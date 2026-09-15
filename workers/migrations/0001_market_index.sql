@@ -19,6 +19,18 @@ CREATE TABLE IF NOT EXISTS market_events (
 CREATE INDEX IF NOT EXISTS market_events_symbol_observed_at
   ON market_events(symbol, observed_at DESC);
 
+CREATE TABLE IF NOT EXISTS application_sessions (
+  id_hash TEXT PRIMARY KEY,
+  privy_user_id TEXT NOT NULL,
+  wallet_address TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  last_used_at INTEGER NOT NULL,
+  revoked_at INTEGER,
+  user_agent_hash TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS application_sessions_expiry ON application_sessions(expires_at);
+
 CREATE TABLE IF NOT EXISTS launch_pools (
   id TEXT PRIMARY KEY,
   stock_symbol TEXT NOT NULL,
