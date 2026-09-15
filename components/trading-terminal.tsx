@@ -21,7 +21,7 @@ import {
   WalletCards
 } from "lucide-react";
 import { useAppAuth } from "@/components/app-providers";
-import { previewPlaceOrder } from "@/clients/stockstream/src";
+import { authorizeTradingSession, cancelAll, createTraderSeat, depositCollateral, initializeSettlementScratch, initializeVault, previewPlaceOrder, revokeTradingSession, withdrawCollateral } from "@/clients/stockstream/src";
 
 const marketSymbol = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_SYMBOL ?? "AAPL-PERP";
 const marketApiUrl = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_API_URL;
@@ -86,7 +86,47 @@ export function TradingTerminal() {
     return () => { stopped = true; socket.close(); };
   }, []);
   function runLifecycle() {
-    setNotice("Wallet execution is unavailable until the StockStream devnet program and market are deployed. No transaction was created.");
+    if (!auth.walletAddress || !marketAddress) { setNotice("Configure the market address and sign in before constructing lifecycle actions."); return; }
+    try {
+      const seat = createTraderSeat({ market: marketAddress, authority: auth.walletAddress }, 0);
+      const scratchAddress = process.env.NEXT_PUBLIC_STOCKSTREAM_SETTLEMENT_SCRATCH_ADDRESS;
+      const scratch = scratchAddress ? initializeSettlementScratch({ market: marketAddress, authority: auth.walletAddress, settlementScratch: scratchAddress }, 0) : null;
+      setNotice(`Constructed ${scratch ? "CreateTraderSeat + InitializeSettlementScratch" : "CreateTraderSeat"} (${seat.keys.length + (scratch?.keys.length ?? 0)} account metas). Signing is disabled until the configured L1 transport is available.`);
+    } catch (error) { setNotice(error instanceof Error ? error.message : "Could not construct lifecycle action"); }
+  }
+
+  function constructCollateralAction(withdraw: boolean) {
+    if (!auth.walletAddress || !marketAddress) { setNotice("Configure the market address and sign in before constructing custody actions."); return; }
+    const mint = process.env.NEXT_PUBLIC_STOCKSTREAM_COLLATERAL_MINT;
+    const tokenProgram = process.env.NEXT_PUBLIC_STOCKSTREAM_TOKEN_PROGRAM;
+    const vault = process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT;
+    const vaultAuthority = process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT_AUTHORITY;
+    if (!mint || !tokenProgram || !vault || !vaultAuthority) { setNotice("Custody action blocked: collateral mint, token program and vault addresses are not configured."); return; }
+    const ix = withdraw ? withdrawCollateral({ market: marketAddress, authority: auth.walletAddress, seat: auth.walletAddress, sourceOrDestination: auth.walletAddress, mint, tokenProgram, vault, vaultAuthority }, BigInt(quantityNumber || 1)) : depositCollateral({ market: marketAddress, authority: auth.walletAddress, seat: auth.walletAddress, sourceOrDestination: auth.walletAddress, mint, tokenProgram, vault, vaultAuthority }, BigInt(quantityNumber || 1));
+    setNotice(`Constructed ${withdraw ? "WithdrawCollateral" : "DepositCollateral"} with ${ix.keys.length} accounts. Runtime submission is disabled until the custody transport is configured.`);
+  }
+
+  function constructSessionAction(revoke = false) {
+    if (!auth.walletAddress || !marketAddress) { setNotice("Configure the market address and sign in before constructing session actions."); return; }
+    const ix = revoke ? revokeTradingSession({ market: marketAddress, authority: auth.walletAddress }, 1n) : authorizeTradingSession({ market: marketAddress, authority: auth.walletAddress }, BigInt(Date.now() + 3_600_000), 1n);
+    setNotice(`Constructed ${revoke ? "RevokeTradingSession" : "AuthorizeTradingSession"} with ${ix.keys.length} accounts. No signature was requested.`);
+  }
+
+  function constructCancelAll() {
+    if (!auth.walletAddress || !marketAddress) { setNotice("Configure the market address and sign in before constructing cancellation actions."); return; }
+    const ix = cancelAll({ market: marketAddress, authority: auth.walletAddress }, 0, 4);
+    setNotice(`Constructed CancelAll with ${ix.keys.length} accounts. No transaction was submitted.`);
+  }
+
+  function constructVault() {
+    if (!auth.walletAddress || !marketAddress) { setNotice("Configure the market address and sign in before initializing custody."); return; }
+    const mint = process.env.NEXT_PUBLIC_STOCKSTREAM_COLLATERAL_MINT;
+    const tokenProgram = process.env.NEXT_PUBLIC_STOCKSTREAM_TOKEN_PROGRAM;
+    const vault = process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT;
+    const vaultAuthority = process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT_AUTHORITY;
+    if (!mint || !tokenProgram || !vault || !vaultAuthority) { setNotice("Vault initialization blocked: explicit collateral deployment configuration is missing."); return; }
+    const ix = initializeVault({ market: marketAddress, authority: auth.walletAddress, mint, tokenProgram, vault, vaultAuthority });
+    setNotice(`Constructed InitializeVault with ${ix.keys.length} accounts. Token CPI runtime remains unavailable in this environment.`);
   }
 
   function submitOrder() {
@@ -170,7 +210,9 @@ export function TradingTerminal() {
               <Step complete={false} active={false} label="Commit ER state to L1" />
               <Step complete={false} active={false} label="Undelegate and unlock withdrawal" />
             </div>
-            <button className="lifecycle-action" onClick={runLifecycle}><LockKeyhole size={17} /> Program execution unavailable</button>
+            <button className="lifecycle-action" onClick={runLifecycle}><LockKeyhole size={17} /> Construct seat + scratch</button>
+            <div className="lifecycle-actions"><button onClick={() => constructCollateralAction(false)}>Construct deposit</button><button onClick={() => constructCollateralAction(true)}>Construct withdrawal</button></div>
+            <div className="lifecycle-actions"><button onClick={constructVault}>Construct vault</button><button onClick={() => constructSessionAction()}>Authorize session</button><button onClick={() => constructSessionAction(true)}>Revoke session</button><button onClick={constructCancelAll}>Cancel all</button></div>
           </section>
 
           <section className="sponsor-panel">
