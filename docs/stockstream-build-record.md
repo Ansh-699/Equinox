@@ -119,3 +119,24 @@ session sharing remain a blocker. The initial production build failed because
 `@solana-program/memo` and `@stripe/stripe-js` were absent; after installing
 those current Privy peer packages, the final `npm run build` completed
 successfully.
+
+## Phase 1 Progress (Gate 1 Open)
+
+The serialized Pinocchio account path now supports market initialization, seat
+creation, bounded fixed-price matching, fill-event writes, position updates,
+fees, funding settlement, open-interest recomputation, and bounded ownership-
+checked cancellation. Two account-backed tests pass, including a crossing
+trade and a full-byte unauthorized-cancel check.
+
+| Item | Recorded value |
+| --- | --- |
+| Rust debug tests | `29 passed; 0 failed` |
+| Rust release tests | `29 passed; 0 failed` |
+| SBF artifact | `target/deploy/stockstream.so` |
+| SBF SHA-256 | `80928bb8d7a35e79655e7b3a92139fa7fd62ddda7a35d43d7ecdbadac31014c6` |
+| SBF size | `95,440` bytes |
+| Gate status | `NOT PASSED` |
+
+Gate 1 remains open because complete late-failure account rollback has not
+been proven, and the full requested account-level case matrix is still being
+implemented. No local-validator or external integration work has started.
