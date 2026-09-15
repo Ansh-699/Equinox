@@ -8,6 +8,7 @@ pub mod handlers;
 pub mod initialize_market;
 pub mod instruction;
 pub mod risk;
+pub mod scratch;
 pub mod state;
 
 use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
@@ -15,8 +16,8 @@ use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
 use crate::instruction::StockStreamInstruction;
 
 pub const ID: Address = Address::new_from_array([
-    80, 110, 191, 17, 198, 60, 141, 251, 2, 46, 157, 183, 152, 130, 114, 144, 37, 55, 135, 183,
-    214, 85, 224, 205, 241, 32, 82, 25, 49, 154, 84, 255,
+    1, 99, 3, 75, 85, 232, 97, 22, 45, 107, 2, 20, 49, 46, 183, 135, 43, 66, 68, 44, 72, 47, 186,
+    41, 46, 239, 86, 185, 49, 154, 84, 255,
 ]);
 
 // Keep the Phase 2 bounded arena and matcher implementations in the SBF

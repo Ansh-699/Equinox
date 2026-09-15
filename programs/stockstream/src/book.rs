@@ -954,6 +954,7 @@ pub struct MatchResult {
 
 pub const MAX_PLAN_ACTIONS: usize = 16;
 
+#[repr(C, packed(8))]
 #[derive(Clone, Copy)]
 pub struct PlanAction {
     pub handle: u32,
@@ -966,6 +967,7 @@ pub struct PlanAction {
     pub expected_quantity: u64,
 }
 
+#[repr(C, packed(8))]
 #[derive(Clone, Copy)]
 pub struct PlannedMatch {
     pub fills: [FillRecord; MAX_MATCH_FILLS],
@@ -1030,6 +1032,40 @@ pub fn plan_limit_arenas(
     now: u64,
     limits: MatchLimits,
 ) -> Result<PlannedMatch, BookError> {
+    let mut plan = PlannedMatch {
+        fills: [FillRecord::EMPTY; MAX_MATCH_FILLS],
+        fill_count: 0,
+        remaining: 0,
+        invalid_removed: 0,
+        expired_removed: 0,
+        self_cancelled: 0,
+        post_only_rejected: false,
+        actions: [PlanAction::EMPTY; MAX_PLAN_ACTIONS],
+        action_count: 0,
+        expected_oracle_price: 0,
+        expected_oracle_timestamp: 0,
+        expected_funding_accumulator: 0,
+        expected_event_sequence: 0,
+        expected_order_sequence: 0,
+        event_sequence_after: 0,
+        order_sequence_after: 0,
+    };
+    plan_limit_arenas_into(bids, asks, order, oracle, now, limits, &mut plan)?;
+    Ok(plan)
+}
+
+/// Plans into caller-owned memory. Production uses the settlement scratch
+/// account; the by-value wrapper above is retained solely for native book tests.
+#[inline(never)]
+pub fn plan_limit_arenas_into(
+    bids: &Arena,
+    asks: &Arena,
+    order: OrderInput,
+    oracle: Option<i64>,
+    now: u64,
+    limits: MatchLimits,
+    mut plan: &mut PlannedMatch,
+) -> Result<(), BookError> {
     if order.quantity == 0
         || limits.max_fills as usize > MAX_MATCH_FILLS
         || limits.max_invalid_removals as usize
@@ -1049,7 +1085,7 @@ pub fn plan_limit_arenas(
     if taker_price <= 0 {
         return Err(BookError::BadPrice);
     }
-    let mut plan = PlannedMatch {
+    *plan = PlannedMatch {
         fills: [FillRecord::EMPTY; MAX_MATCH_FILLS],
         fill_count: 0,
         remaining: order.quantity,
@@ -1200,7 +1236,7 @@ pub fn plan_limit_arenas(
             },
         )?;
     }
-    Ok(plan)
+    Ok(())
 }
 
 fn add_plan_action(

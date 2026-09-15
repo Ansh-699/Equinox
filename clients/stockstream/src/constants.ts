@@ -1,4 +1,4 @@
-export const STOCKSTREAM_PROGRAM_ID = "6QyZWQw7dvFNXerNdhzhyqQjzZnkMXmr52GNJLT1KpmU";
+export const STOCKSTREAM_PROGRAM_ID = "6QyZWQ7dvFNXerNdhzhyqQjzZnkMXmr52GNJLT1KpmU";
 
 export const STOCKSTREAM_INSTRUCTION = {
   initializeMarket: 0,
@@ -9,6 +9,7 @@ export const STOCKSTREAM_INSTRUCTION = {
   cancelAll: 5,
   updateFunding: 6,
   liquidate: 7,
+  initializeSettlementScratch: 8,
 } as const;
 
 export const STOCKSTREAM_ACCOUNT_SIZE = 222_752;

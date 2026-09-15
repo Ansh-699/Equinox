@@ -64,10 +64,15 @@ fn settlement_plan_is_immutable_and_contains_apply_snapshots() {
     assert_eq!(plan.fills[0].maker_remaining, 0);
     assert_eq!(plan.action_count, 1);
     let maker_key = maker.leaf().unwrap().key;
-    assert_eq!(plan.actions[0].key, maker_key);
-    assert_eq!(plan.actions[0].owner, maker.owner);
-    assert_eq!(plan.actions[0].expected_quantity, maker.quantity);
-    assert!(plan.actions[0].remove);
+    let action = plan.actions[0];
+    let action_key = action.key;
+    let action_owner = action.owner;
+    let action_quantity = action.expected_quantity;
+    let action_remove = action.remove;
+    assert_eq!(action_key, maker_key);
+    assert_eq!(action_owner, maker.owner);
+    assert_eq!(action_quantity, maker.quantity);
+    assert!(action_remove);
     assert_eq!(arena_bytes(&bids), bids_before.as_slice());
     assert_eq!(arena_bytes(&asks), asks_before.as_slice());
 }

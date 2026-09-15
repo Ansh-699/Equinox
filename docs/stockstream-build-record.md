@@ -165,3 +165,31 @@ and two expiry removals per instruction.
 This is Gate 1 progress, not a pass. The handler now applies the planned arena
 actions and remainder, but complete precomputed maker/taker risk, margin,
 funding, event, rollback, and randomized account-model coverage remain.
+
+## Scratch-Backed Settlement Candidate (2026-09-15)
+
+Gate 1 remains **NOT PASSED**. The candidate moves the production plan region
+from the handler frame into a per-market/per-seat StockStream-owned settlement
+scratch PDA. The canonical seeds are `[b"settlement", market, seat_index_le]`.
+The successful order path initializes planning, writes plan/seat/event working
+data into scratch, validates the plan, applies planned arena actions, writes
+precomputed seat/event results, and clears scratch before returning. There is
+no public delayed-plan apply instruction.
+
+| Check | Result |
+| --- | --- |
+| Scratch header | 266 bytes |
+| Encoded `PlannedMatch` region | derived from `size_of::<PlannedMatch>()` |
+| Scratch length | derived and bounded below 12 KiB |
+| Rust debug tests | `35 passed; 0 failed` |
+| Rust release tests | `35 passed; 0 failed` |
+| SBF artifact | `target/deploy/stockstream.so` |
+| SBF SHA-256 | `46e25c26417c0ef427be452a75956a17fc7b14cd917f4a11126da5b12375110c` |
+| SBF size | `121,248` bytes |
+| Stack diagnostic | no frame-overflow warning emitted by `cargo build-sbf` |
+
+The scratch lifecycle is unit-tested, including binding, non-empty reuse,
+layout bounds, and PDA separation. The serialized crossing test now initializes
+both trader scratch accounts and uses them for each order. The full settlement
+matrix, exact reserve ledger, stale-plan mutation cases, and runtime rollback
+proof are still required before the gate can be marked passed.

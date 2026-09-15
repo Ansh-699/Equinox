@@ -5,6 +5,7 @@ import { cancelOrder, decodeInstruction, initializeMarket, placeOrder, previewPl
 
 const market = PublicKey.unique();
 const authority = PublicKey.unique();
+const settlementScratch = PublicKey.unique();
 
 test("instruction constructors use canonical program id and exact account flags", () => {
   const ix = initializeMarket({ market, authority });
@@ -17,7 +18,7 @@ test("instruction constructors use canonical program id and exact account flags"
 });
 
 test("place order serializes little-endian fields and decodes", () => {
-  const ix = placeOrder({ market, authority, seatIndex: 2, side: "bid", tree: "fixed", quantity: 12n, priceOrOffset: 123_450_000n, clientOrderId: 9n, reduceOnly: true });
+  const ix = placeOrder({ market, authority, settlementScratch, seatIndex: 2, side: "bid", tree: "fixed", quantity: 12n, priceOrOffset: 123_450_000n, clientOrderId: 9n, reduceOnly: true });
   expect(ix.data.length).toBe(46);
   expect(Array.from(ix.data.slice(0, 4))).toEqual([3, 0, 0, 4]);
   expect(decodeInstruction(ix.data).name).toBe("PlaceOrder");
@@ -30,7 +31,7 @@ test("cancel order encodes a full 128-bit key", () => {
 });
 
 test("transaction preview is unsigned and explicit about unavailable margin", () => {
-  const preview = previewPlaceOrder({ market, authority, seatIndex: 0, side: "ask", quantity: 2n, priceOrOffset: 100n, clientOrderId: 1n });
+  const preview = previewPlaceOrder({ market, authority, settlementScratch, seatIndex: 0, side: "ask", quantity: 2n, priceOrOffset: 100n, clientOrderId: 1n });
   expect(preview.programId).toBe(STOCKSTREAM_PROGRAM_ID);
   expect(preview.signers).toEqual([authority.toBase58()]);
   expect(preview.estimatedInternalMargin).toContain("verified oracle");

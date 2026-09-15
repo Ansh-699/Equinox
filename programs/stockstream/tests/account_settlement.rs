@@ -6,6 +6,7 @@ use pinocchio::{
 };
 use stockstream::{
     process_instruction,
+    scratch::{derive_settlement_scratch, SETTLEMENT_SCRATCH_LEN},
     state::{
         MarketMode, MarketStateHeader, TraderSeat, MARKET_ACCOUNT_SIZE, MARKET_HEADER_SIZE,
         TRADER_SEAT_OFFSET, TRADER_SEAT_SIZE,
@@ -85,6 +86,20 @@ fn serialized_market_can_create_seats_and_settle_crossing_orders() {
     );
     let signer_a = account(authority.clone(), ID, 0, true, false);
     let signer_b = account(trader_b, ID, 0, true, false);
+    let scratch_a = account(
+        derive_settlement_scratch(market.view.address(), 0, &ID),
+        ID,
+        SETTLEMENT_SCRATCH_LEN,
+        false,
+        true,
+    );
+    let scratch_b = account(
+        derive_settlement_scratch(market.view.address(), 1, &ID),
+        ID,
+        SETTLEMENT_SCRATCH_LEN,
+        false,
+        true,
+    );
 
     {
         let mut accounts = [market.view.clone(), signer_a.view.clone()];
@@ -101,6 +116,22 @@ fn serialized_market_can_create_seats_and_settle_crossing_orders() {
     }
     credit(&mut market, 0, 1_000_000);
     credit(&mut market, 1, 1_000_000);
+    {
+        let mut accounts = [
+            market.view.clone(),
+            signer_a.view.clone(),
+            scratch_a.view.clone(),
+        ];
+        process_instruction(&ID, &mut accounts, &[8, 0, 0]).unwrap();
+    }
+    {
+        let mut accounts = [
+            market.view.clone(),
+            signer_b.view.clone(),
+            scratch_b.view.clone(),
+        ];
+        process_instruction(&ID, &mut accounts, &[8, 1, 0]).unwrap();
+    }
     let mut maker_order = vec![3, 1, 0, 0, 0, 0];
     maker_order.extend_from_slice(&10u64.to_le_bytes());
     maker_order.extend_from_slice(&100i64.to_le_bytes());
@@ -108,7 +139,11 @@ fn serialized_market_can_create_seats_and_settle_crossing_orders() {
     maker_order.extend_from_slice(&0i64.to_le_bytes());
     maker_order.extend_from_slice(&11u64.to_le_bytes());
     {
-        let mut accounts = [market.view.clone(), signer_a.view.clone()];
+        let mut accounts = [
+            market.view.clone(),
+            signer_a.view.clone(),
+            scratch_a.view.clone(),
+        ];
         process_instruction(&ID, &mut accounts, &maker_order).unwrap();
     }
 
@@ -118,7 +153,11 @@ fn serialized_market_can_create_seats_and_settle_crossing_orders() {
     taker_order[14..22].copy_from_slice(&110i64.to_le_bytes());
     taker_order[38..46].copy_from_slice(&12u64.to_le_bytes());
     {
-        let mut accounts = [market.view.clone(), signer_b.view.clone()];
+        let mut accounts = [
+            market.view.clone(),
+            signer_b.view.clone(),
+            scratch_b.view.clone(),
+        ];
         process_instruction(&ID, &mut accounts, &taker_order).unwrap();
     }
 
@@ -157,4 +196,42 @@ fn failed_wrong_owner_cancel_does_not_change_serialized_account() {
     assert!(result.is_err());
     assert_eq!(before, unsafe { market.view.borrow_unchecked() });
     let _ = signer;
+}
+
+#[test]
+fn settlement_scratch_rejects_a_non_pda_without_mutating_any_account() {
+    let trader = Address::new_from_array([41; 32]);
+    let market = account(
+        Address::new_from_array([42; 32]),
+        ID,
+        MARKET_ACCOUNT_SIZE,
+        false,
+        true,
+    );
+    let signer = account(trader, ID, 0, true, false);
+    let scratch = account(
+        Address::new_from_array([43; 32]),
+        ID,
+        SETTLEMENT_SCRATCH_LEN,
+        false,
+        true,
+    );
+    {
+        let mut accounts = [market.view.clone(), signer.view.clone()];
+        process_instruction(&ID, &mut accounts, &[0]).unwrap();
+    }
+    {
+        let mut accounts = [market.view.clone(), signer.view.clone()];
+        process_instruction(&ID, &mut accounts, &[1, 0, 0]).unwrap();
+    }
+    let market_before = unsafe { market.view.borrow_unchecked() }.to_vec();
+    let scratch_before = unsafe { scratch.view.borrow_unchecked() }.to_vec();
+    let mut accounts = [
+        market.view.clone(),
+        signer.view.clone(),
+        scratch.view.clone(),
+    ];
+    assert!(process_instruction(&ID, &mut accounts, &[8, 0, 0]).is_err());
+    assert_eq!(market_before, unsafe { market.view.borrow_unchecked() });
+    assert_eq!(scratch_before, unsafe { scratch.view.borrow_unchecked() });
 }

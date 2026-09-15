@@ -15,6 +15,7 @@ pub enum StockStreamError {
     RiskViolation = 0x600A,
     ArithmeticOverflow = 0x600B,
     UnsupportedInProduction = 0x600C,
+    InvalidSettlementScratch = 0x600D,
 }
 
 impl From<StockStreamError> for ProgramError {

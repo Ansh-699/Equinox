@@ -12,6 +12,8 @@ export interface InstructionAccounts {
 }
 
 export interface PlaceOrderParams extends InstructionAccounts {
+  /** Per-market/per-seat PDA: ["settlement", market, seat_index_le]. */
+  settlementScratch: AddressInput;
   seatIndex: number;
   side: Side;
   tree?: OrderTree;
@@ -95,7 +97,7 @@ export function placeOrder(params: PlaceOrderParams): TransactionInstruction {
   writeUnsigned(data, 22, checkedUnsigned(params.expiresAt ?? 0, 64, "expiresAt"), 8);
   writeSigned(data, 30, checkedSigned(params.pegLimit ?? 0, 64, "pegLimit"), 8);
   writeUnsigned(data, 38, checkedUnsigned(params.clientOrderId, 64, "clientOrderId"), 8);
-  return instruction(data, [accountMeta(params.market, false, true), accountMeta(params.authority, true, false)]);
+  return instruction(data, [accountMeta(params.market, false, true), accountMeta(params.authority, true, false), accountMeta(params.settlementScratch, false, true)]);
 }
 
 export function cancelOrder(accounts: InstructionAccounts, seatIndex: number, orderKey: bigint): TransactionInstruction {
@@ -120,7 +122,7 @@ export function liquidate(accounts: InstructionAccounts, seatIndex: number, maxQ
 
 export function decodeInstruction(data: Uint8Array): InstructionFixture {
   if (data.length === 0) throw new RangeError("Empty instruction");
-  const names: Record<number, string> = { 0: "InitializeMarket", 1: "CreateTraderSeat", 2: "CloseTraderSeat", 3: "PlaceOrder", 4: "CancelOrder", 5: "CancelAll", 6: "UpdateFunding", 7: "Liquidate" };
+  const names: Record<number, string> = { 0: "InitializeMarket", 1: "CreateTraderSeat", 2: "CloseTraderSeat", 3: "PlaceOrder", 4: "CancelOrder", 5: "CancelAll", 6: "UpdateFunding", 7: "Liquidate", 8: "InitializeSettlementScratch" };
   const name = names[data[0]];
   if (!name) throw new RangeError("Unknown instruction");
   return { name, data: data.slice() };
