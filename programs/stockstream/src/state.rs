@@ -18,6 +18,20 @@ pub const TRADER_SEAT_OFFSET: usize = ASK_ARENA_OFFSET + ASK_ARENA_LENGTH;
 pub const FILL_EVENT_OFFSET: usize = TRADER_SEAT_OFFSET + TRADER_SEAT_REGION_SIZE;
 pub const MARKET_ACCOUNT_SIZE: usize = FILL_EVENT_OFFSET + FILL_EVENT_REGION_SIZE;
 
+#[repr(C, packed(1))]
+#[derive(Clone, Copy)]
+pub struct FillEvent {
+    pub sequence: u64,
+    pub maker_seat: u32,
+    pub taker_seat: u32,
+    pub price: i64,
+    pub quantity: u64,
+    pub maker_client_order_id: u64,
+    pub timestamp: u64,
+    pub reserved: [u8; 16],
+}
+const _: [(); FILL_EVENT_SIZE] = [(); size_of::<FillEvent>()];
+
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MarketMode {

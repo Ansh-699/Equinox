@@ -532,7 +532,16 @@ impl Arena {
     }
 
     pub fn cancel_owner(&mut self, owner: u32, max: u8) -> Result<u8, BookError> {
+        Ok(self.cancel_owner_summary(owner, max)?.count)
+    }
+
+    pub fn cancel_owner_summary(
+        &mut self,
+        owner: u32,
+        max: u8,
+    ) -> Result<CancelSummary, BookError> {
         let mut removed = 0u8;
+        let mut summary = CancelSummary::default();
         let mut tree_index = 0usize;
         while tree_index < 2 && removed < max {
             let tree = if tree_index == 0 {
@@ -548,13 +557,34 @@ impl Arena {
                     if leaf.owner == owner && self.find(tree, leaf.key) == Ok(handle) {
                         self.remove(tree, leaf.key)?;
                         removed += 1;
+                        summary.count = removed;
+                        if leaf.side == Side::Bid as u8 {
+                            summary.bid_quantity = summary
+                                .bid_quantity
+                                .checked_add(leaf.quantity)
+                                .ok_or(BookError::Integrity)?;
+                        } else {
+                            summary.ask_quantity = summary
+                                .ask_quantity
+                                .checked_add(leaf.quantity)
+                                .ok_or(BookError::Integrity)?;
+                        }
+                        summary.reserved_notional = summary
+                            .reserved_notional
+                            .checked_add(
+                                (leaf.quantity as u128)
+                                    .checked_mul(leaf.price_or_offset.max(0) as u128)
+                                    .ok_or(BookError::Integrity)?,
+                            )
+                            .ok_or(BookError::Integrity)?;
                     }
                 }
                 handle += 1;
             }
             tree_index += 1;
         }
-        Ok(removed)
+        summary.count = removed;
+        Ok(summary)
     }
 
     pub fn validate(&self) -> Result<(), BookError> {
@@ -595,6 +625,20 @@ impl Arena {
             if unsafe { self.nodes[handle].inner.tag } != TAG_UNINITIALIZED {
                 return Err(BookError::Integrity);
             }
+        }
+        Ok(())
+    }
+
+    pub fn validate_owner_occupancy(&self, occupied: &[bool; 128]) -> Result<(), BookError> {
+        let mut handle = 0u32;
+        while handle < self.bump_index {
+            if self.tag(handle)? == TAG_LEAF {
+                let owner = self.leaf(handle)?.owner as usize;
+                if owner >= occupied.len() || !occupied[owner] {
+                    return Err(BookError::InvalidOwner);
+                }
+            }
+            handle += 1;
         }
         Ok(())
     }
@@ -820,6 +864,7 @@ pub struct FillRecord {
     pub price: i64,
     pub quantity: u64,
     pub maker_client_order_id: u64,
+    pub maker_remaining: u64,
 }
 impl FillRecord {
     const EMPTY: Self = Self {
@@ -828,6 +873,7 @@ impl FillRecord {
         price: 0,
         quantity: 0,
         maker_client_order_id: 0,
+        maker_remaining: 0,
     };
 }
 #[derive(Clone, Copy)]
@@ -847,8 +893,27 @@ pub struct MatchResult {
     pub post_only_rejected: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct CancelSummary {
+    pub count: u8,
+    pub bid_quantity: u64,
+    pub ask_quantity: u64,
+    pub reserved_notional: u128,
+}
+
 pub fn match_limit(
     state: &mut MarketState,
+    order: OrderInput,
+    oracle: Option<i64>,
+    now: u64,
+    limits: MatchLimits,
+) -> Result<MatchResult, BookError> {
+    match_limit_arenas(&mut state.bids, &mut state.asks, order, oracle, now, limits)
+}
+
+pub fn match_limit_arenas(
+    bids: &mut Arena,
+    asks: &mut Arena,
     order: OrderInput,
     oracle: Option<i64>,
     now: u64,
@@ -879,7 +944,7 @@ pub fn match_limit(
     };
     for tree in [TreeKind::Fixed, TreeKind::OraclePegged] {
         result.expired_removed = result.expired_removed.saturating_add(
-            state.arena_mut(opposite).sweep_expired(
+            arena_mut_for_side(bids, asks, opposite).sweep_expired(
                 tree,
                 now,
                 limits
@@ -900,10 +965,10 @@ pub fn match_limit(
         iterations += 1;
         let mut removed_invalid = false;
         for tree in [TreeKind::Fixed, TreeKind::OraclePegged] {
-            let Some(handle) = state.arena(opposite).best(tree)? else {
+            let Some(handle) = arena_for_side(bids, asks, opposite).best(tree)? else {
                 continue;
             };
-            let leaf = state.arena(opposite).leaf(handle)?;
+            let leaf = arena_for_side(bids, asks, opposite).leaf(handle)?;
             let invalid = match tree {
                 TreeKind::Fixed => leaf.quantity == 0 || expiry_of(&leaf) <= now,
                 TreeKind::OraclePegged => {
@@ -914,7 +979,7 @@ pub fn match_limit(
                 if result.invalid_removed >= limits.max_invalid_removals {
                     continue;
                 }
-                state.arena_mut(opposite).remove(tree, leaf.key)?;
+                arena_mut_for_side(bids, asks, opposite).remove(tree, leaf.key)?;
                 result.invalid_removed += 1;
                 removed_invalid = true;
                 break;
@@ -923,7 +988,8 @@ pub fn match_limit(
         if removed_invalid {
             continue;
         }
-        let candidate = best_candidate(state.arena(opposite), opposite, oracle, now)?;
+        let candidate =
+            best_candidate(arena_for_side(bids, asks, opposite), opposite, oracle, now)?;
         let Some((tree, handle, maker, price)) = candidate else {
             break;
         };
@@ -939,7 +1005,7 @@ pub fn match_limit(
             break;
         }
         if maker.owner == order.owner {
-            state.arena_mut(opposite).remove(tree, maker.key)?;
+            arena_mut_for_side(bids, asks, opposite).remove(tree, maker.key)?;
             result.self_cancelled = result.self_cancelled.saturating_add(1);
             continue;
         }
@@ -950,15 +1016,17 @@ pub fn match_limit(
             price,
             quantity: amount,
             maker_client_order_id: maker.client_order_id,
+            maker_remaining: 0,
         };
         result.fill_count += 1;
         result.remaining -= amount;
         if amount == maker.quantity {
-            state.arena_mut(opposite).remove(tree, maker.key)?;
+            arena_mut_for_side(bids, asks, opposite).remove(tree, maker.key)?;
         } else {
             let mut changed = maker;
             changed.quantity -= amount;
-            state.arena_mut(opposite).write_leaf(handle, changed);
+            arena_mut_for_side(bids, asks, opposite).write_leaf(handle, changed);
+            result.fills[result.fill_count as usize - 1].maker_remaining = changed.quantity;
         }
     }
     if result.remaining > 0
@@ -967,11 +1035,23 @@ pub fn match_limit(
     {
         let mut resting = order;
         resting.quantity = result.remaining;
-        state
-            .arena_mut(order.side)
-            .insert(resting.tree, resting.leaf()?)?;
+        arena_mut_for_side(bids, asks, order.side).insert(resting.tree, resting.leaf()?)?;
     }
     Ok(result)
+}
+
+fn arena_for_side<'a>(bids: &'a Arena, asks: &'a Arena, side: Side) -> &'a Arena {
+    match side {
+        Side::Bid => bids,
+        Side::Ask => asks,
+    }
+}
+
+fn arena_mut_for_side<'a>(bids: &'a mut Arena, asks: &'a mut Arena, side: Side) -> &'a mut Arena {
+    match side {
+        Side::Bid => bids,
+        Side::Ask => asks,
+    }
 }
 
 fn best_candidate(

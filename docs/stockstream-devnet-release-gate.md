@@ -21,6 +21,7 @@ or external protocol integration was performed in this sprint.
 | Persistent layout and risk primitives | `MarketState`/`TraderSeat` size assertions, seat lifecycle, position transitions, PnL, margin, fees, funding math, liquidation eligibility, and overflow tests pass. | PASS |
 | Typed client and vectors | 4 Vitest client tests and 1 Rust golden-vector test pass; no transaction submission is implemented. | PASS |
 | Privy authentication boundary | 4 server session tests pass; current Privy server SDK verification is used and raw tokens are not stored. | PASS |
+| Account-backed settlement progress | 2 serialized account tests pass for crossing settlement and unauthorized-cancel byte preservation. | IN PROGRESS |
 
 ## Current Program Boundary
 
@@ -42,6 +43,13 @@ fills, signatures, or latency.
 - Program-test coverage using a local validator.
 - Security review of the expanded instruction surface.
 - Explicit deployment transaction and post-deploy binary/program-ID verification.
+
+## Gate 1 Status
+
+NOT PASSED. The current artifact is a successful SBF build, but the complete
+late-failure rollback proof and exhaustive account-level settlement matrix are
+not complete. Phase 2 local-validator work and all external integrations are
+therefore blocked.
 
 The detailed toolchain, artifact, and test evidence is recorded in
 `docs/stockstream-build-record.md`.
