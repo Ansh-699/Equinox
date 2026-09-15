@@ -73,8 +73,11 @@ pub struct SettlementScratchHeader {
 }
 
 pub const SETTLEMENT_SCRATCH_HEADER_SIZE: usize = size_of::<SettlementScratchHeader>();
-pub const SETTLEMENT_PLAN_OFFSET: usize =
-    align_up(SETTLEMENT_SCRATCH_HEADER_SIZE, align_of::<PlannedMatch>());
+/// Physical header region. The logical header is packed and decoded as bytes;
+/// this explicit padding keeps the following typed plan region 8-byte aligned.
+pub const SETTLEMENT_SCRATCH_HEADER_PHYSICAL_SIZE: usize =
+    align_up(SETTLEMENT_SCRATCH_HEADER_SIZE, SETTLEMENT_SCRATCH_ALIGNMENT);
+pub const SETTLEMENT_PLAN_OFFSET: usize = SETTLEMENT_SCRATCH_HEADER_PHYSICAL_SIZE;
 pub const SETTLEMENT_PLAN_SIZE: usize = size_of::<PlannedMatch>();
 pub const SETTLEMENT_SEAT_RESULTS_OFFSET: usize = align_up(
     SETTLEMENT_PLAN_OFFSET + SETTLEMENT_PLAN_SIZE,
@@ -90,6 +93,7 @@ pub const SETTLEMENT_SCRATCH_LEN: usize = align_up(
 );
 
 const _: [(); 266] = [(); SETTLEMENT_SCRATCH_HEADER_SIZE];
+const _: [(); 272] = [(); SETTLEMENT_SCRATCH_HEADER_PHYSICAL_SIZE];
 const _: [(); 0] = [(); SETTLEMENT_PLAN_OFFSET % align_of::<PlannedMatch>()];
 const _: [(); 0] = [(); SETTLEMENT_SEAT_RESULTS_OFFSET % align_of::<TraderSeat>()];
 const _: [(); 0] = [(); SETTLEMENT_EVENTS_OFFSET % align_of::<FillEvent>()];
@@ -266,6 +270,14 @@ impl<'a> SettlementScratchView<'a> {
         header = SettlementScratchHeader::empty(market, trader, seat);
         header.plan_nonce = nonce;
         self.write_header(&header);
+    }
+
+    /// Restores the empty pre-instruction scratch state for predictable
+    /// pre-apply rejections in native account tests. Runtime failures still
+    /// receive Solana's instruction-level rollback.
+    pub fn abort_to(&mut self, header: &SettlementScratchHeader) {
+        self.data[SETTLEMENT_PLAN_OFFSET..].fill(0);
+        self.write_header(header);
     }
 
     pub fn set_seat_result_index(

@@ -447,6 +447,7 @@ fn place_order(
         post_only: is_post_only,
     };
     let now = header.last_verified_oracle_timestamp;
+    let scratch_before = scratch.read_header();
     let nonce = scratch.begin(market_address, trader, order.seat_index)?;
     {
         let planned = scratch.plan_mut();
@@ -477,6 +478,7 @@ fn place_order(
     plan_seat_results(data, &mut scratch, input, header, &taker)?;
     validate_settlement_plan(data, &scratch, input, header, &taker_before)?;
     if scratch.plan().post_only_rejected {
+        scratch.abort_to(&scratch_before);
         return Err(custom(StockStreamError::InvalidInstruction));
     }
     apply_settlement_plan(data, scratch.plan())?;
@@ -745,6 +747,20 @@ fn validate_settlement_plan(
     header: MarketStateHeader,
     taker_before: &TraderSeat,
 ) -> ProgramResult {
+    let current_header = read_header(data)?;
+    if current_header.version != header.version
+        || current_header.mode != header.mode
+        || current_header.oracle_valid != header.oracle_valid
+        || current_header.last_verified_oracle_price != header.last_verified_oracle_price
+        || current_header.last_verified_oracle_timestamp != header.last_verified_oracle_timestamp
+        || current_header.funding_accumulator != header.funding_accumulator
+        || current_header.last_funding_timestamp != header.last_funding_timestamp
+        || current_header.global_order_sequence != header.global_order_sequence
+        || current_header.global_event_sequence != header.global_event_sequence
+        || current_header.current_open_interest != header.current_open_interest
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
     let scratch_header = scratch.read_header();
     let plan = scratch.plan();
     if scratch_header.status != ScratchStatus::Ready as u8
@@ -822,6 +838,20 @@ fn validate_settlement_plan(
         .map_err(risk_error)?;
     }
     Ok(())
+}
+
+/// Native account tests use this boundary to prove a scratch plan cannot be
+/// applied after the market changes. It is not an instruction and therefore
+/// cannot create a deferred plan/apply transaction flow.
+#[doc(hidden)]
+pub fn validate_planned_settlement_for_test(
+    data: &[u8],
+    scratch: &SettlementScratchView,
+    order: OrderInput,
+    header: MarketStateHeader,
+    taker_before: &TraderSeat,
+) -> ProgramResult {
+    validate_settlement_plan(data, scratch, order, header, taker_before)
 }
 
 fn cancel_order(

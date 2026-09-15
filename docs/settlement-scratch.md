@@ -12,7 +12,9 @@ and validates this binding. Account creation funding and System Program CPI are
 reserved for the runtime lifecycle milestone; the current program validates an
 already allocated program-owned PDA of the exact length.
 
-The fixed layout consists of a 266-byte header, a `PlannedMatch` region, five
+The logical header is 266 bytes. Its physical region is explicitly padded to
+272 bytes before the plan begins, preserving the required 8-byte alignment for
+the packed plan representation. The fixed layout then contains a `PlannedMatch` region, five
 `TraderSeat` result slots (taker plus at most four makers), and four fill-event
 slots. The total length is derived from Rust type sizes and alignment in
 `scratch.rs`; it is bounded below 12 KiB. No full plan is returned by the
