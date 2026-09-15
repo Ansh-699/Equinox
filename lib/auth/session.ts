@@ -32,6 +32,30 @@ function configuredVerifier(): TokenVerifier {
   };
 }
 
+export async function verifyPrivyAccessToken(accessToken: string): Promise<VerifiedToken> {
+  return configuredVerifier()(accessToken);
+}
+
+export function persistentSession(input: {
+  privyUserId: string;
+  walletAddress: string;
+  userAgent?: string;
+  now?: number;
+  tokenExpiry: number;
+}): { cookieValue: string; session: ApplicationSession } {
+  const now = input.now ?? Date.now();
+  if (!input.privyUserId || !input.walletAddress || input.tokenExpiry <= now) throw new Error("Expired Privy access token");
+  const rawSessionId = randomBytes(32).toString("base64url");
+  return {
+    cookieValue: rawSessionId,
+    session: {
+      idHash: hash(rawSessionId), privyUserId: input.privyUserId, walletAddress: input.walletAddress,
+      createdAt: now, expiresAt: Math.min(now + SESSION_TTL_MS, input.tokenExpiry), lastUsedAt: now,
+      revokedAt: null, userAgentHash: hash(input.userAgent ?? "")
+    }
+  };
+}
+
 export async function createApplicationSession(input: {
   accessToken: string;
   walletAddress: string;
@@ -77,4 +101,3 @@ export function revokeApplicationSession(rawSessionId: string | undefined): bool
 }
 
 export function clearApplicationSessionsForTests() { sessions.clear(); }
-

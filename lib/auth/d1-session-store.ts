@@ -14,3 +14,9 @@ export async function lookupSession(db: SessionDatabase, rawCookie: string, now 
 export async function revokeSession(db: SessionDatabase, rawCookie: string, now = Date.now()): Promise<void> {
   await db.prepare("UPDATE application_sessions SET revoked_at = ?, last_used_at = ? WHERE id_hash = ?").bind(now, now, digest(rawCookie)).run();
 }
+export async function touchSession(db: SessionDatabase, rawCookie: string, now = Date.now()): Promise<void> {
+  await db.prepare("UPDATE application_sessions SET last_used_at = ? WHERE id_hash = ? AND revoked_at IS NULL").bind(now, digest(rawCookie)).run();
+}
+export async function cleanupExpiredSessions(db: SessionDatabase, now = Date.now()): Promise<void> {
+  await db.prepare("DELETE FROM application_sessions WHERE expires_at <= ?").bind(now).run();
+}
