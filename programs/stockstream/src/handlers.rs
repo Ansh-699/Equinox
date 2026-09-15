@@ -3,7 +3,9 @@ use core::{
     ptr,
 };
 
+use pinocchio::cpi::{Seed, Signer};
 use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
+use pinocchio_token::instructions::Transfer;
 
 use crate::{
     book::{
@@ -95,6 +97,54 @@ fn signer(account: &AccountView) -> ProgramResult {
     }
 }
 
+const SESSION_DISCRIMINATOR: [u8; 8] = *b"STKSES01";
+const SESSION_PLACE: u8 = 1;
+const SESSION_CANCEL: u8 = 2;
+const SESSION_CANCEL_ALL: u8 = 8;
+
+fn authorize_trading_actor(
+    accounts: &[AccountView],
+    market: &[u8],
+    seat: &TraderSeat,
+    seat_index: usize,
+    action: u8,
+    notional: i128,
+    now: u64,
+) -> ProgramResult {
+    let signer_key = accounts[1].address().to_bytes();
+    if signer_key == seat.trader {
+        return Ok(());
+    }
+    if accounts.len() < 4 {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    let session = &accounts[3];
+    if !session.is_writable() || !session.owned_by(&crate::ID) || session.data_len() < 124 {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let bytes = unsafe { session.borrow_unchecked() };
+    if bytes[0..8] != SESSION_DISCRIMINATOR
+        || bytes[8..40] != seat.trader
+        || bytes[40..72] != signer_key
+        || bytes[72..104] != *market
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    if u16::from_le_bytes(bytes[104..106].try_into().unwrap()) != seat_index as u16
+        || bytes[114] & action == 0
+        || bytes[115] != 0
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    if u64::from_le_bytes(bytes[106..114].try_into().unwrap()) <= now
+        || notional < 0
+        || notional as u128 > u64::from_le_bytes(bytes[116..124].try_into().unwrap()) as u128
+    {
+        return Err(custom(StockStreamError::RiskViolation));
+    }
+    Ok(())
+}
+
 fn seat_at(data: &[u8], index: usize) -> Result<TraderSeat, ProgramError> {
     if index >= MAX_TRADER_SEATS {
         return Err(custom(StockStreamError::InvalidSeat));
@@ -181,6 +231,32 @@ pub fn dispatch(
         } => liquidate(program_id, accounts, seat_index as usize, max_quantity),
         StockStreamInstruction::InitializeSettlementScratch { seat_index } => {
             initialize_settlement_scratch(program_id, accounts, seat_index)
+        }
+        StockStreamInstruction::InitializeVault => initialize_vault(program_id, accounts),
+        StockStreamInstruction::DepositCollateral { amount } => {
+            deposit_collateral(program_id, accounts, amount)
+        }
+        StockStreamInstruction::WithdrawCollateral { amount } => {
+            withdraw_collateral(program_id, accounts, amount)
+        }
+        StockStreamInstruction::ConsumeOracleUpdate => consume_oracle_update(program_id, accounts),
+        StockStreamInstruction::DelegateMarket { sequence } => {
+            delegate_market(program_id, accounts, sequence)
+        }
+        StockStreamInstruction::CommitMarket { sequence } => {
+            commit_market(program_id, accounts, sequence)
+        }
+        StockStreamInstruction::CommitAndUndelegate { sequence } => {
+            commit_and_undelegate(program_id, accounts, sequence)
+        }
+        StockStreamInstruction::UndelegationCallback { sequence } => {
+            undelegation_callback(program_id, accounts, sequence)
+        }
+        StockStreamInstruction::AuthorizeTradingSession { expires_at, nonce } => {
+            authorize_trading_session(program_id, accounts, expires_at, nonce)
+        }
+        StockStreamInstruction::RevokeTradingSession { nonce } => {
+            revoke_trading_session(program_id, accounts, nonce)
         }
     }
 }
@@ -276,6 +352,328 @@ fn initialize_arena_bytes(data: &mut [u8], offset: usize) -> ProgramResult {
     Ok(())
 }
 
+const TOKEN_PROGRAM_ID: Address = pinocchio_token::ID;
+const VAULT_SEED: &[u8] = b"vault";
+const VAULT_AUTHORITY_SEED: &[u8] = b"vault-authority";
+
+fn derive_vault(market: &Address, program_id: &Address) -> Address {
+    Address::find_program_address(&[VAULT_SEED, market.as_ref()], program_id).0
+}
+
+fn derive_vault_authority(market: &Address, program_id: &Address) -> Address {
+    Address::find_program_address(&[VAULT_AUTHORITY_SEED, market.as_ref()], program_id).0
+}
+
+fn custody_config(
+    header: &MarketStateHeader,
+    mint: &Address,
+    token_program: &Address,
+) -> ProgramResult {
+    if header.collateral_mint != mint.to_bytes()
+        || header.collateral_token_program != token_program.to_bytes()
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    if token_program != &TOKEN_PROGRAM_ID || header.reserved_upgrade[0] != 6 {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    Ok(())
+}
+
+fn initialize_vault(program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
+    if accounts.len() < 6 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    signer(&accounts[1])?;
+    if accounts[0].address() == accounts[4].address()
+        || accounts[0].address() == accounts[5].address()
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    if *accounts[3].address() != TOKEN_PROGRAM_ID
+        || *accounts[4].address() != derive_vault(accounts[0].address(), program_id)
+        || *accounts[5].address() != derive_vault_authority(accounts[0].address(), program_id)
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let mint_valid = {
+        let mint = pinocchio_token::state::Mint::from_account_view(&accounts[2])
+            .map_err(|_| custom(StockStreamError::InvalidInstruction))?;
+        mint.is_initialized() && mint.decimals() == 6
+    };
+    if !mint_valid {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let authority = accounts[1].address().to_bytes();
+    let mint = accounts[2].address().to_bytes();
+    let data = market_data(&mut accounts[0], program_id)?;
+    let mut header = initialized_header(data)?;
+    if header.market_authority != authority || header.reserved_upgrade[1] != 0 {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    header.collateral_mint = mint;
+    header.collateral_token_program = TOKEN_PROGRAM_ID.to_bytes();
+    header.reserved_upgrade[0] = 6;
+    header.reserved_upgrade[1] = 1;
+    write_header(data, &header)
+}
+
+fn deposit_collateral(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    amount: u64,
+) -> ProgramResult {
+    if accounts.len() < 7 || amount == 0 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    let (market_accounts, rest) = accounts.split_at_mut(1);
+    signer(&rest[0])?;
+    if market_accounts[0].address() == rest[2].address()
+        || market_accounts[0].address() == rest[3].address()
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    if *rest[3].address() != derive_vault(market_accounts[0].address(), program_id) {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let data = market_data(&mut market_accounts[0], program_id)?;
+    let header = initialized_header(data)?;
+    custody_config(&header, rest[4].address(), rest[5].address())?;
+    let mut seat = seat_at(data, 0)?;
+    if seat.trader != rest[0].address().to_bytes() {
+        return Err(custom(StockStreamError::InvalidSeat));
+    }
+    let token_account = pinocchio_token::state::Account::from_account_view(&rest[2])
+        .map_err(|_| custom(StockStreamError::InvalidInstruction))?;
+    if token_account.mint() != rest[4].address()
+        || token_account.owner() != rest[0].address()
+        || token_account.amount() < amount
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    Transfer::<&AccountView>::new(&rest[2], &rest[3], &rest[0], amount)
+        .invoke_with_program(rest[5].address())?;
+    seat.available_collateral = seat
+        .available_collateral
+        .checked_add(amount as i128)
+        .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
+    write_seat(data, 0, &seat)
+}
+
+fn withdraw_collateral(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    amount: u64,
+) -> ProgramResult {
+    if accounts.len() < 7 || amount == 0 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    let (market_accounts, rest) = accounts.split_at_mut(1);
+    signer(&rest[0])?;
+    if *rest[3].address() != derive_vault(market_accounts[0].address(), program_id)
+        || *rest[4].address() != derive_vault_authority(market_accounts[0].address(), program_id)
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let trader = rest[0].address().to_bytes();
+    let market_key = market_accounts[0].address().to_bytes();
+    let data = market_data(&mut market_accounts[0], program_id)?;
+    let header = initialized_header(data)?;
+    custody_config(&header, rest[2].address(), rest[5].address())?;
+    let mut seat = seat_at(data, 0)?;
+    if seat.trader != trader
+        || seat.available_collateral < amount as i128
+        || seat.available_collateral - (amount as i128) < seat.reserved_margin
+    {
+        return Err(custom(StockStreamError::RiskViolation));
+    }
+    let destination = pinocchio_token::state::Account::from_account_view(&rest[1])
+        .map_err(|_| custom(StockStreamError::InvalidInstruction))?;
+    if destination.mint() != rest[2].address() || destination.owner() != rest[0].address() {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let seeds = [Seed::from(VAULT_AUTHORITY_SEED), Seed::from(&market_key)];
+    let signer_seeds = [Signer::from(&seeds)];
+    Transfer::<&AccountView>::new(&rest[3], &rest[1], &rest[4], amount)
+        .invoke_signed_with_program(&signer_seeds, rest[5].address())?;
+    seat.available_collateral -= amount as i128;
+    write_seat(data, 0, &seat)
+}
+
+fn consume_oracle_update(program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
+    if accounts.len() < 6 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    let writable = accounts[1].is_writable();
+    let authority_key = accounts[1].address().clone();
+    let storage_key = accounts[3].address().clone();
+    let treasury_key = accounts[4].address().clone();
+    let payload_len = accounts[5].data_len();
+    let payload = unsafe { accounts[5].borrow_unchecked() };
+    if writable
+        || accounts[2].address() != &authority_key
+        || storage_key != treasury_key
+        || payload_len < 24
+    {
+        return Err(custom(StockStreamError::OracleUnavailable));
+    }
+    if payload[0] == 0 {
+        return Err(custom(StockStreamError::OracleUnavailable));
+    }
+    let price = i64::from_le_bytes(payload[0..8].try_into().unwrap());
+    let timestamp = u64::from_le_bytes(payload[8..16].try_into().unwrap());
+    let confidence = u64::from_le_bytes(payload[16..24].try_into().unwrap());
+    let data = market_data(&mut accounts[0], program_id)?;
+    let mut header = initialized_header(data)?;
+    if price <= 0
+        || confidence > price.unsigned_abs() / 5
+        || timestamp <= header.last_verified_oracle_timestamp
+    {
+        return Err(custom(StockStreamError::OracleUnavailable));
+    }
+    header.last_verified_oracle_price = price;
+    header.last_verified_oracle_timestamp = timestamp;
+    header.oracle_valid = 1;
+    write_header(data, &header)
+}
+
+fn validate_hot_accounts(accounts: &[AccountView]) -> ProgramResult {
+    if accounts.len() < 5 {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let mut i = 2;
+    while i < accounts.len() {
+        if !accounts[i].is_writable() {
+            return Err(custom(StockStreamError::InvalidInstruction));
+        }
+        let mut j = 2;
+        while j < i {
+            if accounts[i].address() == accounts[j].address() {
+                return Err(custom(StockStreamError::InvalidInstruction));
+            }
+            j += 1;
+        }
+        i += 1;
+    }
+    Ok(())
+}
+
+fn delegate_market(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    sequence: u64,
+) -> ProgramResult {
+    if accounts.len() < 5 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    signer(&accounts[1])?;
+    validate_hot_accounts(accounts)?;
+    let authority = accounts[1].address().to_bytes();
+    let data = market_data(&mut accounts[0], program_id)?;
+    let mut header = initialized_header(data)?;
+    if header.market_authority != authority || sequence == 0 {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    header.reserved_upgrade[2] = 1;
+    header.reserved_upgrade[3..11].copy_from_slice(&sequence.to_le_bytes());
+    write_header(data, &header)
+}
+
+fn commit_market(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    sequence: u64,
+) -> ProgramResult {
+    if accounts.len() < 2 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    signer(&accounts[1])?;
+    let data = market_data(&mut accounts[0], program_id)?;
+    let mut header = initialized_header(data)?;
+    if header.reserved_upgrade[2] == 0
+        || sequence <= u64::from_le_bytes(header.reserved_upgrade[3..11].try_into().unwrap())
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    header.reserved_upgrade[3..11].copy_from_slice(&sequence.to_le_bytes());
+    write_header(data, &header)
+}
+
+fn commit_and_undelegate(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    sequence: u64,
+) -> ProgramResult {
+    commit_market(program_id, accounts, sequence)?;
+    let data = market_data(&mut accounts[0], program_id)?;
+    let mut header = initialized_header(data)?;
+    header.reserved_upgrade[2] = 2;
+    write_header(data, &header)
+}
+
+fn undelegation_callback(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    sequence: u64,
+) -> ProgramResult {
+    if accounts.len() < 2 || accounts[1].address() != accounts[0].address() {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    if sequence == 0 {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let data = market_data(&mut accounts[0], program_id)?;
+    let mut header = initialized_header(data)?;
+    if header.reserved_upgrade[2] != 2 {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    header.reserved_upgrade[2] = 0;
+    header.reserved_upgrade[11..19].copy_from_slice(&sequence.to_le_bytes());
+    write_header(data, &header)
+}
+
+fn authorize_trading_session(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    expires_at: u64,
+    nonce: u64,
+) -> ProgramResult {
+    if accounts.len() < 2 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    signer(&accounts[1])?;
+    let owner = accounts[1].address().to_bytes();
+    let data = market_data(&mut accounts[0], program_id)?;
+    let mut seat = seat_at(data, 0)?;
+    if seat.trader != owner || expires_at == 0 {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    seat.reserved[0] = 1;
+    seat.reserved[1..9].copy_from_slice(&expires_at.to_le_bytes());
+    seat.reserved[9..17].copy_from_slice(&nonce.to_le_bytes());
+    write_seat(data, 0, &seat)
+}
+
+fn revoke_trading_session(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    nonce: u64,
+) -> ProgramResult {
+    if accounts.len() < 2 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    signer(&accounts[1])?;
+    let owner = accounts[1].address().to_bytes();
+    let data = market_data(&mut accounts[0], program_id)?;
+    let mut seat = seat_at(data, 0)?;
+    if seat.trader != owner || u64::from_le_bytes(seat.reserved[9..17].try_into().unwrap()) != nonce
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    seat.reserved[0] = 0;
+    write_seat(data, 0, &seat)
+}
+
 fn create_seat(program_id: &Address, accounts: &mut [AccountView], index: usize) -> ProgramResult {
     if accounts.len() < 2 {
         return Err(ProgramError::NotEnoughAccountKeys);
@@ -346,6 +744,21 @@ fn place_order(
     if expected_scratch != *accounts[2].address() {
         return Err(custom(StockStreamError::InvalidSettlementScratch));
     }
+    let session_authorized = {
+        let snapshot = unsafe { accounts[0].borrow_unchecked() };
+        let snapshot_header = initialized_header(snapshot)?;
+        let snapshot_seat = seat_at(snapshot, order.seat_index as usize)?;
+        authorize_trading_actor(
+            accounts,
+            &market_address,
+            &snapshot_seat,
+            order.seat_index as usize,
+            SESSION_PLACE,
+            0,
+            snapshot_header.last_verified_oracle_timestamp,
+        )?;
+        snapshot_seat.trader != trader
+    };
     let (market_accounts, scratch_accounts) = accounts.split_at_mut(2);
     let scratch_bytes = scratch_data(&mut scratch_accounts[0], program_id)?;
     let mut scratch = SettlementScratchView::new(scratch_bytes)?;
@@ -354,7 +767,9 @@ fn place_order(
     if header.mode != MarketMode::Open as u8 {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
-    if seat_at(data, order.seat_index as usize)?.trader != trader || order.quantity == 0 {
+    if (seat_at(data, order.seat_index as usize)?.trader != trader && !session_authorized)
+        || order.quantity == 0
+    {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
     if header.oracle_valid == 0 || header.last_verified_oracle_price <= 0 {
@@ -865,9 +1280,24 @@ fn cancel_order(
     }
     signer(&accounts[1])?;
     let trader = accounts[1].address().to_bytes();
+    let session_authorized = {
+        let snapshot = unsafe { accounts[0].borrow_unchecked() };
+        let snapshot_header = initialized_header(snapshot)?;
+        let snapshot_seat = seat_at(snapshot, seat_index)?;
+        authorize_trading_actor(
+            accounts,
+            accounts[0].address().as_ref(),
+            &snapshot_seat,
+            seat_index,
+            SESSION_CANCEL,
+            0,
+            snapshot_header.last_verified_oracle_timestamp,
+        )?;
+        snapshot_seat.trader != trader
+    };
     let data = market_data(&mut accounts[0], program_id)?;
     initialized_header(data)?;
-    if seat_at(data, seat_index)?.trader != trader {
+    if seat_at(data, seat_index)?.trader != trader && !session_authorized {
         return Err(custom(StockStreamError::InvalidSeat));
     }
     let bid_result = {
@@ -1005,9 +1435,24 @@ fn cancel_all(
     }
     signer(&accounts[1])?;
     let trader = accounts[1].address().to_bytes();
+    let session_authorized = {
+        let snapshot = unsafe { accounts[0].borrow_unchecked() };
+        let snapshot_header = initialized_header(snapshot)?;
+        let snapshot_seat = seat_at(snapshot, seat_index)?;
+        authorize_trading_actor(
+            accounts,
+            accounts[0].address().as_ref(),
+            &snapshot_seat,
+            seat_index,
+            SESSION_CANCEL_ALL,
+            0,
+            snapshot_header.last_verified_oracle_timestamp,
+        )?;
+        snapshot_seat.trader != trader
+    };
     let data = market_data(&mut accounts[0], program_id)?;
     initialized_header(data)?;
-    if seat_at(data, seat_index)?.trader != trader {
+    if seat_at(data, seat_index)?.trader != trader && !session_authorized {
         return Err(custom(StockStreamError::InvalidSeat));
     }
     let bid = arena_mut(data, crate::state::BID_ARENA_OFFSET)?;

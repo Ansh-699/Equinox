@@ -1,7 +1,7 @@
 import { PublicKey } from "@solana/web3.js";
 import { expect, test } from "vitest";
 import { STOCKSTREAM_PROGRAM_ID } from "./constants";
-import { cancelOrder, decodeInstruction, initializeMarket, placeOrder, previewPlaceOrder } from "./index";
+import { authorizeTradingSession, cancelOrder, commitMarket, decodeInstruction, delegateMarket, initializeMarket, initializeVault, placeOrder, previewPlaceOrder, undelegationCallback } from "./index";
 
 const market = PublicKey.unique();
 const authority = PublicKey.unique();
@@ -35,4 +35,15 @@ test("transaction preview is unsigned and explicit about unavailable margin", ()
   expect(preview.programId).toBe(STOCKSTREAM_PROGRAM_ID);
   expect(preview.signers).toEqual([authority.toBase58()]);
   expect(preview.estimatedInternalMargin).toContain("verified oracle");
+});
+
+test("integration constructors preserve discriminators, account order and signer flags", () => {
+  const mint = PublicKey.unique(); const tokenProgram = PublicKey.unique(); const vault = PublicKey.unique(); const vaultAuthority = PublicKey.unique();
+  const vaultIx = initializeVault({ market, authority, mint, tokenProgram, vault, vaultAuthority });
+  expect(vaultIx.data).toEqual(Buffer.from([9]));
+  expect(vaultIx.keys.map((key) => [key.pubkey, key.isSigner, key.isWritable])).toEqual([[market, false, true], [authority, true, false], [mint, false, false], [tokenProgram, false, false], [vault, false, true], [vaultAuthority, false, false]]);
+  expect(decodeInstruction(commitMarket({ market, authority }, 4n).data).name).toBe("CommitMarket");
+  expect(decodeInstruction(delegateMarket({ market, authority, hotAccounts: [settlementScratch] }, 2n).data).name).toBe("DelegateMarket");
+  expect(decodeInstruction(undelegationCallback({ market, authority }, 3n).data).name).toBe("UndelegationCallback");
+  expect(decodeInstruction(authorizeTradingSession({ market, authority }, 99n, 1n).data).name).toBe("AuthorizeTradingSession");
 });

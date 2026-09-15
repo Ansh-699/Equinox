@@ -32,6 +32,10 @@ export interface InstructionFixture {
   data: Uint8Array;
 }
 
+export interface VaultAccounts { market: AddressInput; authority: AddressInput; mint: AddressInput; tokenProgram: AddressInput; vault: AddressInput; vaultAuthority: AddressInput; }
+export interface CustodyAccounts extends VaultAccounts { seat: AddressInput; sourceOrDestination: AddressInput; }
+export interface DelegationAccounts { market: AddressInput; authority: AddressInput; hotAccounts: AddressInput[]; }
+
 function publicKey(value: AddressInput): PublicKey {
   if (value instanceof PublicKey) return value;
   try { return new PublicKey(value); } catch { throw new RangeError("Invalid Solana public key"); }
@@ -79,6 +83,11 @@ export function createTraderSeat(accounts: InstructionAccounts, seatIndex: numbe
   return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]);
 }
 
+export function initializeSettlementScratch(accounts: InstructionAccounts & { settlementScratch: AddressInput }, seatIndex: number): TransactionInstruction {
+  const data = new Uint8Array(3); data[0] = STOCKSTREAM_INSTRUCTION.initializeSettlementScratch; writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2);
+  return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false), accountMeta(accounts.settlementScratch, false, true)]);
+}
+
 export function closeTraderSeat(accounts: InstructionAccounts, seatIndex: number): TransactionInstruction {
   const data = new Uint8Array(3); data[0] = STOCKSTREAM_INSTRUCTION.closeTraderSeat; writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2);
   return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]);
@@ -120,9 +129,37 @@ export function liquidate(accounts: InstructionAccounts, seatIndex: number, maxQ
   return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]);
 }
 
+export function initializeVault(accounts: VaultAccounts): TransactionInstruction {
+  return instruction(Uint8Array.of(STOCKSTREAM_INSTRUCTION.initializeVault), [
+    accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false), accountMeta(accounts.mint, false, false),
+    accountMeta(accounts.tokenProgram, false, false), accountMeta(accounts.vault, false, true), accountMeta(accounts.vaultAuthority, false, false),
+  ]);
+}
+
+function amountInstruction(discriminator: number, accounts: CustodyAccounts, amount: bigint | number): TransactionInstruction {
+  const data = new Uint8Array(9); data[0] = discriminator; writeUnsigned(data, 1, checkedUnsigned(amount, 64, "amount"), 8);
+  return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false), accountMeta(accounts.seat, false, true), accountMeta(accounts.sourceOrDestination, false, true), accountMeta(accounts.vault, false, true), accountMeta(accounts.mint, false, false), accountMeta(accounts.tokenProgram, false, false)]);
+}
+export function depositCollateral(accounts: CustodyAccounts, amount: bigint | number) { return amountInstruction(STOCKSTREAM_INSTRUCTION.depositCollateral, accounts, amount); }
+export function withdrawCollateral(accounts: CustodyAccounts, amount: bigint | number) { return amountInstruction(STOCKSTREAM_INSTRUCTION.withdrawCollateral, accounts, amount); }
+
+export function consumeOracleUpdate(accounts: { market: AddressInput; pythProgram: AddressInput; storage: AddressInput; treasury: AddressInput; instructionsSysvar: AddressInput; payload: AddressInput }): TransactionInstruction {
+  return instruction(Uint8Array.of(STOCKSTREAM_INSTRUCTION.consumeOracleUpdate), [accountMeta(accounts.market, false, true), accountMeta(accounts.pythProgram, false, false), accountMeta(accounts.storage, false, false), accountMeta(accounts.treasury, false, false), accountMeta(accounts.instructionsSysvar, false, false), accountMeta(accounts.payload, false, false)]);
+}
+export function delegateMarket(accounts: DelegationAccounts, sequence: bigint | number): TransactionInstruction {
+  const data = new Uint8Array(9); data[0] = STOCKSTREAM_INSTRUCTION.delegateMarket; writeUnsigned(data, 1, checkedUnsigned(sequence, 64, "sequence"), 8);
+  return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false), ...accounts.hotAccounts.map((a) => accountMeta(a, false, true))]);
+}
+export function commitMarket(accounts: InstructionAccounts, sequence: bigint | number): TransactionInstruction { return controlInstruction(STOCKSTREAM_INSTRUCTION.commitMarket, accounts, sequence); }
+export function commitAndUndelegate(accounts: InstructionAccounts, sequence: bigint | number): TransactionInstruction { return controlInstruction(STOCKSTREAM_INSTRUCTION.commitAndUndelegate, accounts, sequence); }
+function controlInstruction(discriminator: number, accounts: InstructionAccounts, sequence: bigint | number) { const data = new Uint8Array(9); data[0] = discriminator; writeUnsigned(data, 1, checkedUnsigned(sequence, 64, "sequence"), 8); return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]); }
+export function undelegationCallback(accounts: InstructionAccounts, sequence: bigint | number): TransactionInstruction { const data = new Uint8Array(17); data[0] = STOCKSTREAM_INSTRUCTION.undelegationCallback; data.set([196, 28, 41, 206, 48, 37, 51, 167], 1); writeUnsigned(data, 9, checkedUnsigned(sequence, 64, "sequence"), 8); return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, false, false)]); }
+export function authorizeTradingSession(accounts: InstructionAccounts, expiresAt: bigint | number, nonce: bigint | number): TransactionInstruction { const data = new Uint8Array(17); data[0] = STOCKSTREAM_INSTRUCTION.authorizeTradingSession; writeUnsigned(data, 1, checkedUnsigned(expiresAt, 64, "expiresAt"), 8); writeUnsigned(data, 9, checkedUnsigned(nonce, 64, "nonce"), 8); return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]); }
+export function revokeTradingSession(accounts: InstructionAccounts, nonce: bigint | number): TransactionInstruction { const data = new Uint8Array(9); data[0] = STOCKSTREAM_INSTRUCTION.revokeTradingSession; writeUnsigned(data, 1, checkedUnsigned(nonce, 64, "nonce"), 8); return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]); }
+
 export function decodeInstruction(data: Uint8Array): InstructionFixture {
   if (data.length === 0) throw new RangeError("Empty instruction");
-  const names: Record<number, string> = { 0: "InitializeMarket", 1: "CreateTraderSeat", 2: "CloseTraderSeat", 3: "PlaceOrder", 4: "CancelOrder", 5: "CancelAll", 6: "UpdateFunding", 7: "Liquidate", 8: "InitializeSettlementScratch" };
+  const names: Record<number, string> = { 0: "InitializeMarket", 1: "CreateTraderSeat", 2: "CloseTraderSeat", 3: "PlaceOrder", 4: "CancelOrder", 5: "CancelAll", 6: "UpdateFunding", 7: "Liquidate", 8: "InitializeSettlementScratch", 9: "InitializeVault", 10: "DepositCollateral", 11: "WithdrawCollateral", 12: "ConsumeOracleUpdate", 13: "DelegateMarket", 14: "CommitMarket", 15: "CommitAndUndelegate", 16: "UndelegationCallback", 17: "AuthorizeTradingSession", 18: "RevokeTradingSession" };
   const name = names[data[0]];
   if (!name) throw new RangeError("Unknown instruction");
   return { name, data: data.slice() };

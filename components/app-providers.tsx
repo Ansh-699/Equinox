@@ -60,6 +60,6 @@ function PrivySession({ children }: { children: React.ReactNode }) {
     return () => { cancelled = true; };
   }, [authenticated, getAccessToken, ready, walletAddress]);
 
-  const value = useMemo<AppAuth>(() => ({ ready: ready && sessionReady, authenticated: authenticated && sessionReady && !!walletAddress, userId: user?.id ?? null, walletAddress, authError, login, logout: async () => { await fetch("/api/auth/logout", { method: "POST", credentials: "include" }); await privyLogout(); setSessionReady(false); } }), [authenticated, authError, login, privyLogout, ready, sessionReady, user?.id, walletAddress]);
+  const value = useMemo<AppAuth>(() => ({ ready: ready && sessionReady, authenticated: authenticated && sessionReady && !!walletAddress, userId: user?.id ?? null, walletAddress, authError, login, logout: async () => { const csrf = document.cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith("stockstream_csrf="))?.split("=")[1]; await fetch("/api/auth/logout", { method: "POST", credentials: "include", headers: csrf ? { "x-stockstream-csrf": decodeURIComponent(csrf) } : {} }); await privyLogout(); setSessionReady(false); } }), [authenticated, authError, login, privyLogout, ready, sessionReady, user?.id, walletAddress]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

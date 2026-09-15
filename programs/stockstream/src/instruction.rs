@@ -10,6 +10,16 @@ pub const CANCEL_ALL: u8 = 5;
 pub const UPDATE_FUNDING: u8 = 6;
 pub const LIQUIDATE: u8 = 7;
 pub const INITIALIZE_SETTLEMENT_SCRATCH: u8 = 8;
+pub const INITIALIZE_VAULT: u8 = 9;
+pub const DEPOSIT_COLLATERAL: u8 = 10;
+pub const WITHDRAW_COLLATERAL: u8 = 11;
+pub const CONSUME_ORACLE_UPDATE: u8 = 12;
+pub const DELEGATE_MARKET: u8 = 13;
+pub const COMMIT_MARKET: u8 = 14;
+pub const COMMIT_AND_UNDELEGATE: u8 = 15;
+pub const UNDELEGATION_CALLBACK: u8 = 16;
+pub const AUTHORIZE_TRADING_SESSION: u8 = 17;
+pub const REVOKE_TRADING_SESSION: u8 = 18;
 
 #[derive(Clone, Copy)]
 pub struct PlaceOrderData {
@@ -51,6 +61,33 @@ pub enum StockStreamInstruction {
     },
     InitializeSettlementScratch {
         seat_index: u16,
+    },
+    InitializeVault,
+    DepositCollateral {
+        amount: u64,
+    },
+    WithdrawCollateral {
+        amount: u64,
+    },
+    ConsumeOracleUpdate,
+    DelegateMarket {
+        sequence: u64,
+    },
+    CommitMarket {
+        sequence: u64,
+    },
+    CommitAndUndelegate {
+        sequence: u64,
+    },
+    UndelegationCallback {
+        sequence: u64,
+    },
+    AuthorizeTradingSession {
+        expires_at: u64,
+        nonce: u64,
+    },
+    RevokeTradingSession {
+        nonce: u64,
     },
 }
 
@@ -117,6 +154,39 @@ impl StockStreamInstruction {
                     seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
                 })
             }
+            Some(INITIALIZE_VAULT) if data.len() == 1 => Ok(Self::InitializeVault),
+            Some(DEPOSIT_COLLATERAL) if data.len() == 9 => Ok(Self::DepositCollateral {
+                amount: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+            }),
+            Some(WITHDRAW_COLLATERAL) if data.len() == 9 => Ok(Self::WithdrawCollateral {
+                amount: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+            }),
+            Some(CONSUME_ORACLE_UPDATE) if data.len() == 1 => Ok(Self::ConsumeOracleUpdate),
+            Some(DELEGATE_MARKET) if data.len() == 9 => Ok(Self::DelegateMarket {
+                sequence: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+            }),
+            Some(COMMIT_MARKET) if data.len() == 9 => Ok(Self::CommitMarket {
+                sequence: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+            }),
+            Some(COMMIT_AND_UNDELEGATE) if data.len() == 9 => Ok(Self::CommitAndUndelegate {
+                sequence: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+            }),
+            Some(UNDELEGATION_CALLBACK)
+                if data.len() == 17 && data[1..9] == [196, 28, 41, 206, 48, 37, 51, 167] =>
+            {
+                Ok(Self::UndelegationCallback {
+                    sequence: read_u64(data, 9).ok_or(ProgramError::InvalidInstructionData)?,
+                })
+            }
+            Some(AUTHORIZE_TRADING_SESSION) if data.len() == 17 => {
+                Ok(Self::AuthorizeTradingSession {
+                    expires_at: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+                    nonce: read_u64(data, 9).ok_or(ProgramError::InvalidInstructionData)?,
+                })
+            }
+            Some(REVOKE_TRADING_SESSION) if data.len() == 9 => Ok(Self::RevokeTradingSession {
+                nonce: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+            }),
             _ => Err(ProgramError::InvalidInstructionData),
         }
     }
