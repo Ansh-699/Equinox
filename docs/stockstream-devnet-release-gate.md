@@ -51,5 +51,11 @@ late-failure rollback proof and exhaustive account-level settlement matrix are
 not complete. Phase 2 local-validator work and all external integrations are
 therefore blocked.
 
+The latest candidate artifact is `c8fc0768c6c333ed29609f958100ee231909009e8b699ac4347357b4fe844eb7`
+(`114,864` bytes). It passes the current Rust debug/release suites (`31`
+tests each) and the SBF stack verifier. The immutable planner is currently a
+preflight; account mutation still requires the remaining two-phase apply and
+rollback work.
+
 The detailed toolchain, artifact, and test evidence is recorded in
 `docs/stockstream-build-record.md`.

@@ -11,7 +11,11 @@ use core::mem::size_of;
 pub const ARENA_CAPACITY: usize = 1024;
 pub const NONE: u32 = u32::MAX;
 pub const NO_EXPIRY: u64 = u64::MAX;
-pub const MAX_MATCH_FILLS: usize = 16;
+pub const MAX_MATCH_FILLS: usize = 4;
+pub const MAX_FILLS_PER_INSTRUCTION: usize = MAX_MATCH_FILLS;
+pub const MAX_INVALID_REMOVALS: usize = 8;
+pub const MAX_EXPIRED_REMOVALS: usize = 8;
+pub const MAX_CANCELS_PER_INSTRUCTION: usize = 16;
 
 const TAG_UNINITIALIZED: u8 = 0;
 const TAG_INNER: u8 = 1;
@@ -361,6 +365,33 @@ impl Arena {
                 _ => return Err(BookError::BadTag),
             }
         }
+    }
+
+    /// Checks the only allocation failure that `insert` can encounter after
+    /// the key has been checked: the empty-root case needs one slot and every
+    /// non-empty insertion needs a leaf plus an inner node.
+    pub fn can_insert(
+        &self,
+        tree: TreeKind,
+        key: u128,
+        recycled_after_plan: u32,
+    ) -> Result<(), BookError> {
+        if self.find(tree, key).is_ok() {
+            return Err(BookError::DuplicateKey);
+        }
+        let required = if self.roots[tree.index()] == NONE {
+            1
+        } else {
+            2
+        };
+        let available = (ARENA_CAPACITY as u32)
+            .saturating_sub(self.bump_index)
+            .saturating_add(self.free_len)
+            .saturating_add(recycled_after_plan);
+        if available < required {
+            return Err(BookError::Full);
+        }
+        Ok(())
     }
 
     pub fn find(&self, tree: TreeKind, key: u128) -> Result<u32, BookError> {
@@ -865,6 +896,8 @@ pub struct FillRecord {
     pub quantity: u64,
     pub maker_client_order_id: u64,
     pub maker_remaining: u64,
+    pub maker_handle: u32,
+    pub maker_tree: u8,
 }
 impl FillRecord {
     const EMPTY: Self = Self {
@@ -874,6 +907,8 @@ impl FillRecord {
         quantity: 0,
         maker_client_order_id: 0,
         maker_remaining: 0,
+        maker_handle: NONE,
+        maker_tree: 0,
     };
 }
 #[derive(Clone, Copy)]
@@ -893,6 +928,50 @@ pub struct MatchResult {
     pub post_only_rejected: bool,
 }
 
+pub const MAX_PLAN_ACTIONS: usize = 16;
+
+#[derive(Clone, Copy)]
+pub struct PlanAction {
+    pub handle: u32,
+    pub side: Side,
+    pub tree: TreeKind,
+    pub remove: bool,
+    pub new_quantity: u64,
+    pub key: u128,
+    pub owner: u32,
+    pub expected_quantity: u64,
+}
+
+#[derive(Clone, Copy)]
+pub struct PlannedMatch {
+    pub fills: [FillRecord; MAX_MATCH_FILLS],
+    pub fill_count: u8,
+    pub remaining: u64,
+    pub invalid_removed: u8,
+    pub expired_removed: u8,
+    pub self_cancelled: u8,
+    pub post_only_rejected: bool,
+    pub actions: [PlanAction; MAX_PLAN_ACTIONS],
+    pub action_count: u8,
+}
+
+impl PlanAction {
+    const EMPTY: Self = Self {
+        handle: NONE,
+        side: Side::Bid,
+        tree: TreeKind::Fixed,
+        remove: false,
+        new_quantity: 0,
+        key: 0,
+        owner: 0,
+        expected_quantity: 0,
+    };
+}
+
+const _: [(); core::mem::size_of::<PlanAction>()] = [(); 48];
+const _: [(); core::mem::size_of::<PlannedMatch>()] = [(); core::mem::size_of::<PlannedMatch>()];
+pub type SettlementPlan = PlannedMatch;
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct CancelSummary {
     pub count: u8,
@@ -909,6 +988,272 @@ pub fn match_limit(
     limits: MatchLimits,
 ) -> Result<MatchResult, BookError> {
     match_limit_arenas(&mut state.bids, &mut state.asks, order, oracle, now, limits)
+}
+
+pub fn plan_limit_arenas(
+    bids: &Arena,
+    asks: &Arena,
+    order: OrderInput,
+    oracle: Option<i64>,
+    now: u64,
+    limits: MatchLimits,
+) -> Result<PlannedMatch, BookError> {
+    if order.quantity == 0
+        || limits.max_fills as usize > MAX_MATCH_FILLS
+        || limits.max_invalid_removals as usize
+            + limits.max_expired_removals as usize
+            + limits.max_fills as usize
+            + 2
+            > MAX_PLAN_ACTIONS
+    {
+        return Err(BookError::BadLimit);
+    }
+    let taker_price = match order.tree {
+        TreeKind::Fixed => order.price_or_offset,
+        TreeKind::OraclePegged => oracle
+            .and_then(|p| p.checked_add(order.price_or_offset))
+            .ok_or(BookError::BadPrice)?,
+    };
+    if taker_price <= 0 {
+        return Err(BookError::BadPrice);
+    }
+    let mut plan = PlannedMatch {
+        fills: [FillRecord::EMPTY; MAX_MATCH_FILLS],
+        fill_count: 0,
+        remaining: order.quantity,
+        invalid_removed: 0,
+        expired_removed: 0,
+        self_cancelled: 0,
+        post_only_rejected: false,
+        actions: [PlanAction::EMPTY; MAX_PLAN_ACTIONS],
+        action_count: 0,
+    };
+    let mut virtual_count = 0usize;
+    let opposite = match order.side {
+        Side::Bid => Side::Ask,
+        Side::Ask => Side::Bid,
+    };
+    let opposing_arena = arena_for_side(bids, asks, opposite);
+    let mut cleanup_handle = 0u32;
+    while cleanup_handle < opposing_arena.bump_index {
+        if opposing_arena.tag(cleanup_handle)? == TAG_LEAF {
+            let leaf = opposing_arena.leaf(cleanup_handle)?;
+            let mut tree_index = 0usize;
+            while tree_index < 2 {
+                let tree = if tree_index == 0 {
+                    TreeKind::Fixed
+                } else {
+                    TreeKind::OraclePegged
+                };
+                if opposing_arena.find(tree, leaf.key) == Ok(cleanup_handle) {
+                    let expired = expiry_of(&leaf) <= now;
+                    let invalid = match tree {
+                        TreeKind::Fixed => leaf.quantity == 0 || expired,
+                        TreeKind::OraclePegged => {
+                            matches!(pegged_state(&leaf, oracle, now), PeggedState::Invalid)
+                        }
+                    };
+                    if invalid {
+                        if expired {
+                            if plan.expired_removed >= limits.max_expired_removals {
+                                return Err(BookError::BadLimit);
+                            }
+                            plan.expired_removed += 1;
+                        } else {
+                            if plan.invalid_removed >= limits.max_invalid_removals {
+                                return Err(BookError::BadLimit);
+                            }
+                            plan.invalid_removed += 1;
+                        }
+                        add_plan_action(
+                            &mut plan,
+                            &mut virtual_count,
+                            PlanAction {
+                                handle: cleanup_handle,
+                                side: opposite,
+                                tree,
+                                remove: true,
+                                new_quantity: 0,
+                                key: leaf.key,
+                                owner: leaf.owner,
+                                expected_quantity: leaf.quantity,
+                            },
+                        )?;
+                    }
+                }
+                tree_index += 1;
+            }
+        }
+        cleanup_handle += 1;
+    }
+    let mut iterations = 0usize;
+    while plan.remaining > 0 && plan.fill_count < limits.max_fills && iterations < MAX_PLAN_ACTIONS
+    {
+        iterations += 1;
+        let Some((tree, handle, leaf, price)) = best_virtual_candidate(
+            bids,
+            asks,
+            opposite,
+            oracle,
+            now,
+            &plan.actions,
+            virtual_count,
+        )?
+        else {
+            break;
+        };
+        let crosses = match order.side {
+            Side::Bid => price <= taker_price,
+            Side::Ask => price >= taker_price,
+        };
+        if !crosses {
+            break;
+        }
+        if order.post_only {
+            plan.post_only_rejected = true;
+            break;
+        }
+        if leaf.owner == order.owner {
+            add_plan_action(
+                &mut plan,
+                &mut virtual_count,
+                PlanAction {
+                    handle,
+                    side: opposite,
+                    tree,
+                    remove: true,
+                    new_quantity: 0,
+                    key: leaf.key,
+                    owner: leaf.owner,
+                    expected_quantity: leaf.quantity,
+                },
+            )?;
+            plan.self_cancelled = plan.self_cancelled.saturating_add(1);
+            continue;
+        }
+        let amount = leaf.quantity.min(plan.remaining);
+        let after = leaf.quantity - amount;
+        let fill_index = plan.fill_count as usize;
+        plan.fills[fill_index] = FillRecord {
+            maker: leaf.owner,
+            taker: order.owner,
+            price,
+            quantity: amount,
+            maker_client_order_id: leaf.client_order_id,
+            maker_remaining: after,
+            maker_handle: handle,
+            maker_tree: tree as u8,
+        };
+        plan.fill_count += 1;
+        plan.remaining -= amount;
+        add_plan_action(
+            &mut plan,
+            &mut virtual_count,
+            PlanAction {
+                handle,
+                side: opposite,
+                tree,
+                remove: after == 0,
+                new_quantity: after,
+                key: leaf.key,
+                owner: leaf.owner,
+                expected_quantity: leaf.quantity,
+            },
+        )?;
+    }
+    Ok(plan)
+}
+
+fn add_plan_action(
+    plan: &mut PlannedMatch,
+    virtual_count: &mut usize,
+    action: PlanAction,
+) -> Result<(), BookError> {
+    let mut i = 0usize;
+    while i < *virtual_count {
+        if plan.actions[i].handle == action.handle && plan.actions[i].tree == action.tree {
+            plan.actions[i] = action;
+            return Ok(());
+        }
+        i += 1;
+    }
+    if *virtual_count >= MAX_PLAN_ACTIONS || plan.action_count as usize >= MAX_PLAN_ACTIONS {
+        return Err(BookError::BadLimit);
+    }
+    plan.actions[plan.action_count as usize] = action;
+    plan.action_count += 1;
+    *virtual_count += 1;
+    Ok(())
+}
+
+fn best_virtual_candidate(
+    bids: &Arena,
+    asks: &Arena,
+    side: Side,
+    oracle: Option<i64>,
+    now: u64,
+    virtuals: &[PlanAction; MAX_PLAN_ACTIONS],
+    virtual_count: usize,
+) -> Result<Option<(TreeKind, u32, LeafNode, i64)>, BookError> {
+    let arena = arena_for_side(bids, asks, side);
+    let mut selected: Option<(TreeKind, u32, LeafNode, i64, u128)> = None;
+    let mut handle = 0u32;
+    while handle < arena.bump_index {
+        if arena.tag(handle)? != TAG_LEAF {
+            handle += 1;
+            continue;
+        }
+        let leaf = arena.leaf(handle)?;
+        let mut tree_index = 0usize;
+        while tree_index < 2 {
+            let tree = if tree_index == 0 {
+                TreeKind::Fixed
+            } else {
+                TreeKind::OraclePegged
+            };
+            if arena.find(tree, leaf.key) != Ok(handle) {
+                tree_index += 1;
+                continue;
+            }
+            let mut quantity = leaf.quantity;
+            let mut removed = false;
+            let mut i = 0usize;
+            while i < virtual_count {
+                if virtuals[i].handle == handle && virtuals[i].tree == tree {
+                    removed = virtuals[i].remove;
+                    quantity = virtuals[i].new_quantity;
+                    break;
+                }
+                i += 1;
+            }
+            if removed || quantity == 0 {
+                tree_index += 1;
+                continue;
+            }
+            let mut candidate = leaf;
+            candidate.quantity = quantity;
+            let Some(normalized) = normalized_key(&candidate, tree, oracle, now)? else {
+                tree_index += 1;
+                continue;
+            };
+            let price = match tree {
+                TreeKind::Fixed => candidate.price_or_offset,
+                TreeKind::OraclePegged => match pegged_state(&candidate, oracle, now) {
+                    PeggedState::Valid(price) => price,
+                    PeggedState::Invalid | PeggedState::Skipped => {
+                        tree_index += 1;
+                        continue;
+                    }
+                },
+            };
+            if selected.map(|x| normalized < x.4).unwrap_or(true) {
+                selected = Some((tree, handle, candidate, price, normalized));
+            }
+            tree_index += 1;
+        }
+        handle += 1;
+    }
+    Ok(selected.map(|(tree, handle, leaf, price, _)| (tree, handle, leaf, price)))
 }
 
 pub fn match_limit_arenas(
@@ -1017,6 +1362,8 @@ pub fn match_limit_arenas(
             quantity: amount,
             maker_client_order_id: maker.client_order_id,
             maker_remaining: 0,
+            maker_handle: handle,
+            maker_tree: tree as u8,
         };
         result.fill_count += 1;
         result.remaining -= amount;

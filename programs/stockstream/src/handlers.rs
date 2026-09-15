@@ -6,7 +6,10 @@ use core::{
 use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
 
 use crate::{
-    book::{match_limit_arenas, Arena, MatchLimits, OrderInput, Side, TimeInForce, TreeKind},
+    book::{
+        match_limit_arenas, plan_limit_arenas, Arena, MatchLimits, OrderInput, PlanAction,
+        PlannedMatch, Side, TimeInForce, TreeKind,
+    },
     error::StockStreamError,
     instruction::{PlaceOrderData, StockStreamInstruction},
     risk,
@@ -369,6 +372,27 @@ fn place_order(
         post_only: is_post_only,
     };
     let now = header.last_verified_oracle_timestamp;
+    let planned = unsafe {
+        let bids = &*(data.as_ptr().add(crate::state::BID_ARENA_OFFSET) as *const Arena);
+        let asks = &*(data.as_ptr().add(crate::state::ASK_ARENA_OFFSET) as *const Arena);
+        plan_limit_arenas(
+            bids,
+            asks,
+            input,
+            Some(header.last_verified_oracle_price),
+            now,
+            MatchLimits {
+                max_fills: crate::book::MAX_FILLS_PER_INSTRUCTION as u8,
+                max_invalid_removals: 4,
+                max_expired_removals: 2,
+            },
+        )
+        .map_err(book_error)?
+    };
+    validate_settlement_plan(data, &planned, input, header.initial_margin_bps)?;
+    if planned.post_only_rejected {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
     let result = unsafe {
         let bids = &mut *(data.as_mut_ptr().add(crate::state::BID_ARENA_OFFSET) as *mut Arena);
         let asks = &mut *(data.as_mut_ptr().add(crate::state::ASK_ARENA_OFFSET) as *mut Arena);
@@ -476,6 +500,62 @@ fn place_order(
         .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
     updated.current_open_interest = recompute_open_interest(data)?;
     write_header(data, &updated)
+}
+
+fn validate_settlement_plan(
+    data: &[u8],
+    plan: &PlannedMatch,
+    order: OrderInput,
+    initial_margin_bps: u16,
+) -> ProgramResult {
+    let mut removed_by_side = [0u32; 2];
+    let mut index = 0usize;
+    while index < plan.action_count as usize {
+        let action: PlanAction = plan.actions[index];
+        let offset = if action.side == Side::Bid {
+            crate::state::BID_ARENA_OFFSET
+        } else {
+            crate::state::ASK_ARENA_OFFSET
+        };
+        let arena = unsafe { &*(data.as_ptr().add(offset) as *const Arena) };
+        let handle = arena.find(action.tree, action.key).map_err(book_error)?;
+        if handle != action.handle {
+            return Err(custom(StockStreamError::InvalidInstruction));
+        }
+        let leaf = arena.leaf(handle).map_err(book_error)?;
+        if leaf.owner != action.owner || leaf.quantity != action.expected_quantity {
+            return Err(custom(StockStreamError::InvalidInstruction));
+        }
+        if action.remove {
+            removed_by_side[if leaf.side == Side::Bid as u8 { 0 } else { 1 }] += 1;
+        }
+        index += 1;
+    }
+    if plan.remaining > 0 && order.time_in_force == TimeInForce::GoodTilCancelled {
+        let leaf = order.leaf().map_err(book_error)?;
+        let side = if order.side == Side::Bid {
+            Side::Bid
+        } else {
+            Side::Ask
+        };
+        let arena = unsafe {
+            &*(data.as_ptr().add(if side == Side::Bid {
+                crate::state::BID_ARENA_OFFSET
+            } else {
+                crate::state::ASK_ARENA_OFFSET
+            }) as *const Arena)
+        };
+        arena
+            .can_insert(order.tree, leaf.key, removed_by_side[side as usize])
+            .map_err(book_error)?;
+        let _ = risk::initial_margin(
+            risk::notional(plan.remaining as i128, order.price_or_offset as i128)
+                .map_err(risk_error)?,
+            initial_margin_bps,
+        )
+        .map_err(risk_error)?;
+    }
+    Ok(())
 }
 
 fn recompute_open_interest(data: &[u8]) -> Result<i128, ProgramError> {
