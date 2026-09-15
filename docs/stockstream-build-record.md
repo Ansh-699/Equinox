@@ -193,3 +193,29 @@ layout bounds, and PDA separation. The serialized crossing test now initializes
 both trader scratch accounts and uses them for each order. The full settlement
 matrix, exact reserve ledger, stale-plan mutation cases, and runtime rollback
 proof are still required before the gate can be marked passed.
+
+## MVP Account Settlement Gate (Executed 2026-09-15)
+
+MVP Gate 1 passed with scratch-backed planning, validation, application and
+clearing in one instruction. The focused account-backed coverage verifies a
+partial fill, partial IOC, crossing post-only byte preservation, exact
+cancellation reserve release, stale maker and market snapshot rejection, and
+event-ring wraparound. Existing state/risk coverage supplies the MVP funding
+and healthy-liquidation boundary checks.
+
+| Check | Verified result |
+| --- | --- |
+| Rust debug tests | `45 passed; 0 failed` |
+| Rust release tests | `45 passed; 0 failed` |
+| `cargo fmt --check` | passed |
+| `cargo check -p stockstream` | passed |
+| `cargo build-sbf --features bpf-entrypoint` | passed; no stack-frame diagnostic |
+| SBF artifact | `target/deploy/stockstream.so` |
+| SBF SHA-256 | `7bfad1e46257677bdc7ee7ec8fe0dfbab581df6eda2b968328a8c639f12e5377` |
+| SBF size | `121,952` bytes |
+| MVP Gate 1 | `PASS` |
+| Production hardening / audit / approval | `PENDING / PENDING / NO` |
+
+The older pre-correction artifacts and candidate hashes in this record are
+historical only and are superseded by the artifact above. They must not be
+deployed as StockStream evidence.

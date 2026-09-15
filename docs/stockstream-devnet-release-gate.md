@@ -46,16 +46,30 @@ fills, signatures, or latency.
 
 ## Gate 1 Status
 
-NOT PASSED. The current artifact is a successful SBF build, but the complete
-late-failure rollback proof and exhaustive account-level settlement matrix are
-not complete. Phase 2 local-validator work and all external integrations are
-therefore blocked.
+**MVP Gate 1: PASS.** The scratch-backed, plan-driven account settlement path
+is exercised by 45 debug and 45 release tests. The MVP evidence covers
+full/partial crossing settlement, IOC remainder removal, crossing post-only
+byte preservation, exact cancellation reserve release, stale maker and market
+snapshot rejection, event-ring wraparound, funding and healthy-liquidation
+boundaries. Successful instructions clear the per-seat scratch account.
 
-The latest candidate artifact is `081868a97f4da71a7cea5a226076a03f6fe103db3d6beac98748f094624f9564`
-(`117,944` bytes). It passes the current Rust debug/release suites (`31`
-tests each) and the SBF stack verifier. The immutable planner is currently a
-preflight and deterministic arena apply; complete precomputed risk settlement
-and rollback work remains.
+The verified artifact is
+`7bfad1e46257677bdc7ee7ec8fe0dfbab581df6eda2b968328a8c639f12e5377`
+(`121,952` bytes). `cargo build-sbf --features bpf-entrypoint` completed with
+no stack-frame diagnostic.
+
+**Production hardening: PENDING. Audit: PENDING. Production approval: NO.**
+Runtime rollback proof, exhaustive settlement permutations, broad randomized
+economic testing, fuzzing, and independent review remain required before any
+production claim.
 
 The detailed toolchain, artifact, and test evidence is recorded in
 `docs/stockstream-build-record.md`.
+
+## Deferred Production Hardening
+
+The hackathon MVP gate intentionally defers the exhaustive settlement
+permutation matrix, large randomized economic model, fuzzing, complete
+liquidation/event-ring matrices, long-duration ER failure simulation, and an
+independent audit. These remain required for production approval. The current
+artifact must not be described as production-ready or audited.

@@ -2,7 +2,9 @@ use pinocchio::Address;
 use stockstream::{
     scratch::{
         derive_settlement_scratch, ScratchStatus, SettlementScratchHeader, SettlementScratchView,
-        SETTLEMENT_PLAN_SIZE, SETTLEMENT_SCRATCH_LEN,
+        SETTLEMENT_PLAN_OFFSET, SETTLEMENT_PLAN_SIZE, SETTLEMENT_SCRATCH_ALIGNMENT,
+        SETTLEMENT_SCRATCH_HEADER_PHYSICAL_SIZE, SETTLEMENT_SCRATCH_HEADER_SIZE,
+        SETTLEMENT_SCRATCH_LEN,
     },
     ID,
 };
@@ -58,4 +60,30 @@ fn scratch_pda_is_market_and_seat_scoped() {
     let first = derive_settlement_scratch(&market, 0, &ID);
     let second = derive_settlement_scratch(&market, 1, &ID);
     assert_ne!(first, second);
+}
+
+#[test]
+fn scratch_regions_are_physically_aligned() {
+    assert_eq!(SETTLEMENT_SCRATCH_HEADER_SIZE, 266);
+    assert_eq!(SETTLEMENT_SCRATCH_HEADER_PHYSICAL_SIZE, 272);
+    assert_eq!(SETTLEMENT_PLAN_OFFSET % SETTLEMENT_SCRATCH_ALIGNMENT, 0);
+    assert_eq!(SETTLEMENT_SCRATCH_LEN % SETTLEMENT_SCRATCH_ALIGNMENT, 0);
+}
+
+#[test]
+fn rust_client_and_pda_derivation_use_the_canonical_program_id() {
+    const EXPECTED: Address = Address::new_from_array([
+        1, 99, 3, 75, 85, 232, 97, 22, 45, 107, 2, 20, 49, 46, 183, 135, 43, 66, 68, 44, 72, 47,
+        186, 41, 46, 239, 86, 185, 49, 154, 84, 255,
+    ]);
+    assert_eq!(ID, EXPECTED);
+    assert!(
+        include_str!("../../../clients/stockstream/src/constants.ts")
+            .contains("6QyZWQ7dvFNXerNdhzhyqQjzZnkMXmr52GNJLT1KpmU")
+    );
+    let market = Address::new_from_array([9; 32]);
+    assert_ne!(
+        derive_settlement_scratch(&market, 0, &ID),
+        derive_settlement_scratch(&market, 0, &Address::new_from_array([8; 32]))
+    );
 }
