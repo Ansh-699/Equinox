@@ -20,10 +20,10 @@
     "@privy-io/node": "^0.34.0",
     "@privy-io/react-auth": "3.42.0",
     "@pythnetwork/pyth-lazer-sdk": "7.0.0",
-    "@solana-program/memo": "^0.9.0",
-    "@solana-program/system": "0.14.1",
-    "@solana-program/token": "0.16.1",
-    "@solana/kit": "8.3.0",
+    "@solana-program/memo": "0.10.0",
+    "@solana-program/system": "0.10.0",
+    "@solana-program/token": "0.9.0",
+    "@solana/kit": "5.5.1",
     "@solana/spl-token": "0.4.14",
     "@solana/web3.js": "1.98.4",
     "@stripe/stripe-js": "^8.4.0",
@@ -33,6 +33,11 @@
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "zod": "4.6.5"
+  },
+  "overrides": {
+    "@magicblock-labs/ephemeral-rollups-kit": {
+      "@solana-program/system": "0.9.0"
+    }
   },
   "devDependencies": {
     "@types/bn.js": "5.2.0",
