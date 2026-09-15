@@ -3,6 +3,7 @@ import { deposit, deriveVault, deriveVaultAuthority, SPL_TOKEN_PROGRAM, tokenTra
 import { OracleTracker, requirePythServerConfig } from "./oracle";
 import { COMMIT_INTERVAL_MS, encodeCommit, rejectMixedWritableDomains, validateCallback, validateHotCluster } from "./magicblock";
 import { authorize } from "./trading-session";
+import { requireClientOrderId } from "./execution-boundary";
 
 describe("custody boundaries", () => {
   const config = { mint: "verified-devnet-mint-config", decimals: 6, tokenProgram: SPL_TOKEN_PROGRAM };
@@ -19,6 +20,10 @@ describe("custody boundaries", () => {
 });
 
 describe("oracle and lifecycle boundaries", () => {
+  it("requires retry-safe client order identifiers", () => {
+    expect(requireClientOrderId("order_123456")).toBe("order_123456");
+    expect(() => requireClientOrderId("x")).toThrow();
+  });
   it("requires server-only Pyth configuration", () => expect(() => requirePythServerConfig({})).toThrow("PYTH_PRO_API_KEY"));
   it("accepts monotonic bounded oracle data once", () => {
     const tracker = new OracleTracker({ feedId: "verified", channel: "fixed_rate@200ms", maxAgeMs: 1000, maxConfidence: 2n, exponent: -2 });
