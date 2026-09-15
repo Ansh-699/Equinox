@@ -51,8 +51,8 @@ late-failure rollback proof and exhaustive account-level settlement matrix are
 not complete. Phase 2 local-validator work and all external integrations are
 therefore blocked.
 
-The latest candidate artifact is `c8fc0768c6c333ed29609f958100ee231909009e8b699ac4347357b4fe844eb7`
-(`114,864` bytes). It passes the current Rust debug/release suites (`31`
+The latest candidate artifact is `081868a97f4da71a7cea5a226076a03f6fe103db3d6beac98748f094624f9564`
+(`117,944` bytes). It passes the current Rust debug/release suites (`31`
 tests each) and the SBF stack verifier. The immutable planner is currently a
 preflight; account mutation still requires the remaining two-phase apply and
 rollback work.
