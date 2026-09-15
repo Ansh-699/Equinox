@@ -1,49 +1,19 @@
-# SBPF Compatibility
+# SBPF compatibility
 
-## Gate 1 Evidence
+The local Gate 2 execution path remains blocked because the installed tools are
+mixed: the current `cargo-build-sbf` emits SBPF v4 while the available runtime
+accepts through SBPF v3. No ELF patching or native execution substitute is used.
 
-The verified Gate 1 artifact is preserved by `stockstream-mvp-gate-1`:
+The reproducible path is `scripts/install-stockstream-toolchain.sh`, which pins
+the official Anza Agave `2.2.20` release. That release is intended to provide
+the matching `solana`, `cargo-build-sbf`, `solana-test-validator` and
+platform-tools set together. The script refuses a mixed version set, rebuilds
+the real SBF artifact, and then runs the serialized runtime harness in CI.
 
-- SHA-256: `7bfad1e46257677bdc7ee7ec8fe0dfbab581df6eda2b968328a8c639f12e5377`
-- Size: `121,952` bytes
+The runtime workflow is `.github/workflows/stockstream-runtime.yml`. It is not
+claimed as executed locally in this environment. Current local evidence is:
 
-Later runtime experiments are not Gate 1 evidence.
-
-## Observed Toolchain
-
-| Component | Version |
-| --- | --- |
-| Rust compiler | `rustc 1.98.0 (88d9e12ae 2026-08-18)` |
-| Solana CLI | `4.2.1` |
-| cargo-build-sbf | `4.1.0` |
-| platform-tools | `v1.54` |
-| LiteSVM | `0.16.0` |
-| solana-sbpf in LiteSVM | `0.21.1` |
-| validator | `solana-test-validator 4.2.1` |
-
-## Failure
-
-The default artifact reports `EM_SBPF` (`0x107`) and GNU/Linux ELF OSABI. The
-Agave SBPF parser rejects that file as `Incompatible ELF: wrong ABI`.
-
-Building with `--arch v3` produces Linux BPF with CPU version 4. LiteSVM and
-`solana-test-validator` then reject it with:
-
-`Detected sbpf_version required by the executable which are not enabled`
-
-The installed runtime enables SBPF through v3, while platform-tools v1.54
-produces an SBPF-v4 executable. A v1.51 platform-tools download was attempted
-through the official `cargo build-sbf --tools-version v1.51` path, but the
-download stalled before completing. No ELF bytes were patched and no native
-mock was used.
-
-## Status
-
-- Gate 1: PASS
-- Gate 2 harness implementation: COMPLETE
-- Gate 2 runtime execution: BLOCKED - TOOLCHAIN
-- Runtime/developer network execution: BLOCKED until a matching Agave and
-  platform-tools pair is installed.
-
-The runtime test is `runtime_initialize.rs`, feature-gated with
-`runtime-tests`, and loads `target/deploy/stockstream.so` directly.
+- Gate 1: PASS, artifact `target/deploy/stockstream.so` at tag `stockstream-mvp-gate-1`.
+- Gate 2 harness implementation: COMPLETE.
+- Gate 2 runtime execution: BLOCKED — TOOLCHAIN.
+- No compatible runtime execution or compute-unit measurement is claimed.

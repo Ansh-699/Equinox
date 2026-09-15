@@ -66,6 +66,18 @@ production claim.
 The detailed toolchain, artifact, and test evidence is recorded in
 `docs/stockstream-build-record.md`.
 
+## Post-Gate Integration Wiring
+
+| Area | Status | Evidence / limitation |
+| --- | --- | --- |
+| Pinocchio dispatch | IMPLEMENTED | Custody, oracle, delegation, commit, callback and session discriminators are decoded and dispatched. |
+| Custody CPI boundary | IMPLEMENTED / RUNTIME BLOCKED | SPL Token transfer builders and collateral reconciliation are wired; actual CPI execution awaits the compatible SBPF runtime. |
+| Persistent authentication | IMPLEMENTED / CREDENTIAL BLOCKED | Next routes use the D1 store; live Privy exchange requires `NEXT_PUBLIC_PRIVY_APP_ID` and `PRIVY_APP_SECRET`. |
+| Frontend transactions | IMPLEMENTED / DEVNET UNVERIFIED | Dashboard constructs lifecycle instructions and injected signing transports; no signatures are fabricated. |
+| Pyth keeper | UNIT TESTED / CREDENTIAL BLOCKED | Server-only keeper and rejection boundary exist; live signed AAPL verification requires `PYTH_PRO_API_KEY` and a verified feed catalog result. |
+| MagicBlock | UNIT TESTED / RUNTIME BLOCKED | Account-cluster validation and commit encodings exist; ER execution is not claimed. |
+| Gate 2 | BLOCKED — TOOLCHAIN | Local SBPF runtime mismatch remains documented in `docs/sbpf-compatibility.md`. |
+
 ## Deferred Production Hardening
 
 The hackathon MVP gate intentionally defers the exhaustive settlement

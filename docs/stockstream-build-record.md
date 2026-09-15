@@ -240,3 +240,39 @@ boundary work. This artifact is separate from the preserved Gate 1 artifact.
 
 The artifact remains unverified in a runtime because the documented SBPF
 toolchain mismatch is unresolved.
+
+## Production Wiring Milestones (2026-09-15)
+
+Milestone A commit `960d1f7` wires custody, oracle, delegation, commit,
+undelegation and scoped-session instruction variants into the Pinocchio decoder
+and dispatcher. The custody path uses `pinocchio-token v0.7.0` transfer CPI
+builders and updates collateral only after CPI success. The typed client has
+matching discriminators and account metadata. Rust debug/release tests passed
+(`45` each); client/application tests passed (`19` at the milestone).
+
+Milestone B commit `3159c16` wires the Next routes `/api/auth/session`,
+`/api/auth/me` and `/api/auth/logout` to the D1-shaped session store. Production
+requires a D1 binding; the in-memory adapter is development-only. Session IDs
+are hashed, logout is CSRF-protected, expired rows are cleaned and last-use is
+updated. Lint, typecheck, tests and production build passed.
+
+Milestone C commit `77f1ff6` connects the dashboard lifecycle controls to typed
+instruction constructors and the injected L1 execution boundary. No signature
+is fabricated when a transport is unavailable. Twenty TypeScript tests pass,
+including the simulation/sign/submit/confirm ordering test.
+
+Milestone D commit `77cfedc` adds the server-only Pyth keeper and health route.
+It rotates configured endpoints, retries with backoff, suppresses duplicate or
+older payloads, constructs Ed25519 before ConsumeOracleUpdate, and never logs
+the API key. Keeper fixtures bring the application total to `22` tests. Live
+signed AAPL verification remains blocked by `PYTH_PRO_API_KEY` and an unverified
+Pyth Pro feed identifier.
+
+Milestone E adds the pinned Agave installation script and CI workflow. The
+script has not been executed locally because Gate 2 runtime execution remains
+toolchain-blocked; it is the reproducible path for the serialized harness.
+
+Current SBF artifact from source commit `960d1f7`: SHA-256
+`249d8e08411b39b40bc538e090c94586474546b8c38d7279c7c892b9816a5753`, size
+`143,656` bytes. This is a post-Gate-1 build and must not be substituted for
+the preserved Gate 1 artifact.
