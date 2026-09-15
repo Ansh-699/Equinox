@@ -219,3 +219,24 @@ and healthy-liquidation boundary checks.
 The older pre-correction artifacts and candidate hashes in this record are
 historical only and are superseded by the artifact above. They must not be
 deployed as StockStream evidence.
+
+## Post-Gate-1 Verified Build (Current Source)
+
+The current source rebuild completed after the custody/oracle/lifecycle
+boundary work. This artifact is separate from the preserved Gate 1 artifact.
+
+| Check | Result |
+| --- | --- |
+| Source commit | `2794eca` plus repository cleanup changes |
+| `cargo fmt --check` | passed |
+| `cargo check -p stockstream` | passed |
+| Rust debug tests | `45 passed; 0 failed` |
+| Rust release tests | `45 passed; 0 failed` |
+| SBF build | passed |
+| SBF artifact | `target/deploy/stockstream.so` |
+| SBF SHA-256 | `9c31a51030bcd9021a32731f302817442270c740dfe312c84d5ff23bcdd6cef5` |
+| SBF size | `118,304` bytes |
+| stack diagnostic | no stack-frame diagnostic emitted |
+
+The artifact remains unverified in a runtime because the documented SBPF
+toolchain mismatch is unresolved.
