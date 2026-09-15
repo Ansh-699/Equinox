@@ -159,8 +159,8 @@ and two expiry removals per instruction.
 | `cargo fmt --check` | passed |
 | `cargo check -p stockstream` | passed |
 | `cargo build-sbf --features bpf-entrypoint` | passed; no stack diagnostic |
-| SBF SHA-256 | `c8fc0768c6c333ed29609f958100ee231909009e8b699ac4347357b4fe844eb7` |
-| SBF size | `114,864` bytes |
+| SBF SHA-256 | `081868a97f4da71a7cea5a226076a03f6fe103db3d6beac98748f094624f9564` |
+| SBF size | `117,944` bytes |
 
 This is Gate 1 progress, not a pass. The handler still applies through the
 legacy mutating matcher after preflight; complete two-phase maker/taker risk

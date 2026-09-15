@@ -7,8 +7,8 @@ use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
 
 use crate::{
     book::{
-        match_limit_arenas, plan_limit_arenas, Arena, MatchLimits, OrderInput, PlanAction,
-        PlannedMatch, Side, TimeInForce, TreeKind,
+        plan_limit_arenas, Arena, MatchLimits, OrderInput, PlanAction, PlannedMatch, Side,
+        TimeInForce, TreeKind,
     },
     error::StockStreamError,
     instruction::{PlaceOrderData, StockStreamInstruction},
@@ -393,26 +393,23 @@ fn place_order(
     if planned.post_only_rejected {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
-    let result = unsafe {
-        let bids = &mut *(data.as_mut_ptr().add(crate::state::BID_ARENA_OFFSET) as *mut Arena);
-        let asks = &mut *(data.as_mut_ptr().add(crate::state::ASK_ARENA_OFFSET) as *mut Arena);
-        match_limit_arenas(
-            bids,
-            asks,
-            input,
-            Some(header.last_verified_oracle_price),
-            now,
-            MatchLimits {
-                max_fills: crate::book::MAX_MATCH_FILLS as u8,
-                max_invalid_removals: 8,
-                max_expired_removals: 8,
-            },
-        )
-        .map_err(book_error)?
-    };
-    if result.post_only_rejected {
-        return Err(custom(StockStreamError::InvalidInstruction));
+    apply_settlement_plan(data, &planned)?;
+    if planned.remaining > 0
+        && input.time_in_force == TimeInForce::GoodTilCancelled
+        && !planned.post_only_rejected
+    {
+        let mut resting = input;
+        resting.quantity = planned.remaining;
+        let side_offset = if input.side == Side::Bid {
+            crate::state::BID_ARENA_OFFSET
+        } else {
+            crate::state::ASK_ARENA_OFFSET
+        };
+        arena_mut(data, side_offset)?
+            .insert(resting.tree, resting.leaf().map_err(book_error)?)
+            .map_err(book_error)?;
     }
+    let result = planned;
     let mut fill_index = 0usize;
     while fill_index < result.fill_count as usize {
         let fill = result.fills[fill_index];
@@ -500,6 +497,33 @@ fn place_order(
         .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
     updated.current_open_interest = recompute_open_interest(data)?;
     write_header(data, &updated)
+}
+
+fn apply_settlement_plan(data: &mut [u8], plan: &PlannedMatch) -> ProgramResult {
+    let mut index = 0usize;
+    while index < plan.action_count as usize {
+        let action = plan.actions[index];
+        let offset = if action.side == Side::Bid {
+            crate::state::BID_ARENA_OFFSET
+        } else {
+            crate::state::ASK_ARENA_OFFSET
+        };
+        let arena = arena_mut(data, offset)?;
+        let handle = arena.find(action.tree, action.key).map_err(book_error)?;
+        if handle != action.handle {
+            return Err(custom(StockStreamError::InvalidInstruction));
+        }
+        if action.remove {
+            // SAFETY: validate_settlement_plan checked the exact leaf identity
+            // and all branch preconditions before this apply phase began.
+            unsafe { arena.remove_validated(action.tree, action.key) };
+        } else {
+            // SAFETY: the plan validator checked the leaf tag and handle.
+            unsafe { arena.apply_leaf_quantity_validated(action.handle, action.new_quantity) };
+        }
+        index += 1;
+    }
+    Ok(())
 }
 
 fn validate_settlement_plan(

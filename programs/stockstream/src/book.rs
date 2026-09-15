@@ -208,6 +208,30 @@ impl Arena {
         self.nodes[handle as usize] = AnyNode { leaf: node };
     }
 
+    pub fn apply_leaf_quantity(&mut self, handle: u32, quantity: u64) -> Result<(), BookError> {
+        let mut leaf = self.leaf(handle)?;
+        leaf.quantity = quantity;
+        self.write_leaf(handle, leaf);
+        Ok(())
+    }
+
+    /// Apply a quantity update after `validate_settlement_plan` has checked
+    /// the handle, tag, key, owner, and expected quantity.
+    pub unsafe fn apply_leaf_quantity_validated(&mut self, handle: u32, quantity: u64) {
+        let mut leaf = unsafe { self.nodes[handle as usize].leaf };
+        leaf.quantity = quantity;
+        self.write_leaf(handle, leaf);
+    }
+
+    /// Remove a leaf after the complete identity and branch preconditions have
+    /// been checked without mutating the account.
+    pub unsafe fn remove_validated(&mut self, tree: TreeKind, key: u128) -> LeafNode {
+        match self.remove(tree, key) {
+            Ok(leaf) => leaf,
+            Err(_) => unsafe { core::hint::unreachable_unchecked() },
+        }
+    }
+
     fn allocate(&mut self) -> Result<u32, BookError> {
         if self.free_head != NONE {
             let handle = self.free_head;
