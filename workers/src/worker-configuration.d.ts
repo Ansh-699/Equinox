@@ -6,6 +6,14 @@ interface __BaseEnv_Env {
 	DB?: D1Database;
 	INGESTION_TOKEN?: string;
 	MARKET_STREAM?: DurableObjectNamespace<import("./index").MarketStream>;
+	PRIVY_APP_SECRET?: string;
+	PYTH_PRO_API_KEY?: string;
+	SOLANA_RPC_URL?: string;
+	SOLANA_WS_URL?: string;
+	MAGIC_ROUTER_URL?: string;
+	MAGICBLOCK_RPC_URL?: string;
+	MAGICBLOCK_VALIDATOR?: string;
+	KEEPER_PUBLIC_KEY?: string;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {

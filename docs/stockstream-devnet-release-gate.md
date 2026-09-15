@@ -90,6 +90,21 @@ toolchain, credentials and funded network are available.
 | MagicBlock | UNIT TESTED / RUNTIME BLOCKED | Account-cluster validation and commit encodings exist; ER execution is not claimed. |
 | Gate 2 | BLOCKED — TOOLCHAIN | Local SBPF runtime mismatch remains documented in `docs/sbpf-compatibility.md`. |
 
+## Code-Completion Evidence
+
+The generic registry now has real update/suspend/risk/market-transition
+dispatch variants, and the TypeScript constructors use matching discriminators.
+The Worker has durable protocol projection tables, sequence-aware Durable
+Object snapshots, contiguous-cursor reconciliation helpers, keeper lease and
+idempotency primitives, and scheduled retention/lease cleanup. The reusable
+protocol service composes account instructions over injected L1 and Magic
+Router transports without fabricating signatures.
+
+Current source SBF: SHA-256
+`f821f560499508efa26d85f025910681466f524a4665b54abd6229d96cdeba60`,
+`151,608` bytes. This is compiled evidence only; runtime, CPI, ER and live
+external integrations are not verified.
+
 ## Deferred Production Hardening
 
 The hackathon MVP gate intentionally defers the exhaustive settlement

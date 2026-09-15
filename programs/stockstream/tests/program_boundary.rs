@@ -115,8 +115,11 @@ fn production_instruction_decoder_covers_integration_variants() {
         Ok(StockStreamInstruction::InitializeVault)
     ));
     assert!(matches!(
-        StockStreamInstruction::decode(&[10, 7, 0, 0, 0, 0, 0, 0, 0]),
-        Ok(StockStreamInstruction::DepositCollateral { amount: 7 })
+        StockStreamInstruction::decode(&[10, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0]),
+        Ok(StockStreamInstruction::DepositCollateral {
+            seat_index: 0,
+            amount: 7
+        })
     ));
     assert!(matches!(
         StockStreamInstruction::decode(&[12]),
@@ -131,6 +134,32 @@ fn production_instruction_decoder_covers_integration_variants() {
         Ok(StockStreamInstruction::AuthorizeTradingSession {
             expires_at: 2,
             nonce: 3
+        })
+    ));
+    let mut instrument = [0u8; 37];
+    instrument[0] = 22;
+    instrument[33..37].copy_from_slice(&(-2i32).to_le_bytes());
+    assert!(matches!(
+        StockStreamInstruction::decode(&instrument),
+        Ok(StockStreamInstruction::UpdateStockInstrument {
+            price_exponent: -2,
+            ..
+        })
+    ));
+    assert!(matches!(
+        StockStreamInstruction::decode(&[25]),
+        Ok(StockStreamInstruction::TransitionMarket { mode: 0 })
+    ));
+    let mut risk = [0u8; 9];
+    risk[0] = 24;
+    risk[1..3].copy_from_slice(&2000u16.to_le_bytes());
+    risk[3..5].copy_from_slice(&1000u16.to_le_bytes());
+    risk[5..9].copy_from_slice(&5u32.to_le_bytes());
+    assert!(matches!(
+        StockStreamInstruction::decode(&risk),
+        Ok(StockStreamInstruction::UpdateMarketRisk {
+            maximum_leverage: 5,
+            ..
         })
     ));
 }

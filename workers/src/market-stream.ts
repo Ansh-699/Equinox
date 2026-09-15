@@ -9,6 +9,7 @@ export class MarketStream extends DurableObject<Env> {
       this.ctx.storage.sql.exec(`
         CREATE TABLE IF NOT EXISTS latest_event (
           kind TEXT PRIMARY KEY,
+          sequence INTEGER NOT NULL DEFAULT 0,
           event_json TEXT NOT NULL
         )
       `);
@@ -17,9 +18,13 @@ export class MarketStream extends DurableObject<Env> {
 
   publish(event: MarketEvent): void {
     const serialized = JSON.stringify(event);
+    const sequence = event.sequence ?? 0;
+    const previous = this.ctx.storage.sql.exec<{ sequence: number }>("SELECT sequence FROM latest_event WHERE kind = ?", event.kind).toArray()[0];
+    if (previous && sequence <= previous.sequence) return;
     this.ctx.storage.sql.exec(
-      "INSERT OR REPLACE INTO latest_event (kind, event_json) VALUES (?, ?)",
+      "INSERT OR REPLACE INTO latest_event (kind, sequence, event_json) VALUES (?, ?, ?)",
       event.kind,
+      sequence,
       serialized,
     );
 
@@ -32,6 +37,11 @@ export class MarketStream extends DurableObject<Env> {
     }
   }
 
+  snapshotEnvelope(): { events: MarketEvent[]; sequence: number } {
+    const rows = this.ctx.storage.sql.exec<{ sequence: number }>("SELECT sequence FROM latest_event ORDER BY sequence DESC LIMIT 1").toArray();
+    return { events: this.snapshot(), sequence: rows[0]?.sequence ?? 0 };
+  }
+
   snapshot(): MarketEvent[] {
     return this.ctx.storage.sql
       .exec<{ event_json: string }>("SELECT event_json FROM latest_event ORDER BY kind")
@@ -42,13 +52,13 @@ export class MarketStream extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
     const upgrade = request.headers.get("Upgrade");
     if (upgrade !== "websocket") {
-      return Response.json({ events: this.snapshot() });
+      return Response.json(this.snapshotEnvelope());
     }
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server);
-    server.send(JSON.stringify({ type: "snapshot", events: this.snapshot() }));
+    server.send(JSON.stringify({ type: "snapshot", ...this.snapshotEnvelope() }));
     return new Response(null, { status: 101, webSocket: client });
   }
 

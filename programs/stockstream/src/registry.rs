@@ -120,6 +120,56 @@ pub fn register_instrument(
     Ok(())
 }
 
+pub fn update_instrument(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    id: [u8; 32],
+    exponent: i32,
+) -> ProgramResult {
+    if accounts.len() < 3
+        || !accounts[2].is_signer()
+        || *accounts[1].address() != derive_instrument(program_id, accounts[0].address(), &id)
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let exchange = unsafe { accounts[0].borrow_unchecked() };
+    if exchange.len() != EXCHANGE_SIZE
+        || exchange[0..8] != EXCHANGE_DISCRIMINATOR
+        || exchange[11..43] != accounts[2].address().to_bytes()
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let data = account_data(&mut accounts[1], program_id, INSTRUMENT_SIZE)?;
+    if data[0..8] != INSTRUMENT_DISCRIMINATOR || data[10] == 0 || data[11..43] != id {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    data[75..79].copy_from_slice(&exponent.to_le_bytes());
+    Ok(())
+}
+
+pub fn suspend_instrument(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    id: [u8; 32],
+) -> ProgramResult {
+    if accounts.len() < 3
+        || !accounts[2].is_signer()
+        || *accounts[1].address() != derive_instrument(program_id, accounts[0].address(), &id)
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let exchange = unsafe { accounts[0].borrow_unchecked() };
+    if exchange.len() != EXCHANGE_SIZE || exchange[11..43] != accounts[2].address().to_bytes() {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let data = account_data(&mut accounts[1], program_id, INSTRUMENT_SIZE)?;
+    if data[0..8] != INSTRUMENT_DISCRIMINATOR || data[11..43] != id {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    data[79] = 1;
+    Ok(())
+}
+
 pub fn create_perp_market(
     program_id: &Address,
     accounts: &mut [AccountView],

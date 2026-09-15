@@ -291,3 +291,20 @@ registry Vitest tests. Rust debug and release suites pass with 48 tests each;
 the application suite passes 26 tests in 7 files. The final SBF rebuild and
 hash are `58eb165bd3f13c63f7ed52c661227a8c398d49c6b1eb425948a38cad325921af`
 and `147,344` bytes. The SBF build emitted no stack-frame diagnostic.
+
+## Full Code-Completion Pass (2026-09-16)
+
+This pass adds generic registry lifecycle transitions, the injected protocol
+service, persistent-session service tests, Worker projection/indexer/keeper
+primitives, Durable Object sequence filtering, migration `0003_protocol_projection.sql`,
+and the requested protocol documentation set. The source-built SBF artifact is
+`target/deploy/stockstream.so`, SHA-256
+`f821f560499508efa26d85f025910681466f524a4665b54abd6229d96cdeba60`, size
+`151,608` bytes. `cargo fmt --check`, `cargo check -p stockstream`, debug and
+release Rust tests, SBF compilation, root TypeScript checks/tests, and Worker
+typecheck/tests passed. No deployment or live transaction was attempted.
+
+The runtime remains externally unverified because the installed SBPF runtime
+does not accept the compiler's ELF/SBPF generation. Live Pyth, Privy and
+MagicBlock verification also remain externally blocked by credentials and/or
+network/service availability.

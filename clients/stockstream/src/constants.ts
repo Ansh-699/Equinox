@@ -23,6 +23,15 @@ export const STOCKSTREAM_INSTRUCTION = {
   initializeExchange: 19,
   registerStockInstrument: 20,
   createPerpMarket: 21,
+  updateStockInstrument: 22,
+  suspendStockInstrument: 23,
+  updateMarketRisk: 24,
+  pauseMarket: 25,
+  resumeMarket: 26,
+  setCloseOnly: 27,
+  enterCorporateAction: 28,
+  resolveCorporateAction: 29,
+  closeMarket: 30,
 } as const;
 
 export const STOCKSTREAM_ACCOUNT_SIZE = 222_752;

@@ -233,11 +233,11 @@ pub fn dispatch(
             initialize_settlement_scratch(program_id, accounts, seat_index)
         }
         StockStreamInstruction::InitializeVault => initialize_vault(program_id, accounts),
-        StockStreamInstruction::DepositCollateral { amount } => {
-            deposit_collateral(program_id, accounts, amount)
+        StockStreamInstruction::DepositCollateral { seat_index, amount } => {
+            deposit_collateral(program_id, accounts, seat_index as usize, amount)
         }
-        StockStreamInstruction::WithdrawCollateral { amount } => {
-            withdraw_collateral(program_id, accounts, amount)
+        StockStreamInstruction::WithdrawCollateral { seat_index, amount } => {
+            withdraw_collateral(program_id, accounts, seat_index as usize, amount)
         }
         StockStreamInstruction::ConsumeOracleUpdate => consume_oracle_update(program_id, accounts),
         StockStreamInstruction::DelegateMarket { sequence } => {
@@ -267,7 +267,77 @@ pub fn dispatch(
         StockStreamInstruction::CreatePerpMarket { instrument_id } => {
             crate::registry::create_perp_market(program_id, accounts, instrument_id)
         }
+        StockStreamInstruction::UpdateStockInstrument {
+            instrument_id,
+            price_exponent,
+        } => {
+            crate::registry::update_instrument(program_id, accounts, instrument_id, price_exponent)
+        }
+        StockStreamInstruction::SuspendStockInstrument { instrument_id } => {
+            crate::registry::suspend_instrument(program_id, accounts, instrument_id)
+        }
+        StockStreamInstruction::UpdateMarketRisk {
+            initial_margin_bps,
+            maintenance_margin_bps,
+            maximum_leverage,
+        } => update_market_risk(
+            program_id,
+            accounts,
+            initial_margin_bps,
+            maintenance_margin_bps,
+            maximum_leverage,
+        ),
+        StockStreamInstruction::TransitionMarket { mode } => {
+            transition_market(program_id, accounts, mode)
+        }
     }
+}
+
+fn update_market_risk(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    initial: u16,
+    maintenance: u16,
+    leverage: u32,
+) -> ProgramResult {
+    if accounts.len() < 2
+        || initial == 0
+        || maintenance == 0
+        || maintenance > initial
+        || leverage == 0
+    {
+        return Err(custom(StockStreamError::RiskViolation));
+    }
+    signer(&accounts[1])?;
+    let authority = accounts[1].address().to_bytes();
+    let data = market_data(&mut accounts[0], program_id)?;
+    let mut header = initialized_header(data)?;
+    if header.market_authority != authority {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    header.initial_margin_bps = initial;
+    header.maintenance_margin_bps = maintenance;
+    header.maximum_leverage = leverage;
+    write_header(data, &header)
+}
+
+fn transition_market(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    mode: u8,
+) -> ProgramResult {
+    if accounts.len() < 2 || mode > MarketMode::Emergency as u8 {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    signer(&accounts[1])?;
+    let authority = accounts[1].address().to_bytes();
+    let data = market_data(&mut accounts[0], program_id)?;
+    let mut header = initialized_header(data)?;
+    if header.market_authority != authority {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    header.mode = mode;
+    write_header(data, &header)
 }
 
 fn scratch_data<'a>(
@@ -441,6 +511,7 @@ fn initialize_vault(program_id: &Address, accounts: &mut [AccountView]) -> Progr
 fn deposit_collateral(
     program_id: &Address,
     accounts: &mut [AccountView],
+    seat_index: usize,
     amount: u64,
 ) -> ProgramResult {
     if accounts.len() < 7 || amount == 0 {
@@ -459,7 +530,7 @@ fn deposit_collateral(
     let data = market_data(&mut market_accounts[0], program_id)?;
     let header = initialized_header(data)?;
     custody_config(&header, rest[4].address(), rest[5].address())?;
-    let mut seat = seat_at(data, 0)?;
+    let mut seat = seat_at(data, seat_index)?;
     if seat.trader != rest[0].address().to_bytes() {
         return Err(custom(StockStreamError::InvalidSeat));
     }
@@ -477,12 +548,13 @@ fn deposit_collateral(
         .available_collateral
         .checked_add(amount as i128)
         .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
-    write_seat(data, 0, &seat)
+    write_seat(data, seat_index, &seat)
 }
 
 fn withdraw_collateral(
     program_id: &Address,
     accounts: &mut [AccountView],
+    seat_index: usize,
     amount: u64,
 ) -> ProgramResult {
     if accounts.len() < 7 || amount == 0 {
@@ -500,7 +572,7 @@ fn withdraw_collateral(
     let data = market_data(&mut market_accounts[0], program_id)?;
     let header = initialized_header(data)?;
     custody_config(&header, rest[2].address(), rest[5].address())?;
-    let mut seat = seat_at(data, 0)?;
+    let mut seat = seat_at(data, seat_index)?;
     if seat.trader != trader
         || seat.available_collateral < amount as i128
         || seat.available_collateral - (amount as i128) < seat.reserved_margin
@@ -517,7 +589,7 @@ fn withdraw_collateral(
     Transfer::<&AccountView>::new(&rest[3], &rest[1], &rest[4], amount)
         .invoke_signed_with_program(&signer_seeds, rest[5].address())?;
     seat.available_collateral -= amount as i128;
-    write_seat(data, 0, &seat)
+    write_seat(data, seat_index, &seat)
 }
 
 fn consume_oracle_update(program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
