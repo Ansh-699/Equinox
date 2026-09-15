@@ -32,6 +32,7 @@ function asMarketEvent(input: unknown): MarketEvent | null {
     return null;
   }
 
+  const record = input as Record<string, unknown>;
   return {
     id: input.id,
     symbol: input.symbol.toUpperCase(),
@@ -39,6 +40,8 @@ function asMarketEvent(input: unknown): MarketEvent | null {
     slot: "slot" in input && typeof input.slot === "number" ? input.slot : undefined,
     payload: input.payload as Record<string, unknown>,
     observedAt: "observedAt" in input && typeof input.observedAt === "number" ? input.observedAt : Date.now(),
+    sequence: "sequence" in input && typeof input.sequence === "number" ? input.sequence : undefined,
+    domain: record.domain === "l1" || record.domain === "er" ? record.domain : undefined,
   };
 }
 
@@ -135,14 +138,25 @@ export default {
       return json({ markets: result.results });
     }
 
+    if (request.method === "GET" && parts[0] === "v1" && parts[1] === "markets" && parts.length === 3) {
+      const symbol = parts[2].toUpperCase();
+      const market = await bindings(env).DB.prepare("SELECT symbol, instrument_id AS instrumentId, market_index AS marketIndex, market_pda AS marketPda, vault_pda AS vaultPda, status, oracle_feed_id AS oracleFeedId, session_policy AS sessionPolicy FROM markets WHERE symbol = ?").bind(symbol).first<MarketDefinition>();
+      return market ? json(market) : json({ error: "market_not_found" }, 404);
+    }
+
     if (parts[0] === "v1" && parts[1] === "markets" && parts.length === 4) {
       const symbol = parts[2].toUpperCase();
       const action = parts[3];
       const stream = bindings(env).MARKET_STREAM.getByName(symbol);
       if (request.method === "GET" && action === "stream") return stream.fetch(request);
-      if (request.method === "GET" && action === "snapshot") return json({ symbol, events: await stream.snapshot() });
+      if (request.method === "GET" && action === "snapshot") return stream.fetch(new Request("https://internal.invalid/snapshot"));
     }
 
     return json({ error: "not_found" }, 404);
+  },
+  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+    if (!env.DB) return;
+    await env.DB.prepare("DELETE FROM indexed_events WHERE observed_at < ?").bind(Date.now() - 90 * 24 * 60 * 60 * 1000).run();
+    await env.DB.prepare("DELETE FROM keeper_leases WHERE expires_at <= ?").bind(Date.now()).run();
   },
 } satisfies ExportedHandler<Env>;

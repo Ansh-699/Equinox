@@ -23,6 +23,15 @@ pub const REVOKE_TRADING_SESSION: u8 = 18;
 pub const INITIALIZE_EXCHANGE: u8 = 19;
 pub const REGISTER_STOCK_INSTRUMENT: u8 = 20;
 pub const CREATE_PERP_MARKET: u8 = 21;
+pub const UPDATE_STOCK_INSTRUMENT: u8 = 22;
+pub const SUSPEND_STOCK_INSTRUMENT: u8 = 23;
+pub const UPDATE_MARKET_RISK: u8 = 24;
+pub const PAUSE_MARKET: u8 = 25;
+pub const RESUME_MARKET: u8 = 26;
+pub const SET_CLOSE_ONLY: u8 = 27;
+pub const ENTER_CORPORATE_ACTION: u8 = 28;
+pub const RESOLVE_CORPORATE_ACTION: u8 = 29;
+pub const CLOSE_MARKET: u8 = 30;
 
 #[derive(Clone, Copy)]
 pub struct PlaceOrderData {
@@ -67,9 +76,11 @@ pub enum StockStreamInstruction {
     },
     InitializeVault,
     DepositCollateral {
+        seat_index: u16,
         amount: u64,
     },
     WithdrawCollateral {
+        seat_index: u16,
         amount: u64,
     },
     ConsumeOracleUpdate,
@@ -98,6 +109,21 @@ pub enum StockStreamInstruction {
     },
     CreatePerpMarket {
         instrument_id: [u8; 32],
+    },
+    UpdateStockInstrument {
+        instrument_id: [u8; 32],
+        price_exponent: i32,
+    },
+    SuspendStockInstrument {
+        instrument_id: [u8; 32],
+    },
+    UpdateMarketRisk {
+        initial_margin_bps: u16,
+        maintenance_margin_bps: u16,
+        maximum_leverage: u32,
+    },
+    TransitionMarket {
+        mode: u8,
     },
 }
 
@@ -165,11 +191,13 @@ impl StockStreamInstruction {
                 })
             }
             Some(INITIALIZE_VAULT) if data.len() == 1 => Ok(Self::InitializeVault),
-            Some(DEPOSIT_COLLATERAL) if data.len() == 9 => Ok(Self::DepositCollateral {
-                amount: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+            Some(DEPOSIT_COLLATERAL) if data.len() == 11 => Ok(Self::DepositCollateral {
+                seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+                amount: read_u64(data, 3).ok_or(ProgramError::InvalidInstructionData)?,
             }),
-            Some(WITHDRAW_COLLATERAL) if data.len() == 9 => Ok(Self::WithdrawCollateral {
-                amount: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+            Some(WITHDRAW_COLLATERAL) if data.len() == 11 => Ok(Self::WithdrawCollateral {
+                seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+                amount: read_u64(data, 3).ok_or(ProgramError::InvalidInstructionData)?,
             }),
             Some(CONSUME_ORACLE_UPDATE) if data.len() == 1 => Ok(Self::ConsumeOracleUpdate),
             Some(DELEGATE_MARKET) if data.len() == 9 => Ok(Self::DelegateMarket {
@@ -210,7 +238,46 @@ impl StockStreamInstruction {
                     .try_into()
                     .map_err(|_| ProgramError::InvalidInstructionData)?,
             }),
+            Some(UPDATE_STOCK_INSTRUMENT) if data.len() == 37 => Ok(Self::UpdateStockInstrument {
+                instrument_id: data[1..33]
+                    .try_into()
+                    .map_err(|_| ProgramError::InvalidInstructionData)?,
+                price_exponent: read_i32(data, 33).ok_or(ProgramError::InvalidInstructionData)?,
+            }),
+            Some(SUSPEND_STOCK_INSTRUMENT) if data.len() == 33 => {
+                Ok(Self::SuspendStockInstrument {
+                    instrument_id: data[1..33]
+                        .try_into()
+                        .map_err(|_| ProgramError::InvalidInstructionData)?,
+                })
+            }
+            Some(UPDATE_MARKET_RISK) if data.len() == 9 => Ok(Self::UpdateMarketRisk {
+                initial_margin_bps: read_u16(data, 1)
+                    .ok_or(ProgramError::InvalidInstructionData)?,
+                maintenance_margin_bps: read_u16(data, 3)
+                    .ok_or(ProgramError::InvalidInstructionData)?,
+                maximum_leverage: read_u32(data, 5).ok_or(ProgramError::InvalidInstructionData)?,
+            }),
+            Some(PAUSE_MARKET) if data.len() == 1 => Ok(Self::TransitionMarket { mode: 0 }),
+            Some(RESUME_MARKET) if data.len() == 1 => Ok(Self::TransitionMarket { mode: 1 }),
+            Some(SET_CLOSE_ONLY) if data.len() == 1 => Ok(Self::TransitionMarket { mode: 2 }),
+            Some(ENTER_CORPORATE_ACTION) if data.len() == 1 => {
+                Ok(Self::TransitionMarket { mode: 3 })
+            }
+            Some(RESOLVE_CORPORATE_ACTION) if data.len() == 1 => {
+                Ok(Self::TransitionMarket { mode: 1 })
+            }
+            Some(CLOSE_MARKET) if data.len() == 1 => Ok(Self::TransitionMarket { mode: 0 }),
             _ => Err(ProgramError::InvalidInstructionData),
         }
     }
+}
+
+fn read_u32(data: &[u8], start: usize) -> Option<u32> {
+    data.get(start..start + 4)
+        .and_then(|v| <[u8; 4]>::try_from(v).ok())
+        .map(u32::from_le_bytes)
+}
+fn read_i32(data: &[u8], start: usize) -> Option<i32> {
+    read_u32(data, start).map(|v| v as i32)
 }

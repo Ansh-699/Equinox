@@ -104,7 +104,8 @@ export function TradingTerminal() {
     const vault = process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT ?? marketConfig.vaultPda;
     const vaultAuthority = process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT_AUTHORITY;
     if (!mint || !tokenProgram || !vault || !vaultAuthority) { setNotice("Custody action blocked: collateral mint, token program and vault addresses are not configured."); return; }
-    const ix = withdraw ? withdrawCollateral({ market: marketAddress, authority: auth.walletAddress, seat: auth.walletAddress, sourceOrDestination: auth.walletAddress, mint, tokenProgram, vault, vaultAuthority }, BigInt(quantityNumber || 1)) : depositCollateral({ market: marketAddress, authority: auth.walletAddress, seat: auth.walletAddress, sourceOrDestination: auth.walletAddress, mint, tokenProgram, vault, vaultAuthority }, BigInt(quantityNumber || 1));
+    const custodyAccounts = { market: marketAddress, authority: auth.walletAddress, seat: auth.walletAddress, seatIndex: 0, sourceOrDestination: auth.walletAddress, mint, tokenProgram, vault, vaultAuthority };
+    const ix = withdraw ? withdrawCollateral(custodyAccounts, BigInt(quantityNumber || 1)) : depositCollateral(custodyAccounts, BigInt(quantityNumber || 1));
     setNotice(`Constructed ${withdraw ? "WithdrawCollateral" : "DepositCollateral"} with ${ix.keys.length} accounts. Runtime submission is disabled until the custody transport is configured.`);
   }
 
