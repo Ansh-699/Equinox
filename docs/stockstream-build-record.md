@@ -162,6 +162,6 @@ and two expiry removals per instruction.
 | SBF SHA-256 | `081868a97f4da71a7cea5a226076a03f6fe103db3d6beac98748f094624f9564` |
 | SBF size | `117,944` bytes |
 
-This is Gate 1 progress, not a pass. The handler still applies through the
-legacy mutating matcher after preflight; complete two-phase maker/taker risk
-settlement, rollback, and the requested randomized account model remain.
+This is Gate 1 progress, not a pass. The handler now applies the planned arena
+actions and remainder, but complete precomputed maker/taker risk, margin,
+funding, event, rollback, and randomized account-model coverage remain.

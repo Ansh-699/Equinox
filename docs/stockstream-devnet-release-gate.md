@@ -54,8 +54,8 @@ therefore blocked.
 The latest candidate artifact is `081868a97f4da71a7cea5a226076a03f6fe103db3d6beac98748f094624f9564`
 (`117,944` bytes). It passes the current Rust debug/release suites (`31`
 tests each) and the SBF stack verifier. The immutable planner is currently a
-preflight; account mutation still requires the remaining two-phase apply and
-rollback work.
+preflight and deterministic arena apply; complete precomputed risk settlement
+and rollback work remains.
 
 The detailed toolchain, artifact, and test evidence is recorded in
 `docs/stockstream-build-record.md`.
