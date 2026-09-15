@@ -92,9 +92,10 @@ export function TradingTerminal() {
   function submitOrder() {
     if (!canTrade) {
       if (!auth.authenticated) { setNotice("Sign in with Privy to construct a safe PlaceOrder preview. No transaction was created."); return; }
-      if (!marketAddress || !auth.walletAddress) { setNotice("Preview unavailable: configure NEXT_PUBLIC_STOCKSTREAM_MARKET_ADDRESS. No transaction was created."); return; }
+      const settlementScratch = process.env.NEXT_PUBLIC_STOCKSTREAM_SETTLEMENT_SCRATCH_ADDRESS;
+      if (!marketAddress || !auth.walletAddress || !settlementScratch) { setNotice("Preview unavailable: configure market and settlement scratch addresses. No transaction was created."); return; }
       try {
-        const preview = previewPlaceOrder({ market: marketAddress, authority: auth.walletAddress, seatIndex: 0, side: side === "long" ? "bid" : "ask", quantity: BigInt(quantityNumber), priceOrOffset: BigInt(limitPrice || 0), clientOrderId: 0n });
+        const preview = previewPlaceOrder({ market: marketAddress, authority: auth.walletAddress, settlementScratch, seatIndex: 0, side: side === "long" ? "bid" : "ask", quantity: BigInt(quantityNumber), priceOrOffset: BigInt(limitPrice || 0), clientOrderId: 0n });
         setNotice(`Unsigned ${preview.instruction} preview: ${preview.accounts.length} accounts, ${preview.signers.length} signer, margin ${preview.estimatedInternalMargin}. Live submission requires verified Pyth pricing, USDC custody and MagicBlock delegation.`);
       } catch (error) { setNotice(error instanceof Error ? error.message : "Could not construct order preview"); }
       return;

@@ -9,6 +9,7 @@ pub const CANCEL_ORDER: u8 = 4;
 pub const CANCEL_ALL: u8 = 5;
 pub const UPDATE_FUNDING: u8 = 6;
 pub const LIQUIDATE: u8 = 7;
+pub const INITIALIZE_SETTLEMENT_SCRATCH: u8 = 8;
 
 #[derive(Clone, Copy)]
 pub struct PlaceOrderData {
@@ -47,6 +48,9 @@ pub enum StockStreamInstruction {
     Liquidate {
         seat_index: u16,
         max_quantity: u64,
+    },
+    InitializeSettlementScratch {
+        seat_index: u16,
     },
 }
 
@@ -108,6 +112,11 @@ impl StockStreamInstruction {
                 seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
                 max_quantity: read_u64(data, 3).ok_or(ProgramError::InvalidInstructionData)?,
             }),
+            Some(INITIALIZE_SETTLEMENT_SCRATCH) if data.len() == 3 => {
+                Ok(Self::InitializeSettlementScratch {
+                    seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+                })
+            }
             _ => Err(ProgramError::InvalidInstructionData),
         }
     }
