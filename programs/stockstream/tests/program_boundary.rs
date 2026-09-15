@@ -1,4 +1,5 @@
 use pinocchio::{error::ProgramError, Address};
+use stockstream::instruction::StockStreamInstruction;
 use stockstream::{
     error::StockStreamError,
     initialize_market::{validate_initialize_market, AccountAccess},
@@ -105,4 +106,31 @@ fn initialize_market_requires_a_writable_market() {
         validate_initialize_market(&ID, &accounts),
         Err(StockStreamError::MarketNotWritable.into())
     );
+}
+
+#[test]
+fn production_instruction_decoder_covers_integration_variants() {
+    assert!(matches!(
+        StockStreamInstruction::decode(&[9]),
+        Ok(StockStreamInstruction::InitializeVault)
+    ));
+    assert!(matches!(
+        StockStreamInstruction::decode(&[10, 7, 0, 0, 0, 0, 0, 0, 0]),
+        Ok(StockStreamInstruction::DepositCollateral { amount: 7 })
+    ));
+    assert!(matches!(
+        StockStreamInstruction::decode(&[12]),
+        Ok(StockStreamInstruction::ConsumeOracleUpdate)
+    ));
+    assert!(matches!(
+        StockStreamInstruction::decode(&[14, 1, 0, 0, 0, 0, 0, 0, 0]),
+        Ok(StockStreamInstruction::CommitMarket { sequence: 1 })
+    ));
+    assert!(matches!(
+        StockStreamInstruction::decode(&[17, 2, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0]),
+        Ok(StockStreamInstruction::AuthorizeTradingSession {
+            expires_at: 2,
+            nonce: 3
+        })
+    ));
 }
