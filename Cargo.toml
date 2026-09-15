@@ -1,0 +1,9 @@
+[workspace]
+resolver = "2"
+members = ["programs/stockstream"]
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+opt-level = 3
+overflow-checks = true

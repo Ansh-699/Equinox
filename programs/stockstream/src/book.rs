@@ -1,0 +1,1006 @@
+//! Fixed-capacity, account-compatible PATRICIA order-book arenas.
+//!
+//! Keys are big-endian price-time values: the high 64 bits are the normalized
+//! price and the low 64 bits are the placement sequence. Ask prices use their
+//! unsigned price directly; bid prices use `u64::MAX - price`. Therefore an
+//! unsigned ascending trie walk encounters the best price, then earliest
+//! sequence, first on both sides.
+
+use core::mem::size_of;
+
+pub const ARENA_CAPACITY: usize = 1024;
+pub const NONE: u32 = u32::MAX;
+pub const NO_EXPIRY: u64 = u64::MAX;
+pub const MAX_MATCH_FILLS: usize = 16;
+
+const TAG_UNINITIALIZED: u8 = 0;
+const TAG_INNER: u8 = 1;
+const TAG_LEAF: u8 = 2;
+const TAG_FREE: u8 = 3;
+const TAG_LAST_FREE: u8 = 4;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum Side {
+    Bid = 0,
+    Ask = 1,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum TreeKind {
+    Fixed = 0,
+    OraclePegged = 1,
+}
+
+impl TreeKind {
+    const fn index(self) -> usize {
+        self as usize
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum TimeInForce {
+    GoodTilCancelled = 0,
+    ImmediateOrCancel = 1,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BookError {
+    Full,
+    DuplicateKey,
+    MissingKey,
+    BadHandle,
+    BadTag,
+    BadPrice,
+    BadSequence,
+    InvalidTree,
+    Integrity,
+    BadLimit,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PeggedState {
+    Valid(i64),
+    Invalid,
+    Skipped,
+}
+
+#[repr(C, packed(8))]
+#[derive(Clone, Copy)]
+pub struct InnerNode {
+    pub tag: u8,
+    pub _padding: [u8; 3],
+    pub prefix_len: u32,
+    pub key: u128,
+    pub children: [u32; 2],
+    pub child_earliest_expiry: [u64; 2],
+    pub _reserved: [u8; 40],
+}
+
+#[repr(C, packed(8))]
+#[derive(Clone, Copy)]
+pub struct LeafNode {
+    pub tag: u8,
+    pub side: u8,
+    pub time_in_force: u8,
+    pub _padding: u8,
+    pub owner: u32,
+    pub key: u128,
+    pub quantity: u64,
+    pub expires_at: u64,
+    pub peg_limit: i64,
+    pub client_order_id: u64,
+    pub price_or_offset: i64,
+    pub sequence: u64,
+    pub flags: u8,
+    pub _reserved: [u8; 15],
+}
+
+#[repr(C, packed(8))]
+#[derive(Clone, Copy)]
+pub struct FreeNode {
+    pub tag: u8,
+    pub _padding: [u8; 3],
+    pub next: u32,
+    pub _reserved: [u8; 80],
+}
+
+#[repr(C, packed(8))]
+#[derive(Clone, Copy)]
+pub struct LastFreeNode {
+    pub tag: u8,
+    pub _reserved: [u8; 87],
+}
+
+#[repr(C, packed(8))]
+#[derive(Clone, Copy)]
+pub union AnyNode {
+    pub inner: InnerNode,
+    pub leaf: LeafNode,
+    pub free: FreeNode,
+    pub last_free: LastFreeNode,
+}
+
+const _: [(); 88] = [(); size_of::<InnerNode>()];
+const _: [(); 88] = [(); size_of::<LeafNode>()];
+const _: [(); 88] = [(); size_of::<FreeNode>()];
+const _: [(); 88] = [(); size_of::<LastFreeNode>()];
+const _: [(); 88] = [(); size_of::<AnyNode>()];
+
+impl AnyNode {
+    const fn uninitialized() -> Self {
+        Self {
+            last_free: LastFreeNode {
+                tag: TAG_UNINITIALIZED,
+                _reserved: [0; 87],
+            },
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct Arena {
+    pub version: u8,
+    pub _padding: [u8; 3],
+    pub roots: [u32; 2],
+    pub leaf_counts: [u32; 2],
+    pub bump_index: u32,
+    pub free_head: u32,
+    pub free_len: u32,
+    pub _reserved: [u8; 496],
+    pub nodes: [AnyNode; ARENA_CAPACITY],
+}
+
+impl Arena {
+    pub const fn new() -> Self {
+        Self {
+            version: 1,
+            _padding: [0; 3],
+            roots: [NONE; 2],
+            leaf_counts: [0; 2],
+            bump_index: 0,
+            free_head: NONE,
+            free_len: 0,
+            _reserved: [0; 496],
+            nodes: [AnyNode::uninitialized(); ARENA_CAPACITY],
+        }
+    }
+
+    fn tag(&self, handle: u32) -> Result<u8, BookError> {
+        if handle as usize >= ARENA_CAPACITY {
+            return Err(BookError::BadHandle);
+        }
+        // All node variants place `tag` at byte zero. Reading that common byte
+        // is valid after the explicit handle bounds check; callers validate the
+        // discriminant before reading a variant payload.
+        Ok(unsafe { self.nodes[handle as usize].inner.tag })
+    }
+
+    fn inner(&self, handle: u32) -> Result<InnerNode, BookError> {
+        if self.tag(handle)? != TAG_INNER {
+            return Err(BookError::BadTag);
+        }
+        // Discriminant validation above proves this union field was written.
+        Ok(unsafe { self.nodes[handle as usize].inner })
+    }
+
+    pub fn leaf(&self, handle: u32) -> Result<LeafNode, BookError> {
+        if self.tag(handle)? != TAG_LEAF {
+            return Err(BookError::BadTag);
+        }
+        // Discriminant validation above proves this union field was written.
+        Ok(unsafe { self.nodes[handle as usize].leaf })
+    }
+
+    fn write_inner(&mut self, handle: u32, node: InnerNode) {
+        self.nodes[handle as usize] = AnyNode { inner: node };
+    }
+
+    fn write_leaf(&mut self, handle: u32, node: LeafNode) {
+        self.nodes[handle as usize] = AnyNode { leaf: node };
+    }
+
+    fn allocate(&mut self) -> Result<u32, BookError> {
+        if self.free_head != NONE {
+            let handle = self.free_head;
+            let tag = self.tag(handle)?;
+            self.free_head = match tag {
+                TAG_FREE => unsafe { self.nodes[handle as usize].free.next },
+                TAG_LAST_FREE => NONE,
+                _ => return Err(BookError::BadTag),
+            };
+            self.free_len = self.free_len.checked_sub(1).ok_or(BookError::Integrity)?;
+            return Ok(handle);
+        }
+        if self.bump_index as usize >= ARENA_CAPACITY {
+            return Err(BookError::Full);
+        }
+        let handle = self.bump_index;
+        self.bump_index += 1;
+        Ok(handle)
+    }
+
+    fn recycle(&mut self, handle: u32) -> Result<(), BookError> {
+        if handle >= self.bump_index || self.tag(handle)? == TAG_UNINITIALIZED {
+            return Err(BookError::BadHandle);
+        }
+        self.nodes[handle as usize] = if self.free_head == NONE {
+            AnyNode {
+                last_free: LastFreeNode {
+                    tag: TAG_LAST_FREE,
+                    _reserved: [0; 87],
+                },
+            }
+        } else {
+            AnyNode {
+                free: FreeNode {
+                    tag: TAG_FREE,
+                    _padding: [0; 3],
+                    next: self.free_head,
+                    _reserved: [0; 80],
+                },
+            }
+        };
+        self.free_head = handle;
+        self.free_len = self.free_len.checked_add(1).ok_or(BookError::Integrity)?;
+        Ok(())
+    }
+
+    /// Releases a first-stage split allocation before any node representation
+    /// was written. This prevents a failed two-slot split from orphaning a bump
+    /// slot at capacity.
+    fn release_unwritten(&mut self, handle: u32) -> Result<(), BookError> {
+        if handle >= self.bump_index {
+            return Err(BookError::BadHandle);
+        }
+        if handle + 1 == self.bump_index {
+            self.bump_index -= 1;
+            return Ok(());
+        }
+        self.nodes[handle as usize] = if self.free_head == NONE {
+            AnyNode {
+                last_free: LastFreeNode {
+                    tag: TAG_LAST_FREE,
+                    _reserved: [0; 87],
+                },
+            }
+        } else {
+            AnyNode {
+                free: FreeNode {
+                    tag: TAG_FREE,
+                    _padding: [0; 3],
+                    next: self.free_head,
+                    _reserved: [0; 80],
+                },
+            }
+        };
+        self.free_head = handle;
+        self.free_len = self.free_len.checked_add(1).ok_or(BookError::Integrity)?;
+        Ok(())
+    }
+
+    pub fn insert(&mut self, tree: TreeKind, leaf: LeafNode) -> Result<u32, BookError> {
+        let key = leaf.key;
+        let root_index = tree.index();
+        let mut path = [(NONE, 0u8); 128];
+        let mut depth = 0usize;
+        let mut current = self.roots[root_index];
+
+        if current == NONE {
+            let handle = self.allocate()?;
+            self.write_leaf(handle, leaf);
+            self.roots[root_index] = handle;
+            self.leaf_counts[root_index] += 1;
+            return Ok(handle);
+        }
+
+        loop {
+            match self.tag(current)? {
+                TAG_LEAF => {
+                    let existing = self.leaf(current)?;
+                    if existing.key == key {
+                        return Err(BookError::DuplicateKey);
+                    }
+                    let prefix = common_prefix(existing.key, key);
+                    let new_handle = self.allocate()?;
+                    let inner_handle = match self.allocate() {
+                        Ok(handle) => handle,
+                        Err(error) => {
+                            self.release_unwritten(new_handle)?;
+                            return Err(error);
+                        }
+                    };
+                    self.write_leaf(new_handle, leaf);
+                    let branch = key_bit(key, prefix) as usize;
+                    self.write_inner(
+                        inner_handle,
+                        make_inner(prefix, existing.key, current, new_handle, branch),
+                    );
+                    self.refresh_inner(inner_handle)?;
+                    self.replace_child(root_index, &path[..depth], inner_handle)?;
+                    self.leaf_counts[root_index] += 1;
+                    self.refresh_path(&path[..depth])?;
+                    return Ok(new_handle);
+                }
+                TAG_INNER => {
+                    let inner = self.inner(current)?;
+                    let common = common_prefix(inner.key, key);
+                    if common < inner.prefix_len {
+                        let new_handle = self.allocate()?;
+                        let inner_handle = match self.allocate() {
+                            Ok(handle) => handle,
+                            Err(error) => {
+                                self.release_unwritten(new_handle)?;
+                                return Err(error);
+                            }
+                        };
+                        self.write_leaf(new_handle, leaf);
+                        let branch = key_bit(key, common) as usize;
+                        self.write_inner(
+                            inner_handle,
+                            make_inner(common, inner.key, current, new_handle, branch),
+                        );
+                        self.refresh_inner(inner_handle)?;
+                        self.replace_child(root_index, &path[..depth], inner_handle)?;
+                        self.leaf_counts[root_index] += 1;
+                        self.refresh_path(&path[..depth])?;
+                        return Ok(new_handle);
+                    }
+                    if depth == path.len() {
+                        return Err(BookError::Integrity);
+                    }
+                    let branch = key_bit(key, inner.prefix_len) as usize;
+                    path[depth] = (current, branch as u8);
+                    depth += 1;
+                    current = inner.children[branch];
+                }
+                _ => return Err(BookError::BadTag),
+            }
+        }
+    }
+
+    pub fn find(&self, tree: TreeKind, key: u128) -> Result<u32, BookError> {
+        let mut current = self.roots[tree.index()];
+        while current != NONE {
+            match self.tag(current)? {
+                TAG_LEAF => {
+                    return (self.leaf(current)?.key == key)
+                        .then_some(current)
+                        .ok_or(BookError::MissingKey)
+                }
+                TAG_INNER => {
+                    let inner = self.inner(current)?;
+                    if common_prefix(inner.key, key) < inner.prefix_len {
+                        return Err(BookError::MissingKey);
+                    }
+                    current = inner.children[key_bit(key, inner.prefix_len) as usize];
+                }
+                _ => return Err(BookError::BadTag),
+            }
+        }
+        Err(BookError::MissingKey)
+    }
+
+    pub fn remove(&mut self, tree: TreeKind, key: u128) -> Result<LeafNode, BookError> {
+        let root_index = tree.index();
+        let mut path = [(NONE, 0u8); 128];
+        let mut depth = 0usize;
+        let mut current = self.roots[root_index];
+        if current == NONE {
+            return Err(BookError::MissingKey);
+        }
+        while self.tag(current)? == TAG_INNER {
+            let inner = self.inner(current)?;
+            if common_prefix(inner.key, key) < inner.prefix_len || depth == path.len() {
+                return Err(BookError::MissingKey);
+            }
+            let branch = key_bit(key, inner.prefix_len) as usize;
+            path[depth] = (current, branch as u8);
+            depth += 1;
+            current = inner.children[branch];
+        }
+        let leaf = self.leaf(current)?;
+        if leaf.key != key {
+            return Err(BookError::MissingKey);
+        }
+        if depth == 0 {
+            self.roots[root_index] = NONE;
+        } else {
+            let (parent_handle, branch) = path[depth - 1];
+            let parent = self.inner(parent_handle)?;
+            let sibling = parent.children[1 - branch as usize];
+            self.replace_child(root_index, &path[..depth - 1], sibling)?;
+            self.recycle(parent_handle)?;
+        }
+        self.recycle(current)?;
+        self.leaf_counts[root_index] = self.leaf_counts[root_index]
+            .checked_sub(1)
+            .ok_or(BookError::Integrity)?;
+        self.refresh_path(&path[..depth.saturating_sub(1)])?;
+        Ok(leaf)
+    }
+
+    fn replace_child(
+        &mut self,
+        root_index: usize,
+        path: &[(u32, u8)],
+        replacement: u32,
+    ) -> Result<(), BookError> {
+        if let Some((parent_handle, branch)) = path.last() {
+            let mut parent = self.inner(*parent_handle)?;
+            parent.children[*branch as usize] = replacement;
+            parent.child_earliest_expiry[*branch as usize] = self.subtree_expiry(replacement)?;
+            self.write_inner(*parent_handle, parent);
+        } else {
+            self.roots[root_index] = replacement;
+        }
+        Ok(())
+    }
+
+    fn refresh_path(&mut self, path: &[(u32, u8)]) -> Result<(), BookError> {
+        let mut index = path.len();
+        while index > 0 {
+            index -= 1;
+            let handle = path[index].0;
+            self.refresh_inner(handle)?;
+        }
+        Ok(())
+    }
+
+    fn refresh_inner(&mut self, handle: u32) -> Result<(), BookError> {
+        let mut inner = self.inner(handle)?;
+        inner.child_earliest_expiry = [
+            self.subtree_expiry(inner.children[0])?,
+            self.subtree_expiry(inner.children[1])?,
+        ];
+        self.write_inner(handle, inner);
+        Ok(())
+    }
+
+    fn subtree_expiry(&self, handle: u32) -> Result<u64, BookError> {
+        match self.tag(handle)? {
+            TAG_LEAF => Ok(expiry_of(&self.leaf(handle)?)),
+            TAG_INNER => {
+                let node = self.inner(handle)?;
+                Ok(node.child_earliest_expiry[0].min(node.child_earliest_expiry[1]))
+            }
+            _ => Err(BookError::BadTag),
+        }
+    }
+
+    pub fn best(&self, tree: TreeKind) -> Result<Option<u32>, BookError> {
+        let mut handle = self.roots[tree.index()];
+        while handle != NONE {
+            match self.tag(handle)? {
+                TAG_LEAF => return Ok(Some(handle)),
+                TAG_INNER => handle = self.inner(handle)?.children[0],
+                _ => return Err(BookError::BadTag),
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn first_expired(&self, tree: TreeKind, now: u64) -> Result<Option<u32>, BookError> {
+        let mut handle = self.roots[tree.index()];
+        while handle != NONE {
+            match self.tag(handle)? {
+                TAG_LEAF => return Ok((expiry_of(&self.leaf(handle)?) <= now).then_some(handle)),
+                TAG_INNER => {
+                    let node = self.inner(handle)?;
+                    handle = if node.child_earliest_expiry[0] <= now {
+                        node.children[0]
+                    } else if node.child_earliest_expiry[1] <= now {
+                        node.children[1]
+                    } else {
+                        NONE
+                    };
+                }
+                _ => return Err(BookError::BadTag),
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn sweep_expired(&mut self, tree: TreeKind, now: u64, max: u8) -> Result<u8, BookError> {
+        let mut removed = 0u8;
+        while removed < max {
+            let Some(handle) = self.first_expired(tree, now)? else {
+                break;
+            };
+            let key = self.leaf(handle)?.key;
+            self.remove(tree, key)?;
+            removed += 1;
+        }
+        Ok(removed)
+    }
+
+    pub fn validate(&self) -> Result<(), BookError> {
+        if self.bump_index as usize > ARENA_CAPACITY {
+            return Err(BookError::Integrity);
+        }
+        let mut reachable = [0u64; ARENA_CAPACITY / 64];
+        for tree in [TreeKind::Fixed, TreeKind::OraclePegged] {
+            let count = self.validate_tree(tree, &mut reachable)?;
+            if count != self.leaf_counts[tree.index()] {
+                return Err(BookError::Integrity);
+            }
+        }
+        let mut free = [0u64; ARENA_CAPACITY / 64];
+        let mut cursor = self.free_head;
+        let mut free_count = 0u32;
+        while cursor != NONE {
+            if cursor >= self.bump_index || bit_get(&free, cursor) || bit_get(&reachable, cursor) {
+                return Err(BookError::Integrity);
+            }
+            bit_set(&mut free, cursor);
+            free_count += 1;
+            cursor = match self.tag(cursor)? {
+                TAG_FREE => unsafe { self.nodes[cursor as usize].free.next },
+                TAG_LAST_FREE => NONE,
+                _ => return Err(BookError::BadTag),
+            };
+        }
+        if free_count != self.free_len {
+            return Err(BookError::Integrity);
+        }
+        for handle in 0..self.bump_index {
+            if !bit_get(&reachable, handle) && !bit_get(&free, handle) {
+                return Err(BookError::Integrity);
+            }
+        }
+        for handle in self.bump_index as usize..ARENA_CAPACITY {
+            if unsafe { self.nodes[handle].inner.tag } != TAG_UNINITIALIZED {
+                return Err(BookError::Integrity);
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_tree(
+        &self,
+        tree: TreeKind,
+        reachable: &mut [u64; ARENA_CAPACITY / 64],
+    ) -> Result<u32, BookError> {
+        let root = self.roots[tree.index()];
+        if root == NONE {
+            return Ok(0);
+        }
+        let mut stack = [(root, NONE, 0u8); 129];
+        let mut stack_len = 1usize;
+        let mut leaves = 0u32;
+        while stack_len > 0 {
+            stack_len -= 1;
+            let (handle, parent, expected_branch) = stack[stack_len];
+            if handle >= self.bump_index || bit_get(reachable, handle) {
+                return Err(BookError::Integrity);
+            }
+            bit_set(reachable, handle);
+            let tag = self.tag(handle)?;
+            let key = match tag {
+                TAG_LEAF => self.leaf(handle)?.key,
+                TAG_INNER => self.inner(handle)?.key,
+                _ => return Err(BookError::BadTag),
+            };
+            if parent != NONE {
+                let p = self.inner(parent)?;
+                if !prefix_matches(p.key, key, p.prefix_len)
+                    || key_bit(key, p.prefix_len) != expected_branch
+                {
+                    return Err(BookError::Integrity);
+                }
+                if tag == TAG_INNER && self.inner(handle)?.prefix_len <= p.prefix_len {
+                    return Err(BookError::Integrity);
+                }
+            }
+            match tag {
+                TAG_LEAF => leaves += 1,
+                TAG_INNER => {
+                    let node = self.inner(handle)?;
+                    if node.prefix_len >= 128
+                        || node.children[0] == NONE
+                        || node.children[1] == NONE
+                        || node.child_earliest_expiry
+                            != [
+                                self.subtree_expiry(node.children[0])?,
+                                self.subtree_expiry(node.children[1])?,
+                            ]
+                        || stack_len + 2 > stack.len()
+                    {
+                        return Err(BookError::Integrity);
+                    }
+                    stack[stack_len] = (node.children[0], handle, 0);
+                    stack_len += 1;
+                    stack[stack_len] = (node.children[1], handle, 1);
+                    stack_len += 1;
+                }
+                _ => return Err(BookError::BadTag),
+            }
+        }
+        Ok(leaves)
+    }
+}
+
+impl Default for Arena {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+const _: [(); 90_640] = [(); size_of::<Arena>()];
+
+#[repr(C)]
+pub struct MarketState {
+    pub layout_version: u16,
+    pub _reserved: [u8; 30],
+    pub bids: Arena,
+    pub asks: Arena,
+}
+
+impl MarketState {
+    pub const fn new() -> Self {
+        Self {
+            layout_version: 1,
+            _reserved: [0; 30],
+            bids: Arena::new(),
+            asks: Arena::new(),
+        }
+    }
+    pub fn arena(&self, side: Side) -> &Arena {
+        match side {
+            Side::Bid => &self.bids,
+            Side::Ask => &self.asks,
+        }
+    }
+    pub fn arena_mut(&mut self, side: Side) -> &mut Arena {
+        match side {
+            Side::Bid => &mut self.bids,
+            Side::Ask => &mut self.asks,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct OrderInput {
+    pub side: Side,
+    pub tree: TreeKind,
+    pub owner: u32,
+    pub price_or_offset: i64,
+    pub sequence: u64,
+    pub quantity: u64,
+    pub expires_at: u64,
+    pub peg_limit: i64,
+    pub client_order_id: u64,
+    pub time_in_force: TimeInForce,
+    pub post_only: bool,
+}
+
+impl OrderInput {
+    pub fn leaf(self) -> Result<LeafNode, BookError> {
+        let key = match self.tree {
+            TreeKind::Fixed => price_time_key(self.side, self.price_or_offset, self.sequence)?,
+            TreeKind::OraclePegged => {
+                offset_time_key(self.side, self.price_or_offset, self.sequence)?
+            }
+        };
+        Ok(LeafNode {
+            tag: TAG_LEAF,
+            side: self.side as u8,
+            time_in_force: self.time_in_force as u8,
+            _padding: 0,
+            owner: self.owner,
+            key,
+            quantity: self.quantity,
+            expires_at: self.expires_at,
+            peg_limit: self.peg_limit,
+            client_order_id: self.client_order_id,
+            price_or_offset: self.price_or_offset,
+            sequence: self.sequence,
+            flags: self.post_only as u8,
+            _reserved: [0; 15],
+        })
+    }
+}
+
+pub fn price_time_key(side: Side, price: i64, sequence: u64) -> Result<u128, BookError> {
+    if price <= 0 {
+        return Err(BookError::BadPrice);
+    }
+    let normalized = match side {
+        Side::Ask => price as u64,
+        Side::Bid => u64::MAX
+            .checked_sub(price as u64)
+            .ok_or(BookError::BadPrice)?,
+    };
+    Ok(((normalized as u128) << 64) | sequence as u128)
+}
+
+fn offset_time_key(side: Side, offset: i64, sequence: u64) -> Result<u128, BookError> {
+    let normalized = match side {
+        Side::Ask => (offset as u64) ^ (1u64 << 63),
+        Side::Bid => !((offset as u64) ^ (1u64 << 63)),
+    };
+    Ok(((normalized as u128) << 64) | sequence as u128)
+}
+
+pub fn pegged_state(leaf: &LeafNode, oracle: Option<i64>, now: u64) -> PeggedState {
+    if leaf.quantity == 0 || expiry_of(leaf) <= now {
+        return PeggedState::Invalid;
+    }
+    let Some(oracle) = oracle else {
+        return PeggedState::Skipped;
+    };
+    let Some(price) = oracle.checked_add(leaf.price_or_offset) else {
+        return PeggedState::Invalid;
+    };
+    if price <= 0 {
+        return PeggedState::Invalid;
+    }
+    let side = if leaf.side == Side::Bid as u8 {
+        Side::Bid
+    } else {
+        Side::Ask
+    };
+    let permitted = match side {
+        Side::Bid => price <= leaf.peg_limit,
+        Side::Ask => price >= leaf.peg_limit,
+    };
+    if leaf.peg_limit <= 0 || !permitted {
+        PeggedState::Invalid
+    } else {
+        PeggedState::Valid(price)
+    }
+}
+
+pub fn normalized_key(
+    leaf: &LeafNode,
+    tree: TreeKind,
+    oracle: Option<i64>,
+    now: u64,
+) -> Result<Option<u128>, BookError> {
+    match tree {
+        TreeKind::Fixed => Ok((leaf.quantity != 0 && expiry_of(leaf) > now).then_some(leaf.key)),
+        TreeKind::OraclePegged => match pegged_state(leaf, oracle, now) {
+            PeggedState::Valid(price) => Ok(Some(price_time_key(
+                if leaf.side == 0 { Side::Bid } else { Side::Ask },
+                price,
+                leaf.sequence,
+            )?)),
+            PeggedState::Invalid | PeggedState::Skipped => Ok(None),
+        },
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct FillRecord {
+    pub maker: u32,
+    pub taker: u32,
+    pub price: i64,
+    pub quantity: u64,
+    pub maker_client_order_id: u64,
+}
+impl FillRecord {
+    const EMPTY: Self = Self {
+        maker: 0,
+        taker: 0,
+        price: 0,
+        quantity: 0,
+        maker_client_order_id: 0,
+    };
+}
+#[derive(Clone, Copy)]
+pub struct MatchLimits {
+    pub max_fills: u8,
+    pub max_invalid_removals: u8,
+    pub max_expired_removals: u8,
+}
+#[derive(Clone, Copy)]
+pub struct MatchResult {
+    pub fills: [FillRecord; MAX_MATCH_FILLS],
+    pub fill_count: u8,
+    pub remaining: u64,
+    pub invalid_removed: u8,
+    pub expired_removed: u8,
+    pub self_cancelled: u8,
+    pub post_only_rejected: bool,
+}
+
+pub fn match_limit(
+    state: &mut MarketState,
+    order: OrderInput,
+    oracle: Option<i64>,
+    now: u64,
+    limits: MatchLimits,
+) -> Result<MatchResult, BookError> {
+    if order.quantity == 0 || limits.max_fills as usize > MAX_MATCH_FILLS {
+        return Err(BookError::BadLimit);
+    }
+    let opposite = match order.side {
+        Side::Bid => Side::Ask,
+        Side::Ask => Side::Bid,
+    };
+    let taker_price = match order.tree {
+        TreeKind::Fixed => order.price_or_offset,
+        TreeKind::OraclePegged => match oracle.and_then(|p| p.checked_add(order.price_or_offset)) {
+            Some(p) if p > 0 => p,
+            _ => return Err(BookError::BadPrice),
+        },
+    };
+    let mut result = MatchResult {
+        fills: [FillRecord::EMPTY; MAX_MATCH_FILLS],
+        fill_count: 0,
+        remaining: order.quantity,
+        invalid_removed: 0,
+        expired_removed: 0,
+        self_cancelled: 0,
+        post_only_rejected: false,
+    };
+    for tree in [TreeKind::Fixed, TreeKind::OraclePegged] {
+        result.expired_removed = result.expired_removed.saturating_add(
+            state.arena_mut(opposite).sweep_expired(
+                tree,
+                now,
+                limits
+                    .max_expired_removals
+                    .saturating_sub(result.expired_removed),
+            )?,
+        );
+    }
+    let mut iterations = 0u16;
+    while result.remaining > 0
+        && result.fill_count < limits.max_fills
+        && iterations
+            < (limits.max_fills as u16
+                + limits.max_invalid_removals as u16
+                + limits.max_expired_removals as u16
+                + 2)
+    {
+        iterations += 1;
+        let mut removed_invalid = false;
+        for tree in [TreeKind::Fixed, TreeKind::OraclePegged] {
+            let Some(handle) = state.arena(opposite).best(tree)? else {
+                continue;
+            };
+            let leaf = state.arena(opposite).leaf(handle)?;
+            let invalid = match tree {
+                TreeKind::Fixed => leaf.quantity == 0 || expiry_of(&leaf) <= now,
+                TreeKind::OraclePegged => {
+                    matches!(pegged_state(&leaf, oracle, now), PeggedState::Invalid)
+                }
+            };
+            if invalid {
+                if result.invalid_removed >= limits.max_invalid_removals {
+                    continue;
+                }
+                state.arena_mut(opposite).remove(tree, leaf.key)?;
+                result.invalid_removed += 1;
+                removed_invalid = true;
+                break;
+            }
+        }
+        if removed_invalid {
+            continue;
+        }
+        let candidate = best_candidate(state.arena(opposite), opposite, oracle, now)?;
+        let Some((tree, handle, maker, price)) = candidate else {
+            break;
+        };
+        let crosses = match order.side {
+            Side::Bid => price <= taker_price,
+            Side::Ask => price >= taker_price,
+        };
+        if !crosses {
+            break;
+        }
+        if order.post_only {
+            result.post_only_rejected = true;
+            break;
+        }
+        if maker.owner == order.owner {
+            state.arena_mut(opposite).remove(tree, maker.key)?;
+            result.self_cancelled = result.self_cancelled.saturating_add(1);
+            continue;
+        }
+        let amount = maker.quantity.min(result.remaining);
+        result.fills[result.fill_count as usize] = FillRecord {
+            maker: maker.owner,
+            taker: order.owner,
+            price,
+            quantity: amount,
+            maker_client_order_id: maker.client_order_id,
+        };
+        result.fill_count += 1;
+        result.remaining -= amount;
+        if amount == maker.quantity {
+            state.arena_mut(opposite).remove(tree, maker.key)?;
+        } else {
+            let mut changed = maker;
+            changed.quantity -= amount;
+            state.arena_mut(opposite).write_leaf(handle, changed);
+        }
+    }
+    if result.remaining > 0
+        && order.time_in_force != TimeInForce::ImmediateOrCancel
+        && !result.post_only_rejected
+    {
+        let mut resting = order;
+        resting.quantity = result.remaining;
+        state
+            .arena_mut(order.side)
+            .insert(resting.tree, resting.leaf()?)?;
+    }
+    Ok(result)
+}
+
+fn best_candidate(
+    arena: &Arena,
+    side: Side,
+    oracle: Option<i64>,
+    now: u64,
+) -> Result<Option<(TreeKind, u32, LeafNode, i64)>, BookError> {
+    let mut selected: Option<(TreeKind, u32, LeafNode, i64, u128)> = None;
+    for tree in [TreeKind::Fixed, TreeKind::OraclePegged] {
+        let Some(handle) = arena.best(tree)? else {
+            continue;
+        };
+        let leaf = arena.leaf(handle)?;
+        let price = match tree {
+            TreeKind::Fixed if leaf.quantity != 0 && expiry_of(&leaf) > now => leaf.price_or_offset,
+            TreeKind::Fixed => continue,
+            TreeKind::OraclePegged => match pegged_state(&leaf, oracle, now) {
+                PeggedState::Valid(price) => price,
+                PeggedState::Invalid => continue,
+                PeggedState::Skipped => continue,
+            },
+        };
+        let key = price_time_key(side, price, leaf.sequence)?;
+        if selected.map(|x| key < x.4).unwrap_or(true) {
+            selected = Some((tree, handle, leaf, price, key));
+        }
+    }
+    Ok(selected.map(|(tree, handle, leaf, price, _)| (tree, handle, leaf, price)))
+}
+
+fn make_inner(
+    prefix_len: u32,
+    key: u128,
+    existing: u32,
+    fresh: u32,
+    fresh_branch: usize,
+) -> InnerNode {
+    let mut children = [existing; 2];
+    children[fresh_branch] = fresh;
+    InnerNode {
+        tag: TAG_INNER,
+        _padding: [0; 3],
+        prefix_len,
+        key,
+        children,
+        child_earliest_expiry: [NO_EXPIRY; 2],
+        _reserved: [0; 40],
+    }
+}
+fn key_bit(key: u128, prefix: u32) -> u8 {
+    ((key >> (127 - prefix)) & 1) as u8
+}
+fn common_prefix(a: u128, b: u128) -> u32 {
+    (a ^ b).leading_zeros()
+}
+fn prefix_matches(a: u128, b: u128, prefix: u32) -> bool {
+    prefix == 0 || (a >> (128 - prefix)) == (b >> (128 - prefix))
+}
+fn expiry_of(leaf: &LeafNode) -> u64 {
+    if leaf.expires_at == 0 {
+        NO_EXPIRY
+    } else {
+        leaf.expires_at
+    }
+}
+fn bit_get(bits: &[u64; ARENA_CAPACITY / 64], handle: u32) -> bool {
+    bits[handle as usize / 64] & (1 << (handle % 64)) != 0
+}
+fn bit_set(bits: &mut [u64; ARENA_CAPACITY / 64], handle: u32) {
+    bits[handle as usize / 64] |= 1 << (handle % 64);
+}

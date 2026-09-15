@@ -1,0 +1,44 @@
+{
+  "name": "stockstream",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "npm@11.19.1",
+  "engines": {
+    "node": ">=24.10.0"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@magicblock-labs/ephemeral-rollups-kit": "0.17.0",
+    "@meteora-ag/dynamic-bonding-curve-sdk": "1.5.12",
+    "@privy-io/react-auth": "3.42.0",
+    "@pythnetwork/pyth-lazer-sdk": "7.0.0",
+    "@solana/kit": "8.3.0",
+    "@solana-program/system": "0.14.1",
+    "@solana-program/token": "0.16.1",
+    "@solana/spl-token": "0.4.14",
+    "@solana/web3.js": "1.98.4",
+    "bn.js": "5.2.2",
+    "lucide-react": "1.46.0",
+    "next": "16.3.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/bn.js": "5.2.0",
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "eslint": "9.39.2",
+    "eslint-config-next": "16.3.5",
+    "typescript": "5.8.3",
+    "vitest": "4.0.16"
+  }
+}

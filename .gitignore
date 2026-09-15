@@ -1,0 +1,11 @@
+node_modules
+.next
+.env
+.env.local
+.dev.vars
+.wrangler
+coverage
+target
+.keys
+**/*.so
+**/test-ledger
