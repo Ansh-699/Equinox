@@ -140,3 +140,28 @@ trade and a full-byte unauthorized-cancel check.
 Gate 1 remains open because complete late-failure account rollback has not
 been proven, and the full requested account-level case matrix is still being
 implemented. No local-validator or external integration work has started.
+
+## Settlement-Plan Preflight (Executed 2026-09-15)
+
+The current candidate adds a fixed-capacity, no-heap `SettlementPlan` overlay
+for immutable maker selection. Plan actions carry the expected handle, tree,
+key, owner, and quantity, and are checked before the bounded account matcher
+is entered. Expired and permanently invalid opposing leaves are planned for
+bounded cleanup; oracle-unavailable pegged leaves remain stored and are
+skipped. The current SBF-safe limits are four fills, four invalid removals,
+and two expiry removals per instruction.
+
+| Check | Recorded value |
+| --- | --- |
+| Planner and post-only immutable tests | `2 passed; 0 failed` |
+| Rust debug tests | `31 passed; 0 failed` |
+| Rust release tests | `31 passed; 0 failed` |
+| `cargo fmt --check` | passed |
+| `cargo check -p stockstream` | passed |
+| `cargo build-sbf --features bpf-entrypoint` | passed; no stack diagnostic |
+| SBF SHA-256 | `c8fc0768c6c333ed29609f958100ee231909009e8b699ac4347357b4fe844eb7` |
+| SBF size | `114,864` bytes |
+
+This is Gate 1 progress, not a pass. The handler still applies through the
+legacy mutating matcher after preflight; complete two-phase maker/taker risk
+settlement, rollback, and the requested randomized account model remain.

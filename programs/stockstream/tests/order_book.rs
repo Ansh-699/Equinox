@@ -1,7 +1,7 @@
 use stockstream::book::{
-    match_limit, normalized_key, pegged_state, price_time_key, AnyNode, Arena, BookError,
-    LastFreeNode, MarketState, MatchLimits, OrderInput, PeggedState, Side, TimeInForce, TreeKind,
-    ARENA_CAPACITY,
+    match_limit, normalized_key, pegged_state, plan_limit_arenas, price_time_key, AnyNode, Arena,
+    BookError, LastFreeNode, MarketState, MatchLimits, OrderInput, PeggedState, Side, TimeInForce,
+    TreeKind, ARENA_CAPACITY,
 };
 
 fn order(side: Side, tree: TreeKind, price: i64, sequence: u64) -> OrderInput {
@@ -22,6 +22,80 @@ fn order(side: Side, tree: TreeKind, price: i64, sequence: u64) -> OrderInput {
 
 fn insert(arena: &mut Arena, input: OrderInput) -> u32 {
     arena.insert(input.tree, input.leaf().unwrap()).unwrap()
+}
+
+fn arena_bytes(arena: &Arena) -> &[u8] {
+    unsafe {
+        core::slice::from_raw_parts(
+            arena as *const Arena as *const u8,
+            core::mem::size_of::<Arena>(),
+        )
+    }
+}
+
+#[test]
+fn settlement_plan_is_immutable_and_contains_apply_snapshots() {
+    let bids = Arena::new();
+    let mut asks = Arena::new();
+    let maker = order(Side::Ask, TreeKind::Fixed, 100, 1);
+    let maker_handle = insert(&mut asks, maker);
+    let mut taker = order(Side::Bid, TreeKind::Fixed, 110, 2);
+    taker.owner = 99;
+    taker.quantity = 15;
+    let bids_before = arena_bytes(&bids).to_vec();
+    let asks_before = arena_bytes(&asks).to_vec();
+
+    let plan = plan_limit_arenas(
+        &bids,
+        &asks,
+        taker,
+        Some(100),
+        1,
+        MatchLimits {
+            max_fills: 4,
+            max_invalid_removals: 2,
+            max_expired_removals: 2,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(plan.fill_count, 1);
+    assert_eq!(plan.fills[0].maker_handle, maker_handle);
+    assert_eq!(plan.fills[0].maker_remaining, 0);
+    assert_eq!(plan.action_count, 1);
+    let maker_key = maker.leaf().unwrap().key;
+    assert_eq!(plan.actions[0].key, maker_key);
+    assert_eq!(plan.actions[0].owner, maker.owner);
+    assert_eq!(plan.actions[0].expected_quantity, maker.quantity);
+    assert!(plan.actions[0].remove);
+    assert_eq!(arena_bytes(&bids), bids_before.as_slice());
+    assert_eq!(arena_bytes(&asks), asks_before.as_slice());
+}
+
+#[test]
+fn post_only_plan_rejects_without_book_mutation() {
+    let bids = Arena::new();
+    let mut asks = Arena::new();
+    insert(&mut asks, order(Side::Ask, TreeKind::Fixed, 100, 1));
+    let before = arena_bytes(&asks).to_vec();
+    let mut taker = order(Side::Bid, TreeKind::Fixed, 110, 2);
+    taker.post_only = true;
+    let plan = plan_limit_arenas(
+        &bids,
+        &asks,
+        taker,
+        Some(100),
+        1,
+        MatchLimits {
+            max_fills: 4,
+            max_invalid_removals: 2,
+            max_expired_removals: 2,
+        },
+    )
+    .unwrap();
+    assert!(plan.post_only_rejected);
+    assert_eq!(plan.fill_count, 0);
+    assert_eq!(arena_bytes(&asks), before.as_slice());
 }
 
 #[test]
