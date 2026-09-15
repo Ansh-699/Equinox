@@ -22,10 +22,9 @@ import {
 } from "lucide-react";
 import { useAppAuth } from "@/components/app-providers";
 import { authorizeTradingSession, cancelAll, createTraderSeat, depositCollateral, initializeSettlementScratch, initializeVault, previewPlaceOrder, revokeTradingSession, withdrawCollateral } from "@/clients/stockstream/src";
+import { PERP_MARKETS, marketForSymbol } from "@/lib/markets";
 
-const marketSymbol = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_SYMBOL ?? "AAPL-PERP";
 const marketApiUrl = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_API_URL;
-const marketAddress = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_ADDRESS;
 
 interface BookLevel { price: string; size: string; }
 interface MarketEvent { kind: string; payload: { bids?: BookLevel[]; asks?: BookLevel[] }; }
@@ -46,8 +45,11 @@ export function TradingTerminal() {
   const [quantity, setQuantity] = useState("12");
   const [limitPrice, setLimitPrice] = useState("");
   const [notice, setNotice] = useState("Live submission requires verified Pyth pricing, USDC custody and MagicBlock delegation.");
+  const [marketSymbol, setMarketSymbol] = useState(process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_SYMBOL ?? PERP_MARKETS[0].symbol);
   const [book, setBook] = useState<{ bids: BookLevel[]; asks: BookLevel[] }>({ bids: [], asks: [] });
   const [marketFeedStatus, setMarketFeedStatus] = useState<"connecting" | "live" | "unavailable">(marketApiUrl ? "connecting" : "unavailable");
+  const marketConfig = marketForSymbol(marketSymbol);
+  const marketAddress = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_ADDRESS ?? marketConfig.marketPda;
   const active = false;
   const canTrade = false;
   const quantityNumber = Number(quantity) || 0;
@@ -84,12 +86,12 @@ export function TradingTerminal() {
     };
     socket.onerror = () => { if (!stopped) setMarketFeedStatus("unavailable"); };
     return () => { stopped = true; socket.close(); };
-  }, []);
+  }, [marketSymbol]);
   function runLifecycle() {
     if (!auth.walletAddress || !marketAddress) { setNotice("Configure the market address and sign in before constructing lifecycle actions."); return; }
     try {
       const seat = createTraderSeat({ market: marketAddress, authority: auth.walletAddress }, 0);
-      const scratchAddress = process.env.NEXT_PUBLIC_STOCKSTREAM_SETTLEMENT_SCRATCH_ADDRESS;
+      const scratchAddress = process.env.NEXT_PUBLIC_STOCKSTREAM_SETTLEMENT_SCRATCH_ADDRESS ?? marketConfig.scratchPda(0);
       const scratch = scratchAddress ? initializeSettlementScratch({ market: marketAddress, authority: auth.walletAddress, settlementScratch: scratchAddress }, 0) : null;
       setNotice(`Constructed ${scratch ? "CreateTraderSeat + InitializeSettlementScratch" : "CreateTraderSeat"} (${seat.keys.length + (scratch?.keys.length ?? 0)} account metas). Signing is disabled until the configured L1 transport is available.`);
     } catch (error) { setNotice(error instanceof Error ? error.message : "Could not construct lifecycle action"); }
@@ -99,7 +101,7 @@ export function TradingTerminal() {
     if (!auth.walletAddress || !marketAddress) { setNotice("Configure the market address and sign in before constructing custody actions."); return; }
     const mint = process.env.NEXT_PUBLIC_STOCKSTREAM_COLLATERAL_MINT;
     const tokenProgram = process.env.NEXT_PUBLIC_STOCKSTREAM_TOKEN_PROGRAM;
-    const vault = process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT;
+    const vault = process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT ?? marketConfig.vaultPda;
     const vaultAuthority = process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT_AUTHORITY;
     if (!mint || !tokenProgram || !vault || !vaultAuthority) { setNotice("Custody action blocked: collateral mint, token program and vault addresses are not configured."); return; }
     const ix = withdraw ? withdrawCollateral({ market: marketAddress, authority: auth.walletAddress, seat: auth.walletAddress, sourceOrDestination: auth.walletAddress, mint, tokenProgram, vault, vaultAuthority }, BigInt(quantityNumber || 1)) : depositCollateral({ market: marketAddress, authority: auth.walletAddress, seat: auth.walletAddress, sourceOrDestination: auth.walletAddress, mint, tokenProgram, vault, vaultAuthority }, BigInt(quantityNumber || 1));
@@ -122,7 +124,7 @@ export function TradingTerminal() {
     if (!auth.walletAddress || !marketAddress) { setNotice("Configure the market address and sign in before initializing custody."); return; }
     const mint = process.env.NEXT_PUBLIC_STOCKSTREAM_COLLATERAL_MINT;
     const tokenProgram = process.env.NEXT_PUBLIC_STOCKSTREAM_TOKEN_PROGRAM;
-    const vault = process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT;
+    const vault = process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT ?? marketConfig.vaultPda;
     const vaultAuthority = process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT_AUTHORITY;
     if (!mint || !tokenProgram || !vault || !vaultAuthority) { setNotice("Vault initialization blocked: explicit collateral deployment configuration is missing."); return; }
     const ix = initializeVault({ market: marketAddress, authority: auth.walletAddress, mint, tokenProgram, vault, vaultAuthority });
@@ -132,7 +134,7 @@ export function TradingTerminal() {
   function submitOrder() {
     if (!canTrade) {
       if (!auth.authenticated) { setNotice("Sign in with Privy to construct a safe PlaceOrder preview. No transaction was created."); return; }
-      const settlementScratch = process.env.NEXT_PUBLIC_STOCKSTREAM_SETTLEMENT_SCRATCH_ADDRESS;
+      const settlementScratch = process.env.NEXT_PUBLIC_STOCKSTREAM_SETTLEMENT_SCRATCH_ADDRESS ?? marketConfig.scratchPda(0);
       if (!marketAddress || !auth.walletAddress || !settlementScratch) { setNotice("Preview unavailable: configure market and settlement scratch addresses. No transaction was created."); return; }
       try {
         const preview = previewPlaceOrder({ market: marketAddress, authority: auth.walletAddress, settlementScratch, seatIndex: 0, side: side === "long" ? "bid" : "ask", quantity: BigInt(quantityNumber), priceOrOffset: BigInt(limitPrice || 0), clientOrderId: 0n });
@@ -161,6 +163,7 @@ export function TradingTerminal() {
       </section>
 
       <section className="status-strip" aria-label="StockStream status">
+        <label>Market<select value={marketSymbol} onChange={(event) => setMarketSymbol(event.target.value)}>{PERP_MARKETS.map((market) => <option key={market.symbol} value={market.symbol}>{market.symbol} · {market.live ? "live" : "fixture"}</option>)}</select></label>
         <div><strong>Program</strong><span>local build available</span></div>
         <div><strong>Collateral</strong><span>test-only/not connected</span></div>
         <div><strong>Session</strong><span>{auth.authenticated ? "authenticated" : "not authenticated"}</span></div>
@@ -199,7 +202,7 @@ export function TradingTerminal() {
             <label>Limit price<input value={limitPrice} onChange={(event) => setLimitPrice(event.target.value)} placeholder={Number.isFinite(markPrice) ? markPrice.toFixed(2) : "Awaiting verified price"} inputMode="decimal" /><span className="input-suffix">USD</span></label>
             <div className="order-review"><span>Estimated notional</span><strong>{Number.isFinite(notional) ? formatUsd(notional) : "--"}</strong><span>Initial margin</span><strong>{Number.isFinite(notional) ? formatUsd(notional * 0.2) : "--"}</strong><span>Est. liquidation</span><strong>Calculated on-chain</strong></div>
             <button className={side === "short" ? "submit short-submit" : "submit long-submit"} onClick={submitOrder}>{auth.authenticated ? "Preview order" : "Sign in to preview"}</button>
-            <p className="form-note">Session scope: AAPL-PERP only. Withdrawals and collateral transfers are excluded.</p>
+            <p className="form-note">Session scope: {marketConfig.symbol}. Withdrawals and collateral transfers are excluded.</p>
           </aside>
 
           <section className="lifecycle-panel">

@@ -35,6 +35,9 @@ export interface InstructionFixture {
 export interface VaultAccounts { market: AddressInput; authority: AddressInput; mint: AddressInput; tokenProgram: AddressInput; vault: AddressInput; vaultAuthority: AddressInput; }
 export interface CustodyAccounts extends VaultAccounts { seat: AddressInput; sourceOrDestination: AddressInput; }
 export interface DelegationAccounts { market: AddressInput; authority: AddressInput; hotAccounts: AddressInput[]; }
+export interface RegistryAccounts { exchange: AddressInput; authority: AddressInput; }
+export interface InstrumentAccounts { exchange: AddressInput; instrument: AddressInput; authority: AddressInput; }
+export interface PerpMarketAccounts { instrument: AddressInput; market: AddressInput; authority: AddressInput; }
 
 function publicKey(value: AddressInput): PublicKey {
   if (value instanceof PublicKey) return value;
@@ -157,9 +160,17 @@ export function undelegationCallback(accounts: InstructionAccounts, sequence: bi
 export function authorizeTradingSession(accounts: InstructionAccounts, expiresAt: bigint | number, nonce: bigint | number): TransactionInstruction { const data = new Uint8Array(17); data[0] = STOCKSTREAM_INSTRUCTION.authorizeTradingSession; writeUnsigned(data, 1, checkedUnsigned(expiresAt, 64, "expiresAt"), 8); writeUnsigned(data, 9, checkedUnsigned(nonce, 64, "nonce"), 8); return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]); }
 export function revokeTradingSession(accounts: InstructionAccounts, nonce: bigint | number): TransactionInstruction { const data = new Uint8Array(9); data[0] = STOCKSTREAM_INSTRUCTION.revokeTradingSession; writeUnsigned(data, 1, checkedUnsigned(nonce, 64, "nonce"), 8); return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]); }
 
+function identifierInstruction(discriminator: number, identifier: Uint8Array, accounts: AccountMeta[]): TransactionInstruction {
+  if (identifier.length !== 32) throw new RangeError("identifier must be 32 bytes");
+  const data = new Uint8Array(33); data[0] = discriminator; data.set(identifier, 1); return instruction(data, accounts);
+}
+export function initializeExchange(accounts: RegistryAccounts): TransactionInstruction { return instruction(Uint8Array.of(STOCKSTREAM_INSTRUCTION.initializeExchange), [accountMeta(accounts.exchange, false, true), accountMeta(accounts.authority, true, false)]); }
+export function registerStockInstrument(accounts: InstrumentAccounts, instrumentId: Uint8Array): TransactionInstruction { return identifierInstruction(STOCKSTREAM_INSTRUCTION.registerStockInstrument, instrumentId, [accountMeta(accounts.exchange, false, true), accountMeta(accounts.instrument, false, true), accountMeta(accounts.authority, true, false)]); }
+export function createPerpMarket(accounts: PerpMarketAccounts, instrumentId: Uint8Array): TransactionInstruction { return identifierInstruction(STOCKSTREAM_INSTRUCTION.createPerpMarket, instrumentId, [accountMeta(accounts.instrument, false, false), accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]); }
+
 export function decodeInstruction(data: Uint8Array): InstructionFixture {
   if (data.length === 0) throw new RangeError("Empty instruction");
-  const names: Record<number, string> = { 0: "InitializeMarket", 1: "CreateTraderSeat", 2: "CloseTraderSeat", 3: "PlaceOrder", 4: "CancelOrder", 5: "CancelAll", 6: "UpdateFunding", 7: "Liquidate", 8: "InitializeSettlementScratch", 9: "InitializeVault", 10: "DepositCollateral", 11: "WithdrawCollateral", 12: "ConsumeOracleUpdate", 13: "DelegateMarket", 14: "CommitMarket", 15: "CommitAndUndelegate", 16: "UndelegationCallback", 17: "AuthorizeTradingSession", 18: "RevokeTradingSession" };
+  const names: Record<number, string> = { 0: "InitializeMarket", 1: "CreateTraderSeat", 2: "CloseTraderSeat", 3: "PlaceOrder", 4: "CancelOrder", 5: "CancelAll", 6: "UpdateFunding", 7: "Liquidate", 8: "InitializeSettlementScratch", 9: "InitializeVault", 10: "DepositCollateral", 11: "WithdrawCollateral", 12: "ConsumeOracleUpdate", 13: "DelegateMarket", 14: "CommitMarket", 15: "CommitAndUndelegate", 16: "UndelegationCallback", 17: "AuthorizeTradingSession", 18: "RevokeTradingSession", 19: "InitializeExchange", 20: "RegisterStockInstrument", 21: "CreatePerpMarket" };
   const name = names[data[0]];
   if (!name) throw new RangeError("Unknown instruction");
   return { name, data: data.slice() };

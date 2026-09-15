@@ -7,6 +7,7 @@ pub mod error;
 pub mod handlers;
 pub mod initialize_market;
 pub mod instruction;
+pub mod registry;
 pub mod risk;
 pub mod scratch;
 pub mod state;

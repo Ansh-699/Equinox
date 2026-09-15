@@ -276,3 +276,18 @@ Current SBF artifact from source commit `960d1f7`: SHA-256
 `249d8e08411b39b40bc538e090c94586474546b8c38d7279c7c892b9816a5753`, size
 `143,656` bytes. This is a post-Gate-1 build and must not be substituted for
 the preserved Gate 1 artifact.
+
+## Generic Market Registry Verification (2026-09-15)
+
+The source now exposes fixed-layout `InitializeExchange`,
+`RegisterStockInstrument` and `CreatePerpMarket` dispatch variants. Instrument
+PDAs use `instrument` plus a stable 32-byte instrument ID; perp-market PDAs use
+`perp-market` plus the instrument PDA. The client, worker registry and terminal
+use the same market-scoped identifiers. AAPL-PERP, TSLA-PERP and NVDA-PERP are
+fixtures with `live: false`; no fixture is presented as a deployed market.
+
+The current source verification added two Rust registry tests and three market
+registry Vitest tests. Rust debug and release suites pass with 48 tests each;
+the application suite passes 26 tests in 7 files. The final SBF rebuild and
+hash are `58eb165bd3f13c63f7ed52c661227a8c398d49c6b1eb425948a38cad325921af`
+and `147,344` bytes. The SBF build emitted no stack-frame diagnostic.

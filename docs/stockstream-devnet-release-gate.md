@@ -66,6 +66,18 @@ production claim.
 The detailed toolchain, artifact, and test evidence is recorded in
 `docs/stockstream-build-record.md`.
 
+## Generic Market Isolation
+
+**Unit tested.** The exchange/instrument/perp-market registry is wired into the
+Rust dispatcher, TypeScript client and market-data registry. AAPL-PERP,
+TSLA-PERP and NVDA-PERP fixtures have independent market-scoped addresses and
+remain `live: false` until their deployment, mint and oracle configuration are
+verified.
+
+Runtime loading, token CPI, signed Pyth updates, MagicBlock ER execution,
+Privy login and devnet deployment remain unverified until the external
+toolchain, credentials and funded network are available.
+
 ## Post-Gate Integration Wiring
 
 | Area | Status | Evidence / limitation |

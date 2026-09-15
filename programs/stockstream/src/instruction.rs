@@ -20,6 +20,9 @@ pub const COMMIT_AND_UNDELEGATE: u8 = 15;
 pub const UNDELEGATION_CALLBACK: u8 = 16;
 pub const AUTHORIZE_TRADING_SESSION: u8 = 17;
 pub const REVOKE_TRADING_SESSION: u8 = 18;
+pub const INITIALIZE_EXCHANGE: u8 = 19;
+pub const REGISTER_STOCK_INSTRUMENT: u8 = 20;
+pub const CREATE_PERP_MARKET: u8 = 21;
 
 #[derive(Clone, Copy)]
 pub struct PlaceOrderData {
@@ -88,6 +91,13 @@ pub enum StockStreamInstruction {
     },
     RevokeTradingSession {
         nonce: u64,
+    },
+    InitializeExchange,
+    RegisterStockInstrument {
+        instrument_id: [u8; 32],
+    },
+    CreatePerpMarket {
+        instrument_id: [u8; 32],
     },
 }
 
@@ -186,6 +196,19 @@ impl StockStreamInstruction {
             }
             Some(REVOKE_TRADING_SESSION) if data.len() == 9 => Ok(Self::RevokeTradingSession {
                 nonce: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+            }),
+            Some(INITIALIZE_EXCHANGE) if data.len() == 1 => Ok(Self::InitializeExchange),
+            Some(REGISTER_STOCK_INSTRUMENT) if data.len() == 33 => {
+                Ok(Self::RegisterStockInstrument {
+                    instrument_id: data[1..33]
+                        .try_into()
+                        .map_err(|_| ProgramError::InvalidInstructionData)?,
+                })
+            }
+            Some(CREATE_PERP_MARKET) if data.len() == 33 => Ok(Self::CreatePerpMarket {
+                instrument_id: data[1..33]
+                    .try_into()
+                    .map_err(|_| ProgramError::InvalidInstructionData)?,
             }),
             _ => Err(ProgramError::InvalidInstructionData),
         }
