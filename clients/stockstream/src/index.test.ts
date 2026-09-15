@@ -1,7 +1,7 @@
 import { PublicKey } from "@solana/web3.js";
 import { expect, test } from "vitest";
 import { STOCKSTREAM_PROGRAM_ID } from "./constants";
-import { authorizeTradingSession, cancelOrder, commitMarket, decodeInstruction, delegateMarket, initializeMarket, initializeVault, placeOrder, previewPlaceOrder, undelegationCallback } from "./index";
+import { authorizeTradingSession, cancelOrder, commitMarket, createPerpMarket, decodeInstruction, delegateMarket, initializeExchange, initializeMarket, initializeVault, placeOrder, previewPlaceOrder, registerStockInstrument, undelegationCallback } from "./index";
 
 const market = PublicKey.unique();
 const authority = PublicKey.unique();
@@ -46,4 +46,16 @@ test("integration constructors preserve discriminators, account order and signer
   expect(decodeInstruction(delegateMarket({ market, authority, hotAccounts: [settlementScratch] }, 2n).data).name).toBe("DelegateMarket");
   expect(decodeInstruction(undelegationCallback({ market, authority }, 3n).data).name).toBe("UndelegationCallback");
   expect(decodeInstruction(authorizeTradingSession({ market, authority }, 99n, 1n).data).name).toBe("AuthorizeTradingSession");
+});
+
+test("registry constructors preserve market-scoped account order", () => {
+  const exchange = PublicKey.unique(); const instrument = PublicKey.unique(); const perpMarket = PublicKey.unique();
+  const id = new Uint8Array(32); id.fill(7);
+  expect(decodeInstruction(initializeExchange({ exchange, authority }).data).name).toBe("InitializeExchange");
+  const register = registerStockInstrument({ exchange, instrument, authority }, id);
+  expect(register.keys.map((key) => [key.pubkey, key.isSigner, key.isWritable])).toEqual([[exchange, false, true], [instrument, false, true], [authority, true, false]]);
+  const create = createPerpMarket({ instrument, market: perpMarket, authority }, id);
+  expect(decodeInstruction(create.data).name).toBe("CreatePerpMarket");
+  expect(create.keys[0].pubkey).toBe(instrument);
+  expect(create.keys[1].pubkey).toBe(perpMarket);
 });

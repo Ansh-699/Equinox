@@ -11,7 +11,11 @@ export interface MarketEvent {
 
 export interface MarketDefinition {
   symbol: string;
+  instrumentId: string;
   marketIndex: number;
+  marketPda: string;
+  vaultPda: string;
   status: "active" | "paused" | "restricted";
   oracleFeedId: string;
+  sessionPolicy: "regular" | "extended" | "close-only";
 }

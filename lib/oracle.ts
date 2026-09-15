@@ -18,6 +18,6 @@ export class OracleTracker {
 }
 export function requirePythServerConfig(env: Record<string, string | undefined>): { apiKey: string; feedId: string } {
   if (!env.PYTH_PRO_API_KEY) throw new Error("PYTH_PRO_API_KEY is required for live verification");
-  if (!env.PYTH_PRO_AAPL_FEED_ID) throw new Error("PYTH_PRO_AAPL_FEED_ID must be verified from the Pyth Pro catalog");
-  return { apiKey: env.PYTH_PRO_API_KEY, feedId: env.PYTH_PRO_AAPL_FEED_ID };
+  if (!env.PYTH_PRO_FEED_ID) throw new Error("PYTH_PRO_FEED_ID must be verified from the Pyth Pro catalog");
+  return { apiKey: env.PYTH_PRO_API_KEY, feedId: env.PYTH_PRO_FEED_ID };
 }

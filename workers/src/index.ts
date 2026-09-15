@@ -65,19 +65,31 @@ function asMarketDefinition(input: unknown): MarketDefinition | null {
     typeof input !== "object" ||
     !("symbol" in input) ||
     !("marketIndex" in input) ||
+    !("instrumentId" in input) ||
+    !("marketPda" in input) ||
+    !("vaultPda" in input) ||
+    !("sessionPolicy" in input) ||
     !("status" in input) ||
     !("oracleFeedId" in input) ||
     typeof input.symbol !== "string" ||
     typeof input.marketIndex !== "number" ||
+    typeof input.instrumentId !== "string" ||
+    typeof input.marketPda !== "string" ||
+    typeof input.vaultPda !== "string" ||
     typeof input.oracleFeedId !== "string" ||
-    (input.status !== "active" && input.status !== "paused" && input.status !== "restricted")
+    (input.status !== "active" && input.status !== "paused" && input.status !== "restricted") ||
+    (input.sessionPolicy !== "regular" && input.sessionPolicy !== "extended" && input.sessionPolicy !== "close-only")
   ) return null;
 
   return {
     symbol: input.symbol.toUpperCase(),
+    instrumentId: input.instrumentId,
     marketIndex: input.marketIndex,
+    marketPda: input.marketPda,
+    vaultPda: input.vaultPda,
     status: input.status,
     oracleFeedId: input.oracleFeedId,
+    sessionPolicy: input.sessionPolicy,
   };
 }
 
@@ -103,15 +115,24 @@ export default {
       const market = asMarketDefinition(await request.json().catch(() => null));
       if (!market) return json({ error: "invalid_market" }, 400);
       await bindings(env).DB.prepare(
-        `INSERT INTO markets (symbol, market_index, status, oracle_feed_id, updated_at)
-         VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO markets (symbol, instrument_id, market_index, market_pda, vault_pda, status, oracle_feed_id, session_policy, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(symbol) DO UPDATE SET
+           instrument_id = excluded.instrument_id,
            market_index = excluded.market_index,
+           market_pda = excluded.market_pda,
+           vault_pda = excluded.vault_pda,
            status = excluded.status,
            oracle_feed_id = excluded.oracle_feed_id,
+           session_policy = excluded.session_policy,
            updated_at = excluded.updated_at`,
-      ).bind(market.symbol, market.marketIndex, market.status, market.oracleFeedId, Date.now()).run();
+      ).bind(market.symbol, market.instrumentId, market.marketIndex, market.marketPda, market.vaultPda, market.status, market.oracleFeedId, market.sessionPolicy, Date.now()).run();
       return json({ accepted: true }, 202);
+    }
+
+    if (request.method === "GET" && url.pathname === "/v1/markets") {
+      const result = await bindings(env).DB.prepare("SELECT symbol, instrument_id AS instrumentId, market_index AS marketIndex, market_pda AS marketPda, vault_pda AS vaultPda, status, oracle_feed_id AS oracleFeedId, session_policy AS sessionPolicy FROM markets ORDER BY market_index").all<MarketDefinition>();
+      return json({ markets: result.results });
     }
 
     if (parts[0] === "v1" && parts[1] === "markets" && parts.length === 4) {

@@ -73,5 +73,5 @@ export class PythKeeper {
 }
 
 export function pythHealth(env: Record<string, string | undefined>) {
-  return { configured: Boolean(env.PYTH_PRO_API_KEY && env.PYTH_PRO_AAPL_FEED_ID), liveVerification: Boolean(env.PYTH_PRO_API_KEY), feedIdConfigured: Boolean(env.PYTH_PRO_AAPL_FEED_ID) };
+  return { configured: Boolean(env.PYTH_PRO_API_KEY && env.PYTH_PRO_FEED_ID), liveVerification: Boolean(env.PYTH_PRO_API_KEY), feedIdConfigured: Boolean(env.PYTH_PRO_FEED_ID) };
 }

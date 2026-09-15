@@ -258,6 +258,15 @@ pub fn dispatch(
         StockStreamInstruction::RevokeTradingSession { nonce } => {
             revoke_trading_session(program_id, accounts, nonce)
         }
+        StockStreamInstruction::InitializeExchange => {
+            crate::registry::initialize_exchange(program_id, accounts)
+        }
+        StockStreamInstruction::RegisterStockInstrument { instrument_id } => {
+            crate::registry::register_instrument(program_id, accounts, instrument_id)
+        }
+        StockStreamInstruction::CreatePerpMarket { instrument_id } => {
+            crate::registry::create_perp_market(program_id, accounts, instrument_id)
+        }
     }
 }
 
@@ -319,8 +328,18 @@ fn initialize_market(program_id: &Address, accounts: &mut [AccountView]) -> Prog
         return Err(ProgramError::NotEnoughAccountKeys);
     }
     signer(&accounts[1])?;
-    let market_key = accounts[1].address().to_bytes();
-    let data = market_data(&mut accounts[0], program_id)?;
+    let authority = accounts[1].address().clone();
+    initialize_market_account(program_id, &mut accounts[0], &authority, &[0; 32])
+}
+
+pub(crate) fn initialize_market_account(
+    program_id: &Address,
+    market_account: &mut AccountView,
+    authority: &Address,
+    instrument_id: &[u8; 32],
+) -> ProgramResult {
+    let market_key = authority.to_bytes();
+    let data = market_data(market_account, program_id)?;
     let existing = read_header(data)?;
     if existing.discriminator == MARKET_DISCRIMINATOR && existing.initialized != 0 {
         return Err(custom(StockStreamError::MarketAlreadyInitialized));
@@ -331,6 +350,7 @@ fn initialize_market(program_id: &Address, accounts: &mut [AccountView]) -> Prog
     header.emergency_authority = market_key;
     header.initialized = 1;
     header.mode = crate::state::MarketMode::Paused as u8;
+    header.reserved_upgrade[32..64].copy_from_slice(instrument_id);
     header
         .validate(data.len())
         .map_err(|_| custom(StockStreamError::InvalidMarketLayout))?;

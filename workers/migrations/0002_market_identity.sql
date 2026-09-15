@@ -1,0 +1,4 @@
+ALTER TABLE markets ADD COLUMN instrument_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE markets ADD COLUMN market_pda TEXT NOT NULL DEFAULT '';
+ALTER TABLE markets ADD COLUMN vault_pda TEXT NOT NULL DEFAULT '';
+ALTER TABLE markets ADD COLUMN session_policy TEXT NOT NULL DEFAULT 'regular';

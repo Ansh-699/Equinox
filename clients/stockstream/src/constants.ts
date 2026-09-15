@@ -20,6 +20,9 @@ export const STOCKSTREAM_INSTRUCTION = {
   undelegationCallback: 16,
   authorizeTradingSession: 17,
   revokeTradingSession: 18,
+  initializeExchange: 19,
+  registerStockInstrument: 20,
+  createPerpMarket: 21,
 } as const;
 
 export const STOCKSTREAM_ACCOUNT_SIZE = 222_752;
