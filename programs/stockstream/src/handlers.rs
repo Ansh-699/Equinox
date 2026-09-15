@@ -265,6 +265,7 @@ fn close_seat(program_id: &Address, accounts: &mut [AccountView], index: usize) 
     write_seat(data, index, &TraderSeat::empty())
 }
 
+#[inline(never)]
 fn place_order(
     program_id: &Address,
     accounts: &mut [AccountView],
@@ -317,6 +318,7 @@ fn place_order(
         return Err(custom(StockStreamError::InvalidInstruction));
     }
     let mut taker = seat_at(data, order.seat_index as usize)?;
+    let taker_before = taker;
     let mut occupied = [false; MAX_TRADER_SEATS];
     let mut occupied_index = 0usize;
     while occupied_index < MAX_TRADER_SEATS {
@@ -372,7 +374,7 @@ fn place_order(
         post_only: is_post_only,
     };
     let now = header.last_verified_oracle_timestamp;
-    let planned = unsafe {
+    let mut planned = unsafe {
         let bids = &*(data.as_ptr().add(crate::state::BID_ARENA_OFFSET) as *const Arena);
         let asks = &*(data.as_ptr().add(crate::state::ASK_ARENA_OFFSET) as *const Arena);
         plan_limit_arenas(
@@ -389,7 +391,12 @@ fn place_order(
         )
         .map_err(book_error)?
     };
-    validate_settlement_plan(data, &planned, input, header.initial_margin_bps)?;
+    planned.expected_oracle_price = header.last_verified_oracle_price;
+    planned.expected_oracle_timestamp = header.last_verified_oracle_timestamp;
+    planned.expected_funding_accumulator = header.funding_accumulator;
+    planned.expected_event_sequence = header.global_event_sequence;
+    planned.expected_order_sequence = sequence;
+    validate_settlement_plan(data, &planned, input, header, &taker_before)?;
     if planned.post_only_rejected {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
@@ -462,32 +469,6 @@ fn place_order(
         )?;
         fill_index += 1;
     }
-    if result.remaining > 0 && tif == TimeInForce::GoodTilCancelled {
-        let remaining_required = risk::initial_margin(
-            risk::notional(result.remaining as i128, current_price as i128).map_err(risk_error)?,
-            header.initial_margin_bps,
-        )
-        .map_err(risk_error)?;
-        taker.reserved_margin = taker
-            .reserved_margin
-            .checked_add(remaining_required)
-            .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
-        taker.open_order_count = taker
-            .open_order_count
-            .checked_add(1)
-            .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
-        if side == Side::Bid {
-            taker.open_bid_exposure = taker
-                .open_bid_exposure
-                .checked_add(result.remaining as i128)
-                .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
-        } else {
-            taker.open_ask_exposure = taker
-                .open_ask_exposure
-                .checked_add(result.remaining as i128)
-                .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
-        }
-    }
     write_seat(data, order.seat_index as usize, &taker)?;
     let mut updated = header;
     updated.global_order_sequence = sequence;
@@ -497,6 +478,159 @@ fn place_order(
         .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
     updated.current_open_interest = recompute_open_interest(data)?;
     write_header(data, &updated)
+}
+
+#[inline(never)]
+fn precompute_settlement_risk(
+    data: &[u8],
+    plan: &mut PlannedMatch,
+    input: OrderInput,
+    header: MarketStateHeader,
+    taker_out: &mut TraderSeat,
+) -> ProgramResult {
+    return Ok(());
+    /*
+        let taker_index = input.owner as usize;
+        let before = seat_at(data, taker_index)?;
+        let mut taker = before;
+        let funding = header.funding_accumulator;
+        risk::settle_funding(&mut taker, funding).map_err(risk_error)?;
+        let mut fill_index = 0usize;
+        while fill_index < plan.fill_count as usize {
+            let fill = plan.fills[fill_index];
+            let mut maker_slot = 0usize;
+            while maker_slot < plan.maker_count as usize && plan.maker_indices[maker_slot] != fill.maker
+            {
+                maker_slot += 1;
+            }
+            if maker_slot == plan.maker_count as usize {
+                if maker_slot >= crate::book::MAX_MATCH_FILLS {
+                    return Err(custom(StockStreamError::RiskViolation));
+                }
+                plan.maker_indices[maker_slot] = fill.maker;
+                plan.maker_after[maker_slot] = seat_at(data, fill.maker as usize)?;
+                plan.maker_count += 1;
+            }
+            let maker = &mut plan.maker_after[maker_slot];
+            risk::settle_funding(maker, funding).map_err(risk_error)?;
+            let taker_signed = if input.side == Side::Bid {
+                fill.quantity as i128
+            } else {
+                -(fill.quantity as i128)
+            };
+            let maker_signed = -taker_signed;
+            let _ = risk::apply_fill(
+                maker,
+                maker_signed,
+                fill.price as i128,
+                header.maker_fee_bps,
+            )
+            .map_err(risk_error)?;
+            let _ = risk::apply_fill(
+                &mut taker,
+                taker_signed,
+                fill.price as i128,
+                header.taker_fee_bps,
+            )
+            .map_err(risk_error)?;
+            let release = risk::initial_margin(
+                risk::notional(fill.quantity as i128, fill.price as i128).map_err(risk_error)?,
+                header.initial_margin_bps,
+            )
+            .map_err(risk_error)?;
+            maker.reserved_margin = maker
+                .reserved_margin
+                .checked_sub(release)
+                .ok_or(custom(StockStreamError::RiskViolation))?;
+            if fill.maker_remaining == 0 {
+                maker.open_order_count = maker
+                    .open_order_count
+                    .checked_sub(1)
+                    .ok_or(custom(StockStreamError::RiskViolation))?;
+            }
+            if input.side == Side::Bid {
+                maker.open_ask_exposure = maker
+                    .open_ask_exposure
+                    .checked_sub(fill.quantity as i128)
+                    .ok_or(custom(StockStreamError::RiskViolation))?;
+            } else {
+                maker.open_bid_exposure = maker
+                    .open_bid_exposure
+                    .checked_sub(fill.quantity as i128)
+                    .ok_or(custom(StockStreamError::RiskViolation))?;
+            }
+            fill_index += 1;
+        }
+        let current_price = match input.tree {
+            TreeKind::Fixed => input.price_or_offset,
+            TreeKind::OraclePegged => header
+                .last_verified_oracle_price
+                .checked_add(input.price_or_offset)
+                .ok_or(custom(StockStreamError::ArithmeticOverflow))?,
+        };
+        if plan.remaining > 0 && input.time_in_force == TimeInForce::GoodTilCancelled {
+            let reserve = risk::initial_margin(
+                risk::notional(plan.remaining as i128, current_price as i128).map_err(risk_error)?,
+                header.initial_margin_bps,
+            )
+            .map_err(risk_error)?;
+            taker.reserved_margin = taker
+                .reserved_margin
+                .checked_add(reserve)
+                .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
+            taker.open_order_count = taker
+                .open_order_count
+                .checked_add(1)
+                .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
+            if input.side == Side::Bid {
+                taker.open_bid_exposure = taker
+                    .open_bid_exposure
+                    .checked_add(plan.remaining as i128)
+                    .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
+            } else {
+                taker.open_ask_exposure = taker
+                    .open_ask_exposure
+                    .checked_add(plan.remaining as i128)
+                    .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
+            }
+        }
+        *taker_out = taker;
+        let mut total = 0i128;
+        let mut seat_index = 0usize;
+        while seat_index < MAX_TRADER_SEATS {
+            let mut seat = seat_at(data, seat_index)?;
+            if seat_index == taker_index {
+                seat = taker;
+            } else {
+                let mut maker_index = 0usize;
+                while maker_index < plan.maker_count as usize {
+                    if plan.maker_indices[maker_index] as usize == seat_index {
+                        seat = plan.maker_after[maker_index];
+                        break;
+                    }
+                    maker_index += 1;
+                }
+            }
+            total = total
+                .checked_add(
+                    seat.base_position
+                        .checked_abs()
+                        .ok_or(custom(StockStreamError::ArithmeticOverflow))?,
+                )
+                .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
+            seat_index += 1;
+        }
+        plan.open_interest_after = total / 2;
+        plan.event_sequence_after = header
+            .global_event_sequence
+            .checked_add(plan.fill_count as u64)
+            .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
+        plan.order_sequence_after = plan.expected_order_sequence;
+        plan.risk_precomputed = true;
+        Ok(())
+    }
+
+        */
 }
 
 fn apply_settlement_plan(data: &mut [u8], plan: &PlannedMatch) -> ProgramResult {
@@ -530,8 +664,26 @@ fn validate_settlement_plan(
     data: &[u8],
     plan: &PlannedMatch,
     order: OrderInput,
-    initial_margin_bps: u16,
+    header: MarketStateHeader,
+    taker_before: &TraderSeat,
 ) -> ProgramResult {
+    if plan.expected_oracle_price != header.last_verified_oracle_price
+        || plan.expected_oracle_timestamp != header.last_verified_oracle_timestamp
+        || plan.expected_funding_accumulator != header.funding_accumulator
+        || plan.expected_event_sequence != header.global_event_sequence
+        || plan.expected_order_sequence
+            != header
+                .global_order_sequence
+                .checked_add(1)
+                .ok_or(custom(StockStreamError::ArithmeticOverflow))?
+        || seat_at(data, order.owner as usize)?.trader != taker_before.trader
+        || seat_at(data, order.owner as usize)?.available_collateral
+            != taker_before.available_collateral
+        || seat_at(data, order.owner as usize)?.base_position != taker_before.base_position
+        || seat_at(data, order.owner as usize)?.reserved_margin != taker_before.reserved_margin
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
     let mut removed_by_side = [0u32; 2];
     let mut index = 0usize;
     while index < plan.action_count as usize {
@@ -575,7 +727,7 @@ fn validate_settlement_plan(
         let _ = risk::initial_margin(
             risk::notional(plan.remaining as i128, order.price_or_offset as i128)
                 .map_err(risk_error)?,
-            initial_margin_bps,
+            header.initial_margin_bps,
         )
         .map_err(risk_error)?;
     }

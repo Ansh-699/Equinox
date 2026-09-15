@@ -977,6 +977,13 @@ pub struct PlannedMatch {
     pub post_only_rejected: bool,
     pub actions: [PlanAction; MAX_PLAN_ACTIONS],
     pub action_count: u8,
+    pub expected_oracle_price: i64,
+    pub expected_oracle_timestamp: u64,
+    pub expected_funding_accumulator: i128,
+    pub expected_event_sequence: u64,
+    pub expected_order_sequence: u64,
+    pub event_sequence_after: u64,
+    pub order_sequence_after: u64,
 }
 
 impl PlanAction {
@@ -1014,6 +1021,7 @@ pub fn match_limit(
     match_limit_arenas(&mut state.bids, &mut state.asks, order, oracle, now, limits)
 }
 
+#[inline(never)]
 pub fn plan_limit_arenas(
     bids: &Arena,
     asks: &Arena,
@@ -1051,6 +1059,13 @@ pub fn plan_limit_arenas(
         post_only_rejected: false,
         actions: [PlanAction::EMPTY; MAX_PLAN_ACTIONS],
         action_count: 0,
+        expected_oracle_price: 0,
+        expected_oracle_timestamp: 0,
+        expected_funding_accumulator: 0,
+        expected_event_sequence: 0,
+        expected_order_sequence: 0,
+        event_sequence_after: 0,
+        order_sequence_after: 0,
     };
     let mut virtual_count = 0usize;
     let opposite = match order.side {

@@ -27,16 +27,6 @@ pub const ID: Address = Address::new_from_array([
 static STOCKSTREAM_ARENA_VALIDATOR: fn(&book::Arena) -> Result<(), book::BookError> =
     book::Arena::validate;
 
-#[cfg(feature = "bpf-entrypoint")]
-#[used]
-static STOCKSTREAM_MATCHER: fn(
-    &mut book::MarketState,
-    book::OrderInput,
-    Option<i64>,
-    u64,
-    book::MatchLimits,
-) -> Result<book::MatchResult, book::BookError> = book::match_limit;
-
 pub fn process_instruction(
     program_id: &Address,
     accounts: &mut [AccountView],
