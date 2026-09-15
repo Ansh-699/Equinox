@@ -20,9 +20,12 @@ import {
   TrendingUp,
   WalletCards
 } from "lucide-react";
+import { useAppAuth } from "@/components/app-providers";
+import { previewPlaceOrder } from "@/clients/stockstream/src";
 
 const marketSymbol = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_SYMBOL ?? "AAPL-PERP";
 const marketApiUrl = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_API_URL;
+const marketAddress = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_ADDRESS;
 
 interface BookLevel { price: string; size: string; }
 interface MarketEvent { kind: string; payload: { bids?: BookLevel[]; asks?: BookLevel[] }; }
@@ -37,10 +40,12 @@ function formatUsd(value: number) {
 }
 
 export function TradingTerminal() {
+  const auth = useAppAuth();
   const [side, setSide] = useState<"short" | "long">("short");
   const [tab, setTab] = useState<"trade" | "launch">("trade");
   const [quantity, setQuantity] = useState("12");
-  const [notice, setNotice] = useState("Simulation mode. Wallet signing is disabled until environment credentials are configured.");
+  const [limitPrice, setLimitPrice] = useState("");
+  const [notice, setNotice] = useState("Live submission requires verified Pyth pricing, USDC custody and MagicBlock delegation.");
   const [book, setBook] = useState<{ bids: BookLevel[]; asks: BookLevel[] }>({ bids: [], asks: [] });
   const [marketFeedStatus, setMarketFeedStatus] = useState<"connecting" | "live" | "unavailable">(marketApiUrl ? "connecting" : "unavailable");
   const active = false;
@@ -86,7 +91,12 @@ export function TradingTerminal() {
 
   function submitOrder() {
     if (!canTrade) {
-      setNotice("Start a delegated trading session before placing an order. Deposits and withdrawals always stay on Solana L1.");
+      if (!auth.authenticated) { setNotice("Sign in with Privy to construct a safe PlaceOrder preview. No transaction was created."); return; }
+      if (!marketAddress || !auth.walletAddress) { setNotice("Preview unavailable: configure NEXT_PUBLIC_STOCKSTREAM_MARKET_ADDRESS. No transaction was created."); return; }
+      try {
+        const preview = previewPlaceOrder({ market: marketAddress, authority: auth.walletAddress, seatIndex: 0, side: side === "long" ? "bid" : "ask", quantity: BigInt(quantityNumber), priceOrOffset: BigInt(limitPrice || 0), clientOrderId: 0n });
+        setNotice(`Unsigned ${preview.instruction} preview: ${preview.accounts.length} accounts, ${preview.signers.length} signer, margin ${preview.estimatedInternalMargin}. Live submission requires verified Pyth pricing, USDC custody and MagicBlock delegation.`);
+      } catch (error) { setNotice(error instanceof Error ? error.message : "Could not construct order preview"); }
       return;
     }
     setNotice(`${side === "short" ? "Short" : "Long"} order requires the deployed StockStream program client. No transaction was sent.`);
@@ -100,13 +110,19 @@ export function TradingTerminal() {
           <button className={tab === "trade" ? "nav-active" : ""} onClick={() => setTab("trade")}>Perps</button>
           <button className={tab === "launch" ? "nav-active" : ""} onClick={() => setTab("launch")}>Launch Lab</button>
         </nav>
-        <div className="topbar-meta"><span className="network"><i /> Devnet</span><button className="wallet-button"><WalletCards size={16} /> Connect wallet</button></div>
+        <div className="topbar-meta"><span className="network"><i /> Devnet</span>{auth.authenticated ? <><button className="wallet-button" onClick={() => void navigator.clipboard.writeText(auth.walletAddress ?? "")} title="Copy wallet address"><WalletCards size={16} /> {auth.walletAddress?.slice(0, 4)}...{auth.walletAddress?.slice(-4)}</button><button className="wallet-button" onClick={() => void auth.logout()}>Log out</button></> : <button className="wallet-button" onClick={auth.login}><WalletCards size={16} /> Sign in</button>}</div>
       </header>
 
       <section className="status-strip" aria-live="polite">
-        <div><Radio size={15} /> <strong>Read-only</strong><span>{active ? "MagicBlock ER route selected" : "Solana L1 route selected"}</span></div>
-        <div><Clock3 size={15} /> ER unavailable <span> / L1 unavailable</span></div>
-        <div><ShieldCheck size={15} /> Pyth index <span>awaiting configured stock feed</span></div>
+        <div><Radio size={15} /> <strong>Trading disabled</strong><span>Authenticated previews only</span></div>
+        <div><Clock3 size={15} /> MagicBlock <span>not delegated</span></div>
+        <div><ShieldCheck size={15} /> Oracle <span>not connected</span></div>
+      </section>
+
+      <section className="status-strip" aria-label="StockStream status">
+        <div><strong>Program</strong><span>local build available</span></div>
+        <div><strong>Collateral</strong><span>test-only/not connected</span></div>
+        <div><strong>Session</strong><span>{auth.authenticated ? "authenticated" : "not authenticated"}</span></div>
       </section>
 
       {tab === "trade" ? (
@@ -122,14 +138,7 @@ export function TradingTerminal() {
               <Metric label="Feed" value={marketFeedStatus} />
               <Metric label="Source" value="MagicBlock ER" />
             </div>
-            <div className="chart-area">
-              <div className="chart-label"><span>Price / USD</span><span className="positive">US market open</span></div>
-              <svg viewBox="0 0 760 240" preserveAspectRatio="none" role="img" aria-label="Illustrative AAPL perpetual price history">
-                <path d="M0 188 C36 169 64 197 98 165 S158 175 192 137 S248 151 280 116 S349 121 391 83 S459 117 494 73 S550 89 590 61 S650 88 692 41 S735 49 760 22" fill="none" stroke="currentColor" strokeWidth="3" />
-                <path d="M0 188 C36 169 64 197 98 165 S158 175 192 137 S248 151 280 116 S349 121 391 83 S459 117 494 73 S550 89 590 61 S650 88 692 41 S735 49 760 22 L760 240 L0 240 Z" className="chart-fill" />
-              </svg>
-              <div className="chart-axis"><span>09:30</span><span>12:00</span><span>14:30</span><span>16:00</span></div>
-            </div>
+            <div className="chart-area"><div className="chart-label"><span>Price / USD</span><span className="muted">No verified oracle feed</span></div><div className="chart-empty">Market visualization is disabled until a verified data source is connected.</div></div>
             <div className="execution-note"><Activity size={16} /><span>Perps risk reads only the Pyth index. Launch-pool values are analytics, never collateral or liquidation inputs.</span></div>
           </section>
 
@@ -146,9 +155,9 @@ export function TradingTerminal() {
             <div className="side-toggle" role="group" aria-label="Order direction"><button className={side === "long" ? "long active-side" : "long"} onClick={() => setSide("long")}><TrendingUp size={16} /> Long</button><button className={side === "short" ? "short active-side" : "short"} onClick={() => setSide("short")}><TrendingDown size={16} /> Short</button></div>
             <label>Order type<select defaultValue="marketable-limit"><option value="marketable-limit">Marketable limit</option><option value="limit">Limit</option><option value="post-only">Post-only</option></select></label>
             <label>Size<input value={quantity} type="number" min="1" onChange={(event) => setQuantity(event.target.value)} /><span className="input-suffix">shares</span></label>
-            <label>Limit price<input defaultValue="" placeholder={Number.isFinite(markPrice) ? markPrice.toFixed(2) : "Awaiting ER data"} inputMode="decimal" /><span className="input-suffix">USD</span></label>
+            <label>Limit price<input value={limitPrice} onChange={(event) => setLimitPrice(event.target.value)} placeholder={Number.isFinite(markPrice) ? markPrice.toFixed(2) : "Awaiting verified price"} inputMode="decimal" /><span className="input-suffix">USD</span></label>
             <div className="order-review"><span>Estimated notional</span><strong>{Number.isFinite(notional) ? formatUsd(notional) : "--"}</strong><span>Initial margin</span><strong>{Number.isFinite(notional) ? formatUsd(notional * 0.2) : "--"}</strong><span>Est. liquidation</span><strong>Calculated on-chain</strong></div>
-            <button className={side === "short" ? "submit short-submit" : "submit long-submit"} onClick={submitOrder}>{side === "short" ? "Open short" : "Open long"}</button>
+            <button className={side === "short" ? "submit short-submit" : "submit long-submit"} onClick={submitOrder}>{auth.authenticated ? "Preview order" : "Sign in to preview"}</button>
             <p className="form-note">Session scope: AAPL-PERP only. Withdrawals and collateral transfers are excluded.</p>
           </aside>
 

@@ -55,6 +55,7 @@ pub enum BookError {
     BadTag,
     BadPrice,
     BadSequence,
+    InvalidOwner,
     InvalidTree,
     Integrity,
     BadLimit,
@@ -423,6 +424,19 @@ impl Arena {
         Ok(leaf)
     }
 
+    pub fn remove_owned(
+        &mut self,
+        tree: TreeKind,
+        key: u128,
+        owner: u32,
+    ) -> Result<LeafNode, BookError> {
+        let handle = self.find(tree, key)?;
+        if self.leaf(handle)?.owner != owner {
+            return Err(BookError::InvalidOwner);
+        }
+        self.remove(tree, key)
+    }
+
     fn replace_child(
         &mut self,
         root_index: usize,
@@ -513,6 +527,32 @@ impl Arena {
             let key = self.leaf(handle)?.key;
             self.remove(tree, key)?;
             removed += 1;
+        }
+        Ok(removed)
+    }
+
+    pub fn cancel_owner(&mut self, owner: u32, max: u8) -> Result<u8, BookError> {
+        let mut removed = 0u8;
+        let mut tree_index = 0usize;
+        while tree_index < 2 && removed < max {
+            let tree = if tree_index == 0 {
+                TreeKind::Fixed
+            } else {
+                TreeKind::OraclePegged
+            };
+            let mut handle = 0u32;
+            while handle < self.bump_index && removed < max {
+                let tag = self.tag(handle)?;
+                if tag == TAG_LEAF {
+                    let leaf = self.leaf(handle)?;
+                    if leaf.owner == owner && self.find(tree, leaf.key) == Ok(handle) {
+                        self.remove(tree, leaf.key)?;
+                        removed += 1;
+                    }
+                }
+                handle += 1;
+            }
+            tree_index += 1;
         }
         Ok(removed)
     }

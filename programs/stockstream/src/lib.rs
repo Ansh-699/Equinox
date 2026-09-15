@@ -4,8 +4,11 @@ pinocchio::nostd_panic_handler!();
 
 pub mod book;
 pub mod error;
+pub mod handlers;
 pub mod initialize_market;
 pub mod instruction;
+pub mod risk;
+pub mod state;
 
 use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
 
@@ -43,11 +46,8 @@ pub fn process_instruction(
         return Err(ProgramError::IncorrectProgramId);
     }
 
-    match StockStreamInstruction::decode(instruction_data)? {
-        StockStreamInstruction::InitializeMarket => {
-            initialize_market::process(program_id, accounts)
-        }
-    }
+    let instruction = StockStreamInstruction::decode(instruction_data)?;
+    handlers::dispatch(program_id, accounts, instruction)
 }
 
 #[cfg(feature = "bpf-entrypoint")]
