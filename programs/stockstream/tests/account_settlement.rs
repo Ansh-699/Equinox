@@ -158,6 +158,59 @@ fn created_market_copies_reviewed_instrument_oracle_configuration() {
 }
 
 #[test]
+fn trading_session_is_bound_to_the_owners_actual_seat_and_can_be_revoked() {
+    let f = fixture();
+    let session_signer = account(
+        Address::new_from_array([90; 32]),
+        Address::default(),
+        0,
+        true,
+        false,
+    );
+    let session = account(Address::new_from_array([91; 32]), ID, 176, false, true);
+    let mut authorize = vec![17];
+    authorize.extend(2u64.to_le_bytes());
+    authorize.extend(7u64.to_le_bytes());
+    process_instruction(
+        &ID,
+        &mut [
+            f.market.view.clone(),
+            f.maker.view.clone(),
+            session.view.clone(),
+            session_signer.view.clone(),
+        ],
+        &authorize,
+    )
+    .unwrap();
+    let stored = unsafe { session.view.borrow_unchecked() };
+    assert_eq!(&stored[..8], b"STKSES01");
+    assert_eq!(&stored[10..42], f.maker.view.address().as_ref());
+    assert_eq!(&stored[42..74], session_signer.view.address().as_ref());
+    assert_eq!(u16::from_le_bytes(stored[106..108].try_into().unwrap()), 0);
+    assert_eq!(u64::from_le_bytes(stored[159..167].try_into().unwrap()), 7);
+    let mut place_accounts = [
+        f.market.view.clone(),
+        session_signer.view.clone(),
+        f.maker_scratch.view.clone(),
+        session.view.clone(),
+    ];
+    process_instruction(&ID, &mut place_accounts, &order_data(1, 0, 1, 100, 0, 990)).unwrap();
+    let mut revoke = vec![18];
+    revoke.extend(7u64.to_le_bytes());
+    process_instruction(
+        &ID,
+        &mut [
+            f.market.view.clone(),
+            f.maker.view.clone(),
+            session.view.clone(),
+        ],
+        &revoke,
+    )
+    .unwrap();
+    assert_eq!(unsafe { session.view.borrow_unchecked() }[9], 1);
+}
+
+#[test]
 fn forged_exchange_owner_cannot_register_instrument() {
     use stockstream::registry::{derive_instrument, EXCHANGE_SIZE, INSTRUMENT_SIZE};
     let owner = account(

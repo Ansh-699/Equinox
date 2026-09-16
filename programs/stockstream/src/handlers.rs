@@ -121,9 +121,27 @@ fn signer(account: &AccountView) -> ProgramResult {
 }
 
 const SESSION_DISCRIMINATOR: [u8; 8] = *b"STKSES01";
+const SESSION_VERSION: u8 = 1;
+const TRADING_SESSION_SIZE: usize = 176;
 const SESSION_PLACE: u8 = 1;
 const SESSION_CANCEL: u8 = 2;
 const SESSION_CANCEL_ALL: u8 = 8;
+
+const SESSION_VERSION_OFFSET: usize = 8;
+const SESSION_REVOKED_OFFSET: usize = 9;
+const SESSION_OWNER_OFFSET: usize = 10;
+const SESSION_SIGNER_OFFSET: usize = 42;
+const SESSION_MARKET_OFFSET: usize = 74;
+const SESSION_SEAT_OFFSET: usize = 106;
+const SESSION_EXPIRY_OFFSET: usize = 108;
+const SESSION_ACTIONS_OFFSET: usize = 116;
+const SESSION_MAX_ORDER_NOTIONAL_OFFSET: usize = 117;
+const SESSION_MAX_CUMULATIVE_NOTIONAL_OFFSET: usize = 125;
+const SESSION_USED_CUMULATIVE_NOTIONAL_OFFSET: usize = 133;
+const SESSION_MAX_EXPOSURE_OFFSET: usize = 141;
+const SESSION_MAX_OPEN_ORDERS_OFFSET: usize = 157;
+const SESSION_NONCE_OFFSET: usize = 159;
+const SESSION_LAST_USED_NONCE_OFFSET: usize = 167;
 
 fn authorize_trading_actor(
     accounts: &[AccountView],
@@ -143,26 +161,65 @@ fn authorize_trading_actor(
         return Err(ProgramError::MissingRequiredSignature);
     }
     let session = &accounts[session_account_index];
-    if !session.is_writable() || !session.owned_by(&crate::ID) || session.data_len() < 124 {
+    if !session.is_writable()
+        || !session.owned_by(&crate::ID)
+        || session.data_len() != TRADING_SESSION_SIZE
+        || session.address() == accounts[0].address()
+        || session.address() == accounts[1].address()
+    {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
     let bytes = unsafe { session.borrow_unchecked() };
     if bytes[0..8] != SESSION_DISCRIMINATOR
-        || bytes[8..40] != seat.trader
-        || bytes[40..72] != signer_key
-        || bytes[72..104] != *market
+        || bytes[SESSION_VERSION_OFFSET] != SESSION_VERSION
+        || bytes[SESSION_REVOKED_OFFSET] != 0
+        || bytes[SESSION_OWNER_OFFSET..SESSION_OWNER_OFFSET + 32] != seat.trader
+        || bytes[SESSION_SIGNER_OFFSET..SESSION_SIGNER_OFFSET + 32] != signer_key
+        || bytes[SESSION_MARKET_OFFSET..SESSION_MARKET_OFFSET + 32] != *market
     {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
-    if u16::from_le_bytes(bytes[104..106].try_into().unwrap()) != seat_index as u16
-        || bytes[114] & action == 0
-        || bytes[115] != 0
+    if u16::from_le_bytes(
+        bytes[SESSION_SEAT_OFFSET..SESSION_SEAT_OFFSET + 2]
+            .try_into()
+            .unwrap(),
+    ) != seat_index as u16
+        || bytes[SESSION_ACTIONS_OFFSET] & action == 0
+        || u64::from_le_bytes(
+            bytes[SESSION_LAST_USED_NONCE_OFFSET..SESSION_LAST_USED_NONCE_OFFSET + 8]
+                .try_into()
+                .unwrap(),
+        ) > u64::from_le_bytes(
+            bytes[SESSION_NONCE_OFFSET..SESSION_NONCE_OFFSET + 8]
+                .try_into()
+                .unwrap(),
+        )
     {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
-    if u64::from_le_bytes(bytes[106..114].try_into().unwrap()) <= now
+    let max_order = u64::from_le_bytes(
+        bytes[SESSION_MAX_ORDER_NOTIONAL_OFFSET..SESSION_MAX_ORDER_NOTIONAL_OFFSET + 8]
+            .try_into()
+            .unwrap(),
+    );
+    let max_cumulative = u64::from_le_bytes(
+        bytes[SESSION_MAX_CUMULATIVE_NOTIONAL_OFFSET..SESSION_MAX_CUMULATIVE_NOTIONAL_OFFSET + 8]
+            .try_into()
+            .unwrap(),
+    );
+    let used = u64::from_le_bytes(
+        bytes[SESSION_USED_CUMULATIVE_NOTIONAL_OFFSET..SESSION_USED_CUMULATIVE_NOTIONAL_OFFSET + 8]
+            .try_into()
+            .unwrap(),
+    );
+    if u64::from_le_bytes(
+        bytes[SESSION_EXPIRY_OFFSET..SESSION_EXPIRY_OFFSET + 8]
+            .try_into()
+            .unwrap(),
+    ) <= now
         || notional < 0
-        || notional as u128 > u64::from_le_bytes(bytes[116..124].try_into().unwrap()) as u128
+        || notional as u128 > max_order as u128
+        || (notional as u128).saturating_add(used as u128) > max_cumulative as u128
     {
         return Err(custom(StockStreamError::RiskViolation));
     }
@@ -929,20 +986,69 @@ fn authorize_trading_session(
     expires_at: u64,
     nonce: u64,
 ) -> ProgramResult {
-    if accounts.len() < 2 {
+    if accounts.len() != 4 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
     signer(&accounts[1])?;
     let owner = accounts[1].address().to_bytes();
-    let data = market_data(&mut accounts[0], program_id)?;
-    let mut seat = seat_at(data, 0)?;
-    if seat.trader != owner || expires_at == 0 {
+    let market_key = accounts[0].address().to_bytes();
+    let session_key = accounts[2].address().to_bytes();
+    let session_signer = accounts[3].address().to_bytes();
+    if !accounts[2].is_writable()
+        || !accounts[2].owned_by(program_id)
+        || accounts[2].data_len() != TRADING_SESSION_SIZE
+        || session_key == market_key
+        || session_key == owner
+        || session_key == session_signer
+        || session_signer == owner
+    {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
-    seat.reserved[0] = 1;
-    seat.reserved[1..9].copy_from_slice(&expires_at.to_le_bytes());
-    seat.reserved[9..17].copy_from_slice(&nonce.to_le_bytes());
-    write_seat(data, 0, &seat)
+    let data = market_data(&mut accounts[0], program_id)?;
+    let header = initialized_header(data)?;
+    if expires_at <= header.last_verified_oracle_timestamp {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let mut found = None;
+    let mut index = 0;
+    while index < MAX_TRADER_SEATS {
+        let seat = seat_at(data, index)?;
+        if seat.occupancy == 1 && seat.trader == owner {
+            found = Some(index as u16);
+            break;
+        }
+        index += 1;
+    }
+    let Some(seat_index) = found else {
+        return Err(custom(StockStreamError::InvalidSeat));
+    };
+    let session = unsafe { accounts[2].borrow_unchecked_mut() };
+    if session[0..8] == SESSION_DISCRIMINATOR && session[SESSION_REVOKED_OFFSET] == 0 {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    session.fill(0);
+    session[0..8].copy_from_slice(&SESSION_DISCRIMINATOR);
+    session[SESSION_VERSION_OFFSET] = SESSION_VERSION;
+    session[SESSION_OWNER_OFFSET..SESSION_OWNER_OFFSET + 32].copy_from_slice(&owner);
+    // The session signer stays client-held; the program only stores its public
+    // key and policy, never a signing secret.
+    session[SESSION_SIGNER_OFFSET..SESSION_SIGNER_OFFSET + 32].copy_from_slice(&session_signer);
+    session[SESSION_MARKET_OFFSET..SESSION_MARKET_OFFSET + 32].copy_from_slice(&market_key);
+    session[SESSION_SEAT_OFFSET..SESSION_SEAT_OFFSET + 2]
+        .copy_from_slice(&seat_index.to_le_bytes());
+    session[SESSION_EXPIRY_OFFSET..SESSION_EXPIRY_OFFSET + 8]
+        .copy_from_slice(&expires_at.to_le_bytes());
+    session[SESSION_ACTIONS_OFFSET] = SESSION_PLACE | SESSION_CANCEL | SESSION_CANCEL_ALL;
+    session[SESSION_MAX_ORDER_NOTIONAL_OFFSET..SESSION_MAX_ORDER_NOTIONAL_OFFSET + 8]
+        .copy_from_slice(&u64::MAX.to_le_bytes());
+    session[SESSION_MAX_CUMULATIVE_NOTIONAL_OFFSET..SESSION_MAX_CUMULATIVE_NOTIONAL_OFFSET + 8]
+        .copy_from_slice(&u64::MAX.to_le_bytes());
+    session[SESSION_MAX_EXPOSURE_OFFSET..SESSION_MAX_EXPOSURE_OFFSET + 16]
+        .copy_from_slice(&i128::MAX.to_le_bytes());
+    session[SESSION_MAX_OPEN_ORDERS_OFFSET..SESSION_MAX_OPEN_ORDERS_OFFSET + 2]
+        .copy_from_slice(&u16::MAX.to_le_bytes());
+    session[SESSION_NONCE_OFFSET..SESSION_NONCE_OFFSET + 8].copy_from_slice(&nonce.to_le_bytes());
+    Ok(())
 }
 
 fn revoke_trading_session(
@@ -950,19 +1056,38 @@ fn revoke_trading_session(
     accounts: &mut [AccountView],
     nonce: u64,
 ) -> ProgramResult {
-    if accounts.len() < 2 {
+    if accounts.len() != 3 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
     signer(&accounts[1])?;
     let owner = accounts[1].address().to_bytes();
-    let data = market_data(&mut accounts[0], program_id)?;
-    let mut seat = seat_at(data, 0)?;
-    if seat.trader != owner || u64::from_le_bytes(seat.reserved[9..17].try_into().unwrap()) != nonce
+    let market_key = accounts[0].address().to_bytes();
+    let session_key = accounts[2].address().to_bytes();
+    if !accounts[2].is_writable()
+        || !accounts[2].owned_by(program_id)
+        || accounts[2].data_len() != TRADING_SESSION_SIZE
+        || session_key == market_key
+        || session_key == owner
     {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
-    seat.reserved[0] = 0;
-    write_seat(data, 0, &seat)
+    let data = market_data(&mut accounts[0], program_id)?;
+    initialized_header(data)?;
+    let session = unsafe { accounts[2].borrow_unchecked_mut() };
+    if session[0..8] != SESSION_DISCRIMINATOR
+        || session[SESSION_VERSION_OFFSET] != SESSION_VERSION
+        || session[SESSION_OWNER_OFFSET..SESSION_OWNER_OFFSET + 32] != owner
+        || session[SESSION_MARKET_OFFSET..SESSION_MARKET_OFFSET + 32] != market_key
+        || u64::from_le_bytes(
+            session[SESSION_NONCE_OFFSET..SESSION_NONCE_OFFSET + 8]
+                .try_into()
+                .unwrap(),
+        ) != nonce
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    session[SESSION_REVOKED_OFFSET] = 1;
+    Ok(())
 }
 
 fn create_seat(program_id: &Address, accounts: &mut [AccountView], index: usize) -> ProgramResult {
@@ -1035,7 +1160,7 @@ fn place_order(
     if expected_scratch != *accounts[2].address() {
         return Err(custom(StockStreamError::InvalidSettlementScratch));
     }
-    let session_authorized = {
+    let (session_authorized, seat_owner) = {
         let snapshot = unsafe { accounts[0].borrow_unchecked() };
         let snapshot_header = initialized_header(snapshot)?;
         let snapshot_seat = seat_at(snapshot, order.seat_index as usize)?;
@@ -1049,7 +1174,7 @@ fn place_order(
             0,
             snapshot_header.last_verified_oracle_timestamp,
         )?;
-        snapshot_seat.trader != trader
+        (snapshot_seat.trader != trader, snapshot_seat.trader)
     };
     let (market_accounts, scratch_accounts) = accounts.split_at_mut(2);
     let scratch_bytes = scratch_data(&mut scratch_accounts[0], program_id)?;
@@ -1155,7 +1280,9 @@ fn place_order(
     };
     let now = header.last_verified_oracle_timestamp;
     let scratch_before = scratch.read_header();
-    let nonce = scratch.begin(market_address, trader, order.seat_index)?;
+    // Scratch is bound to the trader seat's owner, not the delegated session
+    // signer. A session must not be able to redirect a seat's working account.
+    let nonce = scratch.begin(market_address, seat_owner, order.seat_index)?;
     {
         let planned = scratch.plan_mut();
         unsafe {
