@@ -45,7 +45,9 @@ test("integration constructors preserve discriminators, account order and signer
   expect(decodeInstruction(commitMarket({ market, authority }, 4n).data).name).toBe("CommitMarket");
   expect(decodeInstruction(delegateMarket({ market, authority, hotAccounts: [settlementScratch] }, 2n).data).name).toBe("DelegateMarket");
   expect(decodeInstruction(undelegationCallback({ market, authority }, 3n).data).name).toBe("UndelegationCallback");
-  expect(decodeInstruction(authorizeTradingSession({ market, authority, session: PublicKey.unique(), sessionSigner: PublicKey.unique() }, 99n, 1n).data).name).toBe("AuthorizeTradingSession");
+  const session = authorizeTradingSession({ market, authority, session: PublicKey.unique(), sessionSigner: PublicKey.unique() }, 99n, 1n, { seatIndex: 0, actions: 3, maxOrderNotional: 10n, maxCumulativeNotional: 20n, maximumExposure: 30n, maximumOpenOrders: 2 });
+  expect(decodeInstruction(session.data).name).toBe("AuthorizeTradingSession");
+  expect(session.data).toHaveLength(54);
 });
 
 test("registry constructors preserve market-scoped account order", () => {

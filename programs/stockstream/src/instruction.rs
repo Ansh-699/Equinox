@@ -97,8 +97,14 @@ pub enum StockStreamInstruction {
         sequence: u64,
     },
     AuthorizeTradingSession {
+        seat_index: u16,
         expires_at: u64,
         nonce: u64,
+        actions: u8,
+        max_order_notional: u64,
+        max_cumulative_notional: u64,
+        maximum_exposure: i128,
+        maximum_open_orders: u16,
     },
     RevokeTradingSession {
         nonce: u64,
@@ -220,10 +226,20 @@ impl StockStreamInstruction {
                     sequence: read_u64(data, 9).ok_or(ProgramError::InvalidInstructionData)?,
                 })
             }
-            Some(AUTHORIZE_TRADING_SESSION) if data.len() == 17 => {
+            Some(AUTHORIZE_TRADING_SESSION) if data.len() == 54 => {
                 Ok(Self::AuthorizeTradingSession {
-                    expires_at: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
-                    nonce: read_u64(data, 9).ok_or(ProgramError::InvalidInstructionData)?,
+                    seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+                    expires_at: read_u64(data, 3).ok_or(ProgramError::InvalidInstructionData)?,
+                    nonce: read_u64(data, 11).ok_or(ProgramError::InvalidInstructionData)?,
+                    actions: data[19],
+                    max_order_notional: read_u64(data, 20)
+                        .ok_or(ProgramError::InvalidInstructionData)?,
+                    max_cumulative_notional: read_u64(data, 28)
+                        .ok_or(ProgramError::InvalidInstructionData)?,
+                    maximum_exposure: read_i128(data, 36)
+                        .ok_or(ProgramError::InvalidInstructionData)?,
+                    maximum_open_orders: read_u16(data, 52)
+                        .ok_or(ProgramError::InvalidInstructionData)?,
                 })
             }
             Some(REVOKE_TRADING_SESSION) if data.len() == 9 => Ok(Self::RevokeTradingSession {

@@ -116,7 +116,7 @@ export function TradingTerminal() {
     if (!session || (!revoke && !sessionSigner)) { setNotice("Trading session action blocked: session account and signer public key are not configured."); return; }
     const ix = revoke
       ? revokeTradingSession({ market: marketAddress, authority: auth.walletAddress, session: session! }, 1n)
-      : authorizeTradingSession({ market: marketAddress, authority: auth.walletAddress, session: session!, sessionSigner: sessionSigner! }, BigInt(Date.now() + 3_600_000), 1n);
+      : authorizeTradingSession({ market: marketAddress, authority: auth.walletAddress, session: session!, sessionSigner: sessionSigner! }, BigInt(Date.now() + 3_600_000), 1n, { seatIndex: 0, actions: 0b1011, maxOrderNotional: 1_000_000n, maxCumulativeNotional: 10_000_000n, maximumExposure: 1_000_000n, maximumOpenOrders: 32 });
     setNotice(`Constructed ${revoke ? "RevokeTradingSession" : "AuthorizeTradingSession"} with ${ix.keys.length} accounts. No signature was requested.`);
   }
 
