@@ -148,3 +148,26 @@ first end-to-end custody tests.
 | Custody events | IMPLEMENTED / UNIT TESTED | `pinocchio_log`-based program-log events (not a binary ring buffer, to avoid growing `MARKET_ACCOUNT_SIZE`); TypeScript decoder and golden vectors. |
 
 **Hardening pending. Audit pending. Production not approved.**
+
+## Priority 5/6 Status: Durable Indexer, Private Projections, Keepers (2026-09-17)
+
+`MARKET_VERSION` bumped to `2` for the now-permanent custody ledger fields
+(`docs/stockstream-build-record.md`'s Layout Formalization entry). Worker-
+side indexing, reconciliation and private-projection infrastructure is now
+substantially real, not aspirational:
+
+| Area | Status | Evidence / limitation |
+| --- | --- | --- |
+| L1/ER WebSocket transports | IMPLEMENTED / UNIT TESTED | Real Solana pubsub protocol (`logsSubscribe`/`accountSubscribe`/`signatureSubscribe`), bounded reconnect, subscription restoration, stale-connection detection. NOT wired into the scheduled ingestion loop yet (HTTP polling is the live path). |
+| Event decoding | IMPLEMENTED / UNIT TESTED / PARTIAL COVERAGE | Custody events only -- decoded from both live log notifications and `getTransaction` results. No other event type (order/fill/funding/liquidation/oracle/delegation/session) is logged by the Rust program yet, so there is nothing else to decode. |
+| Durable ingestion + gap recovery | IMPLEMENTED / UNIT TESTED (real D1 + real Durable Object) | Concrete `AccountSnapshotFetcher` backs gap-triggered resnapshot end to end, not just an interface. |
+| ER/L1 execution-status reconciliation | IMPLEMENTED / UNIT TESTED / INDEXER-DISPLAY-ONLY | Pure state-machine model for UI display; NOT wired to live on-chain commit data; explicitly not the security boundary (on-chain `DelegationStatus` is). |
+| Private trader projections | IMPLEMENTED / UNIT TESTED | Verified filtered subscriptions over the existing `MarketStream` Durable Object; on-chain seat-ownership check at issuance; public/private delivery structurally separated. |
+| Scheduled ingestion loop | IMPLEMENTED / UNIT TESTED | Independent fenced keeper lease alongside (not instead of) cleanup. |
+| Dead-letter handling | IMPLEMENTED / UNIT TESTED | First code ever to use the previously-inert `dead_letters` table; bounded-attempt give-up; `GET /v1/health/keepers`. |
+| Signing keeper jobs (Pyth push, commit scheduling, funding settlement) | NOT IMPLEMENTED | No wallet/key-management infrastructure exists in the Worker yet -- this is the next real blocker for Priority 6. |
+
+Worker test count: `66 passed; 0 failed` (real Miniflare/D1/Durable-Object
+environment, not plain JS fakes), up from `21`.
+
+**Hardening pending. Audit pending. Production not approved.**

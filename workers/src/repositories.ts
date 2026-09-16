@@ -1,7 +1,10 @@
+import { retryDelay } from './backoff';
+
 export interface Lease { key: string; holder: string; fence: number; expiresAt: number }
 export interface Operation { key: string; owner: string; request_hash: string; status: 'pending' | 'succeeded' | 'failed'; result_json: string | null }
 export interface DurableCursor { marketPda: string; domain: 'l1' | 'er'; sequence: number; slot: number; updatedAt: number }
 export type IndexedWrite = { kind: 'applied' } | { kind: 'duplicate' } | { kind: 'gap'; expected: number };
+export interface DeadLetter { id: string; operation: string; payload: unknown; error: string; attempts: number; nextAttemptAt: number; createdAt: number }
 
 function integer(value: number): void {
   if (!Number.isSafeInteger(value) || value < 0) throw new Error('Invalid integer');
@@ -140,3 +143,53 @@ export class IndexerRepository {
     return row ? { sequence: row.sequence, snapshot: JSON.parse(row.snapshot_json) } : null;
   }
 }
+
+/** Priority 6: a durable dead-letter queue for keeper work that failed.
+ * `dead_letters` (migration `0003_protocol_projection.sql`) previously had
+ * no code path writing to or reading from it at all. `record` schedules
+ * the next retry with `keepers.ts::retryDelay`'s bounded exponential
+ * backoff; `resolve` clears an entry once its operation finally succeeds
+ * (a later success always wins over an earlier recorded failure -- this
+ * is a queue of "still needs another attempt", not a permanent failure
+ * log). `giveUp` marks an entry as exhausted after too many attempts,
+ * removing it from the retry sweep's `due()` query without deleting the
+ * record, so it stays visible for manual/operator inspection. */
+export class DeadLetterRepository {
+  constructor(private readonly db: D1Database) {}
+
+  async record(id: string, operation: string, payload: unknown, error: string, now: number): Promise<{ attempts: number; nextAttemptAt: number }> {
+    identifier(id); identifier(operation);
+    const existing = await this.db.prepare('SELECT attempts FROM dead_letters WHERE id=?').bind(id).first<{ attempts: number }>();
+    const attempts = (existing?.attempts ?? 0) + 1;
+    const nextAttemptAt = now + retryDelay(attempts);
+    await this.db
+      .prepare(`INSERT INTO dead_letters(id, operation, payload_json, error, attempts, next_attempt_at, created_at)
+        VALUES (?,?,?,?,?,?,?)
+        ON CONFLICT(id) DO UPDATE SET operation=excluded.operation, payload_json=excluded.payload_json,
+          error=excluded.error, attempts=excluded.attempts, next_attempt_at=excluded.next_attempt_at`)
+      .bind(id, operation, JSON.stringify(payload), error, attempts, nextAttemptAt, now)
+      .run();
+    return { attempts, nextAttemptAt };
+  }
+
+  async due(now: number, limit = 50): Promise<DeadLetter[]> {
+    const result = await this.db
+      .prepare(`SELECT id, operation, payload_json AS payloadJson, error, attempts, next_attempt_at AS nextAttemptAt, created_at AS createdAt
+        FROM dead_letters WHERE next_attempt_at <= ? ORDER BY next_attempt_at ASC LIMIT ?`)
+      .bind(now, limit)
+      .all<{ id: string; operation: string; payloadJson: string; error: string; attempts: number; nextAttemptAt: number; createdAt: number }>();
+    return result.results.map((row) => ({ id: row.id, operation: row.operation, payload: JSON.parse(row.payloadJson), error: row.error, attempts: row.attempts, nextAttemptAt: row.nextAttemptAt, createdAt: row.createdAt }));
+  }
+
+  async resolve(id: string): Promise<void> {
+    await this.db.prepare('DELETE FROM dead_letters WHERE id=?').bind(id).run();
+  }
+
+  /** Pushes `nextAttemptAt` far into the future rather than deleting the
+   * row: the failure stays on record for an operator to find, but the
+   * retry sweep stops picking it up every tick. */
+  async giveUp(id: string, until: number): Promise<void> {
+    await this.db.prepare('UPDATE dead_letters SET next_attempt_at=? WHERE id=?').bind(until, id).run();
+  }
+}
+

@@ -1,7 +1,11 @@
 import { MarketStream } from "./market-stream";
 import type { MarketDefinition, MarketEvent, MarketEventKind } from "./types";
-import { IndexerRepository, ProtocolRepository, type IndexedWrite } from './repositories';
+import { DeadLetterRepository, IndexerRepository, ProtocolRepository, type IndexedWrite } from './repositories';
 import { keeperLeaseKey, runDurableKeeper } from './keepers';
+import { SolanaL1Transport, MagicBlockErTransport } from './chain-transports';
+import { decodeCustodyEvents } from './event-decoder';
+import { AccountSnapshotFetcher } from './ingestion-pipeline';
+import { MarketIndexer } from './indexer-service';
 
 export { MarketStream };
 
@@ -108,6 +112,57 @@ function asMarketDefinition(input: unknown): MarketDefinition | null {
   };
 }
 
+/**
+ * Priority 5, Section 8: the scheduled worker's real (not merely
+ * cleanup-only) ingestion tick. A persistent WebSocket subscription
+ * cannot outlive a single `scheduled` invocation in a stateless Worker
+ * (only a Durable Object connection can) -- see `ws-transport.ts`'s doc
+ * comment -- so this tick polls each registered market's recent L1
+ * signatures via the real HTTP transport instead, decodes any custody
+ * events out of the ones it hasn't already indexed, and ingests them
+ * through the same durable D1 + gap-resnapshot pipeline the (still
+ * separate, not-yet-wired) WebSocket path would use. Bounded to whatever
+ * `getSignaturesForAddress` returns per market per tick (its own server-
+ * side `limit`), not unbounded history replay.
+ */
+export async function runIngestionTick(env: Env, fetcher: typeof fetch = fetch): Promise<{ marketsPolled: number; eventsIngested: number }> {
+  if (!env.DB || !env.MARKET_STREAM || !env.SOLANA_RPC_URL) return { marketsPolled: 0, eventsIngested: 0 };
+  const db = env.DB;
+  const l1 = new SolanaL1Transport(env.SOLANA_RPC_URL, fetcher);
+  const er = new MagicBlockErTransport(env.MAGICBLOCK_RPC_URL ?? env.SOLANA_RPC_URL, fetcher);
+  const markets = await db
+    .prepare('SELECT symbol, instrument_id AS instrumentId, market_index AS marketIndex, market_pda AS marketPda, vault_pda AS vaultPda, status, oracle_feed_id AS oracleFeedId, session_policy AS sessionPolicy FROM markets')
+    .all<MarketDefinition>();
+  const definitionByPda = new Map(markets.results.map((market) => [market.marketPda, market]));
+  const indexerRepository = new IndexerRepository(db);
+  const indexer = new MarketIndexer(
+    indexerRepository,
+    new AccountSnapshotFetcher(l1, er, (pda) => {
+      const definition = definitionByPda.get(pda);
+      if (!definition) throw new Error(`unregistered market: ${pda}`);
+      return definition;
+    }),
+    (marketPda) => env.MARKET_STREAM!.getByName(definitionByPda.get(marketPda)?.symbol ?? marketPda),
+  );
+  let eventsIngested = 0;
+  for (const market of markets.results) {
+    const cursor = await indexerRepository.cursor(market.marketPda, 'l1');
+    let signatures: Array<{ signature: string; slot: number; err: unknown }>;
+    try { signatures = await l1.signatures(market.marketPda); } catch { continue; }
+    // The RPC returns newest-first; ingest oldest-first so sequence
+    // ordering has a chance of being contiguous instead of an immediate
+    // gap on every single tick.
+    for (const entry of [...signatures].reverse()) {
+      if (entry.err || (cursor && entry.slot <= cursor.slot)) continue;
+      let transaction: unknown;
+      try { transaction = await l1.transaction(entry.signature); } catch { continue; }
+      const events = decodeCustodyEvents(transaction as Parameters<typeof decodeCustodyEvents>[0], 'l1', Date.now());
+      for (const event of events) { await indexer.ingest(market.marketPda, event); eventsIngested += 1; }
+    }
+  }
+  return { marketsPolled: markets.results.length, eventsIngested };
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -115,6 +170,24 @@ export default {
 
     if (request.method === "GET" && url.pathname === "/health") {
       return json({ ok: true, service: "stockstream-market-api", environment: env.ENVIRONMENT });
+    }
+
+    // Priority 6: keeper health/metrics. Authorized like the other
+    // operational routes -- due dead-letter counts and per-kind lease
+    // freshness are operational detail, not public information.
+    if (request.method === "GET" && url.pathname === "/v1/health/keepers") {
+      if (!isAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
+      const { DB } = bindings(env);
+      const now = Date.now();
+      const due = await new DeadLetterRepository(DB).due(now, 100);
+      const leases = await DB.prepare(
+        "SELECT lease_key AS leaseKey, holder, fence, expires_at AS expiresAt FROM keeper_leases ORDER BY lease_key",
+      ).all<{ leaseKey: string; holder: string; fence: number; expiresAt: number }>();
+      return json({
+        checkedAt: now,
+        deadLetters: { due: due.length, entries: due.map((d) => ({ id: d.id, operation: d.operation, attempts: d.attempts, error: d.error })) },
+        leases: leases.results.map((lease) => ({ ...lease, active: lease.expiresAt > now })),
+      });
     }
 
     if (request.method === "POST" && url.pathname === "/v1/ingest/market-event") {
@@ -177,6 +250,10 @@ export default {
     const db = env.DB;
     const now = Date.now();
     const repository = new ProtocolRepository(db);
+    // Ingestion and cleanup are two independent fenced keepers, each with
+    // its own lease: a slow or failed ingestion tick must never block
+    // cleanup (or vice versa), and an expired keeper of either kind can
+    // never write after another instance has taken its lease over.
     await runDurableKeeper(repository, {
       leaseKey: keeperLeaseKey('cleanup'), holder: 'scheduled-worker',
       idempotencyKey: `cleanup:${Math.floor(now / 60_000)}`,
@@ -188,5 +265,14 @@ export default {
         return { cleanedAt: now };
       },
     });
+    if (env.SOLANA_RPC_URL) {
+      await runDurableKeeper(repository, {
+        leaseKey: keeperLeaseKey('ingestion'), holder: 'scheduled-worker',
+        idempotencyKey: `ingest:${Math.floor(now / 15_000)}`,
+        requestHash: `ingest:${Math.floor(now / 15_000)}`,
+        now, leaseTtlMs: 55_000, idempotencyTtlMs: 5 * 60_000,
+        work: () => runIngestionTick(env),
+      }).catch(() => {}); // a lease/idempotency conflict here just means another instance is already ticking; never let it fail the whole scheduled invocation.
+    }
   },
 } satisfies ExportedHandler<Env>;

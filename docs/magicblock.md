@@ -91,3 +91,24 @@ Additionally consulted, but **not a dependency and not copied into this reposito
   exact instruction bytes match the real crates' own serialization.
   End-to-end ER execution remains **SBF runtime unverified**, same as the
   rest of this program (see `docs/sbpf-compatibility.md`).
+
+## Indexer-side execution-status model (Priority 5, `workers/src/execution-status.ts`)
+
+The Worker keeps a separate, purely additive state machine
+(`MarketExecutionStatus`: `l1_only -> delegating -> er_active ->
+er_accepted -> commit_scheduled -> commit_observed_on_l1 ->
+commit_finalized -> undelegating -> restoration_pending -> restored`,
+with `reconciliation_error` reachable from any state on a conflicting or
+regressed sequence) for **display purposes only** -- it answers "what
+should the UI currently show for this market's ER/L1 status," never "is a
+withdrawal actually safe." That question is answered entirely on-chain by
+`DelegationStatus`/`l1_withdrawals_allowed()` in `programs/stockstream/src/state.rs`,
+which this Worker-side model cannot weaken or bypass even if it were wrong.
+It exists so the indexer/UI never displays ER-accepted state as if it were
+L1-committed truth, and never silently advances past a sequence that
+doesn't follow monotonically from what it last observed (any such
+conflict is `reconciliation_error`, requiring an explicit, named recovery
+call rather than self-healing). It is not yet wired to real on-chain
+commit-schedule/commit-observation data -- that would mean decoding actual
+delegation-program/magic-program account state, which hasn't been built.
+9 tests in `execution-status.test.ts`.
