@@ -1,5 +1,6 @@
 import { MarketStream } from "./market-stream";
 import type { MarketDefinition, MarketEvent, MarketEventKind } from "./types";
+import { ProtocolRepository } from './repositories';
 
 export { MarketStream };
 
@@ -33,6 +34,8 @@ function asMarketEvent(input: unknown): MarketEvent | null {
   }
 
   const record = input as Record<string, unknown>;
+  if (!Number.isSafeInteger(record.sequence) || Number(record.sequence) <= 0 ||
+      (record.domain !== 'l1' && record.domain !== 'er')) return null;
   return {
     id: input.id,
     symbol: input.symbol.toUpperCase(),
@@ -52,14 +55,14 @@ function bindings(env: Env): { DB: D1Database; MARKET_STREAM: DurableObjectNames
 
 async function ingestEvent(event: MarketEvent, env: Env): Promise<void> {
   const { DB, MARKET_STREAM } = bindings(env);
-  await DB.prepare(
+  const result = await DB.prepare(
     `INSERT OR IGNORE INTO market_events (id, symbol, kind, slot, payload, observed_at)
      VALUES (?, ?, ?, ?, ?, ?)`,
   )
     .bind(event.id, event.symbol, event.kind, event.slot ?? null, JSON.stringify(event.payload), event.observedAt)
     .run();
 
-  await MARKET_STREAM.getByName(event.symbol).publish(event);
+  if (result.meta.changes === 1) await MARKET_STREAM.getByName(event.symbol).publish(event);
 }
 
 function asMarketDefinition(input: unknown): MarketDefinition | null {
@@ -107,6 +110,8 @@ export default {
 
     if (request.method === "POST" && url.pathname === "/v1/ingest/market-event") {
       if (!isAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
+      if (!await new ProtocolRepository(bindings(env).DB).allow('ingestion', 1000, 60_000, Date.now()))
+        return json({ error: 'rate_limited' }, 429);
       const event = asMarketEvent(await request.json().catch(() => null));
       if (!event) return json({ error: "invalid_market_event" }, 400);
       await ingestEvent(event, env);
@@ -157,6 +162,6 @@ export default {
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
     if (!env.DB) return;
     await env.DB.prepare("DELETE FROM indexed_events WHERE observed_at < ?").bind(Date.now() - 90 * 24 * 60 * 60 * 1000).run();
-    await env.DB.prepare("DELETE FROM keeper_leases WHERE expires_at <= ?").bind(Date.now()).run();
+    await new ProtocolRepository(env.DB).cleanup(Date.now());
   },
 } satisfies ExportedHandler<Env>;

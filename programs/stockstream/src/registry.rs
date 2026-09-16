@@ -66,6 +66,34 @@ fn custom(error: StockStreamError) -> ProgramError {
     error.into()
 }
 
+fn validate_registry_accounts(program_id: &Address, accounts: &[AccountView]) -> ProgramResult {
+    if accounts.len() != 3 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    if !accounts[0].owned_by(program_id) || !accounts[1].owned_by(program_id) {
+        return Err(ProgramError::IllegalOwner);
+    }
+    if !accounts[2].is_signer() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    if accounts[0].address() == accounts[1].address()
+        || accounts[0].address() == accounts[2].address()
+        || accounts[1].address() == accounts[2].address()
+    {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    let exchange = accounts[0].try_borrow()?;
+    if exchange.len() != EXCHANGE_SIZE
+        || exchange[..8] != EXCHANGE_DISCRIMINATOR
+        || exchange[8..10] != 1u16.to_le_bytes()
+        || exchange[10] != 1
+        || exchange[11..43] != accounts[2].address().to_bytes()
+    {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    Ok(())
+}
+
 pub fn initialize_exchange(program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
     if accounts.len() < 2 {
         return Err(ProgramError::NotEnoughAccountKeys);
@@ -91,6 +119,7 @@ pub fn register_instrument(
     accounts: &mut [AccountView],
     id: [u8; 32],
 ) -> ProgramResult {
+    validate_registry_accounts(program_id, accounts)?;
     if accounts.len() < 3 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
@@ -124,8 +153,14 @@ pub fn update_instrument(
     program_id: &Address,
     accounts: &mut [AccountView],
     id: [u8; 32],
+    pyth_feed_id: u32,
+    oracle_channel: u8,
     exponent: i32,
 ) -> ProgramResult {
+    validate_registry_accounts(program_id, accounts)?;
+    if pyth_feed_id == 0 || !(1..=4).contains(&oracle_channel) || !(-12..=0).contains(&exponent) {
+        return Err(ProgramError::InvalidInstructionData);
+    }
     if accounts.len() < 3
         || !accounts[2].is_signer()
         || *accounts[1].address() != derive_instrument(program_id, accounts[0].address(), &id)
@@ -143,7 +178,9 @@ pub fn update_instrument(
     if data[0..8] != INSTRUMENT_DISCRIMINATOR || data[10] == 0 || data[11..43] != id {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
-    data[75..79].copy_from_slice(&exponent.to_le_bytes());
+    data[75..79].copy_from_slice(&pyth_feed_id.to_le_bytes());
+    data[79] = oracle_channel;
+    data[107..111].copy_from_slice(&exponent.to_le_bytes());
     Ok(())
 }
 
@@ -152,6 +189,7 @@ pub fn suspend_instrument(
     accounts: &mut [AccountView],
     id: [u8; 32],
 ) -> ProgramResult {
+    validate_registry_accounts(program_id, accounts)?;
     if accounts.len() < 3
         || !accounts[2].is_signer()
         || *accounts[1].address() != derive_instrument(program_id, accounts[0].address(), &id)
@@ -166,7 +204,7 @@ pub fn suspend_instrument(
     if data[0..8] != INSTRUMENT_DISCRIMINATOR || data[11..43] != id {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
-    data[79] = 1;
+    data[111] = 1;
     Ok(())
 }
 
@@ -181,6 +219,9 @@ pub fn create_perp_market(
     if !accounts[2].is_signer() {
         return Err(ProgramError::MissingRequiredSignature);
     }
+    if !accounts[0].owned_by(program_id) {
+        return Err(ProgramError::IllegalOwner);
+    }
     if *accounts[1].address() != derive_perp_market(program_id, accounts[0].address()) {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
@@ -188,10 +229,27 @@ pub fn create_perp_market(
     if instrument.len() != INSTRUMENT_SIZE
         || instrument[0..8] != INSTRUMENT_DISCRIMINATOR
         || instrument[10] == 0
+        || instrument[111] != 0
         || instrument[11..43] != id
     {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
+    let pyth_feed_id = u32::from_le_bytes(instrument[75..79].try_into().unwrap());
+    let oracle_channel = instrument[79];
+    let price_exponent = i32::from_le_bytes(instrument[107..111].try_into().unwrap());
+    if pyth_feed_id == 0
+        || !(1..=4).contains(&oracle_channel)
+        || !(-12..=0).contains(&price_exponent)
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
     let authority = accounts[2].address().clone();
-    handlers::initialize_market_account(program_id, &mut accounts[1], &authority, &id)
+    handlers::initialize_market_account(program_id, &mut accounts[1], &authority, &id)?;
+    handlers::configure_market_oracle(
+        program_id,
+        &mut accounts[1],
+        pyth_feed_id,
+        oracle_channel,
+        price_exponent,
+    )
 }

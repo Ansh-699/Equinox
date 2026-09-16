@@ -23,6 +23,205 @@ struct TestAccount {
     view: AccountView,
 }
 
+#[test]
+fn registry_update_and_suspend_preserve_feed_configuration() {
+    use stockstream::registry::{derive_instrument, EXCHANGE_SIZE, INSTRUMENT_SIZE};
+    let owner = account(
+        Address::new_from_array([81; 32]),
+        Address::default(),
+        0,
+        true,
+        false,
+    );
+    let exchange = account(
+        Address::new_from_array([82; 32]),
+        ID,
+        EXCHANGE_SIZE,
+        false,
+        true,
+    );
+    process_instruction(&ID, &mut [exchange.view.clone(), owner.view.clone()], &[19]).unwrap();
+    let id = [83; 32];
+    let instrument = account(
+        derive_instrument(&ID, exchange.view.address(), &id),
+        ID,
+        INSTRUMENT_SIZE,
+        false,
+        true,
+    );
+    let mut register = vec![20];
+    register.extend(id);
+    let mut accounts = [
+        exchange.view.clone(),
+        instrument.view.clone(),
+        owner.view.clone(),
+    ];
+    process_instruction(&ID, &mut accounts, &register).unwrap();
+    let mut update = vec![22];
+    update.extend(id);
+    update.extend(42u32.to_le_bytes());
+    update.push(1);
+    update.extend((-8i32).to_le_bytes());
+    process_instruction(&ID, &mut accounts, &update).unwrap();
+    let bytes = unsafe { instrument.view.borrow_unchecked() };
+    assert_eq!(&bytes[75..79], &42u32.to_le_bytes());
+    assert_eq!(bytes[79], 1);
+    assert_eq!(&bytes[107..111], &(-8i32).to_le_bytes());
+    let mut suspend = vec![23];
+    suspend.extend(id);
+    process_instruction(&ID, &mut accounts, &suspend).unwrap();
+    let bytes = unsafe { instrument.view.borrow_unchecked() };
+    assert_eq!(&bytes[75..79], &42u32.to_le_bytes());
+    assert_eq!(bytes[79], 1);
+    assert_eq!(bytes[111], 1);
+}
+
+#[test]
+fn created_market_copies_reviewed_instrument_oracle_configuration() {
+    use stockstream::registry::{
+        derive_instrument, derive_perp_market, EXCHANGE_SIZE, INSTRUMENT_SIZE,
+    };
+    let owner = account(
+        Address::new_from_array([87; 32]),
+        Address::default(),
+        0,
+        true,
+        false,
+    );
+    let exchange = account(
+        Address::new_from_array([88; 32]),
+        ID,
+        EXCHANGE_SIZE,
+        false,
+        true,
+    );
+    process_instruction(&ID, &mut [exchange.view.clone(), owner.view.clone()], &[19]).unwrap();
+    let id = [89; 32];
+    let instrument = account(
+        derive_instrument(&ID, exchange.view.address(), &id),
+        ID,
+        INSTRUMENT_SIZE,
+        false,
+        true,
+    );
+    let mut register = vec![20];
+    register.extend(id);
+    process_instruction(
+        &ID,
+        &mut [
+            exchange.view.clone(),
+            instrument.view.clone(),
+            owner.view.clone(),
+        ],
+        &register,
+    )
+    .unwrap();
+    let mut update = vec![22];
+    update.extend(id);
+    update.extend(77u32.to_le_bytes());
+    update.push(1);
+    update.extend((-6i32).to_le_bytes());
+    process_instruction(
+        &ID,
+        &mut [
+            exchange.view.clone(),
+            instrument.view.clone(),
+            owner.view.clone(),
+        ],
+        &update,
+    )
+    .unwrap();
+    let market = account(
+        derive_perp_market(&ID, instrument.view.address()),
+        ID,
+        MARKET_ACCOUNT_SIZE,
+        false,
+        true,
+    );
+    let mut create = vec![21];
+    create.extend(id);
+    process_instruction(
+        &ID,
+        &mut [
+            instrument.view.clone(),
+            market.view.clone(),
+            owner.view.clone(),
+        ],
+        &create,
+    )
+    .unwrap();
+    let data = unsafe { market.view.borrow_unchecked() };
+    assert_eq!(&data[327 + 64..327 + 68], &77u32.to_le_bytes());
+    assert_eq!(data[327 + 68], 1);
+    let exponent = core::mem::offset_of!(MarketStateHeader, price_exponent);
+    assert_eq!(&data[exponent..exponent + 4], &(-6i32).to_le_bytes());
+}
+
+#[test]
+fn forged_exchange_owner_cannot_register_instrument() {
+    use stockstream::registry::{derive_instrument, EXCHANGE_SIZE, INSTRUMENT_SIZE};
+    let owner = account(
+        Address::new_from_array([84; 32]),
+        Address::default(),
+        0,
+        true,
+        false,
+    );
+    let mut exchange = account(
+        Address::new_from_array([85; 32]),
+        Address::default(),
+        EXCHANGE_SIZE,
+        false,
+        true,
+    );
+    unsafe {
+        let data = exchange.view.borrow_unchecked_mut();
+        data[..8].copy_from_slice(b"STKEXC01");
+        data[8] = 1;
+        data[10] = 1;
+        data[11..43].copy_from_slice(owner.view.address().as_ref());
+    }
+    let id = [86; 32];
+    let instrument = account(
+        derive_instrument(&ID, exchange.view.address(), &id),
+        ID,
+        INSTRUMENT_SIZE,
+        false,
+        true,
+    );
+    let before = unsafe { instrument.view.borrow_unchecked().to_vec() };
+    let mut register = vec![20];
+    register.extend(id);
+    assert!(process_instruction(
+        &ID,
+        &mut [
+            exchange.view.clone(),
+            instrument.view.clone(),
+            owner.view.clone()
+        ],
+        &register
+    )
+    .is_err());
+    assert_eq!(unsafe { instrument.view.borrow_unchecked() }, before);
+}
+
+#[test]
+fn market_decoder_offsets_match_packed_rust_layout() {
+    assert_eq!(core::mem::offset_of!(MarketStateHeader, oracle_valid), 294);
+    assert_eq!(
+        core::mem::offset_of!(MarketStateHeader, last_verified_oracle_price),
+        295
+    );
+    assert_eq!(
+        core::mem::offset_of!(MarketStateHeader, bid_arena_offset),
+        311
+    );
+    assert_eq!(
+        core::mem::offset_of!(MarketStateHeader, reserved_upgrade),
+        327
+    );
+}
+
 fn account(
     address: Address,
     owner: Address,

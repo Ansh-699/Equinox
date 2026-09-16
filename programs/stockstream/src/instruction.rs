@@ -112,6 +112,8 @@ pub enum StockStreamInstruction {
     },
     UpdateStockInstrument {
         instrument_id: [u8; 32],
+        pyth_feed_id: u32,
+        oracle_channel: u8,
         price_exponent: i32,
     },
     SuspendStockInstrument {
@@ -199,7 +201,9 @@ impl StockStreamInstruction {
                 seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
                 amount: read_u64(data, 3).ok_or(ProgramError::InvalidInstructionData)?,
             }),
-            Some(CONSUME_ORACLE_UPDATE) if data.len() == 1 => Ok(Self::ConsumeOracleUpdate),
+            Some(CONSUME_ORACLE_UPDATE) if (104..=513).contains(&data.len()) => {
+                Ok(Self::ConsumeOracleUpdate)
+            }
             Some(DELEGATE_MARKET) if data.len() == 9 => Ok(Self::DelegateMarket {
                 sequence: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
             }),
@@ -238,11 +242,13 @@ impl StockStreamInstruction {
                     .try_into()
                     .map_err(|_| ProgramError::InvalidInstructionData)?,
             }),
-            Some(UPDATE_STOCK_INSTRUMENT) if data.len() == 37 => Ok(Self::UpdateStockInstrument {
+            Some(UPDATE_STOCK_INSTRUMENT) if data.len() == 42 => Ok(Self::UpdateStockInstrument {
                 instrument_id: data[1..33]
                     .try_into()
                     .map_err(|_| ProgramError::InvalidInstructionData)?,
-                price_exponent: read_i32(data, 33).ok_or(ProgramError::InvalidInstructionData)?,
+                pyth_feed_id: read_u32(data, 33).ok_or(ProgramError::InvalidInstructionData)?,
+                oracle_channel: data[37],
+                price_exponent: read_i32(data, 38).ok_or(ProgramError::InvalidInstructionData)?,
             }),
             Some(SUSPEND_STOCK_INSTRUMENT) if data.len() == 33 => {
                 Ok(Self::SuspendStockInstrument {

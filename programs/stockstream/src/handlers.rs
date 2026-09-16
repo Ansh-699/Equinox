@@ -3,7 +3,9 @@ use core::{
     ptr,
 };
 
-use pinocchio::cpi::{Seed, Signer};
+use pinocchio::cpi::{invoke_with_bounds, Seed, Signer};
+use pinocchio::instruction::{InstructionAccount, InstructionView};
+use pinocchio::sysvars::{clock::Clock, Sysvar};
 use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
 use pinocchio_token::instructions::Transfer;
 
@@ -89,6 +91,27 @@ fn initialized_header(data: &[u8]) -> Result<MarketStateHeader, ProgramError> {
     Ok(header)
 }
 
+/// Copies reviewed registry oracle configuration into a newly initialized
+/// market. Registry creation is the only path that may set a market's Pyth
+/// Pro feed/channel; trading never accepts either value from callers.
+pub(crate) fn configure_market_oracle(
+    program_id: &Address,
+    market: &mut AccountView,
+    feed_id: u32,
+    channel: u8,
+    price_exponent: i32,
+) -> ProgramResult {
+    if feed_id == 0 || !(1..=4).contains(&channel) || !(-12..=0).contains(&price_exponent) {
+        return Err(ProgramError::InvalidInstructionData);
+    }
+    let data = market_data(market, program_id)?;
+    let mut header = initialized_header(data)?;
+    header.price_exponent = price_exponent;
+    header.reserved_upgrade[64..68].copy_from_slice(&feed_id.to_le_bytes());
+    header.reserved_upgrade[68] = channel;
+    write_header(data, &header)
+}
+
 fn signer(account: &AccountView) -> ProgramResult {
     if account.is_signer() {
         Ok(())
@@ -107,6 +130,7 @@ fn authorize_trading_actor(
     market: &[u8],
     seat: &TraderSeat,
     seat_index: usize,
+    session_account_index: usize,
     action: u8,
     notional: i128,
     now: u64,
@@ -115,10 +139,10 @@ fn authorize_trading_actor(
     if signer_key == seat.trader {
         return Ok(());
     }
-    if accounts.len() < 4 {
+    if accounts.len() <= session_account_index {
         return Err(ProgramError::MissingRequiredSignature);
     }
-    let session = &accounts[3];
+    let session = &accounts[session_account_index];
     if !session.is_writable() || !session.owned_by(&crate::ID) || session.data_len() < 124 {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
@@ -204,6 +228,7 @@ pub fn dispatch(
     program_id: &Address,
     accounts: &mut [AccountView],
     instruction: StockStreamInstruction,
+    instruction_data: &[u8],
 ) -> ProgramResult {
     match instruction {
         StockStreamInstruction::InitializeMarket => initialize_market(program_id, accounts),
@@ -239,7 +264,9 @@ pub fn dispatch(
         StockStreamInstruction::WithdrawCollateral { seat_index, amount } => {
             withdraw_collateral(program_id, accounts, seat_index as usize, amount)
         }
-        StockStreamInstruction::ConsumeOracleUpdate => consume_oracle_update(program_id, accounts),
+        StockStreamInstruction::ConsumeOracleUpdate => {
+            consume_oracle_update(program_id, accounts, instruction_data)
+        }
         StockStreamInstruction::DelegateMarket { sequence } => {
             delegate_market(program_id, accounts, sequence)
         }
@@ -269,10 +296,17 @@ pub fn dispatch(
         }
         StockStreamInstruction::UpdateStockInstrument {
             instrument_id,
+            pyth_feed_id,
+            oracle_channel,
             price_exponent,
-        } => {
-            crate::registry::update_instrument(program_id, accounts, instrument_id, price_exponent)
-        }
+        } => crate::registry::update_instrument(
+            program_id,
+            accounts,
+            instrument_id,
+            pyth_feed_id,
+            oracle_channel,
+            price_exponent,
+        ),
         StockStreamInstruction::SuspendStockInstrument { instrument_id } => {
             crate::registry::suspend_instrument(program_id, accounts, instrument_id)
         }
@@ -464,7 +498,7 @@ fn custody_config(
     {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
-    if token_program != &TOKEN_PROGRAM_ID || header.reserved_upgrade[0] != 6 {
+    if token_program != &TOKEN_PROGRAM_ID || header.reserved_upgrade[1] != 1 {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
     Ok(())
@@ -486,14 +520,14 @@ fn initialize_vault(program_id: &Address, accounts: &mut [AccountView]) -> Progr
     {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
-    let mint_valid = {
+    let decimals = {
         let mint = pinocchio_token::state::Mint::from_account_view(&accounts[2])
             .map_err(|_| custom(StockStreamError::InvalidInstruction))?;
-        mint.is_initialized() && mint.decimals() == 6
+        if !mint.is_initialized() {
+            return Err(custom(StockStreamError::InvalidInstruction));
+        }
+        mint.decimals()
     };
-    if !mint_valid {
-        return Err(custom(StockStreamError::InvalidInstruction));
-    }
     let authority = accounts[1].address().to_bytes();
     let mint = accounts[2].address().to_bytes();
     let data = market_data(&mut accounts[0], program_id)?;
@@ -503,7 +537,7 @@ fn initialize_vault(program_id: &Address, accounts: &mut [AccountView]) -> Progr
     }
     header.collateral_mint = mint;
     header.collateral_token_program = TOKEN_PROGRAM_ID.to_bytes();
-    header.reserved_upgrade[0] = 6;
+    header.reserved_upgrade[0] = decimals;
     header.reserved_upgrade[1] = 1;
     write_header(data, &header)
 }
@@ -517,6 +551,7 @@ fn deposit_collateral(
     if accounts.len() < 7 || amount == 0 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
+    validate_custody_aliases(accounts)?;
     let (market_accounts, rest) = accounts.split_at_mut(1);
     signer(&rest[0])?;
     if market_accounts[0].address() == rest[2].address()
@@ -527,9 +562,11 @@ fn deposit_collateral(
     if *rest[3].address() != derive_vault(market_accounts[0].address(), program_id) {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
+    let vault_authority = derive_vault_authority(market_accounts[0].address(), program_id);
     let data = market_data(&mut market_accounts[0], program_id)?;
     let header = initialized_header(data)?;
     custody_config(&header, rest[4].address(), rest[5].address())?;
+    validate_custody_tokens(&header, &rest[4], &rest[3], &vault_authority)?;
     let mut seat = seat_at(data, seat_index)?;
     if seat.trader != rest[0].address().to_bytes() {
         return Err(custom(StockStreamError::InvalidSeat));
@@ -542,12 +579,12 @@ fn deposit_collateral(
     {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
-    Transfer::<&AccountView>::new(&rest[2], &rest[3], &rest[0], amount)
-        .invoke_with_program(rest[5].address())?;
     seat.available_collateral = seat
         .available_collateral
         .checked_add(amount as i128)
         .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
+    Transfer::<&AccountView>::new(&rest[2], &rest[3], &rest[0], amount)
+        .invoke_with_program(rest[5].address())?;
     write_seat(data, seat_index, &seat)
 }
 
@@ -560,6 +597,7 @@ fn withdraw_collateral(
     if accounts.len() < 7 || amount == 0 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
+    validate_custody_aliases(accounts)?;
     let (market_accounts, rest) = accounts.split_at_mut(1);
     signer(&rest[0])?;
     if *rest[3].address() != derive_vault(market_accounts[0].address(), program_id)
@@ -569,63 +607,224 @@ fn withdraw_collateral(
     }
     let trader = rest[0].address().to_bytes();
     let market_key = market_accounts[0].address().to_bytes();
+    let bump = [Address::find_program_address(&[VAULT_AUTHORITY_SEED, &market_key], program_id).1];
     let data = market_data(&mut market_accounts[0], program_id)?;
     let header = initialized_header(data)?;
     custody_config(&header, rest[2].address(), rest[5].address())?;
-    let mut seat = seat_at(data, seat_index)?;
-    if seat.trader != trader
-        || seat.available_collateral < amount as i128
-        || seat.available_collateral - (amount as i128) < seat.reserved_margin
-    {
+    validate_custody_tokens(&header, &rest[2], &rest[3], rest[4].address())?;
+    let seat = seat_at(data, seat_index)?;
+    if seat.trader != trader || seat.occupancy != 1 || header.oracle_valid != 1 {
         return Err(custom(StockStreamError::RiskViolation));
     }
+    let seat = risk::prepare_withdrawal(
+        &seat,
+        amount,
+        header.funding_accumulator,
+        header.last_verified_oracle_price as i128,
+        header.maintenance_margin_bps,
+    )
+    .map_err(|_| custom(StockStreamError::RiskViolation))?;
     let destination = pinocchio_token::state::Account::from_account_view(&rest[1])
         .map_err(|_| custom(StockStreamError::InvalidInstruction))?;
     if destination.mint() != rest[2].address() || destination.owner() != rest[0].address() {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
-    let seeds = [Seed::from(VAULT_AUTHORITY_SEED), Seed::from(&market_key)];
+    let seeds = [
+        Seed::from(VAULT_AUTHORITY_SEED),
+        Seed::from(&market_key),
+        Seed::from(&bump),
+    ];
     let signer_seeds = [Signer::from(&seeds)];
     Transfer::<&AccountView>::new(&rest[3], &rest[1], &rest[4], amount)
         .invoke_signed_with_program(&signer_seeds, rest[5].address())?;
-    seat.available_collateral -= amount as i128;
     write_seat(data, seat_index, &seat)
 }
 
-fn consume_oracle_update(program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
-    if accounts.len() < 6 {
-        return Err(ProgramError::NotEnoughAccountKeys);
+fn validate_custody_aliases(accounts: &[AccountView]) -> ProgramResult {
+    if accounts.len() != 7 {
+        return Err(ProgramError::InvalidInstructionData);
     }
-    let writable = accounts[1].is_writable();
-    let authority_key = accounts[1].address().clone();
-    let storage_key = accounts[3].address().clone();
-    let treasury_key = accounts[4].address().clone();
-    let payload_len = accounts[5].data_len();
-    let payload = unsafe { accounts[5].borrow_unchecked() };
-    if writable
-        || accounts[2].address() != &authority_key
-        || storage_key != treasury_key
-        || payload_len < 24
+    for i in 0..7 {
+        for j in 0..i {
+            if accounts[i].address() == accounts[j].address() {
+                return Err(ProgramError::InvalidAccountData);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_custody_tokens(
+    header: &MarketStateHeader,
+    mint: &AccountView,
+    vault: &AccountView,
+    authority: &Address,
+) -> ProgramResult {
+    if header.reserved_upgrade[2] != 0 {
+        return Err(custom(StockStreamError::RiskViolation));
+    }
+    let mint_state = pinocchio_token::state::Mint::from_account_view(mint)?;
+    let vault_state = pinocchio_token::state::Account::from_account_view(vault)?;
+    if !mint_state.is_initialized()
+        || mint_state.decimals() != header.reserved_upgrade[0]
+        || vault_state.mint() != mint.address()
+        || vault_state.owner() != authority
+    {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    Ok(())
+}
+
+const PYTH_PROGRAM_ID: Address = Address::new_from_array([
+    12, 74, 159, 176, 3, 249, 12, 128, 32, 17, 101, 150, 154, 165, 132, 195, 182, 126, 234, 138,
+    69, 43, 85, 3, 6, 14, 175, 224, 214, 116, 116, 91,
+]);
+const PYTH_STORAGE_ID: Address = Address::new_from_array([
+    42, 109, 225, 199, 127, 174, 116, 113, 78, 156, 43, 125, 245, 28, 89, 122, 141, 218, 138, 70,
+    61, 251, 135, 64, 90, 171, 220, 10, 61, 0, 238, 25,
+]);
+const SYSTEM_PROGRAM_ID: Address = Address::new_from_array([0; 32]);
+const INSTRUCTIONS_SYSVAR_ID: Address = Address::new_from_array([
+    6, 167, 213, 23, 24, 123, 209, 102, 53, 218, 212, 4, 85, 253, 194, 192, 193, 36, 198, 143, 33,
+    86, 117, 165, 219, 186, 203, 95, 8, 0, 0, 0,
+]);
+const VERIFY_MESSAGE_DISCRIMINATOR: [u8; 8] = [180, 193, 120, 55, 189, 135, 203, 83];
+const SOLANA_FORMAT_MAGIC: u32 = 2_182_742_457;
+const PAYLOAD_FORMAT_MAGIC: u32 = 2_479_346_549;
+const MAX_PYTH_MESSAGE: usize = 512;
+
+struct VerifiedOracle {
+    feed_id: u32,
+    channel: u8,
+    price: i64,
+    exponent: i16,
+    confidence: i64,
+    timestamp_us: u64,
+    session: i16,
+}
+
+fn parse_verified_oracle(message: &[u8]) -> Result<VerifiedOracle, ProgramError> {
+    if message.len() < 102
+        || u32::from_le_bytes(message[0..4].try_into().unwrap()) != SOLANA_FORMAT_MAGIC
     {
         return Err(custom(StockStreamError::OracleUnavailable));
     }
-    if payload[0] == 0 {
+    let payload_len = u16::from_le_bytes(message[100..102].try_into().unwrap()) as usize;
+    if payload_len != 60 || message.len() != 102 + payload_len {
         return Err(custom(StockStreamError::OracleUnavailable));
     }
-    let price = i64::from_le_bytes(payload[0..8].try_into().unwrap());
-    let timestamp = u64::from_le_bytes(payload[8..16].try_into().unwrap());
-    let confidence = u64::from_le_bytes(payload[16..24].try_into().unwrap());
+    let payload = &message[102..];
+    if u32::from_le_bytes(payload[0..4].try_into().unwrap()) != PAYLOAD_FORMAT_MAGIC
+        || payload[13] != 1
+        || payload[18] != 5
+        || [
+            payload[19],
+            payload[28],
+            payload[31],
+            payload[40],
+            payload[43],
+        ] != [0, 4, 5, 9, 12]
+        || payload[44] != 1
+    {
+        return Err(custom(StockStreamError::OracleUnavailable));
+    }
+    Ok(VerifiedOracle {
+        timestamp_us: u64::from_le_bytes(payload[4..12].try_into().unwrap()),
+        channel: payload[12],
+        feed_id: u32::from_le_bytes(payload[14..18].try_into().unwrap()),
+        price: i64::from_le_bytes(payload[20..28].try_into().unwrap()),
+        exponent: i16::from_le_bytes(payload[29..31].try_into().unwrap()),
+        confidence: i64::from_le_bytes(payload[32..40].try_into().unwrap()),
+        session: i16::from_le_bytes(payload[41..43].try_into().unwrap()),
+    })
+}
+
+fn consume_oracle_update(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    instruction_data: &[u8],
+) -> ProgramResult {
+    if accounts.len() != 7 || instruction_data.len() < 104 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    let message = &instruction_data[1..];
+    if message.len() > MAX_PYTH_MESSAGE
+        || !accounts[1].is_signer()
+        || !accounts[1].is_writable()
+        || !accounts[2].executable()
+        || accounts[2].address() != &PYTH_PROGRAM_ID
+        || accounts[3].address() != &PYTH_STORAGE_ID
+        || !accounts[3].owned_by(&PYTH_PROGRAM_ID)
+        || !accounts[4].is_writable()
+        || accounts[5].address() != &SYSTEM_PROGRAM_ID
+        || accounts[6].address() != &INSTRUCTIONS_SYSVAR_ID
+        || accounts[3].address() == accounts[4].address()
+    {
+        return Err(custom(StockStreamError::OracleUnavailable));
+    }
+    let storage = accounts[3].try_borrow()?;
+    if storage.len() < 72 || storage[40..72] != accounts[4].address().to_bytes() {
+        return Err(custom(StockStreamError::OracleUnavailable));
+    }
+    drop(storage);
+
+    let mut verify_data = [0u8; 527];
+    verify_data[..8].copy_from_slice(&VERIFY_MESSAGE_DISCRIMINATOR);
+    verify_data[8..12].copy_from_slice(&(message.len() as u32).to_le_bytes());
+    verify_data[12..12 + message.len()].copy_from_slice(message);
+    verify_data[12 + message.len()..14 + message.len()].copy_from_slice(&0u16.to_le_bytes());
+    verify_data[14 + message.len()] = 0;
+    let metas = [
+        InstructionAccount::writable_signer(accounts[1].address()),
+        InstructionAccount::readonly(accounts[3].address()),
+        InstructionAccount::writable(accounts[4].address()),
+        InstructionAccount::readonly(accounts[5].address()),
+        InstructionAccount::readonly(accounts[6].address()),
+    ];
+    let cpi_accounts = [
+        &accounts[1],
+        &accounts[3],
+        &accounts[4],
+        &accounts[5],
+        &accounts[6],
+    ];
+    invoke_with_bounds::<5, _>(
+        &InstructionView {
+            program_id: accounts[2].address(),
+            accounts: &metas,
+            data: &verify_data[..15 + message.len()],
+        },
+        &cpi_accounts,
+    )?;
+
+    let verified = parse_verified_oracle(message)?;
+    let now = Clock::get()?.unix_timestamp;
+    let timestamp = verified.timestamp_us / 1_000_000;
     let data = market_data(&mut accounts[0], program_id)?;
     let mut header = initialized_header(data)?;
-    if price <= 0
-        || confidence > price.unsigned_abs() / 5
+    let configured_feed = u32::from_le_bytes(header.reserved_upgrade[64..68].try_into().unwrap());
+    if configured_feed == 0
+        || verified.feed_id != configured_feed
+        || verified.channel != header.reserved_upgrade[68]
+        || i32::from(verified.exponent) != header.price_exponent
+        || verified.price <= 0
+        || verified.confidence < 0
+        || verified.confidence as u64 > verified.price.unsigned_abs() / 5
+        || now < 0
+        || timestamp > now as u64 + 2
+        || now as u64 > timestamp.saturating_add(10)
         || timestamp <= header.last_verified_oracle_timestamp
     {
         return Err(custom(StockStreamError::OracleUnavailable));
     }
-    header.last_verified_oracle_price = price;
+    header.last_verified_oracle_price = verified.price;
     header.last_verified_oracle_timestamp = timestamp;
     header.oracle_valid = 1;
+    header.mode = match verified.session {
+        0 | 1 | 2 => MarketMode::Open as u8,
+        3 | 4 => MarketMode::CloseOnly as u8,
+        _ => return Err(custom(StockStreamError::OracleUnavailable)),
+    };
     write_header(data, &header)
 }
 
@@ -845,6 +1044,7 @@ fn place_order(
             &market_address,
             &snapshot_seat,
             order.seat_index as usize,
+            3,
             SESSION_PLACE,
             0,
             snapshot_header.last_verified_oracle_timestamp,
@@ -1381,6 +1581,7 @@ fn cancel_order(
             accounts[0].address().as_ref(),
             &snapshot_seat,
             seat_index,
+            2,
             SESSION_CANCEL,
             0,
             snapshot_header.last_verified_oracle_timestamp,
@@ -1536,6 +1737,7 @@ fn cancel_all(
             accounts[0].address().as_ref(),
             &snapshot_seat,
             seat_index,
+            2,
             SESSION_CANCEL_ALL,
             0,
             snapshot_header.last_verified_oracle_timestamp,

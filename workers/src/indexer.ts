@@ -27,6 +27,7 @@ export function reconcileBatch(snapshot: MarketSnapshot, events: readonly Market
     const cursor: IndexedCursor = { market: snapshot.market.marketPda, domain: current.domain, sequence: current.sequence, slot: 0 };
     const next = nextCursor(cursor, event);
     if (!next) return { kind: "gap" as const, snapshot: current, event };
+    if (next.sequence === cursor.sequence) continue;
     current = applyEvent(current, event);
   }
   return { kind: "applied" as const, snapshot: current };

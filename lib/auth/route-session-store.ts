@@ -12,12 +12,15 @@ function developmentDatabase(): SessionDatabase {
     return { bind(...values: unknown[]) {
       return {
         async first<T>() {
-          if (sql.startsWith("SELECT")) return (developmentRows.get(String(values[0])) ?? null) as T | null;
+          if (sql.startsWith("SELECT")) {
+            const row = developmentRows.get(String(values[0]));
+            return (row && row.revokedAt === null && row.expiresAt > Number(values[1]) ? row : null) as T | null;
+          }
           return null;
         },
         async run() {
           if (sql.startsWith("INSERT")) developmentRows.set(String(values[0]), { idHash: String(values[0]), privyUserId: String(values[1]), walletAddress: String(values[2]), createdAt: Number(values[3]), expiresAt: Number(values[4]), lastUsedAt: Number(values[5]), revokedAt: values[6] == null ? null : Number(values[6]), userAgentHash: String(values[7]) });
-          if (sql.startsWith("UPDATE") && sql.includes("revoked_at")) { const row = developmentRows.get(String(values[2])); if (row) developmentRows.set(String(values[2]), { ...row, revokedAt: Number(values[0]), lastUsedAt: Number(values[1]) }); }
+          if (sql.startsWith("UPDATE") && sql.includes("SET revoked_at")) { const row = developmentRows.get(String(values[2])); if (row) developmentRows.set(String(values[2]), { ...row, revokedAt: Number(values[0]), lastUsedAt: Number(values[1]) }); }
           if (sql.startsWith("UPDATE") && sql.includes("last_used_at = ? WHERE")) { const row = developmentRows.get(String(values[1])); if (row) developmentRows.set(String(values[1]), { ...row, lastUsedAt: Number(values[0]) }); }
           if (sql.startsWith("DELETE")) for (const [key, row] of developmentRows) if (row.expiresAt <= Number(values[0])) developmentRows.delete(key);
           return {};
