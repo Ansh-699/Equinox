@@ -1,5 +1,7 @@
 export interface Lease { key: string; holder: string; fence: number; expiresAt: number }
 export interface Operation { key: string; owner: string; request_hash: string; status: 'pending' | 'succeeded' | 'failed'; result_json: string | null }
+export interface DurableCursor { marketPda: string; domain: 'l1' | 'er'; sequence: number; slot: number; updatedAt: number }
+export type IndexedWrite = { kind: 'applied' } | { kind: 'duplicate' } | { kind: 'gap'; expected: number };
 
 function integer(value: number): void {
   if (!Number.isSafeInteger(value) || value < 0) throw new Error('Invalid integer');
@@ -84,5 +86,57 @@ export class ProtocolRepository {
       // Pending outcomes are ambiguous: expiry must not authorize a duplicate submission.
       this.db.prepare("DELETE FROM operation_keys WHERE expires_at<=? AND status!='pending'").bind(now),
     ]);
+  }
+}
+
+/** Durable D1 projection store. A later delta is rejected until its market is
+ * resnapshotted, rather than being applied over an unreconciled sequence gap. */
+export class IndexerRepository {
+  constructor(private readonly db: D1Database) {}
+
+  async cursor(marketPda: string, domain: 'l1' | 'er'): Promise<DurableCursor | null> {
+    return this.db.prepare(`SELECT market_pda AS marketPda,domain,sequence,slot,updated_at AS updatedAt
+      FROM indexer_cursors WHERE market_pda=? AND domain=?`).bind(marketPda, domain).first<DurableCursor>();
+  }
+
+  async append(marketPda: string, domain: 'l1' | 'er', sequence: number, slot: number, id: string, event: unknown, now: number): Promise<IndexedWrite> {
+    identifier(marketPda); identifier(id); integer(sequence); integer(slot); integer(now);
+    if (sequence === 0) throw new Error('Sequence must be positive');
+    const duplicate = await this.db.prepare('SELECT 1 AS present FROM indexed_events WHERE event_id=?').bind(id).first<{ present: number }>();
+    if (duplicate) return { kind: 'duplicate' };
+    const current = await this.cursor(marketPda, domain);
+    const expected = (current?.sequence ?? 0) + 1;
+    if (sequence !== expected) return { kind: 'gap', expected };
+    const statements = [
+      this.db.prepare(`INSERT INTO indexed_events(event_id,market_pda,domain,sequence,event_json,observed_at)
+        VALUES(?,?,?,?,?,?)`).bind(id, marketPda, domain, sequence, JSON.stringify(event), now),
+      current
+        ? this.db.prepare(`UPDATE indexer_cursors SET sequence=?,slot=?,updated_at=?
+            WHERE market_pda=? AND domain=? AND sequence=?`).bind(sequence, slot, now, marketPda, domain, current.sequence)
+        : this.db.prepare(`INSERT INTO indexer_cursors(market_pda,domain,sequence,slot,updated_at)
+            VALUES(?,?,?,?,?)`).bind(marketPda, domain, sequence, slot, now),
+    ];
+    const results = await this.db.batch(statements);
+    if (current && results[1].meta.changes !== 1) throw new Error('Indexer cursor contention; resnapshot required');
+    return { kind: 'applied' };
+  }
+
+  async replaceSnapshot(marketPda: string, domain: 'l1' | 'er', sequence: number, slot: number, snapshot: unknown, now: number): Promise<void> {
+    identifier(marketPda); integer(sequence); integer(slot); integer(now);
+    await this.db.batch([
+      this.db.prepare(`INSERT INTO market_snapshots(market_pda,domain,sequence,snapshot_json,observed_at)
+        VALUES(?,?,?,?,?) ON CONFLICT(market_pda,domain) DO UPDATE SET
+        sequence=excluded.sequence,snapshot_json=excluded.snapshot_json,observed_at=excluded.observed_at`)
+        .bind(marketPda, domain, sequence, JSON.stringify(snapshot), now),
+      this.db.prepare(`INSERT INTO indexer_cursors(market_pda,domain,sequence,slot,updated_at)
+        VALUES(?,?,?,?,?) ON CONFLICT(market_pda,domain) DO UPDATE SET
+        sequence=excluded.sequence,slot=excluded.slot,updated_at=excluded.updated_at`)
+        .bind(marketPda, domain, sequence, slot, now),
+    ]);
+  }
+
+  async snapshot(marketPda: string, domain: 'l1' | 'er'): Promise<{ sequence: number; snapshot: unknown } | null> {
+    const row = await this.db.prepare('SELECT sequence,snapshot_json FROM market_snapshots WHERE market_pda=? AND domain=?').bind(marketPda, domain).first<{ sequence: number; snapshot_json: string }>();
+    return row ? { sequence: row.sequence, snapshot: JSON.parse(row.snapshot_json) } : null;
   }
 }

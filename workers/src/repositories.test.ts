@@ -1,6 +1,6 @@
 import { env, applyD1Migrations } from 'cloudflare:test';
 import { beforeAll, expect, it } from 'vitest';
-import { ProtocolRepository } from './repositories';
+import { IndexerRepository, ProtocolRepository } from './repositories';
 
 const bindings = env as Env & { TEST_MIGRATIONS: Parameters<typeof applyD1Migrations>[1] };
 const db = bindings.DB!;
@@ -47,4 +47,15 @@ it('cleanup retains ambiguous pending submissions and fencing history', async ()
   expect((await repo.operation('pending'))?.status).toBe('pending');
   expect(await db.prepare("SELECT * FROM rate_limits WHERE key='expired-rate'").first()).toBeNull();
   expect((await repo.acquire('retained-fence', 'b', 1, 10_001))?.fence).toBe(2);
+});
+
+it('persists ordered indexer cursors, suppresses duplicates, and replaces a projection after a gap', async () => {
+  const indexer = new IndexerRepository(db);
+  expect(await indexer.append('market-a', 'er', 1, 10, 'event-1', { type: 'fill' }, 1)).toEqual({ kind: 'applied' });
+  expect(await indexer.append('market-a', 'er', 1, 10, 'event-1', { type: 'fill' }, 2)).toEqual({ kind: 'duplicate' });
+  expect(await indexer.append('market-a', 'er', 3, 12, 'event-3', { type: 'fill' }, 3)).toEqual({ kind: 'gap', expected: 2 });
+  expect((await indexer.cursor('market-a', 'er'))?.sequence).toBe(1);
+  await indexer.replaceSnapshot('market-a', 'er', 3, 12, { bids: [] }, 4);
+  expect(await indexer.snapshot('market-a', 'er')).toEqual({ sequence: 3, snapshot: { bids: [] } });
+  expect(await indexer.append('market-a', 'er', 4, 13, 'event-4', { type: 'fill' }, 5)).toEqual({ kind: 'applied' });
 });
