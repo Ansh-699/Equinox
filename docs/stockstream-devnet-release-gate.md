@@ -112,3 +112,16 @@ permutation matrix, large randomized economic model, fuzzing, complete
 liquidation/event-ring matrices, long-duration ER failure simulation, and an
 independent audit. These remain required for production approval. The current
 artifact must not be described as production-ready or audited.
+
+## Status Correction (2026-09-16)
+
+The older “Code-Completion Evidence” heading is historical wording, not a
+global completion claim. The source has meaningful local coverage for
+scratch-backed settlement, registry oracle configuration, session account
+binding, D1 leases/idempotency/cursors, and Durable Object gap recovery.
+It does not yet contain real onchain MagicBlock delegation/commit CPIs, live
+Pyth Pro signed payload acceptance, runtime SPL CPI evidence, complete session
+cumulative-notional/replay consumption, or a complete external Solana/ER
+indexer and keeper fleet.
+
+**Hardening pending. Audit pending. Production not approved.**
