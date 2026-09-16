@@ -251,38 +251,162 @@ export function reconcileVault(accounts: ReconcileAccounts): TransactionInstruct
   ]);
 }
 
-export interface CustodyEvent {
+// ---------------------------------------------------------------------
+// Priority 7: the complete, versioned, binary StockStream event ABI
+// (`programs/stockstream/src/events.rs`). Every event is one real
+// `sol_log_data` syscall call, surfacing in `meta.logMessages` as a single
+// `Program data: <base64>` line carrying exactly `EVENT_SIZE` (100) bytes:
+// a fixed header (discriminator, ABI version, sequence, market, timestamp)
+// followed by a fixed 48-byte payload whose fields depend on the
+// discriminator. This replaced the earlier Priority-4 custody-only
+// `SS:<Kind> ...` text format (`Program log:` lines via `pinocchio_log`)
+// with this single ABI covering every event category.
+// ---------------------------------------------------------------------
+
+export const EVENT_ABI_VERSION = 1;
+export const EVENT_HEADER_SIZE = 52;
+export const EVENT_PAYLOAD_SIZE = 48;
+export const EVENT_SIZE = EVENT_HEADER_SIZE + EVENT_PAYLOAD_SIZE;
+/** Sentinel `seatIndex` meaning "this event is market-level, not one trader seat's" -- mirrors `events::NO_SEAT`. */
+export const NO_SEAT = 0xffff;
+
+export const EVENT_KIND_NAMES: Record<number, string> = {
+  100: "ExchangeInitialized", 101: "ExchangeConfigUpdated", 102: "StockInstrumentRegistered",
+  103: "StockInstrumentUpdated", 104: "StockInstrumentSuspended", 105: "PerpMarketCreated",
+  106: "MarketRiskUpdated", 107: "MarketPaused", 108: "MarketResumed", 109: "MarketCloseOnly",
+  110: "CorporateActionEntered", 111: "CorporateActionResolved", 112: "MarketClosed",
+  200: "TraderSeatCreated", 201: "TraderSeatClosed", 202: "OrderPlaced", 203: "OrderPartiallyFilled",
+  204: "OrderFilled", 205: "OrderCancelled", 206: "CancelAllProgress", 207: "OrderReplaced",
+  208: "OrderExpired", 209: "InvalidOrderRemoved", 210: "SelfTradePrevented",
+  300: "PositionChanged", 301: "MarginChanged", 302: "FundingAccumulatorUpdated", 303: "FundingSettled",
+  304: "LiquidationStarted", 305: "PositionLiquidated", 306: "BankruptcyRecorded", 307: "InsuranceApplied",
+  400: "VaultInitialized", 401: "CollateralDeposited", 402: "CollateralWithdrawn", 403: "ProtocolFeesChanged",
+  404: "InsuranceFundChanged", 405: "BadDebtRecorded", 406: "BadDebtResolved", 407: "VaultSurplusDetected",
+  408: "VaultDeficitDetected", 409: "VaultReconciled",
+  500: "OracleUpdated", 501: "OracleRejected", 502: "MarketSessionChanged", 503: "TradingStatusChanged",
+  504: "OracleStale", 505: "OracleRecovered",
+  600: "DelegationRequested", 601: "MarketDelegated", 602: "CommitRequested", 603: "CommitSequenceChanged",
+  604: "UndelegationRequested", 605: "RestorationPending", 606: "MarketRestored", 607: "DelegationErrorState",
+  700: "TradingSessionAuthorized", 701: "TradingSessionLimitsUpdated", 702: "TradingSessionActionConsumed",
+  703: "TradingSessionRevoked", 704: "TradingSessionClosed",
+};
+
+export interface StockStreamEvent {
+  discriminator: number;
+  /** Human-readable name for a known discriminator, or `Unknown(<n>)` for
+   * a future/unrecognized one -- the raw discriminator and payload are
+   * still returned so an indexer can preserve the record rather than
+   * dropping it. */
   kind: string;
-  market: string;
-  seat?: number;
-  amount: bigint;
+  abiVersion: number;
   sequence: bigint;
-  balance: bigint;
-  mint: string;
+  /** 64-character lowercase hex market pubkey. */
+  market: string;
+  timestamp: bigint;
+  /** The raw 48-byte payload; use the `decode*Payload` helpers below for
+   * the shape matching this event's `kind`. */
+  payload: Uint8Array;
 }
-const CUSTODY_EVENT_PATTERN = /^SS:(\w+) market=([0-9a-f]{64})(?: seat=(\d+))? amount=(\d+) seq=(\d+) balance=(\d+) mint=([0-9a-f]{64})$/;
+
 /**
- * Decodes one custody event from a transaction log line
- * (`meta.logMessages`), as emitted by `handlers::log_custody_event` via
- * `pinocchio_log`. Not an Anchor-style CPI event: these are plain
- * `Program log:`-prefixed text lines, since adding a binary event ring
- * buffer would have required growing `MARKET_ACCOUNT_SIZE`. Returns `null`
- * for any line that isn't a custody event (including one truncated by the
- * logger's fixed-size buffer).
+ * Decodes one StockStream event out of a transaction log line. Returns
+ * `null` for a line that isn't a `Program data:` record, that fails to
+ * base64-decode, or whose decoded length doesn't exactly match `EVENT_SIZE`
+ * (a truncated or foreign record) -- never for an unrecognized
+ * discriminator, since a future ABI version's new event kinds should still
+ * be preserved (`kind` becomes `Unknown(<n>)`), not silently dropped.
  */
-export function decodeCustodyEvent(logLine: string): CustodyEvent | null {
-  const withoutPrefix = logLine.startsWith("Program log: ") ? logLine.slice("Program log: ".length) : logLine;
-  const match = CUSTODY_EVENT_PATTERN.exec(withoutPrefix);
-  if (!match) return null;
+export function decodeStockStreamEvent(logLine: string): StockStreamEvent | null {
+  const prefix = "Program data: ";
+  if (!logLine.startsWith(prefix)) return null;
+  let bytes: Buffer;
+  try { bytes = Buffer.from(logLine.slice(prefix.length).trim(), "base64"); } catch { return null; }
+  if (bytes.length !== EVENT_SIZE) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const discriminator = view.getUint16(0, true);
   return {
-    kind: match[1],
-    market: match[2],
-    seat: match[3] !== undefined ? Number(match[3]) : undefined,
-    amount: BigInt(match[4]),
-    sequence: BigInt(match[5]),
-    balance: BigInt(match[6]),
-    mint: match[7],
+    discriminator,
+    kind: EVENT_KIND_NAMES[discriminator] ?? `Unknown(${discriminator})`,
+    abiVersion: bytes[2],
+    sequence: view.getBigUint64(4, true),
+    market: Buffer.from(bytes.subarray(12, 44)).toString("hex"),
+    timestamp: view.getBigUint64(44, true),
+    payload: bytes.subarray(EVENT_HEADER_SIZE, EVENT_SIZE),
   };
+}
+
+function payloadView(payload: Uint8Array): DataView {
+  return new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+}
+/** `events::payload_seat`. */
+export function decodeSeatPayload(payload: Uint8Array) {
+  return { seatIndex: payloadView(payload).getUint16(0, true) };
+}
+/** `events::payload_seat_amount`. */
+export function decodeSeatAmountPayload(payload: Uint8Array) {
+  const view = payloadView(payload);
+  return { seatIndex: view.getUint16(0, true), amount: view.getBigUint64(2, true), balance: view.getBigUint64(10, true) };
+}
+/** `events::payload_order`. */
+export function decodeOrderPayload(payload: Uint8Array) {
+  const view = payloadView(payload);
+  return {
+    seatIndex: view.getUint16(0, true),
+    orderKey: (() => { let v = 0n; for (let i = 15; i >= 0; i -= 1) v = (v << 8n) | BigInt(payload[2 + i]); return v; })(),
+    side: payload[18],
+    price: view.getBigInt64(19, true),
+    quantity: view.getBigUint64(27, true),
+  };
+}
+/** `events::payload_fill`. */
+export function decodeFillPayload(payload: Uint8Array) {
+  const view = payloadView(payload);
+  return {
+    makerSeat: view.getUint32(0, true), takerSeat: view.getUint32(4, true),
+    price: view.getBigInt64(8, true), quantity: view.getBigUint64(16, true), fillSequence: view.getBigUint64(24, true),
+  };
+}
+function readI128(payload: Uint8Array, offset: number): bigint {
+  let value = 0n;
+  for (let i = 15; i >= 0; i -= 1) value = (value << 8n) | BigInt(payload[offset + i]);
+  const signBit = 1n << 127n;
+  return value >= signBit ? value - (signBit << 1n) : value;
+}
+/** `events::payload_position`. */
+export function decodePositionPayload(payload: Uint8Array) {
+  return { seatIndex: payloadView(payload).getUint16(0, true), basePosition: readI128(payload, 2), quoteEntryValue: readI128(payload, 18) };
+}
+/** `events::payload_funding`. */
+export function decodeFundingPayload(payload: Uint8Array) {
+  return { seatIndex: payloadView(payload).getUint16(0, true), accumulator: readI128(payload, 2), payment: readI128(payload, 18) };
+}
+/** `events::payload_liquidation`. */
+export function decodeLiquidationPayload(payload: Uint8Array) {
+  const view = payloadView(payload);
+  return { seatIndex: view.getUint16(0, true), quantity: view.getBigUint64(2, true), price: view.getBigInt64(10, true) };
+}
+/** `events::payload_oracle`. */
+export function decodeOraclePayload(payload: Uint8Array) {
+  const view = payloadView(payload);
+  return { price: view.getBigInt64(0, true), exponent: view.getInt16(8, true), confidence: view.getBigInt64(10, true), session: view.getInt16(18, true) };
+}
+/** `events::payload_delegation`. */
+export function decodeDelegationPayload(payload: Uint8Array) {
+  return { validator: Buffer.from(payload.subarray(0, 32)).toString("hex"), sequence: payloadView(payload).getBigUint64(32, true) };
+}
+/** `events::payload_session`. */
+export function decodeSessionPayload(payload: Uint8Array) {
+  const view = payloadView(payload);
+  return { seatIndex: view.getUint16(0, true), sessionSigner: Buffer.from(payload.subarray(2, 34)).toString("hex"), nonce: view.getBigUint64(34, true) };
+}
+/** `events::payload_registry`. */
+export function decodeRegistryPayload(payload: Uint8Array) {
+  return { instrumentId: Buffer.from(payload.subarray(0, 32)).toString("hex") };
+}
+/** `events::payload_reconciliation`. */
+export function decodeReconciliationPayload(payload: Uint8Array) {
+  const view = payloadView(payload);
+  return { actual: view.getBigUint64(0, true), expected: view.getBigUint64(8, true), status: payload[16] };
 }
 
 /**

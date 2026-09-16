@@ -6,12 +6,13 @@ import { IndexerRepository } from "./repositories";
 import { MarketIndexer } from "./indexer-service";
 import type { LogsNotification } from "./ws-transport";
 import type { MarketDefinition, MarketEvent } from "./types";
+import { eventLogLine as eventLogLineFor } from "./test-event-fixtures";
 
 const bindings = env as Env & { TEST_MIGRATIONS: Parameters<typeof applyD1Migrations>[1] };
 beforeAll(async () => { await applyD1Migrations(bindings.DB!, bindings.TEST_MIGRATIONS); });
 
 const market = "cc".repeat(32);
-const mint = "dd".repeat(32);
+const eventLogLine = (discriminator: number, sequence: number) => eventLogLineFor(discriminator, sequence, market);
 
 function notification(logs: string[], overrides: Partial<LogsNotification> = {}): LogsNotification {
   return { kind: "logs", source: "l1", endpoint: "wss://l1.test", commitment: "confirmed", receivedAt: 1, signature: "sig-a", slot: 100, err: null, logs, ...overrides };
@@ -37,7 +38,7 @@ it("ingestLogsNotification decodes a live logs notification straight into Market
     () => ({ publish: async () => "applied", replaceSnapshot: async () => ({ accepted: true }) }),
   );
   const results = await ingestLogsNotification(indexer, "pipeline-market-1", notification([
-    `Program log: SS:CollateralDeposited market=${market} seat=1 amount=100 seq=1 balance=100 mint=${mint}`,
+    eventLogLine(401, 1),
   ]));
   expect(results).toEqual(["applied"]);
   expect((await new IndexerRepository(bindings.DB!).cursor("pipeline-market-1", "l1"))?.sequence).toBe(1);
@@ -50,7 +51,7 @@ it("ingestLogsNotification skips a failed transaction's logs entirely", async ()
     () => ({ publish: async () => "applied", replaceSnapshot: async () => ({ accepted: true }) }),
   );
   const results = await ingestLogsNotification(indexer, "pipeline-market-failed", notification(
-    [`Program log: SS:CollateralDeposited market=${market} amount=1 seq=1 balance=1 mint=${mint}`],
+    [eventLogLine(401, 1)],
     { err: { InstructionError: [0, "Custom"] } },
   ));
   expect(results).toEqual([]);
@@ -100,14 +101,14 @@ it("end to end: a live gap on a real logsNotification triggers a real resnapshot
 
   // First event arrives at sequence 1 as expected.
   await ingestLogsNotification(indexer, "e2e-market", notification(
-    [`Program log: SS:CollateralDeposited market=${market} amount=1 seq=1 balance=1 mint=${mint}`],
+    [eventLogLine(401, 1)],
     { signature: "sig-1" },
   ));
   // A gap: the next observed sequence jumps straight to 6 (matching the
   // fetcher's fixture sequence of 5, so the resnapshot lands exactly where
   // the "authoritative" account said it should).
   const results = await ingestLogsNotification(indexer, "e2e-market", notification(
-    [`Program log: SS:CollateralDeposited market=${market} amount=1 seq=6 balance=2 mint=${mint}`],
+    [eventLogLine(401, 6)],
     { signature: "sig-6" },
   ));
   expect(results).toEqual(["resnapshotted"]);
