@@ -25,8 +25,10 @@ test("place order serializes little-endian fields and decodes", () => {
 });
 
 test("cancel order encodes a full 128-bit key", () => {
-  const ix = cancelOrder({ market, authority }, 2, 2n ** 100n + 7n);
+  const session = PublicKey.unique();
+  const ix = cancelOrder({ market, authority, session }, 2, 2n ** 100n + 7n);
   expect(ix.data.length).toBe(19);
+  expect(ix.keys[2]).toEqual({ pubkey: session, isSigner: false, isWritable: true });
   expect(decodeInstruction(ix.data).name).toBe("CancelOrder");
 });
 

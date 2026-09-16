@@ -25,12 +25,15 @@ export interface PlaceOrderParams extends InstructionAccounts {
   postOnly?: boolean;
   immediateOrCancel?: boolean;
   reduceOnly?: boolean;
+  /** Program-owned TradingSession account when authority is a scoped signer. */
+  session?: AddressInput;
 }
 
 export interface InstructionFixture {
   name: string;
   data: Uint8Array;
 }
+export interface SessionAuthorizedAccounts extends InstructionAccounts { session?: AddressInput; }
 
 export interface VaultAccounts { market: AddressInput; authority: AddressInput; mint: AddressInput; tokenProgram: AddressInput; vault: AddressInput; vaultAuthority: AddressInput; }
 export interface CustodyAccounts extends VaultAccounts { seat: AddressInput; seatIndex: number; sourceOrDestination: AddressInput; }
@@ -109,17 +112,19 @@ export function placeOrder(params: PlaceOrderParams): TransactionInstruction {
   writeUnsigned(data, 22, checkedUnsigned(params.expiresAt ?? 0, 64, "expiresAt"), 8);
   writeSigned(data, 30, checkedSigned(params.pegLimit ?? 0, 64, "pegLimit"), 8);
   writeUnsigned(data, 38, checkedUnsigned(params.clientOrderId, 64, "clientOrderId"), 8);
-  return instruction(data, [accountMeta(params.market, false, true), accountMeta(params.authority, true, false), accountMeta(params.settlementScratch, false, true)]);
+  const accounts = [accountMeta(params.market, false, true), accountMeta(params.authority, true, false), accountMeta(params.settlementScratch, false, true)];
+  if (params.session) accounts.push(accountMeta(params.session, false, true));
+  return instruction(data, accounts);
 }
 
-export function cancelOrder(accounts: InstructionAccounts, seatIndex: number, orderKey: bigint): TransactionInstruction {
+export function cancelOrder(accounts: SessionAuthorizedAccounts, seatIndex: number, orderKey: bigint): TransactionInstruction {
   const data = new Uint8Array(19); data[0] = STOCKSTREAM_INSTRUCTION.cancelOrder; writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2); writeUnsigned(data, 3, checkedUnsigned(orderKey, 128, "orderKey"), 16);
-  return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]);
+  const metas = [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]; if (accounts.session) metas.push(accountMeta(accounts.session, false, true)); return instruction(data, metas);
 }
 
-export function cancelAll(accounts: InstructionAccounts, seatIndex: number, maxCancellations: number): TransactionInstruction {
+export function cancelAll(accounts: SessionAuthorizedAccounts, seatIndex: number, maxCancellations: number): TransactionInstruction {
   const data = new Uint8Array(4); data[0] = STOCKSTREAM_INSTRUCTION.cancelAll; writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2); data[3] = Number(checkedUnsigned(maxCancellations, 8, "maxCancellations"));
-  return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]);
+  const metas = [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]; if (accounts.session) metas.push(accountMeta(accounts.session, false, true)); return instruction(data, metas);
 }
 
 export function updateFunding(accounts: InstructionAccounts, accumulator: bigint, timestamp: bigint | number): TransactionInstruction {
