@@ -1,12 +1,20 @@
 #![no_std]
 
-pinocchio::nostd_panic_handler!();
+// The MagicBlock delegation/magic-program API crates pull in a `std`-linked
+// `solana-address` build (required, not optional, by their own manifests) for
+// the sbpf-solana-solana target. That collides with `nostd_panic_handler!`'s
+// own `#[panic_handler]` (duplicate `panic_impl` lang item), so this program
+// uses the std-compatible panic handler instead. No heap allocator is added:
+// `no_allocator!()` in the entrypoint module is unchanged, so a reachable
+// allocation still fails to link rather than silently costing compute.
+pinocchio::default_panic_handler!();
 
 pub mod book;
 pub mod error;
 pub mod handlers;
 pub mod initialize_market;
 pub mod instruction;
+pub mod magicblock;
 pub mod registry;
 pub mod risk;
 pub mod scratch;
@@ -36,6 +44,18 @@ pub fn process_instruction(
 ) -> ProgramResult {
     if program_id != &ID {
         return Err(ProgramError::IncorrectProgramId);
+    }
+
+    // The delegation program's external-undelegate callback uses its own
+    // fixed 8-byte discriminator, not StockStream's single-byte instruction
+    // tags (see `magicblock::EXTERNAL_UNDELEGATE_DISCRIMINATOR` for why: it
+    // is dictated by `magicblock-delegation-program-api`, not by this
+    // program). Route it before the normal decode so it can never collide
+    // with an opcode.
+    if instruction_data.len() >= 8
+        && instruction_data[0..8] == magicblock::EXTERNAL_UNDELEGATE_DISCRIMINATOR
+    {
+        return magicblock::external_undelegate(program_id, accounts, instruction_data);
     }
 
     let instruction = StockStreamInstruction::decode(instruction_data)?;

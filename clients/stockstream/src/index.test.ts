@@ -1,7 +1,8 @@
 import { PublicKey } from "@solana/web3.js";
 import { expect, test } from "vitest";
 import { STOCKSTREAM_PROGRAM_ID } from "./constants";
-import { authorizeTradingSession, cancelOrder, commitMarket, createPerpMarket, decodeInstruction, delegateMarket, initializeExchange, initializeMarket, initializeVault, placeOrder, previewPlaceOrder, registerStockInstrument, undelegationCallback, updateStockInstrument } from "./index";
+import { MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID } from "./index";
+import { authorizeTradingSession, cancelOrder, commitMarket, createPerpMarket, decodeInstruction, delegateMarket, initializeExchange, initializeMarket, initializeVault, placeOrder, previewPlaceOrder, registerStockInstrument, updateStockInstrument } from "./index";
 
 const market = PublicKey.unique();
 const authority = PublicKey.unique();
@@ -52,9 +53,15 @@ test("integration constructors preserve discriminators, account order and signer
   const vaultIx = initializeVault({ market, authority, mint, tokenProgram, vault, vaultAuthority });
   expect(vaultIx.data).toEqual(Buffer.from([9]));
   expect(vaultIx.keys.map((key) => [key.pubkey, key.isSigner, key.isWritable])).toEqual([[market, false, true], [authority, true, false], [mint, false, false], [tokenProgram, false, false], [vault, false, true], [vaultAuthority, false, false]]);
-  expect(decodeInstruction(commitMarket({ market, authority }, 4n).data).name).toBe("CommitMarket");
-  expect(decodeInstruction(delegateMarket({ market, authority, hotAccounts: [settlementScratch] }, 2n).data).name).toBe("DelegateMarket");
-  expect(decodeInstruction(undelegationCallback({ market, authority }, 3n).data).name).toBe("UndelegationCallback");
+  const payer = PublicKey.unique(); const instrument = PublicKey.unique(); const validator = PublicKey.unique();
+  const commitIx = commitMarket({ market, authority, payer }, 4n);
+  expect(decodeInstruction(commitIx.data).name).toBe("CommitMarket");
+  expect(commitIx.keys.map((key) => key.pubkey.toBase58())).toEqual([market, authority, payer, MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID].map((k) => k.toBase58()));
+  const delegateIx = delegateMarket({ market, authority, instrument, payer, scratchAccounts: [settlementScratch] }, validator);
+  expect(decodeInstruction(delegateIx.data).name).toBe("DelegateMarket");
+  expect(Array.from(delegateIx.data.slice(1))).toEqual(Array.from(validator.toBytes()));
+  expect(delegateIx.keys).toHaveLength(11);
+  expect(delegateIx.keys[10]).toEqual({ pubkey: settlementScratch, isSigner: false, isWritable: true });
   const session = authorizeTradingSession({ market, authority, session: PublicKey.unique(), sessionSigner: PublicKey.unique() }, 99n, 1n, { seatIndex: 0, actions: 3, maxOrderNotional: 10n, maxCumulativeNotional: 20n, maximumExposure: 30n, maximumOpenOrders: 2 });
   expect(decodeInstruction(session.data).name).toBe("AuthorizeTradingSession");
   expect(session.data).toHaveLength(54);

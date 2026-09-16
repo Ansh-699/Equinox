@@ -27,11 +27,11 @@ use crate::{
     },
 };
 
-fn custom(error: StockStreamError) -> ProgramError {
+pub(crate) fn custom(error: StockStreamError) -> ProgramError {
     error.into()
 }
 
-fn read_header(data: &[u8]) -> Result<MarketStateHeader, ProgramError> {
+pub(crate) fn read_header(data: &[u8]) -> Result<MarketStateHeader, ProgramError> {
     if data.len() < MARKET_HEADER_SIZE {
         return Err(custom(StockStreamError::InvalidMarketLayout));
     }
@@ -48,7 +48,7 @@ fn read_header(data: &[u8]) -> Result<MarketStateHeader, ProgramError> {
     }
 }
 
-fn write_header(data: &mut [u8], header: &MarketStateHeader) -> ProgramResult {
+pub(crate) fn write_header(data: &mut [u8], header: &MarketStateHeader) -> ProgramResult {
     if data.len() < MARKET_HEADER_SIZE {
         return Err(custom(StockStreamError::InvalidMarketLayout));
     }
@@ -63,7 +63,7 @@ fn write_header(data: &mut [u8], header: &MarketStateHeader) -> ProgramResult {
     Ok(())
 }
 
-fn market_data<'a>(
+pub(crate) fn market_data<'a>(
     account: &'a mut AccountView,
     program_id: &Address,
 ) -> Result<&'a mut [u8], ProgramError> {
@@ -80,7 +80,7 @@ fn market_data<'a>(
     unsafe { Ok(account.borrow_unchecked_mut()) }
 }
 
-fn initialized_header(data: &[u8]) -> Result<MarketStateHeader, ProgramError> {
+pub(crate) fn initialized_header(data: &[u8]) -> Result<MarketStateHeader, ProgramError> {
     let header = read_header(data)?;
     header
         .validate(data.len())
@@ -406,17 +406,16 @@ pub fn dispatch(
         StockStreamInstruction::ConsumeOracleUpdate => {
             consume_oracle_update(program_id, accounts, instruction_data)
         }
-        StockStreamInstruction::DelegateMarket { sequence } => {
-            delegate_market(program_id, accounts, sequence)
-        }
+        StockStreamInstruction::DelegateMarket { validator } => crate::magicblock::delegate_market(
+            program_id,
+            accounts,
+            Address::new_from_array(validator),
+        ),
         StockStreamInstruction::CommitMarket { sequence } => {
-            commit_market(program_id, accounts, sequence)
+            crate::magicblock::commit_market(program_id, accounts, sequence)
         }
         StockStreamInstruction::CommitAndUndelegate { sequence } => {
-            commit_and_undelegate(program_id, accounts, sequence)
-        }
-        StockStreamInstruction::UndelegationCallback { sequence } => {
-            undelegation_callback(program_id, accounts, sequence)
+            crate::magicblock::commit_and_undelegate_market(program_id, accounts, sequence)
         }
         StockStreamInstruction::AuthorizeTradingSession {
             seat_index,
@@ -767,6 +766,9 @@ fn withdraw_collateral(
     let bump = [Address::find_program_address(&[VAULT_AUTHORITY_SEED, &market_key], program_id).1];
     let data = market_data(&mut market_accounts[0], program_id)?;
     let header = initialized_header(data)?;
+    if !header.l1_withdrawals_allowed() {
+        return Err(custom(StockStreamError::MagicBlockUndelegationInProgress));
+    }
     custody_config(&header, rest[2].address(), rest[5].address())?;
     validate_custody_tokens(&header, &rest[2], &rest[3], rest[4].address())?;
     let seat = seat_at(data, seat_index)?;
@@ -985,100 +987,10 @@ fn consume_oracle_update(
     write_header(data, &header)
 }
 
-fn validate_hot_accounts(accounts: &[AccountView]) -> ProgramResult {
-    if accounts.len() < 5 {
-        return Err(custom(StockStreamError::InvalidInstruction));
-    }
-    let mut i = 2;
-    while i < accounts.len() {
-        if !accounts[i].is_writable() {
-            return Err(custom(StockStreamError::InvalidInstruction));
-        }
-        let mut j = 2;
-        while j < i {
-            if accounts[i].address() == accounts[j].address() {
-                return Err(custom(StockStreamError::InvalidInstruction));
-            }
-            j += 1;
-        }
-        i += 1;
-    }
-    Ok(())
-}
-
-fn delegate_market(
-    program_id: &Address,
-    accounts: &mut [AccountView],
-    sequence: u64,
-) -> ProgramResult {
-    if accounts.len() < 5 {
-        return Err(ProgramError::NotEnoughAccountKeys);
-    }
-    signer(&accounts[1])?;
-    validate_hot_accounts(accounts)?;
-    let authority = accounts[1].address().to_bytes();
-    let data = market_data(&mut accounts[0], program_id)?;
-    let mut header = initialized_header(data)?;
-    if header.market_authority != authority || sequence == 0 {
-        return Err(custom(StockStreamError::InvalidInstruction));
-    }
-    header.reserved_upgrade[2] = 1;
-    header.reserved_upgrade[3..11].copy_from_slice(&sequence.to_le_bytes());
-    write_header(data, &header)
-}
-
-fn commit_market(
-    program_id: &Address,
-    accounts: &mut [AccountView],
-    sequence: u64,
-) -> ProgramResult {
-    if accounts.len() < 2 {
-        return Err(ProgramError::NotEnoughAccountKeys);
-    }
-    signer(&accounts[1])?;
-    let data = market_data(&mut accounts[0], program_id)?;
-    let mut header = initialized_header(data)?;
-    if header.reserved_upgrade[2] == 0
-        || sequence <= u64::from_le_bytes(header.reserved_upgrade[3..11].try_into().unwrap())
-    {
-        return Err(custom(StockStreamError::InvalidInstruction));
-    }
-    header.reserved_upgrade[3..11].copy_from_slice(&sequence.to_le_bytes());
-    write_header(data, &header)
-}
-
-fn commit_and_undelegate(
-    program_id: &Address,
-    accounts: &mut [AccountView],
-    sequence: u64,
-) -> ProgramResult {
-    commit_market(program_id, accounts, sequence)?;
-    let data = market_data(&mut accounts[0], program_id)?;
-    let mut header = initialized_header(data)?;
-    header.reserved_upgrade[2] = 2;
-    write_header(data, &header)
-}
-
-fn undelegation_callback(
-    program_id: &Address,
-    accounts: &mut [AccountView],
-    sequence: u64,
-) -> ProgramResult {
-    if accounts.len() < 2 || accounts[1].address() != accounts[0].address() {
-        return Err(custom(StockStreamError::InvalidInstruction));
-    }
-    if sequence == 0 {
-        return Err(custom(StockStreamError::InvalidInstruction));
-    }
-    let data = market_data(&mut accounts[0], program_id)?;
-    let mut header = initialized_header(data)?;
-    if header.reserved_upgrade[2] != 2 {
-        return Err(custom(StockStreamError::InvalidInstruction));
-    }
-    header.reserved_upgrade[2] = 0;
-    header.reserved_upgrade[11..19].copy_from_slice(&sequence.to_le_bytes());
-    write_header(data, &header)
-}
+// Real MagicBlock lifecycle CPI handlers (DelegateMarket, CommitMarket,
+// CommitAndUndelegate, and the external-undelegate callback) live in
+// `crate::magicblock` -- see that module for the account/data contracts,
+// which are dictated by the delegation and Magic programs, not by this file.
 
 fn authorize_trading_session(
     program_id: &Address,

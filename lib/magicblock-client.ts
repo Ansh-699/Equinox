@@ -1,3 +1,17 @@
+// NOTE: this module builds top-level delegation-program instructions
+// directly via the official SDK, bypassing StockStream's own program. That
+// cannot actually execute on chain: the delegation program's `Delegate`
+// instruction requires the delegated PDA to be a *signer*
+// (`processor/fast/delegate.rs`: "This instruction is meant to be called via
+// CPI with the owning program signing for the delegated account"), which
+// only a CPI from the owning program (via `invoke_signed` with the PDA's own
+// seeds) can satisfy -- a client cannot make a PDA sign a top-level
+// transaction. The real, invocable path is
+// `programs/stockstream/src/magicblock.rs::delegate_market`, driven from the
+// client via `clients/stockstream/src/index.ts::delegateMarket`, which
+// submits a StockStream `DelegateMarket` instruction that performs the CPI
+// itself. This file is kept only because other code does not yet depend on
+// it; do not wire it into a real transaction path as-is.
 import {
   createCommitAndUndelegateInstruction,
   createCommitInstruction,

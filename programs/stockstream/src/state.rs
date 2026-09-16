@@ -157,6 +157,155 @@ pub enum LayoutError {
     Value,
 }
 
+/// MagicBlock Ephemeral Rollup delegation lifecycle status, stored at
+/// `reserved_upgrade[RESERVED_DELEGATION_STATUS]`.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DelegationStatus {
+    /// Never delegated, or fully restored after a completed undelegation.
+    /// L1 withdrawals are permitted in this state.
+    NotDelegated = 0,
+    /// Delegated to the Delegation Program; the market trades on the ER.
+    /// L1 withdrawals are blocked.
+    Delegated = 1,
+    /// `CommitAndUndelegate` has been submitted; awaiting the delegation
+    /// program's external-undelegate callback. L1 withdrawals are blocked.
+    Undelegating = 2,
+    /// The external-undelegate callback has been verified and consumed.
+    /// Functionally equivalent to `NotDelegated` for withdrawal purposes but
+    /// kept distinct for the on-chain audit trail.
+    Restored = 3,
+}
+
+impl DelegationStatus {
+    pub fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::NotDelegated),
+            1 => Some(Self::Delegated),
+            2 => Some(Self::Undelegating),
+            3 => Some(Self::Restored),
+            _ => None,
+        }
+    }
+}
+
+// Byte offsets of MagicBlock delegation-lifecycle fields within
+// `reserved_upgrade`. [0], [1], [32..64], [64..68] and [68] are used by
+// custody and oracle configuration (see handlers.rs) and must not overlap.
+pub const RESERVED_DELEGATION_STATUS: usize = 2;
+pub const RESERVED_EXPECTED_COMMIT_SEQUENCE: usize = 3; // ..11
+pub const RESERVED_LAST_COMMITTED_SEQUENCE: usize = 11; // ..19
+pub const RESERVED_VALIDATOR: usize = 69; // ..101
+pub const RESERVED_DELEGATION_SEQUENCE: usize = 101; // ..109
+pub const RESERVED_COMMIT_INTERVAL_MS: usize = 109; // ..113
+pub const RESERVED_EXPECTED_FINAL_COMMIT_SEQUENCE: usize = 113; // ..121
+pub const RESERVED_PENDING_UNDELEGATION: usize = 121;
+
+impl MarketStateHeader {
+    pub fn delegation_status(&self) -> u8 {
+        self.reserved_upgrade[RESERVED_DELEGATION_STATUS]
+    }
+
+    pub fn set_delegation_status(&mut self, status: DelegationStatus) {
+        self.reserved_upgrade[RESERVED_DELEGATION_STATUS] = status as u8;
+    }
+
+    pub fn expected_commit_sequence(&self) -> u64 {
+        u64::from_le_bytes(
+            self.reserved_upgrade
+                [RESERVED_EXPECTED_COMMIT_SEQUENCE..RESERVED_EXPECTED_COMMIT_SEQUENCE + 8]
+                .try_into()
+                .unwrap(),
+        )
+    }
+
+    pub fn set_expected_commit_sequence(&mut self, value: u64) {
+        self.reserved_upgrade
+            [RESERVED_EXPECTED_COMMIT_SEQUENCE..RESERVED_EXPECTED_COMMIT_SEQUENCE + 8]
+            .copy_from_slice(&value.to_le_bytes());
+    }
+
+    pub fn last_committed_sequence(&self) -> u64 {
+        u64::from_le_bytes(
+            self.reserved_upgrade
+                [RESERVED_LAST_COMMITTED_SEQUENCE..RESERVED_LAST_COMMITTED_SEQUENCE + 8]
+                .try_into()
+                .unwrap(),
+        )
+    }
+
+    pub fn set_last_committed_sequence(&mut self, value: u64) {
+        self.reserved_upgrade
+            [RESERVED_LAST_COMMITTED_SEQUENCE..RESERVED_LAST_COMMITTED_SEQUENCE + 8]
+            .copy_from_slice(&value.to_le_bytes());
+    }
+
+    pub fn validator(&self) -> [u8; 32] {
+        self.reserved_upgrade[RESERVED_VALIDATOR..RESERVED_VALIDATOR + 32]
+            .try_into()
+            .unwrap()
+    }
+
+    pub fn set_validator(&mut self, value: [u8; 32]) {
+        self.reserved_upgrade[RESERVED_VALIDATOR..RESERVED_VALIDATOR + 32].copy_from_slice(&value);
+    }
+
+    pub fn delegation_sequence(&self) -> u64 {
+        u64::from_le_bytes(
+            self.reserved_upgrade[RESERVED_DELEGATION_SEQUENCE..RESERVED_DELEGATION_SEQUENCE + 8]
+                .try_into()
+                .unwrap(),
+        )
+    }
+
+    pub fn set_delegation_sequence(&mut self, value: u64) {
+        self.reserved_upgrade[RESERVED_DELEGATION_SEQUENCE..RESERVED_DELEGATION_SEQUENCE + 8]
+            .copy_from_slice(&value.to_le_bytes());
+    }
+
+    pub fn commit_interval_ms(&self) -> u32 {
+        u32::from_le_bytes(
+            self.reserved_upgrade[RESERVED_COMMIT_INTERVAL_MS..RESERVED_COMMIT_INTERVAL_MS + 4]
+                .try_into()
+                .unwrap(),
+        )
+    }
+
+    pub fn set_commit_interval_ms(&mut self, value: u32) {
+        self.reserved_upgrade[RESERVED_COMMIT_INTERVAL_MS..RESERVED_COMMIT_INTERVAL_MS + 4]
+            .copy_from_slice(&value.to_le_bytes());
+    }
+
+    pub fn expected_final_commit_sequence(&self) -> u64 {
+        u64::from_le_bytes(
+            self.reserved_upgrade[RESERVED_EXPECTED_FINAL_COMMIT_SEQUENCE
+                ..RESERVED_EXPECTED_FINAL_COMMIT_SEQUENCE + 8]
+                .try_into()
+                .unwrap(),
+        )
+    }
+
+    pub fn set_expected_final_commit_sequence(&mut self, value: u64) {
+        self.reserved_upgrade
+            [RESERVED_EXPECTED_FINAL_COMMIT_SEQUENCE..RESERVED_EXPECTED_FINAL_COMMIT_SEQUENCE + 8]
+            .copy_from_slice(&value.to_le_bytes());
+    }
+
+    pub fn pending_undelegation(&self) -> bool {
+        self.reserved_upgrade[RESERVED_PENDING_UNDELEGATION] != 0
+    }
+
+    pub fn set_pending_undelegation(&mut self, value: bool) {
+        self.reserved_upgrade[RESERVED_PENDING_UNDELEGATION] = value as u8;
+    }
+
+    /// L1 withdrawals and deposits are only safe when the market is not
+    /// currently delegated (or has never been / has been fully restored).
+    pub fn l1_withdrawals_allowed(&self) -> bool {
+        matches!(self.delegation_status(), 0 | 3)
+    }
+}
+
 const fn regions_are_disjoint() -> bool {
     BID_ARENA_OFFSET + BID_ARENA_LENGTH <= ASK_ARENA_OFFSET
         && ASK_ARENA_OFFSET + ASK_ARENA_LENGTH <= TRADER_SEAT_OFFSET
