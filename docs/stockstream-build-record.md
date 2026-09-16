@@ -322,14 +322,14 @@ keeper fleet. Those items remain partial or unverified.
 
 | Check | Result |
 | --- | --- |
-| Source commit for current SBF | `f709eea` |
+| Source commit for current SBF | `8340d1c` |
 | Rust debug/release tests | `53 passed; 0 failed` / `53 passed; 0 failed` |
 | Root TypeScript tests | `38 passed; 0 failed` |
 | Worker runtime tests | `13 passed; 0 failed` |
 | Clean `npm ci`, lint, typecheck, test, build | passed |
 | SBF artifact | `target/deploy/stockstream.so` |
-| SBF SHA-256 | `dc27921ff62fa2e3f045f83125e117763a0ed8c116d4d5513b0f6137e7fd2851` |
-| SBF size | `173,872` bytes |
+| SBF SHA-256 | `3b5a4b5272e8a14f25391d4e635a1867e9a37478e9747cd7e291c8822cc645a4` |
+| SBF size | `174,384` bytes |
 | SBF stack diagnostic | no stack-frame diagnostic emitted |
 
 This is SBF compilation evidence only. It does not establish runtime, CPI,
