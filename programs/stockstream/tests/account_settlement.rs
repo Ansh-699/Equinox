@@ -159,41 +159,75 @@ fn created_market_copies_reviewed_instrument_oracle_configuration() {
 
 #[test]
 fn trading_session_is_bound_to_the_owners_actual_seat_and_can_be_revoked() {
+    use stockstream::session::{derive_trading_session, read_session, TRADING_SESSION_SIZE};
+
     let f = fixture();
-    let session_signer = account(
-        Address::new_from_array([90; 32]),
-        Address::default(),
+    // `fixture()`'s maker is a signer but not writable (it never pays for
+    // anything in the existing fixtures). `AuthorizeTradingSession` debits
+    // the owner to fund the session PDA's rent, so it needs its own
+    // writable handle to the same address.
+    let owner_payer = account(*f.maker.view.address(), Address::default(), 0, true, true);
+    let session_signer_addr = Address::new_from_array([90; 32]);
+    let session_signer = account(session_signer_addr, Address::default(), 0, true, false);
+    let session_pda = derive_trading_session(
+        f.maker.view.address(),
+        f.market.view.address(),
         0,
-        true,
-        false,
+        &session_signer_addr,
+        &ID,
     );
-    let session = account(Address::new_from_array([91; 32]), ID, 176, false, true);
+    // Not yet owned by StockStream: `AuthorizeTradingSession` creates it via
+    // a System Program CPI, which is a no-op off the SBF target, so the test
+    // account is pre-sized/pre-funded the way a successful CPI would leave
+    // it and we assert on the surrounding validation/write logic instead.
+    let session = account(
+        session_pda,
+        Address::default(),
+        TRADING_SESSION_SIZE,
+        false,
+        true,
+    );
     let mut authorize = vec![17];
-    authorize.extend(0u16.to_le_bytes());
-    authorize.extend(2u64.to_le_bytes());
-    authorize.extend(7u64.to_le_bytes());
-    authorize.push(3);
-    authorize.extend(1_000u64.to_le_bytes());
-    authorize.extend(2_000u64.to_le_bytes());
-    authorize.extend(3_000i128.to_le_bytes());
-    authorize.extend(4u16.to_le_bytes());
+    authorize.extend(0u16.to_le_bytes()); // seat_index
+    authorize.extend(2u64.to_le_bytes()); // expires_at
+    authorize.push(3); // actions: PLACE | CANCEL
+    authorize.extend(1_000u64.to_le_bytes()); // max_order_notional
+    authorize.extend(2_000u64.to_le_bytes()); // max_cumulative_notional
+    authorize.extend(3_000i128.to_le_bytes()); // maximum_exposure
+    authorize.extend(4u16.to_le_bytes()); // maximum_open_orders
+    let system_program = account(Address::default(), Address::default(), 0, false, false);
     process_instruction(
         &ID,
         &mut [
             f.market.view.clone(),
-            f.maker.view.clone(),
+            owner_payer.view.clone(),
             session.view.clone(),
             session_signer.view.clone(),
+            system_program.view.clone(),
         ],
         &authorize,
     )
     .unwrap();
-    let stored = unsafe { session.view.borrow_unchecked() };
-    assert_eq!(&stored[..8], b"STKSES01");
-    assert_eq!(&stored[10..42], f.maker.view.address().as_ref());
-    assert_eq!(&stored[42..74], session_signer.view.address().as_ref());
-    assert_eq!(u16::from_le_bytes(stored[106..108].try_into().unwrap()), 0);
-    assert_eq!(u64::from_le_bytes(stored[159..167].try_into().unwrap()), 7);
+    // `CreateAccount::invoke_signed` is a no-op off the SBF target (see
+    // `magicblock.rs`'s module doc), so it never actually reassigns the
+    // account's owner the way it would on a real cluster. Apply that one
+    // side effect directly so the rest of this test can exercise the real
+    // post-creation validation path.
+    unsafe { session.view.clone().assign(&ID) };
+    let stored = read_session(unsafe { session.view.borrow_unchecked() }).unwrap();
+    let (discriminator, owner, signer_field, seat_index, next_nonce) = (
+        stored.discriminator,
+        stored.owner,
+        stored.session_signer,
+        stored.trader_seat_index,
+        stored.next_expected_nonce,
+    );
+    assert_eq!(&discriminator, b"STKSES02");
+    assert_eq!(owner, f.maker.view.address().to_bytes());
+    assert_eq!(signer_field, session_signer_addr.to_bytes());
+    assert_eq!(seat_index, 0);
+    assert_eq!(next_nonce, 1);
+
     let mut place_accounts = [
         f.market.view.clone(),
         session_signer.view.clone(),
@@ -203,39 +237,33 @@ fn trading_session_is_bound_to_the_owners_actual_seat_and_can_be_revoked() {
     process_instruction(
         &ID,
         &mut place_accounts,
-        &order_data_with_nonce(1, 0, 1, 100, 0, 990, 7),
+        &order_data_with_nonce(1, 0, 1, 100, 0, 990, 1),
     )
     .unwrap();
-    assert_eq!(
-        u64::from_le_bytes(
-            unsafe { session.view.borrow_unchecked() }[133..141]
-                .try_into()
-                .unwrap()
-        ),
-        100
-    );
+    let consumed = read_session(unsafe { session.view.borrow_unchecked() })
+        .unwrap()
+        .consumed_cumulative_notional;
+    assert_eq!(consumed, 100);
     process_instruction(
         &ID,
         &mut place_accounts,
-        &order_data_with_nonce(1, 0, 10, 100, 0, 991, 8),
+        &order_data_with_nonce(1, 0, 10, 100, 0, 991, 2),
     )
     .unwrap();
-    assert_eq!(
-        u64::from_le_bytes(
-            unsafe { session.view.borrow_unchecked() }[159..167]
-                .try_into()
-                .unwrap()
-        ),
-        9
-    );
+    let next_nonce = read_session(unsafe { session.view.borrow_unchecked() })
+        .unwrap()
+        .next_expected_nonce;
+    assert_eq!(next_nonce, 3);
     let before_replay = unsafe { session.view.borrow_unchecked().to_vec() };
+    // Repeated nonce.
     assert!(process_instruction(
         &ID,
         &mut place_accounts,
-        &order_data_with_nonce(1, 0, 1, 100, 0, 991, 8),
+        &order_data_with_nonce(1, 0, 1, 100, 0, 991, 2),
     )
     .is_err());
     assert_eq!(unsafe { session.view.borrow_unchecked() }, before_replay);
+    // Future/skipped nonce.
     assert!(process_instruction(
         &ID,
         &mut place_accounts,
@@ -243,26 +271,44 @@ fn trading_session_is_bound_to_the_owners_actual_seat_and_can_be_revoked() {
     )
     .is_err());
     let before_rejected = unsafe { session.view.borrow_unchecked().to_vec() };
+    // Disallowed action for this session (CANCEL_ALL was never granted).
     assert!(process_instruction(
         &ID,
-        &mut place_accounts,
-        &order_data_with_nonce(1, 0, 10, 100, 0, 992, 9),
+        &mut [
+            f.market.view.clone(),
+            session_signer.view.clone(),
+            session.view.clone(),
+        ],
+        &[5, 0, 0, 5, 3, 0, 0, 0, 0, 0, 0, 0],
     )
     .is_err());
     assert_eq!(unsafe { session.view.borrow_unchecked() }, before_rejected);
     let mut revoke = vec![18];
-    revoke.extend(9u64.to_le_bytes());
+    revoke.extend(0u16.to_le_bytes());
     process_instruction(
         &ID,
         &mut [
             f.market.view.clone(),
             f.maker.view.clone(),
             session.view.clone(),
+            session_signer.view.clone(),
         ],
         &revoke,
     )
     .unwrap();
-    assert_eq!(unsafe { session.view.borrow_unchecked() }[9], 1);
+    assert_eq!(
+        read_session(unsafe { session.view.borrow_unchecked() })
+            .unwrap()
+            .revoked,
+        1
+    );
+    // A revoked session can no longer authorize any trading action.
+    assert!(process_instruction(
+        &ID,
+        &mut place_accounts,
+        &order_data_with_nonce(1, 0, 1, 100, 0, 993, 3),
+    )
+    .is_err());
 }
 
 #[test]

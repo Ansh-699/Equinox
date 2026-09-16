@@ -132,22 +132,20 @@ fn production_instruction_decoder_covers_integration_variants() {
         StockStreamInstruction::decode(&[14, 1, 0, 0, 0, 0, 0, 0, 0]),
         Ok(StockStreamInstruction::CommitMarket { sequence: 1 })
     ));
-    let mut session = [0u8; 54];
+    let mut session = [0u8; 46];
     session[0] = 17;
     session[1..3].copy_from_slice(&2u16.to_le_bytes());
     session[3..11].copy_from_slice(&20u64.to_le_bytes());
-    session[11..19].copy_from_slice(&3u64.to_le_bytes());
-    session[19] = 3;
-    session[20..28].copy_from_slice(&10u64.to_le_bytes());
-    session[28..36].copy_from_slice(&20u64.to_le_bytes());
-    session[36..52].copy_from_slice(&30i128.to_le_bytes());
-    session[52..54].copy_from_slice(&2u16.to_le_bytes());
+    session[11] = 3;
+    session[12..20].copy_from_slice(&10u64.to_le_bytes());
+    session[20..28].copy_from_slice(&20u64.to_le_bytes());
+    session[28..44].copy_from_slice(&30i128.to_le_bytes());
+    session[44..46].copy_from_slice(&2u16.to_le_bytes());
     assert!(matches!(
         StockStreamInstruction::decode(&session),
         Ok(StockStreamInstruction::AuthorizeTradingSession {
             seat_index: 2,
             expires_at: 20,
-            nonce: 3,
             ..
         })
     ));

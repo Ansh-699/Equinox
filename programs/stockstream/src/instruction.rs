@@ -37,6 +37,9 @@ pub const SET_CLOSE_ONLY: u8 = 27;
 pub const ENTER_CORPORATE_ACTION: u8 = 28;
 pub const RESOLVE_CORPORATE_ACTION: u8 = 29;
 pub const CLOSE_MARKET: u8 = 30;
+pub const UPDATE_TRADING_SESSION_LIMITS: u8 = 31;
+pub const CLOSE_TRADING_SESSION: u8 = 32;
+pub const REPLACE_ORDER: u8 = 33;
 
 #[derive(Clone, Copy)]
 pub struct PlaceOrderData {
@@ -106,7 +109,6 @@ pub enum StockStreamInstruction {
     AuthorizeTradingSession {
         seat_index: u16,
         expires_at: u64,
-        nonce: u64,
         actions: u8,
         max_order_notional: u64,
         max_cumulative_notional: u64,
@@ -114,7 +116,27 @@ pub enum StockStreamInstruction {
         maximum_open_orders: u16,
     },
     RevokeTradingSession {
-        nonce: u64,
+        seat_index: u16,
+    },
+    UpdateTradingSessionLimits {
+        seat_index: u16,
+        expires_at: u64,
+        actions: u8,
+        max_order_notional: u64,
+        max_cumulative_notional: u64,
+        maximum_exposure: i128,
+        maximum_open_orders: u16,
+    },
+    CloseTradingSession {
+        seat_index: u16,
+    },
+    /// The new order's `seat_index` also identifies the seat the old order
+    /// (identified by `old_order_key`) must belong to -- there is no
+    /// separate outer seat index since a replacement can never move an
+    /// order to a different seat.
+    ReplaceOrder {
+        old_order_key: u128,
+        new_order: PlaceOrderData,
     },
     InitializeExchange,
     RegisterStockInstrument {
@@ -231,24 +253,58 @@ impl StockStreamInstruction {
             Some(COMMIT_AND_UNDELEGATE) if data.len() == 9 => Ok(Self::CommitAndUndelegate {
                 sequence: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
             }),
-            Some(AUTHORIZE_TRADING_SESSION) if data.len() == 54 => {
+            Some(AUTHORIZE_TRADING_SESSION) if data.len() == 46 => {
                 Ok(Self::AuthorizeTradingSession {
                     seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
                     expires_at: read_u64(data, 3).ok_or(ProgramError::InvalidInstructionData)?,
-                    nonce: read_u64(data, 11).ok_or(ProgramError::InvalidInstructionData)?,
-                    actions: data[19],
-                    max_order_notional: read_u64(data, 20)
+                    actions: data[11],
+                    max_order_notional: read_u64(data, 12)
                         .ok_or(ProgramError::InvalidInstructionData)?,
-                    max_cumulative_notional: read_u64(data, 28)
+                    max_cumulative_notional: read_u64(data, 20)
                         .ok_or(ProgramError::InvalidInstructionData)?,
-                    maximum_exposure: read_i128(data, 36)
+                    maximum_exposure: read_i128(data, 28)
                         .ok_or(ProgramError::InvalidInstructionData)?,
-                    maximum_open_orders: read_u16(data, 52)
+                    maximum_open_orders: read_u16(data, 44)
                         .ok_or(ProgramError::InvalidInstructionData)?,
                 })
             }
-            Some(REVOKE_TRADING_SESSION) if data.len() == 9 => Ok(Self::RevokeTradingSession {
-                nonce: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+            Some(REVOKE_TRADING_SESSION) if data.len() == 3 => Ok(Self::RevokeTradingSession {
+                seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+            }),
+            Some(UPDATE_TRADING_SESSION_LIMITS) if data.len() == 46 => {
+                Ok(Self::UpdateTradingSessionLimits {
+                    seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+                    expires_at: read_u64(data, 3).ok_or(ProgramError::InvalidInstructionData)?,
+                    actions: data[11],
+                    max_order_notional: read_u64(data, 12)
+                        .ok_or(ProgramError::InvalidInstructionData)?,
+                    max_cumulative_notional: read_u64(data, 20)
+                        .ok_or(ProgramError::InvalidInstructionData)?,
+                    maximum_exposure: read_i128(data, 28)
+                        .ok_or(ProgramError::InvalidInstructionData)?,
+                    maximum_open_orders: read_u16(data, 44)
+                        .ok_or(ProgramError::InvalidInstructionData)?,
+                })
+            }
+            Some(CLOSE_TRADING_SESSION) if data.len() == 3 => Ok(Self::CloseTradingSession {
+                seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+            }),
+            Some(REPLACE_ORDER) if data.len() == 70 => Ok(Self::ReplaceOrder {
+                old_order_key: read_u128(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+                new_order: PlaceOrderData {
+                    side: data[17],
+                    tree: data[18],
+                    flags: data[19],
+                    seat_index: read_u16(data, 20).ok_or(ProgramError::InvalidInstructionData)?,
+                    quantity: read_u64(data, 22).ok_or(ProgramError::InvalidInstructionData)?,
+                    price_or_offset: read_i64(data, 30)
+                        .ok_or(ProgramError::InvalidInstructionData)?,
+                    expires_at: read_u64(data, 38).ok_or(ProgramError::InvalidInstructionData)?,
+                    peg_limit: read_i64(data, 46).ok_or(ProgramError::InvalidInstructionData)?,
+                    client_order_id: read_u64(data, 54)
+                        .ok_or(ProgramError::InvalidInstructionData)?,
+                    action_nonce: read_u64(data, 62).ok_or(ProgramError::InvalidInstructionData)?,
+                },
             }),
             Some(INITIALIZE_EXCHANGE) if data.len() == 1 => Ok(Self::InitializeExchange),
             Some(REGISTER_STOCK_INSTRUMENT) if data.len() == 33 => {

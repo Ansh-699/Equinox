@@ -24,6 +24,8 @@ pub enum StockStreamError {
     MagicBlockScratchNotEmpty = 0x6013,
     MagicBlockUndelegationInProgress = 0x6014,
     MagicBlockCallbackAlreadyConsumed = 0x6015,
+    InvalidTradingSession = 0x6016,
+    SessionNonceReplay = 0x6017,
 }
 
 impl From<StockStreamError> for ProgramError {

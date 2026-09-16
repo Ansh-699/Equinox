@@ -18,6 +18,7 @@ pub mod magicblock;
 pub mod registry;
 pub mod risk;
 pub mod scratch;
+pub mod session;
 pub mod state;
 
 use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
