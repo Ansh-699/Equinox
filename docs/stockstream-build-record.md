@@ -308,3 +308,29 @@ The runtime remains externally unverified because the installed SBPF runtime
 does not accept the compiler's ELF/SBPF generation. Live Pyth, Privy and
 MagicBlock verification also remain externally blocked by credentials and/or
 network/service availability.
+
+## Corrected Implementation Evidence (2026-09-16)
+
+The preceding “Full Code-Completion Pass” heading is historical wording, not a
+claim that every production path is complete. The current implementation has
+concrete account settlement, registry configuration, SPL transfer invocation,
+Pyth verifier-CPI construction, D1 repositories, Durable Object streaming,
+and HTTP/RPC client transports. It does **not** yet provide a verified SBF
+runtime execution, a live Pyth signed update, onchain MagicBlock lifecycle
+CPI, complete session replay consumption, or a complete external indexer and
+keeper fleet. Those items remain partial or unverified.
+
+| Check | Result |
+| --- | --- |
+| Source commit for current SBF | `f709eea` |
+| Rust debug/release tests | `53 passed; 0 failed` / `53 passed; 0 failed` |
+| Root TypeScript tests | `38 passed; 0 failed` |
+| Worker runtime tests | `13 passed; 0 failed` |
+| Clean `npm ci`, lint, typecheck, test, build | passed |
+| SBF artifact | `target/deploy/stockstream.so` |
+| SBF SHA-256 | `dc27921ff62fa2e3f045f83125e117763a0ed8c116d4d5513b0f6137e7fd2851` |
+| SBF size | `173,872` bytes |
+| SBF stack diagnostic | no stack-frame diagnostic emitted |
+
+This is SBF compilation evidence only. It does not establish runtime, CPI,
+ER, devnet, Privy, or authenticated Pyth verification.
