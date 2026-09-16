@@ -212,6 +212,16 @@ fn authorize_trading_actor(
             .try_into()
             .unwrap(),
     );
+    let maximum_exposure = i128::from_le_bytes(
+        bytes[SESSION_MAX_EXPOSURE_OFFSET..SESSION_MAX_EXPOSURE_OFFSET + 16]
+            .try_into()
+            .unwrap(),
+    );
+    let maximum_open_orders = u16::from_le_bytes(
+        bytes[SESSION_MAX_OPEN_ORDERS_OFFSET..SESSION_MAX_OPEN_ORDERS_OFFSET + 2]
+            .try_into()
+            .unwrap(),
+    );
     if u64::from_le_bytes(
         bytes[SESSION_EXPIRY_OFFSET..SESSION_EXPIRY_OFFSET + 8]
             .try_into()
@@ -220,6 +230,8 @@ fn authorize_trading_actor(
         || notional < 0
         || notional as u128 > max_order as u128
         || (notional as u128).saturating_add(used as u128) > max_cumulative as u128
+        || seat.base_position.unsigned_abs() > maximum_exposure as u128
+        || (action == SESSION_PLACE && seat.open_order_count >= maximum_open_orders as u32)
     {
         return Err(custom(StockStreamError::RiskViolation));
     }
@@ -336,9 +348,27 @@ pub fn dispatch(
         StockStreamInstruction::UndelegationCallback { sequence } => {
             undelegation_callback(program_id, accounts, sequence)
         }
-        StockStreamInstruction::AuthorizeTradingSession { expires_at, nonce } => {
-            authorize_trading_session(program_id, accounts, expires_at, nonce)
-        }
+        StockStreamInstruction::AuthorizeTradingSession {
+            seat_index,
+            expires_at,
+            nonce,
+            actions,
+            max_order_notional,
+            max_cumulative_notional,
+            maximum_exposure,
+            maximum_open_orders,
+        } => authorize_trading_session(
+            program_id,
+            accounts,
+            seat_index,
+            expires_at,
+            nonce,
+            actions,
+            max_order_notional,
+            max_cumulative_notional,
+            maximum_exposure,
+            maximum_open_orders,
+        ),
         StockStreamInstruction::RevokeTradingSession { nonce } => {
             revoke_trading_session(program_id, accounts, nonce)
         }
@@ -983,8 +1013,14 @@ fn undelegation_callback(
 fn authorize_trading_session(
     program_id: &Address,
     accounts: &mut [AccountView],
+    seat_index: u16,
     expires_at: u64,
     nonce: u64,
+    actions: u8,
+    max_order_notional: u64,
+    max_cumulative_notional: u64,
+    maximum_exposure: i128,
+    maximum_open_orders: u16,
 ) -> ProgramResult {
     if accounts.len() != 4 {
         return Err(ProgramError::NotEnoughAccountKeys);
@@ -1009,19 +1045,20 @@ fn authorize_trading_session(
     if expires_at <= header.last_verified_oracle_timestamp {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
-    let mut found = None;
-    let mut index = 0;
-    while index < MAX_TRADER_SEATS {
-        let seat = seat_at(data, index)?;
-        if seat.occupancy == 1 && seat.trader == owner {
-            found = Some(index as u16);
-            break;
-        }
-        index += 1;
+    if seat_index as usize >= MAX_TRADER_SEATS
+        || actions == 0
+        || actions & !(SESSION_PLACE | SESSION_CANCEL | SESSION_CANCEL_ALL) != 0
+        || max_order_notional == 0
+        || max_cumulative_notional < max_order_notional
+        || maximum_exposure <= 0
+        || maximum_open_orders == 0
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
     }
-    let Some(seat_index) = found else {
+    let seat = seat_at(data, seat_index as usize)?;
+    if seat.occupancy != 1 || seat.trader != owner {
         return Err(custom(StockStreamError::InvalidSeat));
-    };
+    }
     let session = unsafe { accounts[2].borrow_unchecked_mut() };
     if session[0..8] == SESSION_DISCRIMINATOR && session[SESSION_REVOKED_OFFSET] == 0 {
         return Err(custom(StockStreamError::InvalidInstruction));
@@ -1038,15 +1075,15 @@ fn authorize_trading_session(
         .copy_from_slice(&seat_index.to_le_bytes());
     session[SESSION_EXPIRY_OFFSET..SESSION_EXPIRY_OFFSET + 8]
         .copy_from_slice(&expires_at.to_le_bytes());
-    session[SESSION_ACTIONS_OFFSET] = SESSION_PLACE | SESSION_CANCEL | SESSION_CANCEL_ALL;
+    session[SESSION_ACTIONS_OFFSET] = actions;
     session[SESSION_MAX_ORDER_NOTIONAL_OFFSET..SESSION_MAX_ORDER_NOTIONAL_OFFSET + 8]
-        .copy_from_slice(&u64::MAX.to_le_bytes());
+        .copy_from_slice(&max_order_notional.to_le_bytes());
     session[SESSION_MAX_CUMULATIVE_NOTIONAL_OFFSET..SESSION_MAX_CUMULATIVE_NOTIONAL_OFFSET + 8]
-        .copy_from_slice(&u64::MAX.to_le_bytes());
+        .copy_from_slice(&max_cumulative_notional.to_le_bytes());
     session[SESSION_MAX_EXPOSURE_OFFSET..SESSION_MAX_EXPOSURE_OFFSET + 16]
-        .copy_from_slice(&i128::MAX.to_le_bytes());
+        .copy_from_slice(&maximum_exposure.to_le_bytes());
     session[SESSION_MAX_OPEN_ORDERS_OFFSET..SESSION_MAX_OPEN_ORDERS_OFFSET + 2]
-        .copy_from_slice(&u16::MAX.to_le_bytes());
+        .copy_from_slice(&maximum_open_orders.to_le_bytes());
     session[SESSION_NONCE_OFFSET..SESSION_NONCE_OFFSET + 8].copy_from_slice(&nonce.to_le_bytes());
     Ok(())
 }
@@ -1160,6 +1197,13 @@ fn place_order(
     if expected_scratch != *accounts[2].address() {
         return Err(custom(StockStreamError::InvalidSettlementScratch));
     }
+    let session_notional = if order.price_or_offset > 0 {
+        (order.quantity as i128)
+            .checked_mul(order.price_or_offset as i128)
+            .ok_or(custom(StockStreamError::ArithmeticOverflow))?
+    } else {
+        0
+    };
     let (session_authorized, seat_owner) = {
         let snapshot = unsafe { accounts[0].borrow_unchecked() };
         let snapshot_header = initialized_header(snapshot)?;
@@ -1171,7 +1215,7 @@ fn place_order(
             order.seat_index as usize,
             3,
             SESSION_PLACE,
-            0,
+            session_notional,
             snapshot_header.last_verified_oracle_timestamp,
         )?;
         (snapshot_seat.trader != trader, snapshot_seat.trader)

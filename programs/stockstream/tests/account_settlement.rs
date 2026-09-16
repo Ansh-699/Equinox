@@ -169,8 +169,14 @@ fn trading_session_is_bound_to_the_owners_actual_seat_and_can_be_revoked() {
     );
     let session = account(Address::new_from_array([91; 32]), ID, 176, false, true);
     let mut authorize = vec![17];
+    authorize.extend(0u16.to_le_bytes());
     authorize.extend(2u64.to_le_bytes());
     authorize.extend(7u64.to_le_bytes());
+    authorize.push(3);
+    authorize.extend(1_000u64.to_le_bytes());
+    authorize.extend(2_000u64.to_le_bytes());
+    authorize.extend(3_000i128.to_le_bytes());
+    authorize.extend(4u16.to_le_bytes());
     process_instruction(
         &ID,
         &mut [
