@@ -44,6 +44,9 @@ pub struct PlaceOrderData {
     pub expires_at: u64,
     pub peg_limit: i64,
     pub client_order_id: u64,
+    /// Strictly monotonic scoped-session action nonce. Main-wallet actions
+    /// encode zero and do not consume a session nonce.
+    pub action_nonce: u64,
 }
 
 pub enum StockStreamInstruction {
@@ -58,10 +61,12 @@ pub enum StockStreamInstruction {
     CancelOrder {
         seat_index: u16,
         order_key: u128,
+        action_nonce: u64,
     },
     CancelAll {
         seat_index: u16,
         max_cancellations: u8,
+        action_nonce: u64,
     },
     UpdateFunding {
         accumulator: i128,
@@ -166,7 +171,7 @@ impl StockStreamInstruction {
             Some(CLOSE_TRADER_SEAT) if data.len() == 3 => Ok(Self::CloseTraderSeat {
                 seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
             }),
-            Some(PLACE_ORDER) if data.len() == 46 => Ok(Self::PlaceOrder(PlaceOrderData {
+            Some(PLACE_ORDER) if data.len() == 54 => Ok(Self::PlaceOrder(PlaceOrderData {
                 side: data[1],
                 tree: data[2],
                 flags: data[3],
@@ -176,14 +181,17 @@ impl StockStreamInstruction {
                 expires_at: read_u64(data, 22).ok_or(ProgramError::InvalidInstructionData)?,
                 peg_limit: read_i64(data, 30).ok_or(ProgramError::InvalidInstructionData)?,
                 client_order_id: read_u64(data, 38).ok_or(ProgramError::InvalidInstructionData)?,
+                action_nonce: read_u64(data, 46).ok_or(ProgramError::InvalidInstructionData)?,
             })),
-            Some(CANCEL_ORDER) if data.len() == 19 => Ok(Self::CancelOrder {
+            Some(CANCEL_ORDER) if data.len() == 27 => Ok(Self::CancelOrder {
                 seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
                 order_key: read_u128(data, 3).ok_or(ProgramError::InvalidInstructionData)?,
+                action_nonce: read_u64(data, 19).ok_or(ProgramError::InvalidInstructionData)?,
             }),
-            Some(CANCEL_ALL) if data.len() == 4 => Ok(Self::CancelAll {
+            Some(CANCEL_ALL) if data.len() == 12 => Ok(Self::CancelAll {
                 seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
                 max_cancellations: data[3],
+                action_nonce: read_u64(data, 4).ok_or(ProgramError::InvalidInstructionData)?,
             }),
             Some(UPDATE_FUNDING) if data.len() == 25 => Ok(Self::UpdateFunding {
                 accumulator: read_i128(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
