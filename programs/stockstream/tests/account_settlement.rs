@@ -200,7 +200,12 @@ fn trading_session_is_bound_to_the_owners_actual_seat_and_can_be_revoked() {
         f.maker_scratch.view.clone(),
         session.view.clone(),
     ];
-    process_instruction(&ID, &mut place_accounts, &order_data(1, 0, 1, 100, 0, 990)).unwrap();
+    process_instruction(
+        &ID,
+        &mut place_accounts,
+        &order_data_with_nonce(1, 0, 1, 100, 0, 990, 7),
+    )
+    .unwrap();
     assert_eq!(
         u64::from_le_bytes(
             unsafe { session.view.borrow_unchecked() }[133..141]
@@ -209,14 +214,44 @@ fn trading_session_is_bound_to_the_owners_actual_seat_and_can_be_revoked() {
         ),
         100
     );
-    process_instruction(&ID, &mut place_accounts, &order_data(1, 0, 10, 100, 0, 991)).unwrap();
-    let before_rejected = unsafe { session.view.borrow_unchecked().to_vec() };
-    assert!(
-        process_instruction(&ID, &mut place_accounts, &order_data(1, 0, 10, 100, 0, 992)).is_err()
+    process_instruction(
+        &ID,
+        &mut place_accounts,
+        &order_data_with_nonce(1, 0, 10, 100, 0, 991, 8),
+    )
+    .unwrap();
+    assert_eq!(
+        u64::from_le_bytes(
+            unsafe { session.view.borrow_unchecked() }[159..167]
+                .try_into()
+                .unwrap()
+        ),
+        9
     );
+    let before_replay = unsafe { session.view.borrow_unchecked().to_vec() };
+    assert!(process_instruction(
+        &ID,
+        &mut place_accounts,
+        &order_data_with_nonce(1, 0, 1, 100, 0, 991, 8),
+    )
+    .is_err());
+    assert_eq!(unsafe { session.view.borrow_unchecked() }, before_replay);
+    assert!(process_instruction(
+        &ID,
+        &mut place_accounts,
+        &order_data_with_nonce(1, 0, 1, 100, 0, 991, 10),
+    )
+    .is_err());
+    let before_rejected = unsafe { session.view.borrow_unchecked().to_vec() };
+    assert!(process_instruction(
+        &ID,
+        &mut place_accounts,
+        &order_data_with_nonce(1, 0, 10, 100, 0, 992, 9),
+    )
+    .is_err());
     assert_eq!(unsafe { session.view.borrow_unchecked() }, before_rejected);
     let mut revoke = vec![18];
-    revoke.extend(7u64.to_le_bytes());
+    revoke.extend(9u64.to_le_bytes());
     process_instruction(
         &ID,
         &mut [
@@ -350,6 +385,18 @@ fn credit(market: &mut TestAccount, index: usize, amount: i128) {
 }
 
 fn order_data(side: u8, seat: u16, quantity: u64, price: i64, flags: u8, client: u64) -> Vec<u8> {
+    order_data_with_nonce(side, seat, quantity, price, flags, client, 0)
+}
+
+fn order_data_with_nonce(
+    side: u8,
+    seat: u16,
+    quantity: u64,
+    price: i64,
+    flags: u8,
+    client: u64,
+    action_nonce: u64,
+) -> Vec<u8> {
     let mut data = vec![3, side, 0, flags, 0, 0];
     data[4..6].copy_from_slice(&seat.to_le_bytes());
     data.extend_from_slice(&quantity.to_le_bytes());
@@ -357,6 +404,7 @@ fn order_data(side: u8, seat: u16, quantity: u64, price: i64, flags: u8, client:
     data.extend_from_slice(&0u64.to_le_bytes());
     data.extend_from_slice(&0i64.to_le_bytes());
     data.extend_from_slice(&client.to_le_bytes());
+    data.extend_from_slice(&action_nonce.to_le_bytes());
     data
 }
 
@@ -582,6 +630,7 @@ fn serialized_market_can_create_seats_and_settle_crossing_orders() {
     maker_order.extend_from_slice(&0u64.to_le_bytes());
     maker_order.extend_from_slice(&0i64.to_le_bytes());
     maker_order.extend_from_slice(&11u64.to_le_bytes());
+    maker_order.extend_from_slice(&0u64.to_le_bytes());
     {
         let mut accounts = [
             market.view.clone(),
@@ -650,7 +699,9 @@ fn failed_wrong_owner_cancel_does_not_change_serialized_account() {
     let result = process_instruction(
         &ID,
         &mut accounts,
-        &[4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        &[
+            4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ],
     );
     assert!(result.is_err());
     assert_eq!(before, unsafe { market.view.borrow_unchecked() });
@@ -775,6 +826,7 @@ fn mvp_cancellation_releases_exact_remaining_reserve_once() {
         unsafe { &*(data.as_ptr().add(TRADER_SEAT_OFFSET) as *const TraderSeat) }.reserved_margin;
     let mut cancel = vec![4, 0, 0];
     cancel.extend_from_slice(&key.to_le_bytes());
+    cancel.extend_from_slice(&0u64.to_le_bytes());
     let mut accounts = [f.market.view.clone(), f.maker.view.clone()];
     process_instruction(&ID, &mut accounts, &cancel).unwrap();
     let data = unsafe { f.market.view.borrow_unchecked() };

@@ -19,17 +19,25 @@ test("instruction constructors use canonical program id and exact account flags"
 
 test("place order serializes little-endian fields and decodes", () => {
   const ix = placeOrder({ market, authority, settlementScratch, seatIndex: 2, side: "bid", tree: "fixed", quantity: 12n, priceOrOffset: 123_450_000n, clientOrderId: 9n, reduceOnly: true });
-  expect(ix.data.length).toBe(46);
+  expect(ix.data.length).toBe(54);
   expect(Array.from(ix.data.slice(0, 4))).toEqual([3, 0, 0, 4]);
   expect(decodeInstruction(ix.data).name).toBe("PlaceOrder");
 });
 
 test("cancel order encodes a full 128-bit key", () => {
   const session = PublicKey.unique();
-  const ix = cancelOrder({ market, authority, session }, 2, 2n ** 100n + 7n);
-  expect(ix.data.length).toBe(19);
+  const ix = cancelOrder({ market, authority, session }, 2, 2n ** 100n + 7n, 3n);
+  expect(ix.data.length).toBe(27);
   expect(ix.keys[2]).toEqual({ pubkey: session, isSigner: false, isWritable: true });
   expect(decodeInstruction(ix.data).name).toBe("CancelOrder");
+  expect(Array.from(ix.data.slice(19))).toEqual([3, 0, 0, 0, 0, 0, 0, 0]);
+});
+
+test("scoped action nonces are serialized while main wallet actions remain zero", () => {
+  const session = PublicKey.unique();
+  const scoped = placeOrder({ market, authority, settlementScratch, session, seatIndex: 2, side: "ask", quantity: 1n, priceOrOffset: 10n, clientOrderId: 10n, actionNonce: 9n });
+  expect(Array.from(scoped.data.slice(46))).toEqual([9, 0, 0, 0, 0, 0, 0, 0]);
+  expect(() => placeOrder({ market, authority, settlementScratch, seatIndex: 2, side: "ask", quantity: 1n, priceOrOffset: 10n, clientOrderId: 10n, actionNonce: 1n })).toThrow(/zero/);
 });
 
 test("transaction preview is unsigned and explicit about unavailable margin", () => {

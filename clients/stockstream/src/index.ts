@@ -22,6 +22,8 @@ export interface PlaceOrderParams extends InstructionAccounts {
   expiresAt?: bigint | number;
   pegLimit?: bigint | number;
   clientOrderId: bigint | number;
+  /** Required for scoped-session actions. Main-wallet actions must use zero. */
+  actionNonce?: bigint | number;
   postOnly?: boolean;
   immediateOrCancel?: boolean;
   reduceOnly?: boolean;
@@ -100,7 +102,7 @@ export function closeTraderSeat(accounts: InstructionAccounts, seatIndex: number
 }
 
 export function placeOrder(params: PlaceOrderParams): TransactionInstruction {
-  const data = new Uint8Array(46);
+  const data = new Uint8Array(54);
   data[0] = STOCKSTREAM_INSTRUCTION.placeOrder;
   data[1] = params.side === "bid" ? 0 : params.side === "ask" ? 1 : 255;
   data[2] = (params.tree ?? "fixed") === "fixed" ? 0 : 1;
@@ -112,18 +114,23 @@ export function placeOrder(params: PlaceOrderParams): TransactionInstruction {
   writeUnsigned(data, 22, checkedUnsigned(params.expiresAt ?? 0, 64, "expiresAt"), 8);
   writeSigned(data, 30, checkedSigned(params.pegLimit ?? 0, 64, "pegLimit"), 8);
   writeUnsigned(data, 38, checkedUnsigned(params.clientOrderId, 64, "clientOrderId"), 8);
+  const actionNonce = params.actionNonce ?? 0;
+  if (!params.session && actionNonce !== 0) throw new RangeError("Main-wallet actions must use actionNonce zero");
+  writeUnsigned(data, 46, checkedUnsigned(actionNonce, 64, "actionNonce"), 8);
   const accounts = [accountMeta(params.market, false, true), accountMeta(params.authority, true, false), accountMeta(params.settlementScratch, false, true)];
   if (params.session) accounts.push(accountMeta(params.session, false, true));
   return instruction(data, accounts);
 }
 
-export function cancelOrder(accounts: SessionAuthorizedAccounts, seatIndex: number, orderKey: bigint): TransactionInstruction {
-  const data = new Uint8Array(19); data[0] = STOCKSTREAM_INSTRUCTION.cancelOrder; writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2); writeUnsigned(data, 3, checkedUnsigned(orderKey, 128, "orderKey"), 16);
+export function cancelOrder(accounts: SessionAuthorizedAccounts, seatIndex: number, orderKey: bigint, actionNonce: bigint | number = 0): TransactionInstruction {
+  if (!accounts.session && actionNonce !== 0) throw new RangeError("Main-wallet actions must use actionNonce zero");
+  const data = new Uint8Array(27); data[0] = STOCKSTREAM_INSTRUCTION.cancelOrder; writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2); writeUnsigned(data, 3, checkedUnsigned(orderKey, 128, "orderKey"), 16); writeUnsigned(data, 19, checkedUnsigned(actionNonce, 64, "actionNonce"), 8);
   const metas = [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]; if (accounts.session) metas.push(accountMeta(accounts.session, false, true)); return instruction(data, metas);
 }
 
-export function cancelAll(accounts: SessionAuthorizedAccounts, seatIndex: number, maxCancellations: number): TransactionInstruction {
-  const data = new Uint8Array(4); data[0] = STOCKSTREAM_INSTRUCTION.cancelAll; writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2); data[3] = Number(checkedUnsigned(maxCancellations, 8, "maxCancellations"));
+export function cancelAll(accounts: SessionAuthorizedAccounts, seatIndex: number, maxCancellations: number, actionNonce: bigint | number = 0): TransactionInstruction {
+  if (!accounts.session && actionNonce !== 0) throw new RangeError("Main-wallet actions must use actionNonce zero");
+  const data = new Uint8Array(12); data[0] = STOCKSTREAM_INSTRUCTION.cancelAll; writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2); data[3] = Number(checkedUnsigned(maxCancellations, 8, "maxCancellations")); writeUnsigned(data, 4, checkedUnsigned(actionNonce, 64, "actionNonce"), 8);
   const metas = [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]; if (accounts.session) metas.push(accountMeta(accounts.session, false, true)); return instruction(data, metas);
 }
 

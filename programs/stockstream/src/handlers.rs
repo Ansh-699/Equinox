@@ -151,10 +151,16 @@ fn authorize_trading_actor(
     session_account_index: usize,
     action: u8,
     notional: i128,
+    action_nonce: u64,
     now: u64,
 ) -> ProgramResult {
     let signer_key = accounts[1].address().to_bytes();
     if signer_key == seat.trader {
+        // Main-wallet authorizations are transaction-signature protected and
+        // intentionally do not share the scoped-session nonce namespace.
+        if action_nonce != 0 {
+            return Err(custom(StockStreamError::InvalidInstruction));
+        }
         return Ok(());
     }
     if accounts.len() <= session_account_index {
@@ -170,6 +176,11 @@ fn authorize_trading_actor(
         return Err(custom(StockStreamError::InvalidInstruction));
     }
     let bytes = unsafe { session.borrow_unchecked() };
+    let expected_nonce = u64::from_le_bytes(
+        bytes[SESSION_NONCE_OFFSET..SESSION_NONCE_OFFSET + 8]
+            .try_into()
+            .unwrap(),
+    );
     if bytes[0..8] != SESSION_DISCRIMINATOR
         || bytes[SESSION_VERSION_OFFSET] != SESSION_VERSION
         || bytes[SESSION_REVOKED_OFFSET] != 0
@@ -185,17 +196,12 @@ fn authorize_trading_actor(
             .unwrap(),
     ) != seat_index as u16
         || bytes[SESSION_ACTIONS_OFFSET] & action == 0
-        || u64::from_le_bytes(
-            bytes[SESSION_LAST_USED_NONCE_OFFSET..SESSION_LAST_USED_NONCE_OFFSET + 8]
-                .try_into()
-                .unwrap(),
-        ) > u64::from_le_bytes(
-            bytes[SESSION_NONCE_OFFSET..SESSION_NONCE_OFFSET + 8]
-                .try_into()
-                .unwrap(),
-        )
+        || action_nonce != expected_nonce
     {
         return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    if expected_nonce == u64::MAX {
+        return Err(custom(StockStreamError::ArithmeticOverflow));
     }
     let max_order = u64::from_le_bytes(
         bytes[SESSION_MAX_ORDER_NOTIONAL_OFFSET..SESSION_MAX_ORDER_NOTIONAL_OFFSET + 8]
@@ -238,7 +244,11 @@ fn authorize_trading_actor(
     Ok(())
 }
 
-fn consume_session_notional(session: &mut AccountView, notional: i128) -> ProgramResult {
+fn consume_session_action(
+    session: &mut AccountView,
+    notional: i128,
+    action_nonce: u64,
+) -> ProgramResult {
     if notional < 0
         || !session.is_writable()
         || !session.owned_by(&crate::ID)
@@ -264,8 +274,23 @@ fn consume_session_notional(session: &mut AccountView, notional: i128) -> Progra
     if next > maximum {
         return Err(custom(StockStreamError::RiskViolation));
     }
+    let expected_nonce = u64::from_le_bytes(
+        bytes[SESSION_NONCE_OFFSET..SESSION_NONCE_OFFSET + 8]
+            .try_into()
+            .unwrap(),
+    );
+    if action_nonce != expected_nonce {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let next_nonce = expected_nonce
+        .checked_add(1)
+        .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
     bytes[SESSION_USED_CUMULATIVE_NOTIONAL_OFFSET..SESSION_USED_CUMULATIVE_NOTIONAL_OFFSET + 8]
         .copy_from_slice(&next.to_le_bytes());
+    bytes[SESSION_LAST_USED_NONCE_OFFSET..SESSION_LAST_USED_NONCE_OFFSET + 8]
+        .copy_from_slice(&action_nonce.to_le_bytes());
+    bytes[SESSION_NONCE_OFFSET..SESSION_NONCE_OFFSET + 8]
+        .copy_from_slice(&next_nonce.to_le_bytes());
     Ok(())
 }
 
@@ -342,11 +367,25 @@ pub fn dispatch(
         StockStreamInstruction::CancelOrder {
             seat_index,
             order_key,
-        } => cancel_order(program_id, accounts, seat_index as usize, order_key),
+            action_nonce,
+        } => cancel_order(
+            program_id,
+            accounts,
+            seat_index as usize,
+            order_key,
+            action_nonce,
+        ),
         StockStreamInstruction::CancelAll {
             seat_index,
             max_cancellations,
-        } => cancel_all(program_id, accounts, seat_index as usize, max_cancellations),
+            action_nonce,
+        } => cancel_all(
+            program_id,
+            accounts,
+            seat_index as usize,
+            max_cancellations,
+            action_nonce,
+        ),
         funding @ StockStreamInstruction::UpdateFunding { .. } => {
             update_funding(program_id, accounts, funding)
         }
@@ -1247,6 +1286,7 @@ fn place_order(
             3,
             SESSION_PLACE,
             session_notional,
+            order.action_nonce,
             snapshot_header.last_verified_oracle_timestamp,
         )?;
         (snapshot_seat.trader != trader, snapshot_seat.trader)
@@ -1420,7 +1460,7 @@ fn place_order(
     scratch.write_header(&scratch_header);
     scratch.clear();
     if session_authorized {
-        consume_session_notional(&mut session_accounts[0], order_notional)?;
+        consume_session_action(&mut session_accounts[0], order_notional, order.action_nonce)?;
     }
     Ok(())
 }
@@ -1772,6 +1812,7 @@ fn cancel_order(
     accounts: &mut [AccountView],
     seat_index: usize,
     order_key: u128,
+    action_nonce: u64,
 ) -> ProgramResult {
     if accounts.len() < 2 {
         return Err(ProgramError::NotEnoughAccountKeys);
@@ -1790,6 +1831,7 @@ fn cancel_order(
             2,
             SESSION_CANCEL,
             0,
+            action_nonce,
             snapshot_header.last_verified_oracle_timestamp,
         )?;
         snapshot_seat.trader != trader
@@ -1823,6 +1865,9 @@ fn cancel_order(
             seat.reserved_margin = seat.reserved_margin.saturating_sub(release);
         }
         write_seat(data, seat_index, &seat)?;
+        if session_authorized {
+            consume_session_action(&mut accounts[2], 0, action_nonce)?;
+        }
         return Ok(());
     }
     Err(custom(StockStreamError::InvalidInstruction))
@@ -1928,6 +1973,7 @@ fn cancel_all(
     accounts: &mut [AccountView],
     seat_index: usize,
     max: u8,
+    action_nonce: u64,
 ) -> ProgramResult {
     if accounts.len() < 2 {
         return Err(ProgramError::NotEnoughAccountKeys);
@@ -1946,6 +1992,7 @@ fn cancel_all(
             2,
             SESSION_CANCEL_ALL,
             0,
+            action_nonce,
             snapshot_header.last_verified_oracle_timestamp,
         )?;
         snapshot_seat.trader != trader
@@ -1988,5 +2035,8 @@ fn cancel_all(
     .map_err(risk_error)?;
     seat.reserved_margin = seat.reserved_margin.saturating_sub(released);
     write_seat(data, seat_index, &seat)?;
+    if session_authorized {
+        consume_session_action(&mut accounts[2], 0, action_nonce)?;
+    }
     Ok(())
 }
