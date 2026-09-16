@@ -15,7 +15,7 @@ export interface ApplicationSession {
   userAgentHash: string;
 }
 
-type VerifiedToken = { user_id: string; expiration: number };
+type VerifiedToken = { user_id: string; expiration: number; wallets?: readonly string[] };
 type TokenVerifier = (token: string) => Promise<VerifiedToken>;
 
 const sessions = new Map<string, ApplicationSession>();
@@ -28,7 +28,10 @@ function configuredVerifier(): TokenVerifier {
   const client = new PrivyClient({ appId, appSecret });
   return async (token) => {
     const verified = await client.utils().auth().verifyAccessToken(token);
-    return { user_id: verified.user_id, expiration: verified.expiration };
+    const user = await client.users()._get(verified.user_id);
+    const wallets = user.linked_accounts.flatMap(account =>
+      account.type === 'wallet' && account.chain_type === 'solana' ? [account.address] : []);
+    return { user_id: verified.user_id, expiration: verified.expiration, wallets };
   };
 }
 

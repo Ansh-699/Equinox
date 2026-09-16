@@ -39,7 +39,7 @@ pub fn process_instruction(
     }
 
     let instruction = StockStreamInstruction::decode(instruction_data)?;
-    handlers::dispatch(program_id, accounts, instruction)
+    handlers::dispatch(program_id, accounts, instruction, instruction_data)
 }
 
 #[cfg(feature = "bpf-entrypoint")]

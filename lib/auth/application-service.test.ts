@@ -24,7 +24,7 @@ function db(): SessionDatabase {
 describe("persistent application session service", () => {
   it("stores only the hash and supports multi-reader lookup/logout", async () => {
     const store = db();
-    const result = await exchangePrivySession(store, { accessToken: "privy-token", walletAddress: "wallet", expectedOrigin: "https://app.test", origin: "https://app.test" }, { verify: async () => ({ user_id: "did:privy:test", expiration: 2_000_000_000 }) }, 1_000);
+    const result = await exchangePrivySession(store, { accessToken: "privy-token", walletAddress: "wallet", expectedOrigin: "https://app.test", origin: "https://app.test" }, { verify: async () => ({ user_id: "did:privy:test", expiration: 2_000_000_000, wallets: ['wallet'] }) }, 1_000);
     expect(result.session.idHash).not.toContain("privy-token");
     expect(await readSession(store, result.cookieValue, 1_001)).not.toBeNull();
     await logoutSession(store, result.cookieValue, result.csrfToken, result.csrfToken, 1_002);
@@ -33,5 +33,10 @@ describe("persistent application session service", () => {
   it("rejects origin and rate limits", () => {
     expect(() => requireTrustedOrigin("b", "a")).toThrow("Origin rejected");
     const allow = createRateLimiter(1, 1000); expect(allow("a", 1)).toBe(true); expect(allow("a", 2)).toBe(false);
+  });
+  it('rejects a caller-selected wallet not linked to the verified user', async () => {
+    await expect(exchangePrivySession(db(), { accessToken:'token', walletAddress:'victim' },
+      { verify: async () => ({user_id:'user',expiration:2_000_000_000,wallets:['owned']}) }, 1000))
+      .rejects.toThrow('Wallet is not linked');
   });
 });

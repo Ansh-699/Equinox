@@ -121,8 +121,11 @@ fn production_instruction_decoder_covers_integration_variants() {
             amount: 7
         })
     ));
+    assert!(StockStreamInstruction::decode(&[12]).is_err());
+    let mut signed = [0u8; 104];
+    signed[0] = 12;
     assert!(matches!(
-        StockStreamInstruction::decode(&[12]),
+        StockStreamInstruction::decode(&signed),
         Ok(StockStreamInstruction::ConsumeOracleUpdate)
     ));
     assert!(matches!(
@@ -136,12 +139,16 @@ fn production_instruction_decoder_covers_integration_variants() {
             nonce: 3
         })
     ));
-    let mut instrument = [0u8; 37];
+    let mut instrument = [0u8; 42];
     instrument[0] = 22;
-    instrument[33..37].copy_from_slice(&(-2i32).to_le_bytes());
+    instrument[33..37].copy_from_slice(&123u32.to_le_bytes());
+    instrument[37] = 1;
+    instrument[38..42].copy_from_slice(&(-2i32).to_le_bytes());
     assert!(matches!(
         StockStreamInstruction::decode(&instrument),
         Ok(StockStreamInstruction::UpdateStockInstrument {
+            pyth_feed_id: 123,
+            oracle_channel: 1,
             price_exponent: -2,
             ..
         })

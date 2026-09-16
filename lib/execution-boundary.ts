@@ -1,4 +1,4 @@
-export type TransactionStatus = "constructed" | "simulated" | "awaiting_signature" | "submitted" | "er_accepted" | "l1_committed" | "blocked_runtime" | "blocked_credential";
+export type TransactionStatus = "constructed" | "simulated" | "awaiting_signature" | "submitted" | "er_accepted" | "l1_committed" | "l1_finalized" | "blocked_runtime" | "blocked_credential";
 export interface TransactionPreview { instruction: string; programId: string; accounts: readonly { address: string; signer: boolean; writable: boolean }[]; feeLamports?: bigint; status: TransactionStatus; clientOrderId?: string; }
 export interface WalletBoundary { signTransaction(bytes: Uint8Array): Promise<Uint8Array>; }
 export interface RouterBoundary { getAccountAwareBlockhash(writableAccounts: readonly string[]): Promise<string>; submit(serialized: Uint8Array): Promise<{ status: "er_accepted"; sequence: bigint }>; }
@@ -16,5 +16,5 @@ export async function executeL1(preview: TransactionPreview, wallet: WalletBound
   const signed = await signL1(preview, wallet, bytes);
   const submitted = await transport.submit(signed.bytes);
   const confirmation = await transport.confirm(submitted.signature);
-  return { preview: { ...signed.preview, status: "submitted" }, signature: submitted.signature, confirmation };
+  return { preview: { ...signed.preview, status: confirmation === 'finalized' ? 'l1_finalized' : 'l1_committed' }, signature: submitted.signature, confirmation };
 }

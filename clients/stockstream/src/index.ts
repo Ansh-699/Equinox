@@ -144,10 +144,22 @@ function amountInstruction(discriminator: number, accounts: CustodyAccounts, amo
   return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false), accountMeta(accounts.seat, false, true), accountMeta(accounts.sourceOrDestination, false, true), accountMeta(accounts.vault, false, true), accountMeta(accounts.mint, false, false), accountMeta(accounts.tokenProgram, false, false)]);
 }
 export function depositCollateral(accounts: CustodyAccounts, amount: bigint | number) { return amountInstruction(STOCKSTREAM_INSTRUCTION.depositCollateral, accounts, amount); }
-export function withdrawCollateral(accounts: CustodyAccounts, amount: bigint | number) { return amountInstruction(STOCKSTREAM_INSTRUCTION.withdrawCollateral, accounts, amount); }
+export function withdrawCollateral(accounts: CustodyAccounts, amount: bigint | number) {
+  const result = amountInstruction(STOCKSTREAM_INSTRUCTION.withdrawCollateral, accounts, amount);
+  const vaultAuthority = PublicKey.findProgramAddressSync([Buffer.from('vault-authority'), new PublicKey(accounts.market).toBuffer()], new PublicKey(STOCKSTREAM_PROGRAM_ID))[0];
+  result.keys = [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false),
+    accountMeta(accounts.sourceOrDestination, false, true), accountMeta(accounts.mint, false, false),
+    accountMeta(accounts.vault, false, true), accountMeta(vaultAuthority, false, false), accountMeta(accounts.tokenProgram, false, false)];
+  return result;
+}
 
-export function consumeOracleUpdate(accounts: { market: AddressInput; pythProgram: AddressInput; storage: AddressInput; treasury: AddressInput; instructionsSysvar: AddressInput; payload: AddressInput }): TransactionInstruction {
-  return instruction(Uint8Array.of(STOCKSTREAM_INSTRUCTION.consumeOracleUpdate), [accountMeta(accounts.market, false, true), accountMeta(accounts.pythProgram, false, false), accountMeta(accounts.storage, false, false), accountMeta(accounts.treasury, false, false), accountMeta(accounts.instructionsSysvar, false, false), accountMeta(accounts.payload, false, false)]);
+export function consumeOracleUpdate(accounts: { market: AddressInput; payer: AddressInput; pythProgram: AddressInput; storage: AddressInput; treasury: AddressInput; systemProgram: AddressInput; instructionsSysvar: AddressInput }, message: Uint8Array): TransactionInstruction {
+  if (message.length < 103 || message.length > 512) throw new RangeError('Invalid signed Pyth message length');
+  const data = new Uint8Array(1 + message.length); data[0] = STOCKSTREAM_INSTRUCTION.consumeOracleUpdate; data.set(message, 1);
+  return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.payer, true, true),
+    accountMeta(accounts.pythProgram, false, false), accountMeta(accounts.storage, false, false),
+    accountMeta(accounts.treasury, false, true), accountMeta(accounts.systemProgram, false, false),
+    accountMeta(accounts.instructionsSysvar, false, false)]);
 }
 export function delegateMarket(accounts: DelegationAccounts, sequence: bigint | number): TransactionInstruction {
   const data = new Uint8Array(9); data[0] = STOCKSTREAM_INSTRUCTION.delegateMarket; writeUnsigned(data, 1, checkedUnsigned(sequence, 64, "sequence"), 8);
@@ -167,7 +179,7 @@ function identifierInstruction(discriminator: number, identifier: Uint8Array, ac
 export function initializeExchange(accounts: RegistryAccounts): TransactionInstruction { return instruction(Uint8Array.of(STOCKSTREAM_INSTRUCTION.initializeExchange), [accountMeta(accounts.exchange, false, true), accountMeta(accounts.authority, true, false)]); }
 export function registerStockInstrument(accounts: InstrumentAccounts, instrumentId: Uint8Array): TransactionInstruction { return identifierInstruction(STOCKSTREAM_INSTRUCTION.registerStockInstrument, instrumentId, [accountMeta(accounts.exchange, false, true), accountMeta(accounts.instrument, false, true), accountMeta(accounts.authority, true, false)]); }
 export function createPerpMarket(accounts: PerpMarketAccounts, instrumentId: Uint8Array): TransactionInstruction { return identifierInstruction(STOCKSTREAM_INSTRUCTION.createPerpMarket, instrumentId, [accountMeta(accounts.instrument, false, false), accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]); }
-export function updateStockInstrument(accounts: InstrumentAccounts, instrumentId: Uint8Array, priceExponent: number): TransactionInstruction { const data = new Uint8Array(37); data[0] = STOCKSTREAM_INSTRUCTION.updateStockInstrument; data.set(instrumentId, 1); new DataView(data.buffer).setInt32(33, priceExponent, true); return instruction(data, [accountMeta(accounts.exchange, false, false), accountMeta(accounts.instrument, false, true), accountMeta(accounts.authority, true, false)]); }
+export function updateStockInstrument(accounts: InstrumentAccounts, instrumentId: Uint8Array, pythFeedId: number, oracleChannel: number, priceExponent: number): TransactionInstruction { if (!Number.isInteger(pythFeedId) || pythFeedId <= 0 || pythFeedId > 0xffff_ffff) throw new RangeError("pythFeedId must be a non-zero u32"); if (!Number.isInteger(oracleChannel) || oracleChannel < 1 || oracleChannel > 4) throw new RangeError("oracleChannel must be between 1 and 4"); const data = new Uint8Array(42); const view = new DataView(data.buffer); data[0] = STOCKSTREAM_INSTRUCTION.updateStockInstrument; data.set(instrumentId, 1); view.setUint32(33, pythFeedId, true); data[37] = oracleChannel; view.setInt32(38, priceExponent, true); return instruction(data, [accountMeta(accounts.exchange, false, false), accountMeta(accounts.instrument, false, true), accountMeta(accounts.authority, true, false)]); }
 export function suspendStockInstrument(accounts: InstrumentAccounts, instrumentId: Uint8Array): TransactionInstruction { return identifierInstruction(STOCKSTREAM_INSTRUCTION.suspendStockInstrument, instrumentId, [accountMeta(accounts.exchange, false, false), accountMeta(accounts.instrument, false, true), accountMeta(accounts.authority, true, false)]); }
 export function updateMarketRisk(accounts: InstructionAccounts, initial: number, maintenance: number, leverage: number): TransactionInstruction { const data = new Uint8Array(9); data[0] = STOCKSTREAM_INSTRUCTION.updateMarketRisk; const view = new DataView(data.buffer); view.setUint16(1, initial, true); view.setUint16(3, maintenance, true); view.setUint32(5, leverage, true); return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]); }
 export function transitionMarket(accounts: InstructionAccounts, mode: "pause" | "resume" | "close-only" | "corporate-action" | "resolve" | "close"): TransactionInstruction { const discriminator = { pause: STOCKSTREAM_INSTRUCTION.pauseMarket, resume: STOCKSTREAM_INSTRUCTION.resumeMarket, "close-only": STOCKSTREAM_INSTRUCTION.setCloseOnly, "corporate-action": STOCKSTREAM_INSTRUCTION.enterCorporateAction, resolve: STOCKSTREAM_INSTRUCTION.resolveCorporateAction, close: STOCKSTREAM_INSTRUCTION.closeMarket }[mode]; return instruction(Uint8Array.of(discriminator), [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]); }
@@ -200,7 +212,10 @@ export function decodeMarketState(data: Uint8Array): MarketStateView {
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const bytes = data.slice(0, 8); const discriminator = new TextDecoder().decode(bytes);
   if (discriminator !== "STKMRK01" || view.getUint16(8, true) !== 1) throw new RangeError("Invalid StockStream market header");
-  return { discriminator, version: 1, initialized: view.getUint8(10) === 1, mode: view.getUint8(11), marketAuthority: new PublicKey(data.slice(12, 44)), oracleValid: view.getUint8(270) === 1, lastVerifiedOraclePrice: view.getBigInt64(271, true), lastVerifiedOracleTimestamp: view.getBigUint64(279, true), bidArenaOffset: view.getUint32(287, true), askArenaOffset: view.getUint32(291, true), traderSeatOffset: view.getUint32(295, true), fillEventOffset: view.getUint32(299, true) };
+  if (view.getUint32(311, true) !== 512 || view.getUint32(315, true) !== 91152 ||
+      view.getUint32(319, true) !== 181792 || view.getUint32(323, true) !== 214560)
+    throw new RangeError('Invalid StockStream regions');
+  return { discriminator, version: 1, initialized: view.getUint8(10) === 1, mode: view.getUint8(11), marketAuthority: new PublicKey(data.slice(12, 44)), oracleValid: view.getUint8(294) === 1, lastVerifiedOraclePrice: view.getBigInt64(295, true), lastVerifiedOracleTimestamp: view.getBigUint64(303, true), bidArenaOffset: view.getUint32(311, true), askArenaOffset: view.getUint32(315, true), traderSeatOffset: view.getUint32(319, true), fillEventOffset: view.getUint32(323, true) };
 }
 
 export interface BookMetadata { version: number; fixedRoot: number; peggedRoot: number; fixedLeaves: number; peggedLeaves: number; bumpIndex: number; freeHead: number; freeLength: number; }

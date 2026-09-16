@@ -121,6 +121,32 @@ pub fn equity(seat: &TraderSeat, mark_price: i128) -> Result<i128, RiskError> {
     )
 }
 
+pub fn prepare_withdrawal(
+    seat: &TraderSeat,
+    amount: u64,
+    funding_accumulator: i128,
+    mark_price: i128,
+    maintenance_bps: u16,
+) -> Result<TraderSeat, RiskError> {
+    if amount == 0 || seat.reserved_margin < 0 {
+        return Err(RiskError::Margin);
+    }
+    let mut result = *seat;
+    settle_funding(&mut result, funding_accumulator)?;
+    result.available_collateral = sub(result.available_collateral, i128::from(amount))?;
+    if result.available_collateral < 0 {
+        return Err(RiskError::NegativeCollateral);
+    }
+    let requirement = maintenance_margin(
+        notional(abs(result.base_position)?, mark_price)?,
+        maintenance_bps,
+    )?;
+    if equity(&result, mark_price)? < add(requirement, result.reserved_margin)? {
+        return Err(RiskError::Margin);
+    }
+    Ok(result)
+}
+
 pub fn initial_margin(notional_value: i128, margin_bps: u16) -> Result<i128, RiskError> {
     fee(notional_value, margin_bps)
 }
