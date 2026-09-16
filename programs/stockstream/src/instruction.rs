@@ -239,7 +239,7 @@ impl StockStreamInstruction {
                 seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
                 amount: read_u64(data, 3).ok_or(ProgramError::InvalidInstructionData)?,
             }),
-            Some(CONSUME_ORACLE_UPDATE) if (104..=513).contains(&data.len()) => {
+            Some(CONSUME_ORACLE_UPDATE) if (107..=516).contains(&data.len()) => {
                 Ok(Self::ConsumeOracleUpdate)
             }
             Some(DELEGATE_MARKET) if data.len() == 33 => Ok(Self::DelegateMarket {

@@ -122,7 +122,7 @@ fn production_instruction_decoder_covers_integration_variants() {
         })
     ));
     assert!(StockStreamInstruction::decode(&[12]).is_err());
-    let mut signed = [0u8; 104];
+    let mut signed = [0u8; 107];
     signed[0] = 12;
     assert!(matches!(
         StockStreamInstruction::decode(&signed),

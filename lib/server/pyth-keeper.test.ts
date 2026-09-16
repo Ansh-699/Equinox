@@ -21,8 +21,11 @@ describe('server-side Pyth keeper',()=>{
     const update=await keeper.fetchSignedUpdate(); const instructions=keeper.buildTransaction(update);
     expect(instructions).toHaveLength(2); expect(instructions[0].programId.toBase58()).toBe('Ed25519SigVerify111111111111111111111111111');
     const offsets=new DataView(instructions[0].data.buffer,instructions[0].data.byteOffset,instructions[0].data.byteLength);
-    expect([offsets.getUint16(2,true),offsets.getUint16(4,true),offsets.getUint16(10,true),offsets.getUint16(14,true)]).toEqual([5,1,103,1]);
-    expect(Buffer.from(instructions[1].data.slice(1))).toEqual(Buffer.from(message())); expect(keeper.health.lastTimestamp).toBe(1000);
+    expect([offsets.getUint16(2,true),offsets.getUint16(4,true),offsets.getUint16(10,true),offsets.getUint16(14,true)]).toEqual([8,1,106,1]);
+    const consumerData=new DataView(instructions[1].data.buffer,instructions[1].data.byteOffset,instructions[1].data.byteLength);
+    expect(consumerData.getUint16(1,true)).toBe(0); // ed25519_instruction_index (baseIndex=0)
+    expect(instructions[1].data[3]).toBe(0); // signature_index
+    expect(Buffer.from(instructions[1].data.slice(4))).toEqual(Buffer.from(message())); expect(keeper.health.lastTimestamp).toBe(1000);
     await expect(keeper.fetchSignedUpdate()).rejects.toThrow('Duplicate');
   });
   it('rejects malformed signed-message framing before transaction construction',()=>{
