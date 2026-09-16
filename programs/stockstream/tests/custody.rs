@@ -678,3 +678,92 @@ fn record_bad_debt_requires_a_bankrupt_seat_and_resolve_requires_insurance_cover
         assert_eq!(insurance, 0);
     }
 }
+
+/// Layout-formalization Section 1: proves unpaid funding is settled
+/// *before* the withdrawal-health check runs, not ignored or settled
+/// after. `available_collateral=10_000`, `base_position=100` (entry price
+/// 100, so `unrealized_pnl=0` at the current mark), `funding_accumulator`
+/// moves from `0` to half of `risk::FUNDING_SCALE`, so `settle_funding`
+/// must deduct exactly `100 * 500_000 / 1_000_000 = 50` from `realized_pnl`
+/// -- pre-withdrawal equity is `9_950`, not the naive `10_000` a
+/// withdrawal that ignored funding would use.  `maintenance_margin =
+/// notional(100, 100) * 1000 / 10_000 = 1_000`, so the maximum safe
+/// withdrawal is exactly `9_950 - 1_000 = 8_950`. `8_975` sits strictly
+/// between that correct boundary and the incorrect (funding-ignored)
+/// boundary of `9_000`, so it discriminates the two: accepting it would
+/// mean funding was not actually settled first.
+#[test]
+fn withdrawal_health_settles_pending_funding_before_evaluating_margin() {
+    let mut f = fixture();
+    set_vault_amount(&mut f.vault, 10_000);
+    {
+        let seat = seat_mut(&mut f.market, 0);
+        seat.available_collateral = 10_000;
+        seat.base_position = 100;
+        seat.quote_entry_value = 100 * 100;
+        seat.last_funding_accumulator = 0;
+    }
+    header_mut(&mut f.market).funding_accumulator = stockstream::risk::FUNDING_SCALE / 2;
+    let destination = token_account(
+        Address::new_from_array([84; 32]),
+        f.mint_key,
+        *f.trader.view.address(),
+        0,
+        true,
+    );
+    let vault_authority_account = account(f.vault_authority, Address::default(), 0, false, false);
+
+    // Above the funding-settled boundary (8,950) but below the
+    // funding-ignored one (9,000): must be rejected.
+    let mut accounts = withdraw_accounts(&f, &destination, &vault_authority_account);
+    assert!(process_instruction(&ID, &mut accounts, &withdraw_data(0, 8_975)).is_err());
+
+    // Exactly at the funding-settled boundary: must succeed, and the
+    // seat's realized_pnl must show the funding payment was actually
+    // deducted (not silently skipped).
+    let mut accounts = withdraw_accounts(&f, &destination, &vault_authority_account);
+    process_instruction(&ID, &mut accounts, &withdraw_data(0, 8_950)).unwrap();
+    let seat = seat_mut(&mut f.market, 0);
+    let realized_pnl = seat.realized_pnl;
+    let available = seat.available_collateral;
+    let last_funding_accumulator = seat.last_funding_accumulator;
+    assert_eq!(realized_pnl, -50);
+    assert_eq!(available, 1_050);
+    assert_eq!(
+        last_funding_accumulator,
+        stockstream::risk::FUNDING_SCALE / 2
+    );
+}
+
+/// Companion to the funding test above: a fee already charged by a prior
+/// fill (this program's immediate-settlement model deducts fees into
+/// `realized_pnl` at fill time -- see `docs/risk.md` -- so there is no
+/// separate "settle fees" step left to run at withdrawal time) must still
+/// be fully reflected in the withdrawal-health equity computation, not
+/// dropped. `available_collateral=10_000`, flat position (no margin
+/// requirement beyond zero), `realized_pnl=-200` standing in for an
+/// already-charged fee: equity is `9_800`, so `9_800` is withdrawable but
+/// `9_801` is not.
+#[test]
+fn withdrawal_health_reflects_a_fee_already_charged_into_realized_pnl() {
+    let mut f = fixture();
+    set_vault_amount(&mut f.vault, 10_000);
+    {
+        let seat = seat_mut(&mut f.market, 0);
+        seat.available_collateral = 10_000;
+        seat.realized_pnl = -200;
+    }
+    let destination = token_account(
+        Address::new_from_array([85; 32]),
+        f.mint_key,
+        *f.trader.view.address(),
+        0,
+        true,
+    );
+    let vault_authority_account = account(f.vault_authority, Address::default(), 0, false, false);
+
+    let mut accounts = withdraw_accounts(&f, &destination, &vault_authority_account);
+    assert!(process_instruction(&ID, &mut accounts, &withdraw_data(0, 9_801)).is_err());
+    let mut accounts = withdraw_accounts(&f, &destination, &vault_authority_account);
+    process_instruction(&ID, &mut accounts, &withdraw_data(0, 9_800)).unwrap();
+}

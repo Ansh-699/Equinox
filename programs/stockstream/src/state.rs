@@ -1,7 +1,22 @@
 use core::mem::size_of;
 
 pub const MARKET_DISCRIMINATOR: [u8; 8] = *b"STKMRK01";
-pub const MARKET_VERSION: u16 = 1;
+/// `1`: the pre-Priority-4 layout, where every byte of `reserved_upgrade`
+/// past the MagicBlock/oracle fields (bytes `122..185`) was unused scratch
+/// space with no defined interpretation.
+///
+/// `2` (current): bytes `122..155` of `reserved_upgrade` are permanent
+/// protocol fields (`protocol_fee_balance`, `insurance_fund_balance`,
+/// `recognized_bad_debt`, `reconciliation_status`, `vault_surplus` -- see
+/// `docs/custody.md`/`docs/program-layout.md`). `validate()` below rejects
+/// any header whose stored `version` does not equal the version this build
+/// was compiled against, so a `1`-tagged account is never silently
+/// reinterpreted under the `2` layout (or vice versa). No live migration
+/// instruction exists because no market has ever been deployed under
+/// version `1`; if one ever is, a version-1-to-2 migration would need to
+/// explicitly zero-initialize the new fields (their sensible defaults) and
+/// rewrite the stored version, rather than being inferred implicitly.
+pub const MARKET_VERSION: u16 = 2;
 pub const MARKET_HEADER_SIZE: usize = 512;
 pub const MAX_TRADER_SEATS: usize = 128;
 pub const TRADER_SEAT_SIZE: usize = 256;

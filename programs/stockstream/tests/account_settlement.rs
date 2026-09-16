@@ -376,6 +376,74 @@ fn market_decoder_offsets_match_packed_rust_layout() {
     );
 }
 
+/// Golden vector: the absolute byte offsets of the Priority-4 custody
+/// ledger fields, cross-checked against the hardcoded offsets
+/// `clients/stockstream/src/index.ts::decodeMarketState` reads
+/// (`449, 457, 465, 473, 474`). `reserved_upgrade` starts at `327`
+/// (asserted above); these are `327 + RESERVED_*` from `state.rs`.
+#[test]
+fn custody_ledger_field_offsets_match_the_typescript_decoder() {
+    const RESERVED_UPGRADE_OFFSET: usize = 327;
+    assert_eq!(
+        RESERVED_UPGRADE_OFFSET + stockstream::state::RESERVED_PROTOCOL_FEE_BALANCE,
+        449
+    );
+    assert_eq!(
+        RESERVED_UPGRADE_OFFSET + stockstream::state::RESERVED_INSURANCE_FUND_BALANCE,
+        457
+    );
+    assert_eq!(
+        RESERVED_UPGRADE_OFFSET + stockstream::state::RESERVED_RECOGNIZED_BAD_DEBT,
+        465
+    );
+    assert_eq!(
+        RESERVED_UPGRADE_OFFSET + stockstream::state::RESERVED_RECONCILIATION_STATUS,
+        473
+    );
+    assert_eq!(
+        RESERVED_UPGRADE_OFFSET + stockstream::state::RESERVED_VAULT_SURPLUS,
+        474
+    );
+}
+
+/// `MARKET_VERSION` was bumped from `1` to `2` when the custody ledger
+/// fields above became permanent (Priority 4, see `state.rs`); a
+/// `1`-tagged account must be rejected outright, not silently reinterpreted
+/// under the new layout.
+#[test]
+fn a_version_one_market_header_is_rejected_after_the_layout_bump() {
+    let mut market = account(
+        Address::new_from_array([95; 32]),
+        ID,
+        MARKET_ACCOUNT_SIZE,
+        false,
+        true,
+    );
+    let authority = account(
+        Address::new_from_array([96; 32]),
+        Address::default(),
+        0,
+        true,
+        false,
+    );
+    process_instruction(
+        &ID,
+        &mut [market.view.clone(), authority.view.clone()],
+        &[0],
+    )
+    .unwrap();
+    {
+        let data = unsafe { market.view.borrow_unchecked_mut() };
+        data[8..10].copy_from_slice(&1u16.to_le_bytes());
+    }
+    assert!(process_instruction(
+        &ID,
+        &mut [market.view.clone(), authority.view.clone()],
+        &[1, 0, 0]
+    )
+    .is_err());
+}
+
 fn account(
     address: Address,
     owner: Address,
