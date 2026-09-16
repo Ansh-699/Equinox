@@ -478,17 +478,36 @@ export interface MarketStateView {
   askArenaOffset: number;
   traderSeatOffset: number;
   fillEventOffset: number;
+  /** `reserved_upgrade[122..130]`, byte 449. See `docs/program-layout.md`. */
+  protocolFeeBalance: bigint;
+  /** `reserved_upgrade[130..138]`, byte 457. */
+  insuranceFundBalance: bigint;
+  /** `reserved_upgrade[138..146]`, byte 465. */
+  recognizedBadDebt: bigint;
+  /** `reserved_upgrade[146]`, byte 473. 0=Reconciled 1=SurplusDetected 2=DeficitDetected 3=RecoveryRequired. */
+  reconciliationStatus: number;
+  /** `reserved_upgrade[147..155]`, byte 474. */
+  vaultSurplus: bigint;
 }
+
+/** `MARKET_VERSION` in `state.rs`. Bumped from `1` to `2` when
+ * `reserved_upgrade[122..155]` (previously unused scratch space) became
+ * permanent protocol fields for custody fee/insurance/reconciliation
+ * accounting (Priority 4) -- see `docs/program-layout.md`. A `version: 1`
+ * account predates those fields entirely and is rejected outright rather
+ * than silently read as if they were present. */
+const CURRENT_MARKET_VERSION = 2;
 
 export function decodeMarketState(data: Uint8Array): MarketStateView {
   if (data.byteLength !== STOCKSTREAM_ACCOUNT_SIZE) throw new RangeError("Invalid StockStream market account size");
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const bytes = data.slice(0, 8); const discriminator = new TextDecoder().decode(bytes);
-  if (discriminator !== "STKMRK01" || view.getUint16(8, true) !== 1) throw new RangeError("Invalid StockStream market header");
+  const version = view.getUint16(8, true);
+  if (discriminator !== "STKMRK01" || version !== CURRENT_MARKET_VERSION) throw new RangeError("Invalid StockStream market header");
   if (view.getUint32(311, true) !== 512 || view.getUint32(315, true) !== 91152 ||
       view.getUint32(319, true) !== 181792 || view.getUint32(323, true) !== 214560)
     throw new RangeError('Invalid StockStream regions');
-  return { discriminator, version: 1, initialized: view.getUint8(10) === 1, mode: view.getUint8(11), marketAuthority: new PublicKey(data.slice(12, 44)), oracleValid: view.getUint8(294) === 1, lastVerifiedOraclePrice: view.getBigInt64(295, true), lastVerifiedOracleTimestamp: view.getBigUint64(303, true), bidArenaOffset: view.getUint32(311, true), askArenaOffset: view.getUint32(315, true), traderSeatOffset: view.getUint32(319, true), fillEventOffset: view.getUint32(323, true) };
+  return { discriminator, version, initialized: view.getUint8(10) === 1, mode: view.getUint8(11), marketAuthority: new PublicKey(data.slice(12, 44)), oracleValid: view.getUint8(294) === 1, lastVerifiedOraclePrice: view.getBigInt64(295, true), lastVerifiedOracleTimestamp: view.getBigUint64(303, true), bidArenaOffset: view.getUint32(311, true), askArenaOffset: view.getUint32(315, true), traderSeatOffset: view.getUint32(319, true), fillEventOffset: view.getUint32(323, true), protocolFeeBalance: view.getBigUint64(449, true), insuranceFundBalance: view.getBigUint64(457, true), recognizedBadDebt: view.getBigUint64(465, true), reconciliationStatus: view.getUint8(473), vaultSurplus: view.getBigUint64(474, true) };
 }
 
 export interface BookMetadata { version: number; fixedRoot: number; peggedRoot: number; fixedLeaves: number; peggedLeaves: number; bumpIndex: number; freeHead: number; freeLength: number; }

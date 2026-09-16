@@ -2,7 +2,8 @@ import { PublicKey } from "@solana/web3.js";
 import { expect, test } from "vitest";
 import { STOCKSTREAM_PROGRAM_ID } from "./constants";
 import { MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID } from "./index";
-import { authorizeTradingSession, cancelOrder, commitMarket, createPerpMarket, decodeCustodyEvent, decodeInstruction, delegateMarket, deriveTradingSession, initializeExchange, initializeMarket, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateStockInstrument, withdrawInsuranceFunds, withdrawProtocolFees } from "./index";
+import { authorizeTradingSession, cancelOrder, commitMarket, createPerpMarket, decodeCustodyEvent, decodeInstruction, decodeMarketState, delegateMarket, deriveTradingSession, initializeExchange, initializeMarket, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateStockInstrument, withdrawInsuranceFunds, withdrawProtocolFees } from "./index";
+import { STOCKSTREAM_ACCOUNT_SIZE } from "./constants";
 
 const market = PublicKey.unique();
 const authority = PublicKey.unique();
@@ -139,6 +140,38 @@ test("custody fee/insurance/reconciliation constructors use canonical discrimina
     { pubkey: mint, isSigner: false, isWritable: false },
     { pubkey: tokenProgram, isSigner: false, isWritable: false },
   ]);
+});
+
+function marketHeaderFixture(version: number): Uint8Array {
+  const data = new Uint8Array(STOCKSTREAM_ACCOUNT_SIZE);
+  const view = new DataView(data.buffer);
+  data.set(new TextEncoder().encode("STKMRK01"), 0);
+  view.setUint16(8, version, true);
+  view.setUint32(311, 512, true);
+  view.setUint32(315, 91152, true);
+  view.setUint32(319, 181792, true);
+  view.setUint32(323, 214560, true);
+  view.setBigUint64(449, 111n, true);
+  view.setBigUint64(457, 222n, true);
+  view.setBigUint64(465, 333n, true);
+  view.setUint8(473, 2);
+  view.setBigUint64(474, 444n, true);
+  return data;
+}
+
+test("decodeMarketState golden vector: custody-ledger byte offsets match the Rust layout and version 1 is rejected", () => {
+  // Golden vector cross-checked against
+  // `programs/stockstream/tests/account_settlement.rs::custody_ledger_field_offsets_match_the_typescript_decoder`
+  // -- same absolute byte offsets (449, 457, 465, 473, 474) for the
+  // Priority-4 custody ledger fields added at MARKET_VERSION 2.
+  const state = decodeMarketState(marketHeaderFixture(2));
+  expect(state.version).toBe(2);
+  expect(state.protocolFeeBalance).toBe(111n);
+  expect(state.insuranceFundBalance).toBe(222n);
+  expect(state.recognizedBadDebt).toBe(333n);
+  expect(state.reconciliationStatus).toBe(2);
+  expect(state.vaultSurplus).toBe(444n);
+  expect(() => decodeMarketState(marketHeaderFixture(1))).toThrow(/Invalid StockStream market header/);
 });
 
 test("decodeCustodyEvent parses a program log line emitted by pinocchio_log", () => {

@@ -7,7 +7,7 @@ const signature = '2'.repeat(64);
 function response(id: number, result: unknown) { return new Response(JSON.stringify({jsonrpc:'2.0',id,result}), {headers:{'content-type':'application/json'}}); }
 function marketBytes(commit = 4n, event = 7n) {
   const bytes = Buffer.alloc(STOCKSTREAM_ACCOUNT_SIZE);
-  bytes.write('STKMRK01'); bytes.writeUInt16LE(1,8); bytes[10]=1; bytes[11]=1;
+  bytes.write('STKMRK01'); bytes.writeUInt16LE(2,8); bytes[10]=1; bytes[11]=1;
   Buffer.from(new Uint8Array(32).fill(1)).copy(bytes,12);
   bytes[294]=1; bytes.writeBigInt64LE(100n,295); bytes.writeBigUInt64LE(1n,303);
   bytes.writeUInt32LE(512,311); bytes.writeUInt32LE(91152,315); bytes.writeUInt32LE(181792,319); bytes.writeUInt32LE(214560,323);
