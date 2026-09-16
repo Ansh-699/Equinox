@@ -11,6 +11,7 @@ pinocchio::default_panic_handler!();
 
 pub mod book;
 pub mod error;
+pub mod events;
 pub mod handlers;
 pub mod initialize_market;
 pub mod instruction;

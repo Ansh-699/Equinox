@@ -782,8 +782,20 @@ fn serialized_market_can_create_seats_and_settle_crossing_orders() {
     let open_interest = header.current_open_interest;
     let event_sequence = header.global_event_sequence;
     assert_eq!(open_interest, 10);
-    assert_eq!(event_sequence, 1);
-    let event_offset = stockstream::state::FILL_EVENT_OFFSET;
+    // 2 (TraderSeatCreated for each of the two seats) + 1 (the fill itself,
+    // no fee credited since this test's smaller notional floors to a zero
+    // taker fee -- see `crossing_fill_credits_the_protocol_fee_ledger`).
+    assert_eq!(event_sequence, 3);
+    // The fill-event ring is a modular buffer keyed by the *shared*
+    // protocol-wide event sequence (`global_event_sequence`), not a
+    // fill-only counter that always starts at 0 -- the two preceding
+    // `TraderSeatCreated` events already advanced it, so this fill's own
+    // sequence is `event_sequence - 1`, landing at that ring slot, not
+    // necessarily slot 0.
+    let fill_sequence = event_sequence - 1;
+    let event_offset = stockstream::state::FILL_EVENT_OFFSET
+        + (fill_sequence as usize % stockstream::state::FILL_EVENT_CAPACITY)
+            * stockstream::state::FILL_EVENT_SIZE;
     let event =
         unsafe { &*(data.as_ptr().add(event_offset) as *const stockstream::state::FillEvent) };
     let event_price = event.price;
@@ -892,11 +904,12 @@ fn crossing_fill_credits_the_protocol_fee_ledger() {
     let header = unsafe { &*(data.as_ptr() as *const MarketStateHeader) };
     let protocol_fee_balance = header.protocol_fee_balance();
     // The fee-crediting branch shares the market's fill-event sequence
-    // counter, so it must also have advanced past the single fill's own
-    // increment (1 -> 2), not reset or duplicate it.
+    // counter, so it must also have advanced past the fill's own increment,
+    // not reset or duplicate it: 2 (TraderSeatCreated x2) + 1 (the fill) +
+    // 1 (ProtocolFeesChanged).
     let event_sequence = header.global_event_sequence;
     assert_eq!(protocol_fee_balance, 500);
-    assert_eq!(event_sequence, 2);
+    assert_eq!(event_sequence, 4);
 }
 
 #[test]
