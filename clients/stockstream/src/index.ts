@@ -203,9 +203,33 @@ export function withdrawCollateral(accounts: CustodyAccounts, amount: bigint | n
   return result;
 }
 
-export function consumeOracleUpdate(accounts: { market: AddressInput; payer: AddressInput; pythProgram: AddressInput; storage: AddressInput; treasury: AddressInput; systemProgram: AddressInput; instructionsSysvar: AddressInput }, message: Uint8Array): TransactionInstruction {
-  if (message.length < 103 || message.length > 512) throw new RangeError('Invalid signed Pyth message length');
-  const data = new Uint8Array(1 + message.length); data[0] = STOCKSTREAM_INSTRUCTION.consumeOracleUpdate; data.set(message, 1);
+/**
+ * The signed Pyth message is embedded at byte offset 4 of this
+ * instruction's own data (after the tag + `ed25519_instruction_index` +
+ * `signature_index`); the Ed25519 precompile instruction the keeper places
+ * before this one must reference that exact offset. `ed25519InstructionIndex`
+ * and `signatureIndex` are not assumed by the program -- it independently
+ * inspects the Instructions sysvar to confirm they name a real, preceding
+ * Ed25519-program instruction before trusting them (and before the CPI into
+ * Pyth's own `verify_message`, which repeats the check authoritatively).
+ * See `handlers::consume_oracle_update` in the Rust program.
+ */
+export const CONSUME_ORACLE_UPDATE_MESSAGE_OFFSET = 4;
+
+export function consumeOracleUpdate(
+  accounts: { market: AddressInput; payer: AddressInput; pythProgram: AddressInput; storage: AddressInput; treasury: AddressInput; systemProgram: AddressInput; instructionsSysvar: AddressInput },
+  message: Uint8Array,
+  ed25519InstructionIndex: number,
+  signatureIndex: number,
+): TransactionInstruction {
+  if (message.length < 102 || message.length > 512) throw new RangeError('Invalid signed Pyth message length');
+  if (!Number.isInteger(ed25519InstructionIndex) || ed25519InstructionIndex < 0 || ed25519InstructionIndex > 0xffff) throw new RangeError('ed25519InstructionIndex must be a u16');
+  if (!Number.isInteger(signatureIndex) || signatureIndex < 0 || signatureIndex > 0xff) throw new RangeError('signatureIndex must be a u8');
+  const data = new Uint8Array(CONSUME_ORACLE_UPDATE_MESSAGE_OFFSET + message.length);
+  data[0] = STOCKSTREAM_INSTRUCTION.consumeOracleUpdate;
+  new DataView(data.buffer).setUint16(1, ed25519InstructionIndex, true);
+  data[3] = signatureIndex;
+  data.set(message, CONSUME_ORACLE_UPDATE_MESSAGE_OFFSET);
   return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.payer, true, true),
     accountMeta(accounts.pythProgram, false, false), accountMeta(accounts.storage, false, false),
     accountMeta(accounts.treasury, false, true), accountMeta(accounts.systemProgram, false, false),

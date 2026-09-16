@@ -5,6 +5,8 @@ use core::{
 
 use pinocchio::cpi::{invoke_with_bounds, Seed, Signer};
 use pinocchio::instruction::{InstructionAccount, InstructionView};
+use pinocchio::sysvars::instructions::Instructions;
+#[cfg(any(target_os = "solana", target_arch = "bpf"))]
 use pinocchio::sysvars::{clock::Clock, Sysvar};
 use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
 use pinocchio_token::instructions::Transfer;
@@ -128,6 +130,28 @@ fn signer(account: &AccountView) -> ProgramResult {
 /// handlers (currently `authorize_trading_session`) from being completely
 /// untestable off-chain to being testable using the same rent-exempt
 /// minimum a real cluster would require.
+/// The live Clock sysvar's `unix_timestamp` on-chain; a fixed sentinel off
+/// the SBF target, where the sysvar syscall is unavailable (host tests
+/// running `Clock::get()` always observe `ProgramError::UnsupportedSysvar`,
+/// since the syscall stub returns a pointer value instead of the `SUCCESS`
+/// code pinocchio checks for). `tests/pyth_oracle.rs` builds its fixture
+/// timestamps relative to this same constant.
+#[cfg(any(target_os = "solana", target_arch = "bpf"))]
+pub const OFF_CHAIN_TEST_NOW: i64 = 0; // unused on-chain; keeps the constant defined everywhere.
+#[cfg(not(any(target_os = "solana", target_arch = "bpf")))]
+pub const OFF_CHAIN_TEST_NOW: i64 = 1_700_000_000;
+
+fn current_unix_timestamp() -> Result<i64, ProgramError> {
+    #[cfg(any(target_os = "solana", target_arch = "bpf"))]
+    {
+        Ok(Clock::get()?.unix_timestamp)
+    }
+    #[cfg(not(any(target_os = "solana", target_arch = "bpf")))]
+    {
+        Ok(OFF_CHAIN_TEST_NOW)
+    }
+}
+
 fn current_rent() -> Result<pinocchio::sysvars::rent::Rent, ProgramError> {
     #[cfg(any(target_os = "solana", target_arch = "bpf"))]
     {
@@ -839,6 +863,12 @@ const INSTRUCTIONS_SYSVAR_ID: Address = Address::new_from_array([
     6, 167, 213, 23, 24, 123, 209, 102, 53, 218, 212, 4, 85, 253, 194, 192, 193, 36, 198, 143, 33,
     86, 117, 165, 219, 186, 203, 95, 8, 0, 0, 0,
 ]);
+/// The native Ed25519 signature-verification program
+/// (`Ed25519SigVerify111111111111111111111111111`).
+const ED25519_PROGRAM_ID: Address = Address::new_from_array([
+    3, 125, 70, 214, 124, 147, 251, 190, 18, 249, 66, 143, 131, 141, 64, 255, 5, 112, 116, 73, 39,
+    244, 138, 100, 252, 202, 112, 68, 128, 0, 0, 0,
+]);
 const VERIFY_MESSAGE_DISCRIMINATOR: [u8; 8] = [180, 193, 120, 55, 189, 135, 203, 83];
 const SOLANA_FORMAT_MAGIC: u32 = 2_182_742_457;
 const PAYLOAD_FORMAT_MAGIC: u32 = 2_479_346_549;
@@ -850,18 +880,38 @@ struct VerifiedOracle {
     price: i64,
     exponent: i16,
     confidence: i64,
-    timestamp_us: u64,
+    /// The signed envelope's own generation timestamp (`PayloadData::timestamp_us`).
+    envelope_timestamp_us: u64,
+    /// The per-feed `FeedUpdateTimestamp` property: when this specific feed's
+    /// price last actually changed, which can lag the envelope timestamp for
+    /// a feed that hasn't updated this tick. This -- not the envelope
+    /// timestamp -- is the correct value for staleness/monotonic checks.
+    feed_update_timestamp_us: u64,
     session: i16,
 }
 
+/// Parses the fixed 5-property payload shape the keeper always requests
+/// (`price, exponent, confidence, marketSession, feedUpdateTimestamp`, in
+/// that order -- see `lib/server/pyth-keeper.ts`'s `PROPERTIES`). Property
+/// tags are checked explicitly (`[0, 4, 5, 9, 12]`, the real
+/// `PriceFeedProperty` enum discriminants for those five properties) so a
+/// differently-shaped payload is rejected rather than misparsed.
 fn parse_verified_oracle(message: &[u8]) -> Result<VerifiedOracle, ProgramError> {
     if message.len() < 102
         || u32::from_le_bytes(message[0..4].try_into().unwrap()) != SOLANA_FORMAT_MAGIC
     {
         return Err(custom(StockStreamError::OracleUnavailable));
     }
+    // Exact TLV size for the 5 requested properties (header 19 bytes +
+    // Price 1+8 + Exponent 1+2 + Confidence 1+8 + MarketSession 1+2 +
+    // FeedUpdateTimestamp 1+1+8 = 53), per `PayloadData`/`write_option_price`/
+    // `write_option_timestamp` in `pyth_lazer_protocol::payload`. `Option<Price>`
+    // properties (Price, Confidence) are a bare i64 with no presence byte
+    // (0 encodes `None`); only `FeedUpdateTimestamp` carries an explicit
+    // presence flag.
+    const EXPECTED_PAYLOAD_LEN: usize = 53;
     let payload_len = u16::from_le_bytes(message[100..102].try_into().unwrap()) as usize;
-    if payload_len != 60 || message.len() != 102 + payload_len {
+    if payload_len != EXPECTED_PAYLOAD_LEN || message.len() != 102 + payload_len {
         return Err(custom(StockStreamError::OracleUnavailable));
     }
     let payload = &message[102..];
@@ -880,25 +930,39 @@ fn parse_verified_oracle(message: &[u8]) -> Result<VerifiedOracle, ProgramError>
         return Err(custom(StockStreamError::OracleUnavailable));
     }
     Ok(VerifiedOracle {
-        timestamp_us: u64::from_le_bytes(payload[4..12].try_into().unwrap()),
+        envelope_timestamp_us: u64::from_le_bytes(payload[4..12].try_into().unwrap()),
         channel: payload[12],
         feed_id: u32::from_le_bytes(payload[14..18].try_into().unwrap()),
         price: i64::from_le_bytes(payload[20..28].try_into().unwrap()),
         exponent: i16::from_le_bytes(payload[29..31].try_into().unwrap()),
         confidence: i64::from_le_bytes(payload[32..40].try_into().unwrap()),
         session: i16::from_le_bytes(payload[41..43].try_into().unwrap()),
+        feed_update_timestamp_us: u64::from_le_bytes(payload[45..53].try_into().unwrap()),
     })
 }
 
+/// Accounts: `[market, payer (signer, writable), pyth_program, storage,
+/// treasury (writable), system_program, instructions_sysvar]`.
+///
+/// Data: `[tag, ed25519_instruction_index: u16 LE, signature_index: u8,
+/// signed Solana-format message...]`. The index fields are supplied by the
+/// keeper (who controls transaction layout), not assumed -- this handler
+/// independently inspects the Instructions sysvar to confirm they name a
+/// real, preceding Ed25519-program instruction before ever using them,
+/// and the CPI into Pyth's own `verify_message` (which repeats this check
+/// authoritatively, plus the actual signature/trusted-signer verification)
+/// receives the same caller-supplied values rather than a hardcoded guess.
 fn consume_oracle_update(
     program_id: &Address,
     accounts: &mut [AccountView],
     instruction_data: &[u8],
 ) -> ProgramResult {
-    if accounts.len() != 7 || instruction_data.len() < 104 {
+    if accounts.len() != 7 || instruction_data.len() < 107 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
-    let message = &instruction_data[1..];
+    let ed25519_instruction_index = u16::from_le_bytes(instruction_data[1..3].try_into().unwrap());
+    let signature_index = instruction_data[3];
+    let message = &instruction_data[4..];
     if message.len() > MAX_PYTH_MESSAGE
         || !accounts[1].is_signer()
         || !accounts[1].is_writable()
@@ -919,12 +983,35 @@ fn consume_oracle_update(
     }
     drop(storage);
 
+    // Independent Instructions-sysvar inspection: confirm a real Ed25519
+    // native-program instruction precedes us at the claimed index before
+    // trusting it at all. Pyth's own CPI repeats this (authoritatively,
+    // including the actual cryptographic check), but failing fast here with
+    // our own error keeps a forged/malformed reference from ever reaching
+    // the CPI, and is independently testable without a live Pyth fixture.
+    {
+        let sysvar = Instructions::try_from(&accounts[6])?;
+        let current_index = sysvar.load_current_index();
+        if ed25519_instruction_index >= current_index {
+            return Err(custom(StockStreamError::OracleUnavailable));
+        }
+        let ed25519_instruction = sysvar.load_instruction_at(ed25519_instruction_index as usize)?;
+        if ed25519_instruction.get_program_id() != &ED25519_PROGRAM_ID {
+            return Err(custom(StockStreamError::OracleUnavailable));
+        }
+        let ed25519_data = ed25519_instruction.get_instruction_data();
+        if ed25519_data.is_empty() || signature_index >= ed25519_data[0] {
+            return Err(custom(StockStreamError::OracleUnavailable));
+        }
+    }
+
     let mut verify_data = [0u8; 527];
     verify_data[..8].copy_from_slice(&VERIFY_MESSAGE_DISCRIMINATOR);
     verify_data[8..12].copy_from_slice(&(message.len() as u32).to_le_bytes());
     verify_data[12..12 + message.len()].copy_from_slice(message);
-    verify_data[12 + message.len()..14 + message.len()].copy_from_slice(&0u16.to_le_bytes());
-    verify_data[14 + message.len()] = 0;
+    verify_data[12 + message.len()..14 + message.len()]
+        .copy_from_slice(&ed25519_instruction_index.to_le_bytes());
+    verify_data[14 + message.len()] = signature_index;
     let metas = [
         InstructionAccount::writable_signer(accounts[1].address()),
         InstructionAccount::readonly(accounts[3].address()),
@@ -949,8 +1036,13 @@ fn consume_oracle_update(
     )?;
 
     let verified = parse_verified_oracle(message)?;
-    let now = Clock::get()?.unix_timestamp;
-    let timestamp = verified.timestamp_us / 1_000_000;
+    let now = current_unix_timestamp()?;
+    // The feed-specific timestamp is authoritative for staleness; it can
+    // never be newer than the envelope that carried it.
+    if verified.feed_update_timestamp_us > verified.envelope_timestamp_us {
+        return Err(custom(StockStreamError::OracleUnavailable));
+    }
+    let timestamp = verified.feed_update_timestamp_us / 1_000_000;
     let data = market_data(&mut accounts[0], program_id)?;
     let mut header = initialized_header(data)?;
     let configured_feed = u32::from_le_bytes(header.reserved_upgrade[64..68].try_into().unwrap());

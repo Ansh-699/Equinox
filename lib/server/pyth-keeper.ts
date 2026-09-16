@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { PublicKey, TransactionInstruction } from '@solana/web3.js';
 import { PythLazerClient, type ParsedFeedPayload } from '@pythnetwork/pyth-lazer-sdk';
-import { consumeOracleUpdate } from '../../clients/stockstream/src';
+import { consumeOracleUpdate, CONSUME_ORACLE_UPDATE_MESSAGE_OFFSET } from '../../clients/stockstream/src';
 import { requirePythServerConfig } from '../oracle';
 
 const ED25519_PROGRAM = new PublicKey('Ed25519SigVerify111111111111111111111111111');
@@ -27,13 +27,39 @@ const defaultFactory:ClientFactory=async config=>{
   return {getLatestPrice: input => client.getLatestPrice({...input,properties:[...input.properties],formats:['solana']})};
 };
 function decode(data:{encoding:'base64'|'hex';data:string}):Uint8Array { return data.encoding==='hex'?Uint8Array.from(data.data.match(/../g)?.map(x=>Number.parseInt(x,16))??[]):Uint8Array.from(Buffer.from(data.data,'base64')); }
-function ed25519(message:Uint8Array):TransactionInstruction {
-  if(message.length<103||message.length>512) throw new Error('Invalid signed Solana message');
+/**
+ * Builds the native Ed25519 precompile instruction whose offsets point at
+ * the signed message embedded in the *following* `ConsumeOracleUpdate`
+ * instruction's own data, at `CONSUME_ORACLE_UPDATE_MESSAGE_OFFSET` (4).
+ * `consumerInstructionIndex` is this transaction's actual index for that
+ * instruction (not assumed to be a fixed value) -- see
+ * `signature::Ed25519SignatureOffsets` in the real
+ * `pyth-lazer-solana-contract`, which requires `signature_instruction_index
+ * == public_key_instruction_index == message_instruction_index ==` the
+ * *current* (calling) instruction's own index, not the Ed25519 instruction's.
+ */
+function ed25519(message:Uint8Array, consumerInstructionIndex:number):TransactionInstruction {
+  if(message.length<102||message.length>512) throw new Error('Invalid signed Solana message');
   const size=new DataView(message.buffer,message.byteOffset,message.byteLength).getUint16(100,true);
   if(message.length!==102+size) throw new Error('Invalid signed Solana message framing');
+  if(!Number.isInteger(consumerInstructionIndex)||consumerInstructionIndex<0||consumerInstructionIndex>0xffff) throw new Error('Invalid consumer instruction index');
+  // Exact arithmetic from `Ed25519SignatureOffsets::new` in the real
+  // pyth-lazer-solana-contract (`signature.rs`): starting_offset is where
+  // the message's own 4-byte magic begins within the *calling*
+  // (ConsumeOracleUpdate) instruction's data.
+  const MAGIC_LEN=4, SIGNATURE_LEN=64, PUBKEY_LEN=32, MESSAGE_SIZE_LEN=2;
+  const startingOffset=CONSUME_ORACLE_UPDATE_MESSAGE_OFFSET;
+  const signatureOffset=startingOffset+MAGIC_LEN;
+  const publicKeyOffset=signatureOffset+SIGNATURE_LEN;
+  const messageDataOffset=publicKeyOffset+PUBKEY_LEN+MESSAGE_SIZE_LEN;
   const data=new Uint8Array(16); data[0]=1; const view=new DataView(data.buffer);
-  view.setUint16(2,5,true); view.setUint16(4,1,true); view.setUint16(6,69,true); view.setUint16(8,1,true);
-  view.setUint16(10,103,true); view.setUint16(12,size,true); view.setUint16(14,1,true);
+  view.setUint16(2,signatureOffset,true);
+  view.setUint16(4,consumerInstructionIndex,true);
+  view.setUint16(6,publicKeyOffset,true);
+  view.setUint16(8,consumerInstructionIndex,true);
+  view.setUint16(10,messageDataOffset,true);
+  view.setUint16(12,size,true);
+  view.setUint16(14,consumerInstructionIndex,true);
   return new TransactionInstruction({programId:ED25519_PROGRAM,keys:[],data:Buffer.from(data)});
 }
 export class PythKeeper {
@@ -49,9 +75,21 @@ export class PythKeeper {
     this.lastTimestamp=timestamp; this.lastHash=payloadHash;
     return {message,feedId:this.config.feedId,timestamp,payloadHash,parsed:parsed[0]};
   }
-  buildTransaction(update:SignedPythUpdate):TransactionInstruction[] {
+  /**
+   * `baseIndex` is the Ed25519 instruction's actual position in the final
+   * transaction (default 0, i.e. first). If the caller prepends other
+   * instructions (e.g. a compute-budget instruction), pass its real index
+   * here -- the program independently verifies whatever is claimed against
+   * the Instructions sysvar, so a wrong value here fails closed rather than
+   * silently misverifying.
+   */
+  buildTransaction(update:SignedPythUpdate, baseIndex=0):TransactionInstruction[] {
     if(update.feedId!==this.config.feedId) throw new Error('Unexpected Pyth feed');
-    return [ed25519(update.message),consumeOracleUpdate(this.config.accounts,update.message)];
+    const consumerIndex=baseIndex+1;
+    return [
+      ed25519(update.message,consumerIndex),
+      consumeOracleUpdate(this.config.accounts,update.message,baseIndex,0),
+    ];
   }
   get health(){return{configured:true,feedId:this.config.feedId,lastTimestamp:this.lastTimestamp,lastPayloadHash:this.lastHash};}
 }
