@@ -121,14 +121,34 @@ pub fn equity(seat: &TraderSeat, mark_price: i128) -> Result<i128, RiskError> {
     )
 }
 
+/// No governance instruction currently sets a per-market withdrawal buffer;
+/// this is the documented placeholder value (`docs/risk.md`) that
+/// `prepare_withdrawal` adds on top of the maintenance-margin and
+/// reserved-order-margin requirement. Introducing a configurable buffer
+/// later only means passing a non-zero value in from the market header,
+/// not changing this formula.
+pub const DEFAULT_WITHDRAWAL_BUFFER: i128 = 0;
+
+/// Computes the post-withdrawal seat state, or rejects the withdrawal.
+///
+/// Withdrawal health: `post_withdraw_equity = equity - amount` must be
+/// `>= maintenance_margin(|position|) + reserved_margin + withdrawal_buffer`.
+/// `reserved_margin` already reflects the seat's worst-case resting-order
+/// exposure (see `place_order_core`), so this does not double-count it.
+/// `available_collateral` is also required to stay `>= 0` on its own: this
+/// program never lets a withdrawal convert unrealized/realized PnL directly
+/// into a token payout past the trader's actually-deposited collateral (see
+/// `docs/risk.md` for why that is a deliberate, not accidental, limit of the
+/// current immediate-settlement accounting model).
 pub fn prepare_withdrawal(
     seat: &TraderSeat,
     amount: u64,
     funding_accumulator: i128,
     mark_price: i128,
     maintenance_bps: u16,
+    withdrawal_buffer: i128,
 ) -> Result<TraderSeat, RiskError> {
-    if amount == 0 || seat.reserved_margin < 0 {
+    if amount == 0 || seat.reserved_margin < 0 || withdrawal_buffer < 0 {
         return Err(RiskError::Margin);
     }
     let mut result = *seat;
@@ -141,7 +161,8 @@ pub fn prepare_withdrawal(
         notional(abs(result.base_position)?, mark_price)?,
         maintenance_bps,
     )?;
-    if equity(&result, mark_price)? < add(requirement, result.reserved_margin)? {
+    let required_total = add(add(requirement, result.reserved_margin)?, withdrawal_buffer)?;
+    if equity(&result, mark_price)? < required_total {
         return Err(RiskError::Margin);
     }
     Ok(result)

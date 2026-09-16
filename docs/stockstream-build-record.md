@@ -334,3 +334,78 @@ keeper fleet. Those items remain partial or unverified.
 
 This is SBF compilation evidence only. It does not establish runtime, CPI,
 ER, devnet, Privy, or authenticated Pyth verification.
+
+## Priority 4: Custody, Vault Accounting, Fees, Insurance, Reconciliation (2026-09-16)
+
+Completes production custody on top of the existing (not a parallel) model
+from Priorities 1-3: complete collateral-accounting documentation and a
+`withdrawal_buffer` term in `risk::prepare_withdrawal`; full vault
+configuration/validation (Model A: canonical PDA vault + vault-authority
+PDA); hardened `InitializeVault`/`DepositCollateral`/`WithdrawCollateral`;
+new `TransferToInsuranceFund`, `WithdrawProtocolFees`,
+`WithdrawInsuranceFunds`, `RecordBadDebt`, `ResolveBadDebt`, `ReconcileVault`
+instructions (opcodes 34-39); automatic protocol-fee crediting from real
+fills and liquidations; a permissionless vault-reconciliation state machine
+(`Reconciled`/`SurplusDetected`/`DeficitDetected`/`RecoveryRequired`) that
+auto-pauses the market on a detected deficit and blocks withdrawals until
+resolved; `pinocchio_log`-based custody events; and matching TypeScript
+client builders/decoders. Full detail in `docs/custody.md`,
+`docs/risk.md`, and `docs/program-layout.md`.
+
+Two real, previously-undetected integration defects were found and fixed
+(both documented in `docs/custody.md`):
+
+1. `validate_custody_tokens` independently gated custody movement on
+   `reserved_upgrade[2] != 0` -- the same byte `DelegationStatus`
+   (introduced in Priority 1) uses -- which would incorrectly reject a
+   `Restored` market's withdrawal even though
+   `header.l1_withdrawals_allowed()` (checked separately) already permits
+   it. Fixed to use `l1_withdrawals_allowed()` as the single source of
+   truth.
+2. `deposit_collateral`/`withdraw_collateral` each held a `Ref<Account>`
+   (from decoding the source/destination SPL token account) alive across
+   the SPL `Transfer` CPI that also touches the same account.
+   `pinocchio_token`'s own CPI account writer rejects any account it
+   touches that is still borrowed, and this check runs unconditionally
+   (not only on-chain) -- meaning **every deposit and withdrawal would
+   have failed on a real cluster**, not only in tests. Undetected until
+   now because no prior test exercised either handler's CPI path
+   end-to-end. Fixed by scoping each decode-and-validate block so the
+   `Ref` drops before the CPI executes.
+
+| Item | Recorded value |
+| --- | --- |
+| Source commit | current working tree (pre-commit; see below) |
+| `cargo fmt --check` | passed |
+| `cargo check -p stockstream` | passed |
+| Rust debug tests | `128 passed; 0 failed` |
+| Rust release tests | `128 passed; 0 failed` |
+| Root TypeScript tests | `42 passed; 0 failed` |
+| Worker runtime tests | `14 passed; 0 failed` |
+| `npm run lint` | passed |
+| `npx tsc --noEmit` | passed |
+| `npm run build` | passed |
+| SBF artifact | `target/deploy/stockstream.so` |
+| SBF SHA-256 | `156bd1f1f825ee95db08d3ae8664b316450fc84a4d35df1d7d8ca17f11d30921` |
+| SBF size | `229,792` bytes |
+| SBF stack diagnostic | no stack-frame diagnostic emitted |
+| `MARKET_ACCOUNT_SIZE` | unchanged (`222,752` bytes) -- new fields fit within `reserved_upgrade` |
+
+New Rust tests: `programs/stockstream/tests/custody.rs` (10 tests: vault
+init/duplicate/wrong-authority, deposit credit/non-owner/insufficient-
+balance/aliasing, withdrawal success/margin-violation/delegation-regression/
+reconciliation-gate, fee/insurance ledger transfer and authority rejection,
+bad-debt record/resolve, full reconciliation state-machine escalation) plus
+one new test in `tests/account_settlement.rs`
+(`crossing_fill_credits_the_protocol_fee_ledger`, verifying real fee
+crediting from an actual crossing fill, not just the ledger handlers in
+isolation). New TypeScript tests in `clients/stockstream/src/index.test.ts`
+cover every new instruction's discriminator/account order and the
+`decodeCustodyEvent` log-line parser.
+
+This is SBF compilation and unit/wire-conformance evidence only. Live SPL
+Transfer CPI execution, live reconciliation against a real vault balance,
+and live fee/insurance withdrawal remain runtime-unverified (the same
+`invoke_with_program`/`invoke_signed_with_program` no-op-off-SBF limitation
+documented for Priorities 1-3 in `docs/magicblock.md` and `docs/oracle.md`).
+**Audit pending. Production not approved.**

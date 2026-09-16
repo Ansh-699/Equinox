@@ -201,6 +201,47 @@ pub const RESERVED_COMMIT_INTERVAL_MS: usize = 109; // ..113
 pub const RESERVED_EXPECTED_FINAL_COMMIT_SEQUENCE: usize = 113; // ..121
 pub const RESERVED_PENDING_UNDELEGATION: usize = 121;
 
+// Custody/vault-accounting fields (Priority 4). [122..155] (33 bytes);
+// [155..185] (30 bytes) remain free for future upgrades.
+pub const RESERVED_PROTOCOL_FEE_BALANCE: usize = 122; // ..130
+pub const RESERVED_INSURANCE_FUND_BALANCE: usize = 130; // ..138
+pub const RESERVED_RECOGNIZED_BAD_DEBT: usize = 138; // ..146
+pub const RESERVED_RECONCILIATION_STATUS: usize = 146;
+pub const RESERVED_VAULT_SURPLUS: usize = 147; // ..155
+
+/// Vault reconciliation status, stored at
+/// `reserved_upgrade[RESERVED_RECONCILIATION_STATUS]`. See `ReconcileVault`
+/// in `handlers.rs` and `docs/custody.md` for the transition rules.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReconciliationStatus {
+    /// Actual vault token balance exactly matches expected liability, or the
+    /// market has never been reconciled yet (the default).
+    Reconciled = 0,
+    /// Actual vault balance exceeds expected liability. Recorded, not
+    /// auto-assigned to any trader.
+    SurplusDetected = 1,
+    /// Actual vault balance is short of expected liability. New risk is
+    /// paused and `WithdrawCollateral` is blocked until this is resolved.
+    DeficitDetected = 2,
+    /// A deficit was detected on two consecutive reconciliations: governance
+    /// must explicitly intervene (`RecordBadDebt`/`ResolveBadDebt`, an
+    /// external deposit, etc.) before this can clear.
+    RecoveryRequired = 3,
+}
+
+impl ReconciliationStatus {
+    pub fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Reconciled),
+            1 => Some(Self::SurplusDetected),
+            2 => Some(Self::DeficitDetected),
+            3 => Some(Self::RecoveryRequired),
+            _ => None,
+        }
+    }
+}
+
 impl MarketStateHeader {
     pub fn delegation_status(&self) -> u8 {
         self.reserved_upgrade[RESERVED_DELEGATION_STATUS]
@@ -303,6 +344,74 @@ impl MarketStateHeader {
     /// currently delegated (or has never been / has been fully restored).
     pub fn l1_withdrawals_allowed(&self) -> bool {
         matches!(self.delegation_status(), 0 | 3)
+    }
+
+    pub fn protocol_fee_balance(&self) -> u64 {
+        u64::from_le_bytes(
+            self.reserved_upgrade[RESERVED_PROTOCOL_FEE_BALANCE..RESERVED_PROTOCOL_FEE_BALANCE + 8]
+                .try_into()
+                .unwrap(),
+        )
+    }
+
+    pub fn set_protocol_fee_balance(&mut self, value: u64) {
+        self.reserved_upgrade[RESERVED_PROTOCOL_FEE_BALANCE..RESERVED_PROTOCOL_FEE_BALANCE + 8]
+            .copy_from_slice(&value.to_le_bytes());
+    }
+
+    pub fn insurance_fund_balance(&self) -> u64 {
+        u64::from_le_bytes(
+            self.reserved_upgrade
+                [RESERVED_INSURANCE_FUND_BALANCE..RESERVED_INSURANCE_FUND_BALANCE + 8]
+                .try_into()
+                .unwrap(),
+        )
+    }
+
+    pub fn set_insurance_fund_balance(&mut self, value: u64) {
+        self.reserved_upgrade[RESERVED_INSURANCE_FUND_BALANCE..RESERVED_INSURANCE_FUND_BALANCE + 8]
+            .copy_from_slice(&value.to_le_bytes());
+    }
+
+    pub fn recognized_bad_debt(&self) -> u64 {
+        u64::from_le_bytes(
+            self.reserved_upgrade[RESERVED_RECOGNIZED_BAD_DEBT..RESERVED_RECOGNIZED_BAD_DEBT + 8]
+                .try_into()
+                .unwrap(),
+        )
+    }
+
+    pub fn set_recognized_bad_debt(&mut self, value: u64) {
+        self.reserved_upgrade[RESERVED_RECOGNIZED_BAD_DEBT..RESERVED_RECOGNIZED_BAD_DEBT + 8]
+            .copy_from_slice(&value.to_le_bytes());
+    }
+
+    pub fn reconciliation_status(&self) -> u8 {
+        self.reserved_upgrade[RESERVED_RECONCILIATION_STATUS]
+    }
+
+    pub fn set_reconciliation_status(&mut self, status: ReconciliationStatus) {
+        self.reserved_upgrade[RESERVED_RECONCILIATION_STATUS] = status as u8;
+    }
+
+    pub fn vault_surplus(&self) -> u64 {
+        u64::from_le_bytes(
+            self.reserved_upgrade[RESERVED_VAULT_SURPLUS..RESERVED_VAULT_SURPLUS + 8]
+                .try_into()
+                .unwrap(),
+        )
+    }
+
+    pub fn set_vault_surplus(&mut self, value: u64) {
+        self.reserved_upgrade[RESERVED_VAULT_SURPLUS..RESERVED_VAULT_SURPLUS + 8]
+            .copy_from_slice(&value.to_le_bytes());
+    }
+
+    /// Withdrawals must be blocked while the vault has an unresolved deficit:
+    /// paying out against a shortfall the vault cannot cover would only make
+    /// the shortfall worse for remaining traders.
+    pub fn withdrawals_blocked_by_reconciliation(&self) -> bool {
+        matches!(self.reconciliation_status(), 2 | 3)
     }
 }
 

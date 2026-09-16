@@ -727,6 +727,110 @@ fn serialized_market_can_create_seats_and_settle_crossing_orders() {
     assert_eq!(scratch.read_header().status, ScratchStatus::Empty as u8);
 }
 
+/// Priority 4: a crossing fill's maker+taker fee (already deducted from
+/// each seat's `realized_pnl` by `risk::apply_fill`) must also be credited
+/// to the market-level protocol fee ledger -- previously it was deducted
+/// and never credited anywhere. Uses a large enough notional (price 1000 x
+/// quantity 1000) that the default `taker_fee_bps = 5` produces a nonzero,
+/// exactly predictable fee (1_000_000 * 5 / 10_000 = 500), unlike the
+/// smaller-notional crossing test above where integer division floors the
+/// fee to zero.
+#[test]
+fn crossing_fill_credits_the_protocol_fee_ledger() {
+    let authority = Address::new_from_array([27; 32]);
+    let trader_b = Address::new_from_array([28; 32]);
+    let mut market = account(
+        Address::new_from_array([29; 32]),
+        ID,
+        MARKET_ACCOUNT_SIZE,
+        false,
+        true,
+    );
+    let signer_a = account(authority.clone(), ID, 0, true, false);
+    let signer_b = account(trader_b, ID, 0, true, false);
+    let scratch_a = account(
+        derive_settlement_scratch(market.view.address(), 0, &ID),
+        ID,
+        SETTLEMENT_SCRATCH_LEN,
+        false,
+        true,
+    );
+    let scratch_b = account(
+        derive_settlement_scratch(market.view.address(), 1, &ID),
+        ID,
+        SETTLEMENT_SCRATCH_LEN,
+        false,
+        true,
+    );
+    {
+        let mut accounts = [market.view.clone(), signer_a.view.clone()];
+        process_instruction(&ID, &mut accounts, &[0]).unwrap();
+    }
+    set_open_oracle(&mut market, authority);
+    {
+        let mut accounts = [market.view.clone(), signer_a.view.clone()];
+        process_instruction(&ID, &mut accounts, &[1, 0, 0]).unwrap();
+    }
+    {
+        let mut accounts = [market.view.clone(), signer_b.view.clone()];
+        process_instruction(&ID, &mut accounts, &[1, 1, 0]).unwrap();
+    }
+    credit(&mut market, 0, 10_000_000);
+    credit(&mut market, 1, 10_000_000);
+    {
+        let mut accounts = [
+            market.view.clone(),
+            signer_a.view.clone(),
+            scratch_a.view.clone(),
+        ];
+        process_instruction(&ID, &mut accounts, &[8, 0, 0]).unwrap();
+    }
+    {
+        let mut accounts = [
+            market.view.clone(),
+            signer_b.view.clone(),
+            scratch_b.view.clone(),
+        ];
+        process_instruction(&ID, &mut accounts, &[8, 1, 0]).unwrap();
+    }
+    let mut maker_order = vec![3, 1, 0, 0, 0, 0];
+    maker_order.extend_from_slice(&1_000u64.to_le_bytes());
+    maker_order.extend_from_slice(&1_000i64.to_le_bytes());
+    maker_order.extend_from_slice(&0u64.to_le_bytes());
+    maker_order.extend_from_slice(&0i64.to_le_bytes());
+    maker_order.extend_from_slice(&21u64.to_le_bytes());
+    maker_order.extend_from_slice(&0u64.to_le_bytes());
+    {
+        let mut accounts = [
+            market.view.clone(),
+            signer_a.view.clone(),
+            scratch_a.view.clone(),
+        ];
+        process_instruction(&ID, &mut accounts, &maker_order).unwrap();
+    }
+    let mut taker_order = maker_order.clone();
+    taker_order[1] = 0;
+    taker_order[4] = 1;
+    taker_order[38..46].copy_from_slice(&22u64.to_le_bytes());
+    {
+        let mut accounts = [
+            market.view.clone(),
+            signer_b.view.clone(),
+            scratch_b.view.clone(),
+        ];
+        process_instruction(&ID, &mut accounts, &taker_order).unwrap();
+    }
+    let data = unsafe { market.view.borrow_unchecked() };
+    let header = unsafe { &*(data.as_ptr() as *const MarketStateHeader) };
+    let protocol_fee_balance = header.protocol_fee_balance();
+    // The fee-crediting branch shares the market's fill-event sequence
+    // counter, so it must also have advanced past the single fill's own
+    // increment (1 -> 2), not reset or duplicate it.
+    let event_sequence = header.global_event_sequence;
+    assert_eq!(protocol_fee_balance, 500);
+    assert_eq!(event_sequence, 2);
+}
+
 #[test]
 fn failed_wrong_owner_cancel_does_not_change_serialized_account() {
     let authority = Address::new_from_array([17; 32]);
