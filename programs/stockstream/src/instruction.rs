@@ -40,6 +40,12 @@ pub const CLOSE_MARKET: u8 = 30;
 pub const UPDATE_TRADING_SESSION_LIMITS: u8 = 31;
 pub const CLOSE_TRADING_SESSION: u8 = 32;
 pub const REPLACE_ORDER: u8 = 33;
+pub const TRANSFER_TO_INSURANCE_FUND: u8 = 34;
+pub const WITHDRAW_PROTOCOL_FEES: u8 = 35;
+pub const WITHDRAW_INSURANCE_FUNDS: u8 = 36;
+pub const RECORD_BAD_DEBT: u8 = 37;
+pub const RESOLVE_BAD_DEBT: u8 = 38;
+pub const RECONCILE_VAULT: u8 = 39;
 
 #[derive(Clone, Copy)]
 pub struct PlaceOrderData {
@@ -162,6 +168,38 @@ pub enum StockStreamInstruction {
     TransitionMarket {
         mode: u8,
     },
+    /// Moves `amount` from the protocol fee ledger to the insurance fund
+    /// ledger. Internal book-transfer only: no tokens move (both balances
+    /// are backed by the same vault).
+    TransferToInsuranceFund {
+        amount: u64,
+    },
+    /// Pays `amount` out of the protocol fee ledger to `destination` via a
+    /// real vault-authority-signed SPL transfer.
+    WithdrawProtocolFees {
+        amount: u64,
+    },
+    /// Pays `amount` out of the insurance fund ledger to `destination` via a
+    /// real vault-authority-signed SPL transfer. Emergency-authority only.
+    WithdrawInsuranceFunds {
+        amount: u64,
+    },
+    /// Formally recognizes `amount` of a bankrupt seat's negative equity as
+    /// unrecoverable bad debt, forgiving that much of the seat's negative
+    /// `realized_pnl`. Emergency-authority only.
+    RecordBadDebt {
+        seat_index: u16,
+        amount: u64,
+    },
+    /// Pays down `amount` of recognized bad debt from the insurance fund
+    /// ledger. Emergency-authority only.
+    ResolveBadDebt {
+        amount: u64,
+    },
+    /// Recomputes the vault's actual token balance against the sum of every
+    /// seat's `available_collateral` plus the fee/insurance ledgers minus
+    /// recognized bad debt, and records the result.
+    ReconcileVault,
 }
 
 fn read_u16(data: &[u8], start: usize) -> Option<u16> {
@@ -351,6 +389,25 @@ impl StockStreamInstruction {
                 Ok(Self::TransitionMarket { mode: 1 })
             }
             Some(CLOSE_MARKET) if data.len() == 1 => Ok(Self::TransitionMarket { mode: 0 }),
+            Some(TRANSFER_TO_INSURANCE_FUND) if data.len() == 9 => {
+                Ok(Self::TransferToInsuranceFund {
+                    amount: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+                })
+            }
+            Some(WITHDRAW_PROTOCOL_FEES) if data.len() == 9 => Ok(Self::WithdrawProtocolFees {
+                amount: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+            }),
+            Some(WITHDRAW_INSURANCE_FUNDS) if data.len() == 9 => Ok(Self::WithdrawInsuranceFunds {
+                amount: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+            }),
+            Some(RECORD_BAD_DEBT) if data.len() == 11 => Ok(Self::RecordBadDebt {
+                seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+                amount: read_u64(data, 3).ok_or(ProgramError::InvalidInstructionData)?,
+            }),
+            Some(RESOLVE_BAD_DEBT) if data.len() == 9 => Ok(Self::ResolveBadDebt {
+                amount: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+            }),
+            Some(RECONCILE_VAULT) if data.len() == 1 => Ok(Self::ReconcileVault),
             _ => Err(ProgramError::InvalidInstructionData),
         }
     }

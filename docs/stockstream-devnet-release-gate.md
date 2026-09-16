@@ -125,3 +125,26 @@ cumulative-notional/replay consumption, or a complete external Solana/ER
 indexer and keeper fleet.
 
 **Hardening pending. Audit pending. Production not approved.**
+
+## Priority 4 Status Correction (2026-09-16)
+
+Custody, vault accounting, withdrawal health, fees, insurance and
+reconciliation are now **code implemented, unit tested, SBF compiled,
+runtime unverified** on top of the existing (not a parallel) custody model.
+Two real integration defects were found and fixed in this pass (see
+`docs/custody.md` and `docs/stockstream-build-record.md`): a stale
+delegation-status byte check that would have blocked withdrawals for a
+`Restored` market, and a held token-account borrow across the SPL Transfer
+CPI that would have failed **every** deposit and withdrawal on a real
+cluster (not only in tests) -- undetected until this priority added the
+first end-to-end custody tests.
+
+| Area | Status | Evidence / limitation |
+| --- | --- | --- |
+| Vault initialization/config | IMPLEMENTED / UNIT TESTED | Canonical PDA vault + vault-authority model (Model A), legacy-SPL-only, exact-decimals; duplicate-init and wrong-authority rejected. |
+| Deposit/withdrawal | IMPLEMENTED / UNIT TESTED / RUNTIME BLOCKED | Full pre-CPI validation and post-CPI ledger update tested; CPI itself is a no-op off SBF (`docs/magicblock.md`). |
+| Fee/insurance ledgers | IMPLEMENTED / UNIT TESTED | Automatic fee crediting from real fills/liquidations; ledger transfer and withdrawal with authority separation (market vs. emergency authority); bad-debt record/resolve. |
+| Reconciliation | IMPLEMENTED / UNIT TESTED | Permissionless recompute; auto-pause and withdrawal block on detected deficit; escalation to `RecoveryRequired` on a persisted deficit; surplus recorded, never auto-assigned. |
+| Custody events | IMPLEMENTED / UNIT TESTED | `pinocchio_log`-based program-log events (not a binary ring buffer, to avoid growing `MARKET_ACCOUNT_SIZE`); TypeScript decoder and golden vectors. |
+
+**Hardening pending. Audit pending. Production not approved.**

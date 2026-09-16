@@ -35,6 +35,12 @@ export const STOCKSTREAM_INSTRUCTION = {
   updateTradingSessionLimits: 31,
   closeTradingSession: 32,
   replaceOrder: 33,
+  transferToInsuranceFund: 34,
+  withdrawProtocolFees: 35,
+  withdrawInsuranceFunds: 36,
+  recordBadDebt: 37,
+  resolveBadDebt: 38,
+  reconcileVault: 39,
 } as const;
 
 export const STOCKSTREAM_ACCOUNT_SIZE = 222_752;

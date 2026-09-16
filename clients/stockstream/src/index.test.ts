@@ -2,7 +2,7 @@ import { PublicKey } from "@solana/web3.js";
 import { expect, test } from "vitest";
 import { STOCKSTREAM_PROGRAM_ID } from "./constants";
 import { MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID } from "./index";
-import { authorizeTradingSession, cancelOrder, commitMarket, createPerpMarket, decodeInstruction, delegateMarket, deriveTradingSession, initializeExchange, initializeMarket, initializeVault, placeOrder, previewPlaceOrder, registerStockInstrument, updateStockInstrument } from "./index";
+import { authorizeTradingSession, cancelOrder, commitMarket, createPerpMarket, decodeCustodyEvent, decodeInstruction, delegateMarket, deriveTradingSession, initializeExchange, initializeMarket, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateStockInstrument, withdrawInsuranceFunds, withdrawProtocolFees } from "./index";
 
 const market = PublicKey.unique();
 const authority = PublicKey.unique();
@@ -98,4 +98,56 @@ test("registry constructors preserve market-scoped account order", () => {
   const update = updateStockInstrument({ exchange, instrument, authority }, id, 77, 1, -6);
   expect(Array.from(update.data.slice(33))).toEqual([77, 0, 0, 0, 1, 250, 255, 255, 255]);
   expect(() => updateStockInstrument({ exchange, instrument, authority }, id, 0, 1, -6)).toThrow(/non-zero/);
+});
+
+test("custody fee/insurance/reconciliation constructors use canonical discriminators and account order", () => {
+  const vault = PublicKey.unique(); const vaultAuthority = PublicKey.unique();
+  const destination = PublicKey.unique(); const mint = PublicKey.unique(); const tokenProgram = PublicKey.unique();
+
+  const transfer = transferToInsuranceFund({ market, authority }, 500n);
+  expect(decodeInstruction(transfer.data).name).toBe("TransferToInsuranceFund");
+  expect(Array.from(transfer.data)).toEqual([34, 244, 1, 0, 0, 0, 0, 0, 0]);
+  expect(transfer.keys).toEqual([
+    { pubkey: market, isSigner: false, isWritable: true },
+    { pubkey: authority, isSigner: true, isWritable: false },
+  ]);
+
+  const ledgerAccounts = { market, authority, vault, vaultAuthority, destination, mint, tokenProgram };
+  const fees = withdrawProtocolFees(ledgerAccounts, 10n);
+  expect(decodeInstruction(fees.data).name).toBe("WithdrawProtocolFees");
+  expect(fees.keys.map((key) => [key.pubkey, key.isSigner, key.isWritable])).toEqual([
+    [market, false, true], [authority, true, false], [vault, false, true], [vaultAuthority, false, false],
+    [destination, false, true], [mint, false, false], [tokenProgram, false, false],
+  ]);
+  const insurance = withdrawInsuranceFunds(ledgerAccounts, 10n);
+  expect(decodeInstruction(insurance.data).name).toBe("WithdrawInsuranceFunds");
+  expect(insurance.data[0]).toBe(36);
+
+  const record = recordBadDebt({ market, authority }, 3, 42n);
+  expect(decodeInstruction(record.data).name).toBe("RecordBadDebt");
+  expect(record.data.length).toBe(11);
+  expect(Array.from(record.data.slice(1, 3))).toEqual([3, 0]);
+  const resolve = resolveBadDebt({ market, authority }, 42n);
+  expect(decodeInstruction(resolve.data).name).toBe("ResolveBadDebt");
+
+  const reconcile = reconcileVault({ market, vault, mint, tokenProgram });
+  expect(decodeInstruction(reconcile.data).name).toBe("ReconcileVault");
+  expect(reconcile.data).toEqual(Buffer.from([39]));
+  expect(reconcile.keys).toEqual([
+    { pubkey: market, isSigner: false, isWritable: true },
+    { pubkey: vault, isSigner: false, isWritable: false },
+    { pubkey: mint, isSigner: false, isWritable: false },
+    { pubkey: tokenProgram, isSigner: false, isWritable: false },
+  ]);
+});
+
+test("decodeCustodyEvent parses a program log line emitted by pinocchio_log", () => {
+  const marketHex = "aa".repeat(32);
+  const mintHex = "bb".repeat(32);
+  const line = `Program log: SS:CollateralDeposited market=${marketHex} seat=4 amount=1000 seq=7 balance=1000 mint=${mintHex}`;
+  const event = decodeCustodyEvent(line);
+  expect(event).toEqual({ kind: "CollateralDeposited", market: marketHex, seat: 4, amount: 1000n, sequence: 7n, balance: 1000n, mint: mintHex });
+  const withoutSeat = decodeCustodyEvent(`SS:VaultInitialized market=${marketHex} amount=0 seq=1 balance=0 mint=${mintHex}`);
+  expect(withoutSeat?.seat).toBeUndefined();
+  expect(decodeCustodyEvent("Program log: not a custody event")).toBeNull();
 });

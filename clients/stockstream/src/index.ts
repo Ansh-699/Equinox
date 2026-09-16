@@ -39,6 +39,12 @@ export interface SessionAuthorizedAccounts extends InstructionAccounts { session
 
 export interface VaultAccounts { market: AddressInput; authority: AddressInput; mint: AddressInput; tokenProgram: AddressInput; vault: AddressInput; vaultAuthority: AddressInput; }
 export interface CustodyAccounts extends VaultAccounts { seat: AddressInput; seatIndex: number; sourceOrDestination: AddressInput; }
+export interface InsuranceTransferAccounts { market: AddressInput; authority: AddressInput; }
+/** `authority` is the market authority for `withdrawProtocolFees`, the market's `emergencyAuthority` for `withdrawInsuranceFunds`. */
+export interface LedgerWithdrawalAccounts { market: AddressInput; authority: AddressInput; vault: AddressInput; vaultAuthority: AddressInput; destination: AddressInput; mint: AddressInput; tokenProgram: AddressInput; }
+/** `authority` must be the market's `emergencyAuthority`. */
+export interface BadDebtAccounts { market: AddressInput; authority: AddressInput; }
+export interface ReconcileAccounts { market: AddressInput; vault: AddressInput; mint: AddressInput; tokenProgram: AddressInput; }
 export interface DelegationAccounts { market: AddressInput; authority: AddressInput; instrument: AddressInput; payer: AddressInput; scratchAccounts?: AddressInput[]; }
 export interface CommitAccounts { market: AddressInput; authority: AddressInput; payer: AddressInput; scratchAccounts?: AddressInput[]; }
 
@@ -201,6 +207,82 @@ export function withdrawCollateral(accounts: CustodyAccounts, amount: bigint | n
     accountMeta(accounts.sourceOrDestination, false, true), accountMeta(accounts.mint, false, false),
     accountMeta(accounts.vault, false, true), accountMeta(vaultAuthority, false, false), accountMeta(accounts.tokenProgram, false, false)];
   return result;
+}
+
+/** Internal ledger reassignment (protocol fees -> insurance fund); no token CPI. Market-authority-signed. */
+export function transferToInsuranceFund(accounts: InsuranceTransferAccounts, amount: bigint | number): TransactionInstruction {
+  const data = new Uint8Array(9); data[0] = STOCKSTREAM_INSTRUCTION.transferToInsuranceFund; writeUnsigned(data, 1, checkedUnsigned(amount, 64, "amount"), 8);
+  return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]);
+}
+
+function ledgerWithdrawal(discriminator: number, accounts: LedgerWithdrawalAccounts, amount: bigint | number): TransactionInstruction {
+  const data = new Uint8Array(9); data[0] = discriminator; writeUnsigned(data, 1, checkedUnsigned(amount, 64, "amount"), 8);
+  return instruction(data, [
+    accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false),
+    accountMeta(accounts.vault, false, true), accountMeta(accounts.vaultAuthority, false, false),
+    accountMeta(accounts.destination, false, true), accountMeta(accounts.mint, false, false),
+    accountMeta(accounts.tokenProgram, false, false),
+  ]);
+}
+/** Pays `amount` out of the protocol fee ledger via a real vault-authority-signed SPL transfer. Market-authority-signed. */
+export function withdrawProtocolFees(accounts: LedgerWithdrawalAccounts, amount: bigint | number): TransactionInstruction {
+  return ledgerWithdrawal(STOCKSTREAM_INSTRUCTION.withdrawProtocolFees, accounts, amount);
+}
+/** Pays `amount` out of the insurance fund ledger via a real vault-authority-signed SPL transfer. Emergency-authority-signed. */
+export function withdrawInsuranceFunds(accounts: LedgerWithdrawalAccounts, amount: bigint | number): TransactionInstruction {
+  return ledgerWithdrawal(STOCKSTREAM_INSTRUCTION.withdrawInsuranceFunds, accounts, amount);
+}
+
+/** Formally recognizes `amount` of a bankrupt seat's negative equity as unrecoverable bad debt. Emergency-authority-signed. */
+export function recordBadDebt(accounts: BadDebtAccounts, seatIndex: number, amount: bigint | number): TransactionInstruction {
+  const data = new Uint8Array(11); data[0] = STOCKSTREAM_INSTRUCTION.recordBadDebt; writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2); writeUnsigned(data, 3, checkedUnsigned(amount, 64, "amount"), 8);
+  return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]);
+}
+/** Pays `amount` of recognized bad debt down from the insurance fund ledger. Emergency-authority-signed. */
+export function resolveBadDebt(accounts: BadDebtAccounts, amount: bigint | number): TransactionInstruction {
+  const data = new Uint8Array(9); data[0] = STOCKSTREAM_INSTRUCTION.resolveBadDebt; writeUnsigned(data, 1, checkedUnsigned(amount, 64, "amount"), 8);
+  return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]);
+}
+/** Permissionless: recomputes the vault's actual balance against trader collateral + fee/insurance ledgers - recognized bad debt, and records the result. */
+export function reconcileVault(accounts: ReconcileAccounts): TransactionInstruction {
+  return instruction(Uint8Array.of(STOCKSTREAM_INSTRUCTION.reconcileVault), [
+    accountMeta(accounts.market, false, true), accountMeta(accounts.vault, false, false),
+    accountMeta(accounts.mint, false, false), accountMeta(accounts.tokenProgram, false, false),
+  ]);
+}
+
+export interface CustodyEvent {
+  kind: string;
+  market: string;
+  seat?: number;
+  amount: bigint;
+  sequence: bigint;
+  balance: bigint;
+  mint: string;
+}
+const CUSTODY_EVENT_PATTERN = /^SS:(\w+) market=([0-9a-f]{64})(?: seat=(\d+))? amount=(\d+) seq=(\d+) balance=(\d+) mint=([0-9a-f]{64})$/;
+/**
+ * Decodes one custody event from a transaction log line
+ * (`meta.logMessages`), as emitted by `handlers::log_custody_event` via
+ * `pinocchio_log`. Not an Anchor-style CPI event: these are plain
+ * `Program log:`-prefixed text lines, since adding a binary event ring
+ * buffer would have required growing `MARKET_ACCOUNT_SIZE`. Returns `null`
+ * for any line that isn't a custody event (including one truncated by the
+ * logger's fixed-size buffer).
+ */
+export function decodeCustodyEvent(logLine: string): CustodyEvent | null {
+  const withoutPrefix = logLine.startsWith("Program log: ") ? logLine.slice("Program log: ".length) : logLine;
+  const match = CUSTODY_EVENT_PATTERN.exec(withoutPrefix);
+  if (!match) return null;
+  return {
+    kind: match[1],
+    market: match[2],
+    seat: match[3] !== undefined ? Number(match[3]) : undefined,
+    amount: BigInt(match[4]),
+    sequence: BigInt(match[5]),
+    balance: BigInt(match[6]),
+    mint: match[7],
+  };
 }
 
 /**
@@ -377,7 +459,7 @@ export function transitionMarket(accounts: InstructionAccounts, mode: "pause" | 
 
 export function decodeInstruction(data: Uint8Array): InstructionFixture {
   if (data.length === 0) throw new RangeError("Empty instruction");
-  const names: Record<number, string> = { 0: "InitializeMarket", 1: "CreateTraderSeat", 2: "CloseTraderSeat", 3: "PlaceOrder", 4: "CancelOrder", 5: "CancelAll", 6: "UpdateFunding", 7: "Liquidate", 8: "InitializeSettlementScratch", 9: "InitializeVault", 10: "DepositCollateral", 11: "WithdrawCollateral", 12: "ConsumeOracleUpdate", 13: "DelegateMarket", 14: "CommitMarket", 15: "CommitAndUndelegate", 16: "UndelegationCallback", 17: "AuthorizeTradingSession", 18: "RevokeTradingSession", 19: "InitializeExchange", 20: "RegisterStockInstrument", 21: "CreatePerpMarket", 22: "UpdateStockInstrument", 23: "SuspendStockInstrument", 24: "UpdateMarketRisk", 25: "PauseMarket", 26: "ResumeMarket", 27: "SetCloseOnly", 28: "EnterCorporateAction", 29: "ResolveCorporateAction", 30: "CloseMarket", 31: "UpdateTradingSessionLimits", 32: "CloseTradingSession", 33: "ReplaceOrder" };
+  const names: Record<number, string> = { 0: "InitializeMarket", 1: "CreateTraderSeat", 2: "CloseTraderSeat", 3: "PlaceOrder", 4: "CancelOrder", 5: "CancelAll", 6: "UpdateFunding", 7: "Liquidate", 8: "InitializeSettlementScratch", 9: "InitializeVault", 10: "DepositCollateral", 11: "WithdrawCollateral", 12: "ConsumeOracleUpdate", 13: "DelegateMarket", 14: "CommitMarket", 15: "CommitAndUndelegate", 16: "UndelegationCallback", 17: "AuthorizeTradingSession", 18: "RevokeTradingSession", 19: "InitializeExchange", 20: "RegisterStockInstrument", 21: "CreatePerpMarket", 22: "UpdateStockInstrument", 23: "SuspendStockInstrument", 24: "UpdateMarketRisk", 25: "PauseMarket", 26: "ResumeMarket", 27: "SetCloseOnly", 28: "EnterCorporateAction", 29: "ResolveCorporateAction", 30: "CloseMarket", 31: "UpdateTradingSessionLimits", 32: "CloseTradingSession", 33: "ReplaceOrder", 34: "TransferToInsuranceFund", 35: "WithdrawProtocolFees", 36: "WithdrawInsuranceFunds", 37: "RecordBadDebt", 38: "ResolveBadDebt", 39: "ReconcileVault" };
   const name = names[data[0]];
   if (!name) throw new RangeError("Unknown instruction");
   return { name, data: data.slice() };

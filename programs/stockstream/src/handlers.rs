@@ -9,6 +9,7 @@ use pinocchio::sysvars::instructions::Instructions;
 #[cfg(any(target_os = "solana", target_arch = "bpf"))]
 use pinocchio::sysvars::{clock::Clock, Sysvar};
 use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
+use pinocchio_log::logger::Logger;
 use pinocchio_token::instructions::Transfer;
 
 use crate::{
@@ -23,9 +24,10 @@ use crate::{
         derive_settlement_scratch, ScratchStatus, SettlementScratchView, SETTLEMENT_SCRATCH_LEN,
     },
     state::{
-        FillEvent, MarketMode, MarketStateHeader, TraderSeat, FILL_EVENT_CAPACITY,
-        FILL_EVENT_OFFSET, FILL_EVENT_SIZE, MARKET_ACCOUNT_SIZE, MARKET_DISCRIMINATOR,
-        MARKET_HEADER_SIZE, MAX_TRADER_SEATS, TRADER_SEAT_OFFSET, TRADER_SEAT_SIZE,
+        FillEvent, MarketMode, MarketStateHeader, ReconciliationStatus, TraderSeat,
+        FILL_EVENT_CAPACITY, FILL_EVENT_OFFSET, FILL_EVENT_SIZE, MARKET_ACCOUNT_SIZE,
+        MARKET_DISCRIMINATOR, MARKET_HEADER_SIZE, MAX_TRADER_SEATS, TRADER_SEAT_OFFSET,
+        TRADER_SEAT_SIZE,
     },
 };
 
@@ -496,6 +498,22 @@ pub fn dispatch(
         StockStreamInstruction::TransitionMarket { mode } => {
             transition_market(program_id, accounts, mode)
         }
+        StockStreamInstruction::TransferToInsuranceFund { amount } => {
+            transfer_to_insurance_fund(program_id, accounts, amount)
+        }
+        StockStreamInstruction::WithdrawProtocolFees { amount } => {
+            withdraw_protocol_fees(program_id, accounts, amount)
+        }
+        StockStreamInstruction::WithdrawInsuranceFunds { amount } => {
+            withdraw_insurance_funds(program_id, accounts, amount)
+        }
+        StockStreamInstruction::RecordBadDebt { seat_index, amount } => {
+            record_bad_debt(program_id, accounts, seat_index, amount)
+        }
+        StockStreamInstruction::ResolveBadDebt { amount } => {
+            resolve_bad_debt(program_id, accounts, amount)
+        }
+        StockStreamInstruction::ReconcileVault => reconcile_vault(program_id, accounts),
     }
 }
 
@@ -702,6 +720,7 @@ fn initialize_vault(program_id: &Address, accounts: &mut [AccountView]) -> Progr
     };
     let authority = accounts[1].address().to_bytes();
     let mint = accounts[2].address().to_bytes();
+    let market_key = accounts[0].address().to_bytes();
     let data = market_data(&mut accounts[0], program_id)?;
     let mut header = initialized_header(data)?;
     if header.market_authority != authority || header.reserved_upgrade[1] != 0 {
@@ -711,7 +730,15 @@ fn initialize_vault(program_id: &Address, accounts: &mut [AccountView]) -> Progr
     header.collateral_token_program = TOKEN_PROGRAM_ID.to_bytes();
     header.reserved_upgrade[0] = decimals;
     header.reserved_upgrade[1] = 1;
-    write_header(data, &header)
+    header.set_protocol_fee_balance(0);
+    header.set_insurance_fund_balance(0);
+    header.set_recognized_bad_debt(0);
+    header.set_reconciliation_status(ReconciliationStatus::Reconciled);
+    header.set_vault_surplus(0);
+    let sequence = next_event_sequence(&mut header)?;
+    write_header(data, &header)?;
+    log_custody_event("VaultInitialized", &market_key, None, 0, sequence, 0, &mint);
+    Ok(())
 }
 
 fn deposit_collateral(
@@ -735,29 +762,61 @@ fn deposit_collateral(
         return Err(custom(StockStreamError::InvalidInstruction));
     }
     let vault_authority = derive_vault_authority(market_accounts[0].address(), program_id);
+    let market_key = market_accounts[0].address().to_bytes();
     let data = market_data(&mut market_accounts[0], program_id)?;
-    let header = initialized_header(data)?;
+    let mut header = initialized_header(data)?;
     custody_config(&header, rest[4].address(), rest[5].address())?;
     validate_custody_tokens(&header, &rest[4], &rest[3], &vault_authority)?;
     let mut seat = seat_at(data, seat_index)?;
+    // Only the seat's own owner may deposit for it -- there is no scoped
+    // trading-session account in this instruction's account list at all, so
+    // a session signer structurally cannot reach this path.
     if seat.trader != rest[0].address().to_bytes() {
         return Err(custom(StockStreamError::InvalidSeat));
     }
-    let token_account = pinocchio_token::state::Account::from_account_view(&rest[2])
-        .map_err(|_| custom(StockStreamError::InvalidInstruction))?;
-    if token_account.mint() != rest[4].address()
-        || token_account.owner() != rest[0].address()
-        || token_account.amount() < amount
     {
-        return Err(custom(StockStreamError::InvalidInstruction));
+        // Scoped so this `Ref` is dropped before the CPI below: the SPL
+        // Transfer CPI writer itself rejects any account it touches that is
+        // still borrowed (`write_accounts`'s `is_borrowed()` check runs
+        // unconditionally, not only on-chain), so holding this borrow open
+        // across the call would make every deposit fail with
+        // `AccountBorrowFailed` -- a real, pre-existing defect this test
+        // suite caught, not a test-only artifact.
+        let token_account = pinocchio_token::state::Account::from_account_view(&rest[2])?;
+        if token_account.mint() != rest[4].address()
+            || token_account.owner() != rest[0].address()
+            || token_account.amount() < amount
+        {
+            return Err(custom(StockStreamError::InvalidInstruction));
+        }
     }
     seat.available_collateral = seat
         .available_collateral
         .checked_add(amount as i128)
         .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
+    // Ledger credit happens before the CPI: every fallible check above (seat
+    // ownership, mint/vault/token-program identity, source balance) has
+    // already run, and `write_seat` below only executes after the CPI
+    // succeeds -- if the CPI fails, `?` aborts the whole instruction and
+    // Solana's atomic rollback discards the in-memory `seat` mutation along
+    // with everything else, so the credit is never actually observed unless
+    // the transfer also succeeded.
     Transfer::<&AccountView>::new(&rest[2], &rest[3], &rest[0], amount)
         .invoke_with_program(rest[5].address())?;
-    write_seat(data, seat_index, &seat)
+    write_seat(data, seat_index, &seat)?;
+    let mint = rest[4].address().to_bytes();
+    let sequence = next_event_sequence(&mut header)?;
+    write_header(data, &header)?;
+    log_custody_event(
+        "CollateralDeposited",
+        &market_key,
+        Some(seat_index as u16),
+        amount,
+        sequence,
+        seat.available_collateral.max(0) as u64,
+        &mint,
+    );
+    Ok(())
 }
 
 fn withdraw_collateral(
@@ -781,13 +840,29 @@ fn withdraw_collateral(
     let market_key = market_accounts[0].address().to_bytes();
     let bump = [Address::find_program_address(&[VAULT_AUTHORITY_SEED, &market_key], program_id).1];
     let data = market_data(&mut market_accounts[0], program_id)?;
-    let header = initialized_header(data)?;
+    let mut header = initialized_header(data)?;
     if !header.l1_withdrawals_allowed() {
         return Err(custom(StockStreamError::MagicBlockUndelegationInProgress));
+    }
+    // A market-wide vault deficit is blocked from the withdrawal path
+    // entirely, independent of any individual seat's own health: paying out
+    // against a shortfall the vault cannot cover only deepens it for
+    // whoever is left. Only `ReconcileVault` (once the shortfall is fixed)
+    // or governed recovery clears this.
+    if header.withdrawals_blocked_by_reconciliation() {
+        return Err(custom(StockStreamError::CustodyViolation));
     }
     custody_config(&header, rest[2].address(), rest[5].address())?;
     validate_custody_tokens(&header, &rest[2], &rest[3], rest[4].address())?;
     let seat = seat_at(data, seat_index)?;
+    // Only the seat's own owner may withdraw for it (main-wallet signer
+    // check above); no session account is ever passed to this instruction,
+    // so a scoped trading session can never expand withdrawal authority.
+    // A fresh, valid oracle is required unconditionally, not only when the
+    // seat currently has an open position: a position can be opened again
+    // the instant after an under-collateralized withdrawal, so basing the
+    // requirement on the seat's current position would let a flat seat
+    // withdraw against a stale price and then immediately re-lever.
     if seat.trader != trader || seat.occupancy != 1 || header.oracle_valid != 1 {
         return Err(custom(StockStreamError::RiskViolation));
     }
@@ -797,22 +872,57 @@ fn withdraw_collateral(
         header.funding_accumulator,
         header.last_verified_oracle_price as i128,
         header.maintenance_margin_bps,
+        risk::DEFAULT_WITHDRAWAL_BUFFER,
     )
     .map_err(|_| custom(StockStreamError::RiskViolation))?;
-    let destination = pinocchio_token::state::Account::from_account_view(&rest[1])
-        .map_err(|_| custom(StockStreamError::InvalidInstruction))?;
-    if destination.mint() != rest[2].address() || destination.owner() != rest[0].address() {
-        return Err(custom(StockStreamError::InvalidInstruction));
+    {
+        // Scoped for the same reason as `deposit_collateral`'s source-token
+        // check: `destination` (`rest[1]`) is also the CPI's `to` account
+        // below, and the SPL Transfer CPI writer rejects any account it
+        // touches that is still borrowed when the CPI runs.
+        let destination = pinocchio_token::state::Account::from_account_view(&rest[1])
+            .map_err(|_| custom(StockStreamError::InvalidInstruction))?;
+        if destination.mint() != rest[2].address() || destination.owner() != rest[0].address() {
+            return Err(custom(StockStreamError::InvalidInstruction));
+        }
     }
+    let vault_after = {
+        let vault_state = pinocchio_token::state::Account::from_account_view(&rest[3])
+            .map_err(|_| custom(StockStreamError::InvalidInstruction))?;
+        vault_state
+            .amount()
+            .checked_sub(amount)
+            .ok_or(custom(StockStreamError::CustodyViolation))?
+    };
     let seeds = [
         Seed::from(VAULT_AUTHORITY_SEED),
         Seed::from(&market_key),
         Seed::from(&bump),
     ];
     let signer_seeds = [Signer::from(&seeds)];
+    // The CPI runs before the seat/header writeback for the same reason as
+    // `deposit_collateral`: every fallible check (signer, delegation state,
+    // reconciliation state, custody config, mint/vault/destination shape,
+    // and the full risk/margin computation) has already completed above, so
+    // the only way execution reaches this line is with a transfer that is
+    // already known to be valid; if the CPI itself still fails, the runtime
+    // discards this instruction's in-memory writes entirely.
     Transfer::<&AccountView>::new(&rest[3], &rest[1], &rest[4], amount)
         .invoke_signed_with_program(&signer_seeds, rest[5].address())?;
-    write_seat(data, seat_index, &seat)
+    write_seat(data, seat_index, &seat)?;
+    let mint = rest[2].address().to_bytes();
+    let sequence = next_event_sequence(&mut header)?;
+    write_header(data, &header)?;
+    log_custody_event(
+        "CollateralWithdrawn",
+        &market_key,
+        Some(seat_index as u16),
+        amount,
+        sequence,
+        vault_after,
+        &mint,
+    );
+    Ok(())
 }
 
 fn validate_custody_aliases(accounts: &[AccountView]) -> ProgramResult {
@@ -835,8 +945,14 @@ fn validate_custody_tokens(
     vault: &AccountView,
     authority: &Address,
 ) -> ProgramResult {
-    if header.reserved_upgrade[2] != 0 {
-        return Err(custom(StockStreamError::RiskViolation));
+    // `l1_withdrawals_allowed()` is the single source of truth for whether L1
+    // custody movement is safe (states `NotDelegated`/`Restored`); this used
+    // to duplicate the check against the stale 3-state marker convention
+    // (`reserved_upgrade[2] != 0`), which would incorrectly reject deposits
+    // and withdrawals for a `Restored` (value 3) market even though
+    // `withdraw_collateral` already permits it via the same accessor.
+    if !header.l1_withdrawals_allowed() {
+        return Err(custom(StockStreamError::MagicBlockUndelegationInProgress));
     }
     let mint_state = pinocchio_token::state::Mint::from_account_view(mint)?;
     let vault_state = pinocchio_token::state::Account::from_account_view(vault)?;
@@ -847,6 +963,448 @@ fn validate_custody_tokens(
     {
         return Err(ProgramError::InvalidAccountData);
     }
+    Ok(())
+}
+
+fn hex32(bytes: &[u8; 32]) -> [u8; 64] {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = [0u8; 64];
+    let mut i = 0;
+    while i < 32 {
+        out[i * 2] = HEX[(bytes[i] >> 4) as usize];
+        out[i * 2 + 1] = HEX[(bytes[i] & 0xf) as usize];
+        i += 1;
+    }
+    out
+}
+
+/// Emits one custody event as a Solana program log via `pinocchio_log`
+/// (`sol_log_` on-chain; `println!` off-chain, so this is exercisable in
+/// host tests without an SBF runtime). Logs, not account bytes, carry these
+/// events -- growing `MARKET_ACCOUNT_SIZE` for an event ring buffer would
+/// cascade into every existing offset/test in this program for no benefit
+/// an indexer cannot already get from transaction logs. `sequence` is
+/// `header.global_event_sequence`, the same monotonic counter fill events
+/// use, advanced by the caller before this is called.
+#[allow(clippy::too_many_arguments)]
+fn log_custody_event(
+    kind: &str,
+    market: &[u8; 32],
+    seat_index: Option<u16>,
+    amount: u64,
+    sequence: u64,
+    resulting_balance: u64,
+    mint: &[u8; 32],
+) {
+    let mut logger = Logger::<256>::default();
+    logger.append("SS:");
+    logger.append(kind);
+    logger.append(" market=");
+    logger.append(unsafe { core::str::from_utf8_unchecked(&hex32(market)) });
+    if let Some(seat) = seat_index {
+        logger.append(" seat=");
+        logger.append(seat as u64);
+    }
+    logger.append(" amount=");
+    logger.append(amount);
+    logger.append(" seq=");
+    logger.append(sequence);
+    logger.append(" balance=");
+    logger.append(resulting_balance);
+    logger.append(" mint=");
+    logger.append(unsafe { core::str::from_utf8_unchecked(&hex32(mint)) });
+    logger.log();
+}
+
+/// Advances and returns the market's shared monotonic event-sequence
+/// counter (also used for fill events), for a custody event about to be
+/// logged.
+fn next_event_sequence(header: &mut MarketStateHeader) -> Result<u64, ProgramError> {
+    header.global_event_sequence = header
+        .global_event_sequence
+        .checked_add(1)
+        .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
+    Ok(header.global_event_sequence)
+}
+
+/// Sums every seat's `available_collateral` -- the only field that ever
+/// actually moves real tokens into or out of the vault (`realized_pnl` and
+/// `unrealized_pnl` are health/margin bookkeeping only; see `docs/risk.md`).
+/// This is the trader side of the vault-reconciliation invariant. Bounded to
+/// exactly `MAX_TRADER_SEATS` (128) reads, same cost class as the existing
+/// open-interest scan in `plan_seat_results`.
+fn total_trader_collateral(data: &[u8]) -> Result<i128, ProgramError> {
+    let mut total: i128 = 0;
+    let mut index = 0usize;
+    while index < MAX_TRADER_SEATS {
+        let seat = seat_at(data, index)?;
+        total = total
+            .checked_add(seat.available_collateral)
+            .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
+        index += 1;
+    }
+    Ok(total)
+}
+
+/// Requires `accounts[1]` to be the market's `market_authority` and a
+/// signer. Used for the governance-only fee/insurance/reconciliation
+/// handlers, none of which accept a scoped trading-session account at all
+/// (so a session signer can never reach them, regardless of what actions it
+/// was granted).
+/// Accounts: `[market, market_authority (signer)]`. Internal ledger
+/// reassignment only -- both balances are backed by the same vault, so no
+/// token CPI is needed or performed.
+fn transfer_to_insurance_fund(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    amount: u64,
+) -> ProgramResult {
+    if accounts.len() != 2 || amount == 0 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    let (market_accounts, rest) = accounts.split_at_mut(1);
+    signer(&rest[0])?;
+    let authority = rest[0].address().to_bytes();
+    let market_key = market_accounts[0].address().to_bytes();
+    let data = market_data(&mut market_accounts[0], program_id)?;
+    let mut header = initialized_header(data)?;
+    if authority != header.market_authority {
+        return Err(custom(StockStreamError::CustodyViolation));
+    }
+    header.set_protocol_fee_balance(
+        header
+            .protocol_fee_balance()
+            .checked_sub(amount)
+            .ok_or(custom(StockStreamError::CustodyViolation))?,
+    );
+    header.set_insurance_fund_balance(
+        header
+            .insurance_fund_balance()
+            .checked_add(amount)
+            .ok_or(custom(StockStreamError::ArithmeticOverflow))?,
+    );
+    let sequence = next_event_sequence(&mut header)?;
+    let mint = header.collateral_mint;
+    write_header(data, &header)?;
+    log_custody_event(
+        "InsuranceFundChanged",
+        &market_key,
+        None,
+        amount,
+        sequence,
+        header.insurance_fund_balance(),
+        &mint,
+    );
+    Ok(())
+}
+
+/// Shared implementation for `WithdrawProtocolFees` and
+/// `WithdrawInsuranceFunds`: both pay `amount` out of a market-level ledger
+/// balance to an external token account via a real vault-authority-signed
+/// SPL transfer. Accounts: `[market, authority (signer), vault,
+/// vault_authority, destination, mint, token_program]`. The destination must
+/// use the market's configured mint and token program -- there is no path to
+/// redirect either ledger to an unapproved asset. Emergency authority for
+/// the insurance fund, market authority for protocol fees.
+fn withdraw_ledger_balance(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    amount: u64,
+    from_insurance: bool,
+) -> ProgramResult {
+    if accounts.len() != 7 || amount == 0 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    for i in 0..7 {
+        for j in 0..i {
+            if accounts[i].address() == accounts[j].address() {
+                return Err(custom(StockStreamError::CustodyViolation));
+            }
+        }
+    }
+    let (market_accounts, rest) = accounts.split_at_mut(1);
+    signer(&rest[0])?;
+    let authority = rest[0].address().to_bytes();
+    let market_key = market_accounts[0].address().to_bytes();
+    if *rest[1].address() != derive_vault(market_accounts[0].address(), program_id)
+        || *rest[2].address() != derive_vault_authority(market_accounts[0].address(), program_id)
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let data = market_data(&mut market_accounts[0], program_id)?;
+    let mut header = initialized_header(data)?;
+    let expected_authority = if from_insurance {
+        header.emergency_authority
+    } else {
+        header.market_authority
+    };
+    if authority != expected_authority {
+        return Err(custom(StockStreamError::CustodyViolation));
+    }
+    custody_config(&header, rest[4].address(), rest[5].address())?;
+    validate_custody_tokens(&header, &rest[4], &rest[1], rest[2].address())?;
+    let destination_ok = {
+        let destination = pinocchio_token::state::Account::from_account_view(&rest[3])
+            .map_err(|_| custom(StockStreamError::InvalidInstruction))?;
+        destination.mint() == rest[4].address()
+    };
+    if !destination_ok {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let current = if from_insurance {
+        header.insurance_fund_balance()
+    } else {
+        header.protocol_fee_balance()
+    };
+    let updated_balance = current
+        .checked_sub(amount)
+        .ok_or(custom(StockStreamError::CustodyViolation))?;
+    let bump = [Address::find_program_address(&[VAULT_AUTHORITY_SEED, &market_key], program_id).1];
+    let seeds = [
+        Seed::from(VAULT_AUTHORITY_SEED),
+        Seed::from(&market_key),
+        Seed::from(&bump),
+    ];
+    let signer_seeds = [Signer::from(&seeds)];
+    Transfer::<&AccountView>::new(&rest[1], &rest[3], &rest[2], amount)
+        .invoke_signed_with_program(&signer_seeds, rest[5].address())
+        .map_err(|_| custom(StockStreamError::CustodyViolation))?;
+    if from_insurance {
+        header.set_insurance_fund_balance(updated_balance);
+    } else {
+        header.set_protocol_fee_balance(updated_balance);
+    }
+    let sequence = next_event_sequence(&mut header)?;
+    let mint = header.collateral_mint;
+    write_header(data, &header)?;
+    log_custody_event(
+        if from_insurance {
+            "InsuranceFundChanged"
+        } else {
+            "ProtocolFeeCollected"
+        },
+        &market_key,
+        None,
+        amount,
+        sequence,
+        updated_balance,
+        &mint,
+    );
+    Ok(())
+}
+
+fn withdraw_protocol_fees(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    amount: u64,
+) -> ProgramResult {
+    withdraw_ledger_balance(program_id, accounts, amount, false)
+}
+
+fn withdraw_insurance_funds(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    amount: u64,
+) -> ProgramResult {
+    withdraw_ledger_balance(program_id, accounts, amount, true)
+}
+
+/// Accounts: `[market, emergency_authority (signer)]`. Formally recognizes
+/// `amount` of a bankrupt seat's negative equity as bad debt the seat itself
+/// can never repay (it has no real token claim beyond `available_collateral`
+/// >= 0), forgiving that much of the seat's negative `realized_pnl` so its
+/// health calculations stop being permanently poisoned by an unrecoverable
+/// loss. This never moves tokens or touches `available_collateral`: it is a
+/// governance acknowledgement, paired with `ResolveBadDebt` actually paying
+/// the recognized shortfall down from the insurance fund.
+fn record_bad_debt(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    seat_index: u16,
+    amount: u64,
+) -> ProgramResult {
+    if accounts.len() != 2 || amount == 0 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    let (market_accounts, rest) = accounts.split_at_mut(1);
+    signer(&rest[0])?;
+    let authority = rest[0].address().to_bytes();
+    let market_key = market_accounts[0].address().to_bytes();
+    let data = market_data(&mut market_accounts[0], program_id)?;
+    let mut header = initialized_header(data)?;
+    if authority != header.emergency_authority {
+        return Err(custom(StockStreamError::CustodyViolation));
+    }
+    if header.oracle_valid != 1 {
+        return Err(custom(StockStreamError::OracleUnavailable));
+    }
+    let mut seat = seat_at(data, seat_index as usize)?;
+    let equity =
+        risk::equity(&seat, header.last_verified_oracle_price as i128).map_err(risk_error)?;
+    if equity >= 0 || i128::from(amount) > -equity {
+        return Err(custom(StockStreamError::CustodyViolation));
+    }
+    seat.realized_pnl = seat
+        .realized_pnl
+        .checked_add(i128::from(amount))
+        .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
+    header.set_recognized_bad_debt(
+        header
+            .recognized_bad_debt()
+            .checked_add(amount)
+            .ok_or(custom(StockStreamError::ArithmeticOverflow))?,
+    );
+    write_seat(data, seat_index as usize, &seat)?;
+    let sequence = next_event_sequence(&mut header)?;
+    let mint = header.collateral_mint;
+    write_header(data, &header)?;
+    log_custody_event(
+        "BadDebtRecorded",
+        &market_key,
+        Some(seat_index),
+        amount,
+        sequence,
+        header.recognized_bad_debt(),
+        &mint,
+    );
+    Ok(())
+}
+
+/// Accounts: `[market, emergency_authority (signer)]`. Pays `amount` of
+/// recognized bad debt down from the insurance fund ledger -- both balances
+/// must actually cover it, so this can never make either go negative or
+/// resolve more debt than exists.
+fn resolve_bad_debt(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    amount: u64,
+) -> ProgramResult {
+    if accounts.len() != 2 || amount == 0 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    let (market_accounts, rest) = accounts.split_at_mut(1);
+    signer(&rest[0])?;
+    let authority = rest[0].address().to_bytes();
+    let market_key = market_accounts[0].address().to_bytes();
+    let data = market_data(&mut market_accounts[0], program_id)?;
+    let mut header = initialized_header(data)?;
+    if authority != header.emergency_authority {
+        return Err(custom(StockStreamError::CustodyViolation));
+    }
+    header.set_recognized_bad_debt(
+        header
+            .recognized_bad_debt()
+            .checked_sub(amount)
+            .ok_or(custom(StockStreamError::CustodyViolation))?,
+    );
+    header.set_insurance_fund_balance(
+        header
+            .insurance_fund_balance()
+            .checked_sub(amount)
+            .ok_or(custom(StockStreamError::CustodyViolation))?,
+    );
+    let sequence = next_event_sequence(&mut header)?;
+    let mint = header.collateral_mint;
+    write_header(data, &header)?;
+    log_custody_event(
+        "BadDebtResolved",
+        &market_key,
+        None,
+        amount,
+        sequence,
+        header.recognized_bad_debt(),
+        &mint,
+    );
+    Ok(())
+}
+
+/// Accounts: `[market, vault, mint, token_program]`. Permissionless (any
+/// keeper may call it): it only ever recomputes and records a status, never
+/// moves tokens or seat balances, so there is nothing here for an
+/// unprivileged caller to abuse. Compares the vault's actual decoded token
+/// balance against `total_trader_collateral + protocol_fee_balance +
+/// insurance_fund_balance - recognized_bad_debt` (see `docs/custody.md` for
+/// the sign convention: recognized bad debt lowers the amount the vault is
+/// expected to hold, because it represents claims governance has already
+/// formally written off, not real backed value).
+fn reconcile_vault(program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
+    if accounts.len() != 4 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    for i in 0..4 {
+        for j in 0..i {
+            if accounts[i].address() == accounts[j].address() {
+                return Err(custom(StockStreamError::CustodyViolation));
+            }
+        }
+    }
+    let (market_accounts, rest) = accounts.split_at_mut(1);
+    let market_key = market_accounts[0].address().to_bytes();
+    if *rest[0].address() != derive_vault(market_accounts[0].address(), program_id) {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let vault_authority = derive_vault_authority(market_accounts[0].address(), program_id);
+    let data = market_data(&mut market_accounts[0], program_id)?;
+    let mut header = initialized_header(data)?;
+    custody_config(&header, rest[1].address(), rest[2].address())?;
+    validate_custody_tokens(&header, &rest[1], &rest[0], &vault_authority)?;
+    let actual = i128::from(
+        pinocchio_token::state::Account::from_account_view(&rest[0])
+            .map_err(|_| custom(StockStreamError::InvalidInstruction))?
+            .amount(),
+    );
+    let collateral = total_trader_collateral(data)?;
+    let expected = collateral
+        .checked_add(i128::from(header.protocol_fee_balance()))
+        .and_then(|v| v.checked_add(i128::from(header.insurance_fund_balance())))
+        .and_then(|v| v.checked_sub(i128::from(header.recognized_bad_debt())))
+        .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
+    let previous_status = header.reconciliation_status();
+    let (status, surplus, event_kind) = if actual == expected {
+        (
+            ReconciliationStatus::Reconciled,
+            0u64,
+            "ReconciliationRestored",
+        )
+    } else if actual > expected {
+        (
+            ReconciliationStatus::SurplusDetected,
+            u64::try_from(actual - expected)
+                .map_err(|_| custom(StockStreamError::ArithmeticOverflow))?,
+            "VaultSurplusDetected",
+        )
+    } else {
+        let escalated = matches!(previous_status, 2 | 3);
+        header.mode = MarketMode::Paused as u8;
+        (
+            if escalated {
+                ReconciliationStatus::RecoveryRequired
+            } else {
+                ReconciliationStatus::DeficitDetected
+            },
+            0u64,
+            "VaultDeficitDetected",
+        )
+    };
+    header.set_reconciliation_status(status);
+    header.set_vault_surplus(surplus);
+    let sequence = next_event_sequence(&mut header)?;
+    let mint = header.collateral_mint;
+    let deficit_or_surplus = if actual >= expected {
+        surplus
+    } else {
+        u64::try_from(expected - actual).unwrap_or(u64::MAX)
+    };
+    write_header(data, &header)?;
+    log_custody_event(
+        event_kind,
+        &market_key,
+        None,
+        deficit_or_surplus,
+        sequence,
+        actual.max(0) as u64,
+        &mint,
+    );
     Ok(())
 }
 
@@ -1638,7 +2196,7 @@ fn place_order_core(
         planned.expected_event_sequence = header.global_event_sequence;
         planned.expected_order_sequence = sequence;
     }
-    plan_seat_results(data, &mut scratch, input, header, &taker)?;
+    let total_fee = plan_seat_results(data, &mut scratch, input, header, &taker)?;
     validate_settlement_plan(data, &scratch, input, header, &taker_before)?;
     if scratch.plan().post_only_rejected {
         scratch.abort_to(&scratch_before);
@@ -1666,7 +2224,32 @@ fn place_order_core(
     updated.global_order_sequence = scratch_result.final_order_sequence;
     updated.global_event_sequence = scratch_result.final_event_sequence;
     updated.current_open_interest = scratch_result.open_interest_after;
-    write_header(data, &updated)?;
+    // Maker+taker fees charged this instruction (already deducted from the
+    // relevant seats' `realized_pnl` by `apply_fill`) are credited to the
+    // protocol fee ledger here, atomically with the rest of the settlement.
+    if total_fee > 0 {
+        let fee_u64 =
+            u64::try_from(total_fee).map_err(|_| custom(StockStreamError::ArithmeticOverflow))?;
+        updated.set_protocol_fee_balance(
+            updated
+                .protocol_fee_balance()
+                .checked_add(fee_u64)
+                .ok_or(custom(StockStreamError::ArithmeticOverflow))?,
+        );
+        let sequence = next_event_sequence(&mut updated)?;
+        write_header(data, &updated)?;
+        log_custody_event(
+            "ProtocolFeeCollected",
+            &market_address,
+            None,
+            fee_u64,
+            sequence,
+            updated.protocol_fee_balance(),
+            &updated.collateral_mint,
+        );
+    } else {
+        write_header(data, &updated)?;
+    }
     let mut scratch_header = scratch.read_header();
     scratch_header.plan_nonce = nonce;
     scratch_header.status = ScratchStatus::Ready as u8;
@@ -1785,6 +2368,10 @@ fn replace_order(
 /// Computes every seat, margin, event and market result before the arena is
 /// touched. `TraderSeat` values live in scratch slots rather than an SBF stack
 /// array; a slot is allocated once per participating maker plus the taker.
+/// Returns the total maker+taker fee charged across every fill in this
+/// instruction, so the caller can credit it to the protocol fee ledger --
+/// `apply_fill` already deducts it from each seat's `realized_pnl`, but
+/// nothing previously credited it anywhere, an accounting gap this closes.
 #[inline(never)]
 fn plan_seat_results(
     data: &[u8],
@@ -1792,11 +2379,12 @@ fn plan_seat_results(
     input: OrderInput,
     header: MarketStateHeader,
     taker_initial: &TraderSeat,
-) -> ProgramResult {
+) -> Result<i128, ProgramError> {
     let mut taker = *taker_initial;
     scratch.write_seat_result(0, &taker)?;
     scratch.set_seat_result_index(0, input.owner as u16)?;
 
+    let mut total_fee: i128 = 0;
     let mut fill_index = 0usize;
     while fill_index < scratch.plan().fill_count as usize {
         let fill = scratch.plan().fills[fill_index];
@@ -1822,15 +2410,20 @@ fn plan_seat_results(
         } else {
             -(fill.quantity as i128)
         };
-        risk::apply_fill(
+        let maker_fee = risk::apply_fill(
             &mut maker,
             -signed,
             fill.price as i128,
             header.maker_fee_bps,
         )
         .map_err(risk_error)?;
-        risk::apply_fill(&mut taker, signed, fill.price as i128, header.taker_fee_bps)
-            .map_err(risk_error)?;
+        let taker_fee =
+            risk::apply_fill(&mut taker, signed, fill.price as i128, header.taker_fee_bps)
+                .map_err(risk_error)?;
+        total_fee = total_fee
+            .checked_add(maker_fee)
+            .and_then(|v| v.checked_add(taker_fee))
+            .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
         let release = risk::initial_margin(
             risk::notional(fill.quantity as i128, fill.price as i128).map_err(risk_error)?,
             header.initial_margin_bps,
@@ -1947,7 +2540,7 @@ fn plan_seat_results(
         .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
     result.status = ScratchStatus::Ready as u8;
     scratch.write_header(&result);
-    Ok(())
+    Ok(total_fee)
 }
 
 fn apply_scratch_results(data: &mut [u8], scratch: &SettlementScratchView) -> ProgramResult {
@@ -2240,8 +2833,9 @@ fn liquidate(
     }
     signer(&accounts[1])?;
     let authority = accounts[1].address().to_bytes();
+    let market_key = accounts[0].address().to_bytes();
     let data = market_data(&mut accounts[0], program_id)?;
-    let header = initialized_header(data)?;
+    let mut header = initialized_header(data)?;
     if header.oracle_valid == 0 || authority != header.emergency_authority {
         return Err(custom(StockStreamError::OracleUnavailable));
     }
@@ -2267,7 +2861,7 @@ fn liquidate(
     } else {
         quantity
     };
-    risk::apply_fill(
+    let liquidation_fee = risk::apply_fill(
         &mut seat,
         signed,
         header.last_verified_oracle_price as i128,
@@ -2280,7 +2874,29 @@ fn liquidate(
         header.maintenance_margin_bps,
     )
     .map_err(risk_error)?;
-    write_seat(data, seat_index, &seat)
+    write_seat(data, seat_index, &seat)?;
+    if liquidation_fee > 0 {
+        let fee_u64 = u64::try_from(liquidation_fee)
+            .map_err(|_| custom(StockStreamError::ArithmeticOverflow))?;
+        header.set_protocol_fee_balance(
+            header
+                .protocol_fee_balance()
+                .checked_add(fee_u64)
+                .ok_or(custom(StockStreamError::ArithmeticOverflow))?,
+        );
+        let sequence = next_event_sequence(&mut header)?;
+        write_header(data, &header)?;
+        log_custody_event(
+            "ProtocolFeeCollected",
+            &market_key,
+            Some(seat_index as u16),
+            fee_u64,
+            sequence,
+            header.protocol_fee_balance(),
+            &header.collateral_mint,
+        );
+    }
+    Ok(())
 }
 
 fn risk_error(error: risk::RiskError) -> ProgramError {
