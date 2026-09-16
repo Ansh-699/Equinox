@@ -201,6 +201,20 @@ fn trading_session_is_bound_to_the_owners_actual_seat_and_can_be_revoked() {
         session.view.clone(),
     ];
     process_instruction(&ID, &mut place_accounts, &order_data(1, 0, 1, 100, 0, 990)).unwrap();
+    assert_eq!(
+        u64::from_le_bytes(
+            unsafe { session.view.borrow_unchecked() }[133..141]
+                .try_into()
+                .unwrap()
+        ),
+        100
+    );
+    process_instruction(&ID, &mut place_accounts, &order_data(1, 0, 10, 100, 0, 991)).unwrap();
+    let before_rejected = unsafe { session.view.borrow_unchecked().to_vec() };
+    assert!(
+        process_instruction(&ID, &mut place_accounts, &order_data(1, 0, 10, 100, 0, 992)).is_err()
+    );
+    assert_eq!(unsafe { session.view.borrow_unchecked() }, before_rejected);
     let mut revoke = vec![18];
     revoke.extend(7u64.to_le_bytes());
     process_instruction(
