@@ -1,7 +1,7 @@
 import { PublicKey } from "@solana/web3.js";
 import { expect, test } from "vitest";
 import { STOCKSTREAM_PROGRAM_ID } from "./constants";
-import { authorizeTradingSession, cancelOrder, commitMarket, createPerpMarket, decodeInstruction, delegateMarket, initializeExchange, initializeMarket, initializeVault, placeOrder, previewPlaceOrder, registerStockInstrument, undelegationCallback } from "./index";
+import { authorizeTradingSession, cancelOrder, commitMarket, createPerpMarket, decodeInstruction, delegateMarket, initializeExchange, initializeMarket, initializeVault, placeOrder, previewPlaceOrder, registerStockInstrument, undelegationCallback, updateStockInstrument } from "./index";
 
 const market = PublicKey.unique();
 const authority = PublicKey.unique();
@@ -45,7 +45,7 @@ test("integration constructors preserve discriminators, account order and signer
   expect(decodeInstruction(commitMarket({ market, authority }, 4n).data).name).toBe("CommitMarket");
   expect(decodeInstruction(delegateMarket({ market, authority, hotAccounts: [settlementScratch] }, 2n).data).name).toBe("DelegateMarket");
   expect(decodeInstruction(undelegationCallback({ market, authority }, 3n).data).name).toBe("UndelegationCallback");
-  expect(decodeInstruction(authorizeTradingSession({ market, authority }, 99n, 1n).data).name).toBe("AuthorizeTradingSession");
+  expect(decodeInstruction(authorizeTradingSession({ market, authority, session: PublicKey.unique(), sessionSigner: PublicKey.unique() }, 99n, 1n).data).name).toBe("AuthorizeTradingSession");
 });
 
 test("registry constructors preserve market-scoped account order", () => {
@@ -58,4 +58,7 @@ test("registry constructors preserve market-scoped account order", () => {
   expect(decodeInstruction(create.data).name).toBe("CreatePerpMarket");
   expect(create.keys[0].pubkey).toBe(instrument);
   expect(create.keys[1].pubkey).toBe(perpMarket);
+  const update = updateStockInstrument({ exchange, instrument, authority }, id, 77, 1, -6);
+  expect(Array.from(update.data.slice(33))).toEqual([77, 0, 0, 0, 1, 250, 255, 255, 255]);
+  expect(() => updateStockInstrument({ exchange, instrument, authority }, id, 0, 1, -6)).toThrow(/non-zero/);
 });
