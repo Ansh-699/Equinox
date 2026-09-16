@@ -1,4 +1,4 @@
-export type MarketEventKind = "book" | "fill" | "funding" | "health" | "oracle";
+export type MarketEventKind = "book" | "fill" | "funding" | "health" | "oracle" | "custody";
 
 export interface MarketEvent {
   id: string;
