@@ -17,7 +17,12 @@ pub const CONSUME_ORACLE_UPDATE: u8 = 12;
 pub const DELEGATE_MARKET: u8 = 13;
 pub const COMMIT_MARKET: u8 = 14;
 pub const COMMIT_AND_UNDELEGATE: u8 = 15;
-pub const UNDELEGATION_CALLBACK: u8 = 16;
+/// Reserved: the real external-undelegate callback uses the delegation
+/// program's own fixed 8-byte discriminator
+/// (`magicblock::EXTERNAL_UNDELEGATE_DISCRIMINATOR`), routed in
+/// `lib.rs::process_instruction` before this single-byte tag dispatch is
+/// ever reached. This opcode is not reused for anything else.
+pub const UNDELEGATION_CALLBACK_RESERVED: u8 = 16;
 pub const AUTHORIZE_TRADING_SESSION: u8 = 17;
 pub const REVOKE_TRADING_SESSION: u8 = 18;
 pub const INITIALIZE_EXCHANGE: u8 = 19;
@@ -90,15 +95,12 @@ pub enum StockStreamInstruction {
     },
     ConsumeOracleUpdate,
     DelegateMarket {
-        sequence: u64,
+        validator: [u8; 32],
     },
     CommitMarket {
         sequence: u64,
     },
     CommitAndUndelegate {
-        sequence: u64,
-    },
-    UndelegationCallback {
         sequence: u64,
     },
     AuthorizeTradingSession {
@@ -218,8 +220,10 @@ impl StockStreamInstruction {
             Some(CONSUME_ORACLE_UPDATE) if (104..=513).contains(&data.len()) => {
                 Ok(Self::ConsumeOracleUpdate)
             }
-            Some(DELEGATE_MARKET) if data.len() == 9 => Ok(Self::DelegateMarket {
-                sequence: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+            Some(DELEGATE_MARKET) if data.len() == 33 => Ok(Self::DelegateMarket {
+                validator: data[1..33]
+                    .try_into()
+                    .map_err(|_| ProgramError::InvalidInstructionData)?,
             }),
             Some(COMMIT_MARKET) if data.len() == 9 => Ok(Self::CommitMarket {
                 sequence: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
@@ -227,13 +231,6 @@ impl StockStreamInstruction {
             Some(COMMIT_AND_UNDELEGATE) if data.len() == 9 => Ok(Self::CommitAndUndelegate {
                 sequence: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
             }),
-            Some(UNDELEGATION_CALLBACK)
-                if data.len() == 17 && data[1..9] == [196, 28, 41, 206, 48, 37, 51, 167] =>
-            {
-                Ok(Self::UndelegationCallback {
-                    sequence: read_u64(data, 9).ok_or(ProgramError::InvalidInstructionData)?,
-                })
-            }
             Some(AUTHORIZE_TRADING_SESSION) if data.len() == 54 => {
                 Ok(Self::AuthorizeTradingSession {
                     seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,

@@ -16,6 +16,14 @@ pub enum StockStreamError {
     ArithmeticOverflow = 0x600B,
     UnsupportedInProduction = 0x600C,
     InvalidSettlementScratch = 0x600D,
+    MagicBlockInvalidAccount = 0x600E,
+    MagicBlockAlreadyDelegated = 0x600F,
+    MagicBlockNotDelegated = 0x6010,
+    MagicBlockSequenceReplay = 0x6011,
+    MagicBlockInvalidCallback = 0x6012,
+    MagicBlockScratchNotEmpty = 0x6013,
+    MagicBlockUndelegationInProgress = 0x6014,
+    MagicBlockCallbackAlreadyConsumed = 0x6015,
 }
 
 impl From<StockStreamError> for ProgramError {

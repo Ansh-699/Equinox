@@ -39,7 +39,15 @@ export interface SessionAuthorizedAccounts extends InstructionAccounts { session
 
 export interface VaultAccounts { market: AddressInput; authority: AddressInput; mint: AddressInput; tokenProgram: AddressInput; vault: AddressInput; vaultAuthority: AddressInput; }
 export interface CustodyAccounts extends VaultAccounts { seat: AddressInput; seatIndex: number; sourceOrDestination: AddressInput; }
-export interface DelegationAccounts { market: AddressInput; authority: AddressInput; hotAccounts: AddressInput[]; }
+export interface DelegationAccounts { market: AddressInput; authority: AddressInput; instrument: AddressInput; payer: AddressInput; scratchAccounts?: AddressInput[]; }
+export interface CommitAccounts { market: AddressInput; authority: AddressInput; payer: AddressInput; scratchAccounts?: AddressInput[]; }
+
+/** MagicBlock Delegation Program: `DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh`. */
+export const MAGICBLOCK_DELEGATION_PROGRAM_ID = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
+/** MagicBlock Magic Program: `Magic11111111111111111111111111111111111111`. */
+export const MAGICBLOCK_MAGIC_PROGRAM_ID = new PublicKey("Magic11111111111111111111111111111111111111");
+/** MagicBlock Magic Context account: `MagicContext1111111111111111111111111111111`. */
+export const MAGICBLOCK_MAGIC_CONTEXT_ID = new PublicKey("MagicContext1111111111111111111111111111111");
 export interface RegistryAccounts { exchange: AddressInput; authority: AddressInput; }
 export interface InstrumentAccounts { exchange: AddressInput; instrument: AddressInput; authority: AddressInput; }
 export interface PerpMarketAccounts { instrument: AddressInput; market: AddressInput; authority: AddressInput; }
@@ -173,14 +181,52 @@ export function consumeOracleUpdate(accounts: { market: AddressInput; payer: Add
     accountMeta(accounts.treasury, false, true), accountMeta(accounts.systemProgram, false, false),
     accountMeta(accounts.instructionsSysvar, false, false)]);
 }
-export function delegateMarket(accounts: DelegationAccounts, sequence: bigint | number): TransactionInstruction {
-  const data = new Uint8Array(9); data[0] = STOCKSTREAM_INSTRUCTION.delegateMarket; writeUnsigned(data, 1, checkedUnsigned(sequence, 64, "sequence"), 8);
-  return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false), ...accounts.hotAccounts.map((a) => accountMeta(a, false, true))]);
+/**
+ * Real onchain MagicBlock `DelegateMarket`. Account order and the delegation
+ * program/PDA derivations mirror `programs/stockstream/src/magicblock.rs`
+ * exactly (which is itself verified against the delegation program's own
+ * `magicblock-delegation-program-api` crate and source) -- this is not an
+ * independent encoding, it must match the Rust side byte-for-byte.
+ */
+export function delegateMarket(accounts: DelegationAccounts, validator: AddressInput): TransactionInstruction {
+  const market = publicKey(accounts.market);
+  const validatorKey = publicKey(validator);
+  const [buffer] = PublicKey.findProgramAddressSync([Buffer.from("buffer"), market.toBuffer()], STOCKSTREAM_PROGRAM_KEY);
+  const [delegationRecord] = PublicKey.findProgramAddressSync([Buffer.from("delegation"), market.toBuffer()], MAGICBLOCK_DELEGATION_PROGRAM_ID);
+  const [delegationMetadata] = PublicKey.findProgramAddressSync([Buffer.from("delegation-metadata"), market.toBuffer()], MAGICBLOCK_DELEGATION_PROGRAM_ID);
+  const data = new Uint8Array(33); data[0] = STOCKSTREAM_INSTRUCTION.delegateMarket; data.set(validatorKey.toBytes(), 1);
+  return instruction(data, [
+    accountMeta(market, false, true),
+    accountMeta(accounts.authority, true, false),
+    accountMeta(accounts.instrument, false, false),
+    accountMeta(accounts.payer, true, true),
+    accountMeta(buffer, false, true),
+    accountMeta(delegationRecord, false, true),
+    accountMeta(delegationMetadata, false, true),
+    accountMeta(MAGICBLOCK_DELEGATION_PROGRAM_ID, false, false),
+    accountMeta(SystemProgram.programId, false, false),
+    accountMeta(STOCKSTREAM_PROGRAM_KEY, false, false),
+    ...(accounts.scratchAccounts ?? []).map((a) => accountMeta(a, false, true)),
+  ]);
 }
-export function commitMarket(accounts: InstructionAccounts, sequence: bigint | number): TransactionInstruction { return controlInstruction(STOCKSTREAM_INSTRUCTION.commitMarket, accounts, sequence); }
-export function commitAndUndelegate(accounts: InstructionAccounts, sequence: bigint | number): TransactionInstruction { return controlInstruction(STOCKSTREAM_INSTRUCTION.commitAndUndelegate, accounts, sequence); }
-function controlInstruction(discriminator: number, accounts: InstructionAccounts, sequence: bigint | number) { const data = new Uint8Array(9); data[0] = discriminator; writeUnsigned(data, 1, checkedUnsigned(sequence, 64, "sequence"), 8); return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]); }
-export function undelegationCallback(accounts: InstructionAccounts, sequence: bigint | number): TransactionInstruction { const data = new Uint8Array(17); data[0] = STOCKSTREAM_INSTRUCTION.undelegationCallback; data.set([196, 28, 41, 206, 48, 37, 51, 167], 1); writeUnsigned(data, 9, checkedUnsigned(sequence, 64, "sequence"), 8); return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, false, false)]); }
+function commitInstruction(discriminator: number, accounts: CommitAccounts, sequence: bigint | number): TransactionInstruction {
+  const data = new Uint8Array(9); data[0] = discriminator; writeUnsigned(data, 1, checkedUnsigned(sequence, 64, "sequence"), 8);
+  return instruction(data, [
+    accountMeta(accounts.market, false, true),
+    accountMeta(accounts.authority, true, false),
+    accountMeta(accounts.payer, true, true),
+    accountMeta(MAGICBLOCK_MAGIC_CONTEXT_ID, false, true),
+    accountMeta(MAGICBLOCK_MAGIC_PROGRAM_ID, false, false),
+    ...(accounts.scratchAccounts ?? []).map((a) => accountMeta(a, false, true)),
+  ]);
+}
+export function commitMarket(accounts: CommitAccounts, sequence: bigint | number): TransactionInstruction { return commitInstruction(STOCKSTREAM_INSTRUCTION.commitMarket, accounts, sequence); }
+export function commitAndUndelegate(accounts: CommitAccounts, sequence: bigint | number): TransactionInstruction { return commitInstruction(STOCKSTREAM_INSTRUCTION.commitAndUndelegate, accounts, sequence); }
+// There is no client-side `undelegationCallback` builder: the delegation
+// program itself invokes StockStream via CPI using its own fixed
+// `EXTERNAL_UNDELEGATE_DISCRIMINATOR` wire format
+// (`[196, 28, 41, 206, 48, 37, 51, 167]`), never a transaction a client
+// constructs. See `programs/stockstream/src/magicblock.rs::external_undelegate`.
 export interface TradingSessionAccounts extends InstructionAccounts { session: AddressInput; sessionSigner: AddressInput; }
 export interface SessionControlAccounts extends InstructionAccounts { session: AddressInput; }
 export interface TradingSessionPolicy { seatIndex: number; actions: number; maxOrderNotional: bigint | number; maxCumulativeNotional: bigint | number; maximumExposure: bigint | number; maximumOpenOrders: number; }
