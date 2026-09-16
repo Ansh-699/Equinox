@@ -1,6 +1,7 @@
 import { env, applyD1Migrations } from 'cloudflare:test';
 import { beforeAll, expect, it } from 'vitest';
 import { IndexerRepository, ProtocolRepository } from './repositories';
+import { runDurableKeeper } from './keepers';
 
 const bindings = env as Env & { TEST_MIGRATIONS: Parameters<typeof applyD1Migrations>[1] };
 const db = bindings.DB!;
@@ -58,4 +59,14 @@ it('persists ordered indexer cursors, suppresses duplicates, and replaces a proj
   await indexer.replaceSnapshot('market-a', 'er', 3, 12, { bids: [] }, 4);
   expect(await indexer.snapshot('market-a', 'er')).toEqual({ sequence: 3, snapshot: { bids: [] } });
   expect(await indexer.append('market-a', 'er', 4, 13, 'event-4', { type: 'fill' }, 5)).toEqual({ kind: 'applied' });
+});
+
+it('runs a durable keeper once and returns its persisted result on a duplicate schedule', async () => {
+  const repository = new ProtocolRepository(db);
+  const request = {
+    leaseKey: 'keeper:test', holder: 'worker-a', idempotencyKey: 'keeper-op', requestHash: 'input-v1',
+    now: 50_000, leaseTtlMs: 100, idempotencyTtlMs: 1_000,
+  };
+  expect(await runDurableKeeper(repository, { ...request, work: async () => ({ committed: 1 }) })).toEqual({ committed: 1 });
+  expect(await runDurableKeeper(repository, { ...request, holder: 'worker-b', work: async () => ({ committed: 2 }) })).toEqual({ committed: 1 });
 });

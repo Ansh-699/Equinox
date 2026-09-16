@@ -1,6 +1,7 @@
 import { MarketStream } from "./market-stream";
 import type { MarketDefinition, MarketEvent, MarketEventKind } from "./types";
 import { IndexerRepository, ProtocolRepository, type IndexedWrite } from './repositories';
+import { keeperLeaseKey, runDurableKeeper } from './keepers';
 
 export { MarketStream };
 
@@ -173,7 +174,19 @@ export default {
   },
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
     if (!env.DB) return;
-    await env.DB.prepare("DELETE FROM indexed_events WHERE observed_at < ?").bind(Date.now() - 90 * 24 * 60 * 60 * 1000).run();
-    await new ProtocolRepository(env.DB).cleanup(Date.now());
+    const db = env.DB;
+    const now = Date.now();
+    const repository = new ProtocolRepository(db);
+    await runDurableKeeper(repository, {
+      leaseKey: keeperLeaseKey('cleanup'), holder: 'scheduled-worker',
+      idempotencyKey: `cleanup:${Math.floor(now / 60_000)}`,
+      requestHash: `cleanup:${Math.floor(now / 60_000)}`,
+      now, leaseTtlMs: 55_000, idempotencyTtlMs: 24 * 60 * 60 * 1000,
+      work: async () => {
+        await db.prepare("DELETE FROM indexed_events WHERE observed_at < ?").bind(now - 90 * 24 * 60 * 60 * 1000).run();
+        await repository.cleanup(now);
+        return { cleanedAt: now };
+      },
+    });
   },
 } satisfies ExportedHandler<Env>;
