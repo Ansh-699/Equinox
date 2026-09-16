@@ -32,7 +32,11 @@ export const STOCKSTREAM_INSTRUCTION = {
   enterCorporateAction: 28,
   resolveCorporateAction: 29,
   closeMarket: 30,
+  updateTradingSessionLimits: 31,
+  closeTradingSession: 32,
+  replaceOrder: 33,
 } as const;
 
 export const STOCKSTREAM_ACCOUNT_SIZE = 222_752;
+export const STOCKSTREAM_TRADING_SESSION_SIZE = 256;
 export const STOCKSTREAM_PROGRAM_ID_BYTES = 32;

@@ -49,8 +49,32 @@ or Magic program actually accepted. L1 withdrawals are rejected
 (`MagicBlockUndelegationInProgress`) whenever the market is anything other
 than `NotDelegated`/`Restored`.
 
+## Source references and licenses
+
+Real, shipped dependencies of the `stockstream` crate:
+
+| Crate | Version | License | Used for |
+| --- | --- | --- | --- |
+| `magicblock-delegation-program-api` (`dlp_api`) | `=3.1.0` | MIT | Program IDs, PDA seed tags/derivation, `DelegateArgs` shape, `EXTERNAL_UNDELEGATE_DISCRIMINATOR` |
+| `magicblock-magic-program-api` | `=0.10.1` | MIT | Magic Program/Context IDs, `MagicBlockInstruction`/`MagicIntentBundleArgs` shape |
+
+Both are pulled with `default-features = false`: only their `consts`/`pda`/`args` modules are used (pure data, no heap allocation); their `AccountInfo`-based CPI helpers are never linked (see "Real CPI implementation" above for why).
+
+Additionally consulted, but **not a dependency and not copied into this repository**: the `magicblock-labs/delegation-program` GitHub repository's `src/processor/fast/{delegate,undelegate}.rs` source, read during implementation to ground the account order, signer/writable flags and the external-undelegate callback's account/data contract in the actual on-chain processor rather than guessing. That repository is licensed **Business Source License 1.1** (converts to MIT on 2027-12-01), a source-available but not OSI-open license restricting production use of *that* codebase specifically. StockStream contains no code copied or derived from it — only independently-written Pinocchio 0.11.2 code that implements the same wire protocol, using facts (account order, discriminator values, PDA seeds) that are also independently confirmed by the MIT-licensed `dlp_api`/`magic-program-api` crates above and by the `ephemeral-rollups-sdk` (`=0.17.0`, MIT) client SDK. Reading a BSL-licensed program's source to interoperate with its public instruction interface, without incorporating its code, does not implicate the BSL's use restrictions.
+
+`@magicblock-labs/ephemeral-rollups-kit` (MIT, an `npm` dependency) is referenced by `lib/magicblock-client.ts`, which is dead code not reachable from any production path -- see "Known scope limits" below.
+
 ## Known scope limits
 
+- `lib/magicblock-client.ts` builds top-level delegation-program instructions
+  directly via the official TS SDK, which cannot actually execute (a PDA
+  cannot sign a top-level client transaction; delegation requires a CPI from
+  the owning program, which is what `magicblock::delegate_market` does).
+  Nothing imports it outside its own test file
+  (`lib/magicblock-client.test.ts`); it is not wired into any route,
+  component, or worker. The real, invocable client path is
+  `clients/stockstream/src/index.ts::delegateMarket` /
+  `commitMarket` / `commitAndUndelegate`.
 - Per-seat settlement scratch PDAs are validated `Empty` before delegating,
   committing, or undelegating, but are not themselves delegated in this
   pass (single-account delegation only). Extending this to loop the same

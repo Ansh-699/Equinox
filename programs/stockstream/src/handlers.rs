@@ -120,178 +120,146 @@ fn signer(account: &AccountView) -> ProgramResult {
     }
 }
 
-const SESSION_DISCRIMINATOR: [u8; 8] = *b"STKSES01";
-const SESSION_VERSION: u8 = 1;
-const TRADING_SESSION_SIZE: usize = 176;
-const SESSION_PLACE: u8 = 1;
-const SESSION_CANCEL: u8 = 2;
-const SESSION_CANCEL_ALL: u8 = 8;
+/// The live Rent sysvar on-chain; the well-known default genesis rent rate
+/// (`pinocchio::sysvars::rent::DEFAULT_LAMPORTS_PER_BYTE`) off the SBF
+/// target, where the sysvar syscall is unavailable
+/// (`ProgramError::UnsupportedSysvar`). Every live Solana cluster still uses
+/// this exact default; this only changes CreateAccount-CPI-dependent
+/// handlers (currently `authorize_trading_session`) from being completely
+/// untestable off-chain to being testable using the same rent-exempt
+/// minimum a real cluster would require.
+fn current_rent() -> Result<pinocchio::sysvars::rent::Rent, ProgramError> {
+    #[cfg(any(target_os = "solana", target_arch = "bpf"))]
+    {
+        pinocchio::sysvars::rent::Rent::get()
+    }
+    #[cfg(not(any(target_os = "solana", target_arch = "bpf")))]
+    {
+        pinocchio::sysvars::rent::Rent::from_bytes(
+            &pinocchio::sysvars::rent::DEFAULT_LAMPORTS_PER_BYTE.to_le_bytes(),
+        )
+    }
+}
 
-const SESSION_VERSION_OFFSET: usize = 8;
-const SESSION_REVOKED_OFFSET: usize = 9;
-const SESSION_OWNER_OFFSET: usize = 10;
-const SESSION_SIGNER_OFFSET: usize = 42;
-const SESSION_MARKET_OFFSET: usize = 74;
-const SESSION_SEAT_OFFSET: usize = 106;
-const SESSION_EXPIRY_OFFSET: usize = 108;
-const SESSION_ACTIONS_OFFSET: usize = 116;
-const SESSION_MAX_ORDER_NOTIONAL_OFFSET: usize = 117;
-const SESSION_MAX_CUMULATIVE_NOTIONAL_OFFSET: usize = 125;
-const SESSION_USED_CUMULATIVE_NOTIONAL_OFFSET: usize = 133;
-const SESSION_MAX_EXPOSURE_OFFSET: usize = 141;
-const SESSION_MAX_OPEN_ORDERS_OFFSET: usize = 157;
-const SESSION_NONCE_OFFSET: usize = 159;
-const SESSION_LAST_USED_NONCE_OFFSET: usize = 167;
+use crate::session::{
+    self, TradingSession, SESSION_ACTION_CANCEL, SESSION_ACTION_CANCEL_ALL, SESSION_ACTION_PLACE,
+    SESSION_ACTION_REDUCE_ONLY_CLOSE, SESSION_ACTION_REPLACE,
+};
 
+/// Validates a scoped-session-authorized trading action against the
+/// dedicated `TradingSession` PDA, or, if the transaction's own signer is
+/// the seat's actual owner, treats it as a main-wallet action (which does
+/// not consume a session nonce at all).
+///
+/// `required_actions` is a bitmask; the session's `actions` allowlist must
+/// intersect it. `resulting_exposure` is the caller-computed absolute
+/// position size *after* this action would apply (not the current one),
+/// since the point of the exposure cap is bounding what the action is about
+/// to permit, not what already exists.
+///
+/// Returns `Ok(Some(session))` when a session authorized the action (the
+/// caller must later call `consume_session_action` on success), or
+/// `Ok(None)` for a main-wallet action.
+#[allow(clippy::too_many_arguments)]
 fn authorize_trading_actor(
     accounts: &[AccountView],
-    market: &[u8],
+    market: &[u8; 32],
     seat: &TraderSeat,
-    seat_index: usize,
+    seat_index: u16,
     session_account_index: usize,
-    action: u8,
+    required_actions: u8,
     notional: i128,
+    resulting_exposure: u128,
     action_nonce: u64,
     now: u64,
-) -> ProgramResult {
-    let signer_key = accounts[1].address().to_bytes();
+) -> Result<Option<TradingSession>, ProgramError> {
+    let signer_addr = *accounts[1].address();
+    let signer_key = signer_addr.to_bytes();
     if signer_key == seat.trader {
         // Main-wallet authorizations are transaction-signature protected and
         // intentionally do not share the scoped-session nonce namespace.
         if action_nonce != 0 {
             return Err(custom(StockStreamError::InvalidInstruction));
         }
-        return Ok(());
+        return Ok(None);
     }
+    signer(&accounts[1])?;
     if accounts.len() <= session_account_index {
         return Err(ProgramError::MissingRequiredSignature);
     }
-    let session = &accounts[session_account_index];
-    if !session.is_writable()
-        || !session.owned_by(&crate::ID)
-        || session.data_len() != TRADING_SESSION_SIZE
-        || session.address() == accounts[0].address()
-        || session.address() == accounts[1].address()
+    if accounts[session_account_index].address() == accounts[0].address()
+        || accounts[session_account_index].address() == &signer_addr
     {
-        return Err(custom(StockStreamError::InvalidInstruction));
+        return Err(custom(StockStreamError::InvalidTradingSession));
     }
-    let bytes = unsafe { session.borrow_unchecked() };
-    let expected_nonce = u64::from_le_bytes(
-        bytes[SESSION_NONCE_OFFSET..SESSION_NONCE_OFFSET + 8]
-            .try_into()
-            .unwrap(),
-    );
-    if bytes[0..8] != SESSION_DISCRIMINATOR
-        || bytes[SESSION_VERSION_OFFSET] != SESSION_VERSION
-        || bytes[SESSION_REVOKED_OFFSET] != 0
-        || bytes[SESSION_OWNER_OFFSET..SESSION_OWNER_OFFSET + 32] != seat.trader
-        || bytes[SESSION_SIGNER_OFFSET..SESSION_SIGNER_OFFSET + 32] != signer_key
-        || bytes[SESSION_MARKET_OFFSET..SESSION_MARKET_OFFSET + 32] != *market
-    {
-        return Err(custom(StockStreamError::InvalidInstruction));
+    let owner_addr = Address::new_from_array(seat.trader);
+    let market_addr = Address::new_from_array(*market);
+    let trading_session = session::validated_session_account(
+        &crate::ID,
+        &accounts[session_account_index],
+        &owner_addr,
+        &market_addr,
+        seat_index,
+        &signer_addr,
+        true,
+    )?;
+    if !trading_session.is_live(now) {
+        return Err(custom(StockStreamError::InvalidTradingSession));
     }
-    if u16::from_le_bytes(
-        bytes[SESSION_SEAT_OFFSET..SESSION_SEAT_OFFSET + 2]
-            .try_into()
-            .unwrap(),
-    ) != seat_index as u16
-        || bytes[SESSION_ACTIONS_OFFSET] & action == 0
-        || action_nonce != expected_nonce
-    {
-        return Err(custom(StockStreamError::InvalidInstruction));
+    if trading_session.actions & required_actions == 0 {
+        return Err(custom(StockStreamError::InvalidTradingSession));
     }
-    if expected_nonce == u64::MAX {
+    if action_nonce != trading_session.next_expected_nonce {
+        return Err(custom(StockStreamError::SessionNonceReplay));
+    }
+    if trading_session.next_expected_nonce == u64::MAX {
         return Err(custom(StockStreamError::ArithmeticOverflow));
     }
-    let max_order = u64::from_le_bytes(
-        bytes[SESSION_MAX_ORDER_NOTIONAL_OFFSET..SESSION_MAX_ORDER_NOTIONAL_OFFSET + 8]
-            .try_into()
-            .unwrap(),
-    );
-    let max_cumulative = u64::from_le_bytes(
-        bytes[SESSION_MAX_CUMULATIVE_NOTIONAL_OFFSET..SESSION_MAX_CUMULATIVE_NOTIONAL_OFFSET + 8]
-            .try_into()
-            .unwrap(),
-    );
-    let used = u64::from_le_bytes(
-        bytes[SESSION_USED_CUMULATIVE_NOTIONAL_OFFSET..SESSION_USED_CUMULATIVE_NOTIONAL_OFFSET + 8]
-            .try_into()
-            .unwrap(),
-    );
-    let maximum_exposure = i128::from_le_bytes(
-        bytes[SESSION_MAX_EXPOSURE_OFFSET..SESSION_MAX_EXPOSURE_OFFSET + 16]
-            .try_into()
-            .unwrap(),
-    );
-    let maximum_open_orders = u16::from_le_bytes(
-        bytes[SESSION_MAX_OPEN_ORDERS_OFFSET..SESSION_MAX_OPEN_ORDERS_OFFSET + 2]
-            .try_into()
-            .unwrap(),
-    );
-    if u64::from_le_bytes(
-        bytes[SESSION_EXPIRY_OFFSET..SESSION_EXPIRY_OFFSET + 8]
-            .try_into()
-            .unwrap(),
-    ) <= now
-        || notional < 0
-        || notional as u128 > max_order as u128
-        || (notional as u128).saturating_add(used as u128) > max_cumulative as u128
-        || seat.base_position.unsigned_abs() > maximum_exposure as u128
-        || (action == SESSION_PLACE && seat.open_order_count >= maximum_open_orders as u32)
+    let opens_new_order = required_actions
+        & (SESSION_ACTION_PLACE | SESSION_ACTION_REPLACE | SESSION_ACTION_REDUCE_ONLY_CLOSE)
+        != 0;
+    if notional < 0
+        || notional as u128 > trading_session.max_order_notional as u128
+        || (notional as u128).saturating_add(trading_session.consumed_cumulative_notional as u128)
+            > trading_session.max_cumulative_notional as u128
+        || resulting_exposure > trading_session.max_exposure as u128
+        || (opens_new_order && seat.open_order_count >= trading_session.max_open_orders as u32)
     {
         return Err(custom(StockStreamError::RiskViolation));
     }
-    Ok(())
+    Ok(Some(trading_session))
 }
 
+/// Commits a session-authorized action's nonce and notional consumption.
+/// Must only be called after the complete trading action has already
+/// succeeded; on any earlier failure the whole instruction is rejected by
+/// the runtime and this is never reached, so the session is left untouched.
 fn consume_session_action(
-    session: &mut AccountView,
+    session_account: &mut AccountView,
+    mut trading_session: TradingSession,
     notional: i128,
     action_nonce: u64,
+    now: u64,
 ) -> ProgramResult {
-    if notional < 0
-        || !session.is_writable()
-        || !session.owned_by(&crate::ID)
-        || session.data_len() != TRADING_SESSION_SIZE
-    {
-        return Err(custom(StockStreamError::InvalidInstruction));
+    if notional < 0 || action_nonce != trading_session.next_expected_nonce {
+        return Err(custom(StockStreamError::InvalidTradingSession));
     }
-    let bytes = unsafe { session.borrow_unchecked_mut() };
-    let used = u64::from_le_bytes(
-        bytes[SESSION_USED_CUMULATIVE_NOTIONAL_OFFSET..SESSION_USED_CUMULATIVE_NOTIONAL_OFFSET + 8]
-            .try_into()
-            .unwrap(),
-    );
-    let maximum = u64::from_le_bytes(
-        bytes[SESSION_MAX_CUMULATIVE_NOTIONAL_OFFSET..SESSION_MAX_CUMULATIVE_NOTIONAL_OFFSET + 8]
-            .try_into()
-            .unwrap(),
-    );
     let increment = u64::try_from(notional).map_err(|_| custom(StockStreamError::RiskViolation))?;
-    let next = used
+    let next_consumed = trading_session
+        .consumed_cumulative_notional
         .checked_add(increment)
         .ok_or(custom(StockStreamError::RiskViolation))?;
-    if next > maximum {
+    if next_consumed > trading_session.max_cumulative_notional {
         return Err(custom(StockStreamError::RiskViolation));
     }
-    let expected_nonce = u64::from_le_bytes(
-        bytes[SESSION_NONCE_OFFSET..SESSION_NONCE_OFFSET + 8]
-            .try_into()
-            .unwrap(),
-    );
-    if action_nonce != expected_nonce {
-        return Err(custom(StockStreamError::InvalidInstruction));
-    }
-    let next_nonce = expected_nonce
+    trading_session.consumed_cumulative_notional = next_consumed;
+    trading_session.next_expected_nonce = trading_session
+        .next_expected_nonce
         .checked_add(1)
         .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
-    bytes[SESSION_USED_CUMULATIVE_NOTIONAL_OFFSET..SESSION_USED_CUMULATIVE_NOTIONAL_OFFSET + 8]
-        .copy_from_slice(&next.to_le_bytes());
-    bytes[SESSION_LAST_USED_NONCE_OFFSET..SESSION_LAST_USED_NONCE_OFFSET + 8]
-        .copy_from_slice(&action_nonce.to_le_bytes());
-    bytes[SESSION_NONCE_OFFSET..SESSION_NONCE_OFFSET + 8]
-        .copy_from_slice(&next_nonce.to_le_bytes());
-    Ok(())
+    trading_session.last_action_timestamp = now;
+    let bytes = unsafe { session_account.borrow_unchecked_mut() };
+    session::write_session(bytes, &trading_session)
 }
 
 fn seat_at(data: &[u8], index: usize) -> Result<TraderSeat, ProgramError> {
@@ -420,7 +388,6 @@ pub fn dispatch(
         StockStreamInstruction::AuthorizeTradingSession {
             seat_index,
             expires_at,
-            nonce,
             actions,
             max_order_notional,
             max_cumulative_notional,
@@ -431,16 +398,41 @@ pub fn dispatch(
             accounts,
             seat_index,
             expires_at,
-            nonce,
             actions,
             max_order_notional,
             max_cumulative_notional,
             maximum_exposure,
             maximum_open_orders,
         ),
-        StockStreamInstruction::RevokeTradingSession { nonce } => {
-            revoke_trading_session(program_id, accounts, nonce)
+        StockStreamInstruction::RevokeTradingSession { seat_index } => {
+            revoke_trading_session(program_id, accounts, seat_index)
         }
+        StockStreamInstruction::UpdateTradingSessionLimits {
+            seat_index,
+            expires_at,
+            actions,
+            max_order_notional,
+            max_cumulative_notional,
+            maximum_exposure,
+            maximum_open_orders,
+        } => update_trading_session_limits(
+            program_id,
+            accounts,
+            seat_index,
+            expires_at,
+            actions,
+            max_order_notional,
+            max_cumulative_notional,
+            maximum_exposure,
+            maximum_open_orders,
+        ),
+        StockStreamInstruction::CloseTradingSession { seat_index } => {
+            close_trading_session(program_id, accounts, seat_index)
+        }
+        StockStreamInstruction::ReplaceOrder {
+            old_order_key,
+            new_order,
+        } => replace_order(program_id, accounts, old_order_key, new_order),
         StockStreamInstruction::InitializeExchange => {
             crate::registry::initialize_exchange(program_id, accounts)
         }
@@ -992,12 +984,185 @@ fn consume_oracle_update(
 // `crate::magicblock` -- see that module for the account/data contracts,
 // which are dictated by the delegation and Magic programs, not by this file.
 
+fn validate_session_policy(
+    seat_index: u16,
+    expires_at: u64,
+    now: u64,
+    actions: u8,
+    max_order_notional: u64,
+    max_cumulative_notional: u64,
+    maximum_exposure: i128,
+    maximum_open_orders: u16,
+) -> ProgramResult {
+    if seat_index as usize >= MAX_TRADER_SEATS
+        || expires_at <= now
+        || actions == 0
+        || actions & !session::SESSION_ACTION_ALL != 0
+        || max_order_notional == 0
+        || max_cumulative_notional < max_order_notional
+        || maximum_exposure <= 0
+        || maximum_open_orders == 0
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    Ok(())
+}
+
+/// Accounts: `[market, owner (signer, writable), session (writable, PDA),
+/// session_signer, system_program]`. Creates and initializes the canonical
+/// `TradingSession` PDA via a real System Program CPI signed with its own
+/// derived seeds (a PDA cannot sign a top-level client transaction, so the
+/// account cannot be pre-created by the client the way a keypair account
+/// could be).
+#[allow(clippy::too_many_arguments)]
 fn authorize_trading_session(
     program_id: &Address,
     accounts: &mut [AccountView],
     seat_index: u16,
     expires_at: u64,
-    nonce: u64,
+    actions: u8,
+    max_order_notional: u64,
+    max_cumulative_notional: u64,
+    maximum_exposure: i128,
+    maximum_open_orders: u16,
+) -> ProgramResult {
+    if accounts.len() != 5 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    signer(&accounts[1])?;
+    if !accounts[1].is_writable() {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let owner = *accounts[1].address();
+    let market_addr = *accounts[0].address();
+    let session_signer = *accounts[3].address();
+    if *accounts[4].address() != pinocchio_system::ID {
+        return Err(custom(StockStreamError::InvalidTradingSession));
+    }
+    // The session signer must be a distinct key from every authority that
+    // could otherwise bypass session scoping.
+    if session_signer == owner || session_signer == market_addr {
+        return Err(custom(StockStreamError::InvalidTradingSession));
+    }
+    let data = market_data(&mut accounts[0], program_id)?;
+    let header = initialized_header(data)?;
+    validate_session_policy(
+        seat_index,
+        expires_at,
+        header.last_verified_oracle_timestamp,
+        actions,
+        max_order_notional,
+        max_cumulative_notional,
+        maximum_exposure,
+        maximum_open_orders,
+    )?;
+    let seat = seat_at(data, seat_index as usize)?;
+    if seat.occupancy != 1 || seat.trader != owner.to_bytes() {
+        return Err(custom(StockStreamError::InvalidSeat));
+    }
+
+    let (expected_pda, bump) = Address::find_program_address(
+        &[
+            session::TRADING_SESSION_SEED,
+            owner.as_ref(),
+            market_addr.as_ref(),
+            &seat_index.to_le_bytes(),
+            session_signer.as_ref(),
+        ],
+        program_id,
+    );
+    if expected_pda != *accounts[2].address() || !accounts[2].is_writable() {
+        return Err(custom(StockStreamError::InvalidTradingSession));
+    }
+    if accounts[2].owned_by(program_id) {
+        // Already initialized (or previously revoked and never closed):
+        // reject rather than silently reusing the slot. `CloseTradingSession`
+        // must reclaim it first.
+        return Err(custom(StockStreamError::InvalidTradingSession));
+    }
+    let bump_slice = [bump];
+    let seat_index_bytes = seat_index.to_le_bytes();
+    let seeds = [
+        pinocchio::cpi::Seed::from(session::TRADING_SESSION_SEED),
+        pinocchio::cpi::Seed::from(owner.as_ref()),
+        pinocchio::cpi::Seed::from(market_addr.as_ref()),
+        pinocchio::cpi::Seed::from(&seat_index_bytes),
+        pinocchio::cpi::Seed::from(session_signer.as_ref()),
+        pinocchio::cpi::Seed::from(&bump_slice),
+    ];
+    let session_signer_seeds = pinocchio::cpi::Signer::from(&seeds);
+    let rent = current_rent()?;
+    pinocchio_system::instructions::CreateAccount {
+        from: &accounts[1],
+        to: &accounts[2],
+        lamports: rent.try_minimum_balance(session::TRADING_SESSION_SIZE)?,
+        space: session::TRADING_SESSION_SIZE as u64,
+        owner: program_id,
+    }
+    .invoke_signed(core::slice::from_ref(&session_signer_seeds))?;
+
+    let mut session_state = TradingSession::empty();
+    session_state.initialized = 1;
+    session_state.owner = owner.to_bytes();
+    // The session signer stays client-held; the program only stores its
+    // public key and policy, never a signing secret.
+    session_state.session_signer = session_signer.to_bytes();
+    session_state.target_program = program_id.to_bytes();
+    session_state.market = market_addr.to_bytes();
+    session_state.trader_seat_index = seat_index;
+    session_state.created_at = header.last_verified_oracle_timestamp;
+    session_state.expires_at = expires_at;
+    session_state.actions = actions;
+    session_state.max_order_notional = max_order_notional;
+    session_state.max_cumulative_notional = max_cumulative_notional;
+    session_state.max_exposure = maximum_exposure;
+    session_state.max_open_orders = maximum_open_orders;
+    let session_bytes = unsafe { accounts[2].borrow_unchecked_mut() };
+    session::write_session(session_bytes, &session_state)
+}
+
+/// Accounts: `[market, owner (signer), session (writable, PDA), session_signer]`.
+fn revoke_trading_session(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    seat_index: u16,
+) -> ProgramResult {
+    if accounts.len() != 4 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    signer(&accounts[1])?;
+    let owner = *accounts[1].address();
+    let market_addr = *accounts[0].address();
+    let session_signer = *accounts[3].address();
+    let mut session_state = session::validated_session_account(
+        program_id,
+        &accounts[2],
+        &owner,
+        &market_addr,
+        seat_index,
+        &session_signer,
+        true,
+    )?;
+    // Idempotent: revoking an already-revoked session is a no-op success,
+    // not an error -- there is no meaningful "unrevoke" to protect against.
+    session_state.revoked = 1;
+    let bytes = unsafe { accounts[2].borrow_unchecked_mut() };
+    session::write_session(bytes, &session_state)
+}
+
+/// Accounts: `[market, owner (signer), session (writable, PDA), session_signer]`.
+///
+/// Never callable by the session signer itself (only `accounts[1]`, which
+/// must equal `session.owner`, may authorize this) -- a session can never
+/// expand its own authority. Limits may only be tightened or loosened by the
+/// owner; a revoked session can never be updated back to life, only replaced
+/// via a fresh `AuthorizeTradingSession` after `CloseTradingSession`.
+#[allow(clippy::too_many_arguments)]
+fn update_trading_session_limits(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    seat_index: u16,
+    expires_at: u64,
     actions: u8,
     max_order_notional: u64,
     max_cumulative_notional: u64,
@@ -1008,104 +1173,95 @@ fn authorize_trading_session(
         return Err(ProgramError::NotEnoughAccountKeys);
     }
     signer(&accounts[1])?;
-    let owner = accounts[1].address().to_bytes();
-    let market_key = accounts[0].address().to_bytes();
-    let session_key = accounts[2].address().to_bytes();
-    let session_signer = accounts[3].address().to_bytes();
-    if !accounts[2].is_writable()
-        || !accounts[2].owned_by(program_id)
-        || accounts[2].data_len() != TRADING_SESSION_SIZE
-        || session_key == market_key
-        || session_key == owner
-        || session_key == session_signer
-        || session_signer == owner
-    {
+    let owner = *accounts[1].address();
+    let market_addr = *accounts[0].address();
+    let session_signer = *accounts[3].address();
+    let data_now = {
+        let data = market_data(&mut accounts[0], program_id)?;
+        initialized_header(data)?.last_verified_oracle_timestamp
+    };
+    let mut session_state = session::validated_session_account(
+        program_id,
+        &accounts[2],
+        &owner,
+        &market_addr,
+        seat_index,
+        &session_signer,
+        true,
+    )?;
+    if session_state.revoked == 1 {
+        return Err(custom(StockStreamError::InvalidTradingSession));
+    }
+    validate_session_policy(
+        seat_index,
+        expires_at,
+        data_now,
+        actions,
+        max_order_notional,
+        max_cumulative_notional,
+        maximum_exposure,
+        maximum_open_orders,
+    )?;
+    // A tightened cumulative limit must not retroactively invalidate
+    // notional the session has already legitimately consumed.
+    if max_cumulative_notional < session_state.consumed_cumulative_notional {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
-    let data = market_data(&mut accounts[0], program_id)?;
-    let header = initialized_header(data)?;
-    if expires_at <= header.last_verified_oracle_timestamp {
-        return Err(custom(StockStreamError::InvalidInstruction));
-    }
-    if seat_index as usize >= MAX_TRADER_SEATS
-        || actions == 0
-        || actions & !(SESSION_PLACE | SESSION_CANCEL | SESSION_CANCEL_ALL) != 0
-        || max_order_notional == 0
-        || max_cumulative_notional < max_order_notional
-        || maximum_exposure <= 0
-        || maximum_open_orders == 0
-    {
-        return Err(custom(StockStreamError::InvalidInstruction));
-    }
-    let seat = seat_at(data, seat_index as usize)?;
-    if seat.occupancy != 1 || seat.trader != owner {
-        return Err(custom(StockStreamError::InvalidSeat));
-    }
-    let session = unsafe { accounts[2].borrow_unchecked_mut() };
-    if session[0..8] == SESSION_DISCRIMINATOR && session[SESSION_REVOKED_OFFSET] == 0 {
-        return Err(custom(StockStreamError::InvalidInstruction));
-    }
-    session.fill(0);
-    session[0..8].copy_from_slice(&SESSION_DISCRIMINATOR);
-    session[SESSION_VERSION_OFFSET] = SESSION_VERSION;
-    session[SESSION_OWNER_OFFSET..SESSION_OWNER_OFFSET + 32].copy_from_slice(&owner);
-    // The session signer stays client-held; the program only stores its public
-    // key and policy, never a signing secret.
-    session[SESSION_SIGNER_OFFSET..SESSION_SIGNER_OFFSET + 32].copy_from_slice(&session_signer);
-    session[SESSION_MARKET_OFFSET..SESSION_MARKET_OFFSET + 32].copy_from_slice(&market_key);
-    session[SESSION_SEAT_OFFSET..SESSION_SEAT_OFFSET + 2]
-        .copy_from_slice(&seat_index.to_le_bytes());
-    session[SESSION_EXPIRY_OFFSET..SESSION_EXPIRY_OFFSET + 8]
-        .copy_from_slice(&expires_at.to_le_bytes());
-    session[SESSION_ACTIONS_OFFSET] = actions;
-    session[SESSION_MAX_ORDER_NOTIONAL_OFFSET..SESSION_MAX_ORDER_NOTIONAL_OFFSET + 8]
-        .copy_from_slice(&max_order_notional.to_le_bytes());
-    session[SESSION_MAX_CUMULATIVE_NOTIONAL_OFFSET..SESSION_MAX_CUMULATIVE_NOTIONAL_OFFSET + 8]
-        .copy_from_slice(&max_cumulative_notional.to_le_bytes());
-    session[SESSION_MAX_EXPOSURE_OFFSET..SESSION_MAX_EXPOSURE_OFFSET + 16]
-        .copy_from_slice(&maximum_exposure.to_le_bytes());
-    session[SESSION_MAX_OPEN_ORDERS_OFFSET..SESSION_MAX_OPEN_ORDERS_OFFSET + 2]
-        .copy_from_slice(&maximum_open_orders.to_le_bytes());
-    session[SESSION_NONCE_OFFSET..SESSION_NONCE_OFFSET + 8].copy_from_slice(&nonce.to_le_bytes());
-    Ok(())
+    session_state.expires_at = expires_at;
+    session_state.actions = actions;
+    session_state.max_order_notional = max_order_notional;
+    session_state.max_cumulative_notional = max_cumulative_notional;
+    session_state.max_exposure = maximum_exposure;
+    session_state.max_open_orders = maximum_open_orders;
+    session_state.session_generation = session_state
+        .session_generation
+        .checked_add(1)
+        .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
+    let bytes = unsafe { accounts[2].borrow_unchecked_mut() };
+    session::write_session(bytes, &session_state)
 }
 
-fn revoke_trading_session(
+/// Accounts: `[market, owner (signer, writable), session (writable, PDA), session_signer]`.
+/// Reclaims the session PDA's rent to the owner. Always safe: a session
+/// holds no funds or open state of its own (orders/collateral live on the
+/// trader seat), so closing one only removes future authorization.
+fn close_trading_session(
     program_id: &Address,
     accounts: &mut [AccountView],
-    nonce: u64,
+    seat_index: u16,
 ) -> ProgramResult {
-    if accounts.len() != 3 {
+    if accounts.len() != 4 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
     signer(&accounts[1])?;
-    let owner = accounts[1].address().to_bytes();
-    let market_key = accounts[0].address().to_bytes();
-    let session_key = accounts[2].address().to_bytes();
-    if !accounts[2].is_writable()
-        || !accounts[2].owned_by(program_id)
-        || accounts[2].data_len() != TRADING_SESSION_SIZE
-        || session_key == market_key
-        || session_key == owner
-    {
+    if !accounts[1].is_writable() {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
-    let data = market_data(&mut accounts[0], program_id)?;
-    initialized_header(data)?;
-    let session = unsafe { accounts[2].borrow_unchecked_mut() };
-    if session[0..8] != SESSION_DISCRIMINATOR
-        || session[SESSION_VERSION_OFFSET] != SESSION_VERSION
-        || session[SESSION_OWNER_OFFSET..SESSION_OWNER_OFFSET + 32] != owner
-        || session[SESSION_MARKET_OFFSET..SESSION_MARKET_OFFSET + 32] != market_key
-        || u64::from_le_bytes(
-            session[SESSION_NONCE_OFFSET..SESSION_NONCE_OFFSET + 8]
-                .try_into()
-                .unwrap(),
-        ) != nonce
-    {
-        return Err(custom(StockStreamError::InvalidInstruction));
+    let owner = *accounts[1].address();
+    let market_addr = *accounts[0].address();
+    let session_signer = *accounts[3].address();
+    let data_now = {
+        let data = market_data(&mut accounts[0], program_id)?;
+        initialized_header(data)?.last_verified_oracle_timestamp
+    };
+    let session_state = session::validated_session_account(
+        program_id,
+        &accounts[2],
+        &owner,
+        &market_addr,
+        seat_index,
+        &session_signer,
+        true,
+    )?;
+    if session_state.revoked == 0 && session_state.expires_at > data_now {
+        return Err(custom(StockStreamError::InvalidTradingSession));
     }
-    session[SESSION_REVOKED_OFFSET] = 1;
+    let refund = accounts[2].lamports();
+    accounts[2].set_lamports(0);
+    let owner_lamports = accounts[1].lamports();
+    accounts[1].set_lamports(owner_lamports.saturating_add(refund));
+    let bytes = unsafe { accounts[2].borrow_unchecked_mut() };
+    bytes.fill(0);
     Ok(())
 }
 
@@ -1186,25 +1342,78 @@ fn place_order(
     } else {
         0
     };
-    let (session_authorized, seat_owner) = {
+    let (trading_session, seat_owner) = {
         let snapshot = unsafe { accounts[0].borrow_unchecked() };
         let snapshot_header = initialized_header(snapshot)?;
         let snapshot_seat = seat_at(snapshot, order.seat_index as usize)?;
-        authorize_trading_actor(
+        let signed_qty = if order.side == Side::Bid as u8 {
+            order.quantity as i128
+        } else {
+            -(order.quantity as i128)
+        };
+        let resulting_exposure = snapshot_seat
+            .base_position
+            .checked_add(signed_qty)
+            .ok_or(custom(StockStreamError::ArithmeticOverflow))?
+            .unsigned_abs();
+        let required_actions = if order.flags & 4 != 0 {
+            SESSION_ACTION_PLACE | SESSION_ACTION_REDUCE_ONLY_CLOSE
+        } else {
+            SESSION_ACTION_PLACE
+        };
+        let trading_session = authorize_trading_actor(
             accounts,
             &market_address,
             &snapshot_seat,
-            order.seat_index as usize,
+            order.seat_index,
             3,
-            SESSION_PLACE,
+            required_actions,
             session_notional,
+            resulting_exposure,
             order.action_nonce,
             snapshot_header.last_verified_oracle_timestamp,
         )?;
-        (snapshot_seat.trader != trader, snapshot_seat.trader)
+        (trading_session, snapshot_seat.trader)
     };
+    let session_authorized = trading_session.is_some();
+    let (order_notional, now) = place_order_core(
+        program_id,
+        accounts,
+        order,
+        trader,
+        seat_owner,
+        session_authorized,
+    )?;
+    if let Some(trading_session) = trading_session {
+        consume_session_action(
+            &mut accounts[3],
+            trading_session,
+            order_notional,
+            order.action_nonce,
+            now,
+        )?;
+    }
+    Ok(())
+}
+
+/// The full matching/settlement pipeline for a new order: validates market
+/// state and the order shape, plans the match, applies it to the book and
+/// settlement scratch, and writes the updated market header. Does not touch
+/// session state -- callers (`place_order`, `replace_order`) authorize
+/// first and consume the session nonce/notional only after this succeeds.
+/// Returns the order's notional and the oracle timestamp used, so the
+/// caller can consume the session action without recomputing either.
+fn place_order_core(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    order: PlaceOrderData,
+    trader: [u8; 32],
+    seat_owner: [u8; 32],
+    session_authorized: bool,
+) -> Result<(i128, u64), ProgramError> {
+    let market_address = accounts[0].address().to_bytes();
     let (market_accounts, remaining_accounts) = accounts.split_at_mut(2);
-    let (scratch_accounts, session_accounts) = remaining_accounts.split_at_mut(1);
+    let (scratch_accounts, _session_accounts) = remaining_accounts.split_at_mut(1);
     let scratch_bytes = scratch_data(&mut scratch_accounts[0], program_id)?;
     let mut scratch = SettlementScratchView::new(scratch_bytes)?;
     let data = market_data(&mut market_accounts[0], program_id)?;
@@ -1371,8 +1580,112 @@ fn place_order(
     scratch_header.status = ScratchStatus::Ready as u8;
     scratch.write_header(&scratch_header);
     scratch.clear();
-    if session_authorized {
-        consume_session_action(&mut session_accounts[0], order_notional, order.action_nonce)?;
+    Ok((order_notional, header.last_verified_oracle_timestamp))
+}
+
+/// Atomically cancels `old_order_key` and places `new_order` in its place.
+/// The new order always receives a fresh sequence number (from
+/// `place_order_core`'s own `header.global_order_sequence + 1`), so a
+/// replacement always loses book time priority -- a price/quantity-changing
+/// replacement is, by design, not distinguishable on-chain from an
+/// independent cancel-then-place. Because this program has no explicit
+/// rollback path, atomicity comes entirely from Solana's own instruction
+/// semantics: if `place_order_core` fails after the cancel already ran, this
+/// function's `?` propagates the error out of `dispatch`, so the runtime
+/// reverts every account write made during the instruction -- the cancelled
+/// order, its released reserve, and the session's nonce/notional are all
+/// left exactly as they were before this instruction ran.
+///
+/// Session-notional policy: a replacement is charged the new order's full
+/// notional, exactly like an independent `PlaceOrder`. The old order's
+/// notional is not credited back, consistent with this program's
+/// cumulative-activity (not outstanding-notional) session accounting: see
+/// `authorize_trading_actor`.
+fn replace_order(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    old_order_key: u128,
+    order: PlaceOrderData,
+) -> ProgramResult {
+    if accounts.len() < 3 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    signer(&accounts[1])?;
+    if accounts[0].address() == accounts[2].address()
+        || accounts[1].address() == accounts[2].address()
+    {
+        return Err(custom(StockStreamError::InvalidSettlementScratch));
+    }
+    let market_address = accounts[0].address().to_bytes();
+    let trader = accounts[1].address().to_bytes();
+    let expected_scratch =
+        derive_settlement_scratch(accounts[0].address(), order.seat_index, program_id);
+    if expected_scratch != *accounts[2].address() {
+        return Err(custom(StockStreamError::InvalidSettlementScratch));
+    }
+    let session_notional = if order.price_or_offset > 0 {
+        (order.quantity as i128)
+            .checked_mul(order.price_or_offset as i128)
+            .ok_or(custom(StockStreamError::ArithmeticOverflow))?
+    } else {
+        0
+    };
+    let (trading_session, seat_owner) = {
+        let snapshot = unsafe { accounts[0].borrow_unchecked() };
+        let snapshot_header = initialized_header(snapshot)?;
+        let snapshot_seat = seat_at(snapshot, order.seat_index as usize)?;
+        let signed_qty = if order.side == Side::Bid as u8 {
+            order.quantity as i128
+        } else {
+            -(order.quantity as i128)
+        };
+        let resulting_exposure = snapshot_seat
+            .base_position
+            .checked_add(signed_qty)
+            .ok_or(custom(StockStreamError::ArithmeticOverflow))?
+            .unsigned_abs();
+        let trading_session = authorize_trading_actor(
+            accounts,
+            &market_address,
+            &snapshot_seat,
+            order.seat_index,
+            3,
+            SESSION_ACTION_REPLACE,
+            session_notional,
+            resulting_exposure,
+            order.action_nonce,
+            snapshot_header.last_verified_oracle_timestamp,
+        )?;
+        (trading_session, snapshot_seat.trader)
+    };
+    let session_authorized = trading_session.is_some();
+    {
+        let data = market_data(&mut accounts[0], program_id)?;
+        let market_header = initialized_header(data)?;
+        if market_header.mode != MarketMode::Open as u8 {
+            return Err(custom(StockStreamError::InvalidInstruction));
+        }
+        if seat_at(data, order.seat_index as usize)?.trader != trader && !session_authorized {
+            return Err(custom(StockStreamError::InvalidSeat));
+        }
+        cancel_order_core(data, order.seat_index as usize, old_order_key)?;
+    }
+    let (order_notional, now) = place_order_core(
+        program_id,
+        accounts,
+        order,
+        trader,
+        seat_owner,
+        session_authorized,
+    )?;
+    if let Some(trading_session) = trading_session {
+        consume_session_action(
+            &mut accounts[3],
+            trading_session,
+            order_notional,
+            order.action_nonce,
+            now,
+        )?;
     }
     Ok(())
 }
@@ -1719,6 +2032,37 @@ pub fn validate_planned_settlement_for_test(
     validate_settlement_plan(data, scratch, order, header, taker_before)
 }
 
+/// Removes one order owned by `seat_index` and releases its reserved
+/// margin. Shared by `cancel_order` and `replace_order`; on any error the
+/// caller's `?` aborts the whole instruction, so a failed removal here
+/// never partially mutates the book.
+fn cancel_order_core(data: &mut [u8], seat_index: usize, order_key: u128) -> ProgramResult {
+    let bid_result = {
+        let bid = arena_mut(data, crate::state::BID_ARENA_OFFSET)?;
+        bid.remove_owned(crate::book::TreeKind::Fixed, order_key, seat_index as u32)
+    };
+    let removed = match bid_result {
+        Ok(leaf) => Ok(leaf),
+        Err(_) => {
+            let ask = arena_mut(data, crate::state::ASK_ARENA_OFFSET)?;
+            ask.remove_owned(crate::book::TreeKind::Fixed, order_key, seat_index as u32)
+        }
+    };
+    let leaf = removed.map_err(|_| custom(StockStreamError::InvalidInstruction))?;
+    let mut seat = seat_at(data, seat_index)?;
+    seat.open_order_count = seat.open_order_count.saturating_sub(1);
+    let price = leaf.price_or_offset;
+    if price > 0 {
+        let release = risk::initial_margin(
+            risk::notional(leaf.quantity as i128, price as i128).map_err(risk_error)?,
+            initialized_header(data)?.initial_margin_bps,
+        )
+        .map_err(risk_error)?;
+        seat.reserved_margin = seat.reserved_margin.saturating_sub(release);
+    }
+    write_seat(data, seat_index, &seat)
+}
+
 fn cancel_order(
     program_id: &Address,
     accounts: &mut [AccountView],
@@ -1731,58 +2075,36 @@ fn cancel_order(
     }
     signer(&accounts[1])?;
     let trader = accounts[1].address().to_bytes();
-    let session_authorized = {
+    let market_address = accounts[0].address().to_bytes();
+    let trading_session = {
         let snapshot = unsafe { accounts[0].borrow_unchecked() };
         let snapshot_header = initialized_header(snapshot)?;
         let snapshot_seat = seat_at(snapshot, seat_index)?;
+        let resulting_exposure = snapshot_seat.base_position.unsigned_abs();
         authorize_trading_actor(
             accounts,
-            accounts[0].address().as_ref(),
+            &market_address,
             &snapshot_seat,
-            seat_index,
+            seat_index as u16,
             2,
-            SESSION_CANCEL,
+            SESSION_ACTION_CANCEL,
             0,
+            resulting_exposure,
             action_nonce,
             snapshot_header.last_verified_oracle_timestamp,
-        )?;
-        snapshot_seat.trader != trader
+        )?
     };
+    let session_authorized = trading_session.is_some();
     let data = market_data(&mut accounts[0], program_id)?;
-    initialized_header(data)?;
+    let now = initialized_header(data)?.last_verified_oracle_timestamp;
     if seat_at(data, seat_index)?.trader != trader && !session_authorized {
         return Err(custom(StockStreamError::InvalidSeat));
     }
-    let bid_result = {
-        let bid = arena_mut(data, crate::state::BID_ARENA_OFFSET)?;
-        bid.remove_owned(crate::book::TreeKind::Fixed, order_key, seat_index as u32)
-    };
-    let removed = match bid_result {
-        Ok(leaf) => Ok(leaf),
-        Err(_) => {
-            let ask = arena_mut(data, crate::state::ASK_ARENA_OFFSET)?;
-            ask.remove_owned(crate::book::TreeKind::Fixed, order_key, seat_index as u32)
-        }
-    };
-    if let Ok(leaf) = removed {
-        let mut seat = seat_at(data, seat_index)?;
-        seat.open_order_count = seat.open_order_count.saturating_sub(1);
-        let price = leaf.price_or_offset;
-        if price > 0 {
-            let release = risk::initial_margin(
-                risk::notional(leaf.quantity as i128, price as i128).map_err(risk_error)?,
-                initialized_header(data)?.initial_margin_bps,
-            )
-            .map_err(risk_error)?;
-            seat.reserved_margin = seat.reserved_margin.saturating_sub(release);
-        }
-        write_seat(data, seat_index, &seat)?;
-        if session_authorized {
-            consume_session_action(&mut accounts[2], 0, action_nonce)?;
-        }
-        return Ok(());
+    cancel_order_core(data, seat_index, order_key)?;
+    if let Some(trading_session) = trading_session {
+        consume_session_action(&mut accounts[2], trading_session, 0, action_nonce, now)?;
     }
-    Err(custom(StockStreamError::InvalidInstruction))
+    Ok(())
 }
 
 fn update_funding(
@@ -1892,25 +2214,28 @@ fn cancel_all(
     }
     signer(&accounts[1])?;
     let trader = accounts[1].address().to_bytes();
-    let session_authorized = {
+    let market_address = accounts[0].address().to_bytes();
+    let trading_session = {
         let snapshot = unsafe { accounts[0].borrow_unchecked() };
         let snapshot_header = initialized_header(snapshot)?;
         let snapshot_seat = seat_at(snapshot, seat_index)?;
+        let resulting_exposure = snapshot_seat.base_position.unsigned_abs();
         authorize_trading_actor(
             accounts,
-            accounts[0].address().as_ref(),
+            &market_address,
             &snapshot_seat,
-            seat_index,
+            seat_index as u16,
             2,
-            SESSION_CANCEL_ALL,
+            SESSION_ACTION_CANCEL_ALL,
             0,
+            resulting_exposure,
             action_nonce,
             snapshot_header.last_verified_oracle_timestamp,
-        )?;
-        snapshot_seat.trader != trader
+        )?
     };
+    let session_authorized = trading_session.is_some();
     let data = market_data(&mut accounts[0], program_id)?;
-    initialized_header(data)?;
+    let now = initialized_header(data)?.last_verified_oracle_timestamp;
     if seat_at(data, seat_index)?.trader != trader && !session_authorized {
         return Err(custom(StockStreamError::InvalidSeat));
     }
@@ -1947,8 +2272,8 @@ fn cancel_all(
     .map_err(risk_error)?;
     seat.reserved_margin = seat.reserved_margin.saturating_sub(released);
     write_seat(data, seat_index, &seat)?;
-    if session_authorized {
-        consume_session_action(&mut accounts[2], 0, action_nonce)?;
+    if let Some(trading_session) = trading_session {
+        consume_session_action(&mut accounts[2], trading_session, 0, action_nonce, now)?;
     }
     Ok(())
 }

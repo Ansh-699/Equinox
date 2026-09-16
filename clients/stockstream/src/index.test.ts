@@ -2,7 +2,7 @@ import { PublicKey } from "@solana/web3.js";
 import { expect, test } from "vitest";
 import { STOCKSTREAM_PROGRAM_ID } from "./constants";
 import { MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID } from "./index";
-import { authorizeTradingSession, cancelOrder, commitMarket, createPerpMarket, decodeInstruction, delegateMarket, initializeExchange, initializeMarket, initializeVault, placeOrder, previewPlaceOrder, registerStockInstrument, updateStockInstrument } from "./index";
+import { authorizeTradingSession, cancelOrder, commitMarket, createPerpMarket, decodeInstruction, delegateMarket, deriveTradingSession, initializeExchange, initializeMarket, initializeVault, placeOrder, previewPlaceOrder, registerStockInstrument, updateStockInstrument } from "./index";
 
 const market = PublicKey.unique();
 const authority = PublicKey.unique();
@@ -62,9 +62,27 @@ test("integration constructors preserve discriminators, account order and signer
   expect(Array.from(delegateIx.data.slice(1))).toEqual(Array.from(validator.toBytes()));
   expect(delegateIx.keys).toHaveLength(11);
   expect(delegateIx.keys[10]).toEqual({ pubkey: settlementScratch, isSigner: false, isWritable: true });
-  const session = authorizeTradingSession({ market, authority, session: PublicKey.unique(), sessionSigner: PublicKey.unique() }, 99n, 1n, { seatIndex: 0, actions: 3, maxOrderNotional: 10n, maxCumulativeNotional: 20n, maximumExposure: 30n, maximumOpenOrders: 2 });
+  const session = authorizeTradingSession({ market, authority, payer: authority, sessionSigner: PublicKey.unique() }, 99n, { seatIndex: 0, actions: 3, maxOrderNotional: 10n, maxCumulativeNotional: 20n, maximumExposure: 30n, maximumOpenOrders: 2 });
   expect(decodeInstruction(session.data).name).toBe("AuthorizeTradingSession");
-  expect(session.data).toHaveLength(54);
+  expect(session.data).toHaveLength(46);
+  expect(session.keys).toHaveLength(5);
+  const derivedPda = deriveTradingSession(authority, market, 0, session.keys[3].pubkey);
+  expect(session.keys[2].pubkey.toBase58()).toBe(derivedPda.toBase58());
+});
+
+test("trading session PDA derivation matches the Rust program byte-for-byte", () => {
+  // Golden vector cross-checked against `derive_trading_session` in
+  // programs/stockstream/tests/trading_session.rs
+  // (`derive_trading_session_golden_vector_for_cross_language_parity`) --
+  // same owner/market/seat/signer inputs, same resulting PDA bytes.
+  const owner = new PublicKey(new Uint8Array(32).fill(1));
+  const market = new PublicKey(new Uint8Array(32).fill(2));
+  const signer = new PublicKey(new Uint8Array(32).fill(3));
+  const pda = deriveTradingSession(owner, market, 7, signer);
+  expect(Array.from(pda.toBytes())).toEqual([
+    15, 27, 164, 236, 73, 126, 218, 96, 7, 34, 216, 162, 61, 204, 142, 55, 237, 185, 14, 91, 242,
+    94, 221, 124, 205, 156, 101, 221, 191, 43, 230, 214,
+  ]);
 });
 
 test("registry constructors preserve market-scoped account order", () => {

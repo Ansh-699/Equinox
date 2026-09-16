@@ -113,10 +113,10 @@ export function TradingTerminal() {
     if (!auth.walletAddress || !marketAddress) { setNotice("Configure the market address and sign in before constructing session actions."); return; }
     const session = process.env.NEXT_PUBLIC_STOCKSTREAM_SESSION_ACCOUNT;
     const sessionSigner = process.env.NEXT_PUBLIC_STOCKSTREAM_SESSION_SIGNER;
-    if (!session || (!revoke && !sessionSigner)) { setNotice("Trading session action blocked: session account and signer public key are not configured."); return; }
+    if (!session || !sessionSigner) { setNotice("Trading session action blocked: session account and signer public key are not configured."); return; }
     const ix = revoke
-      ? revokeTradingSession({ market: marketAddress, authority: auth.walletAddress, session: session! }, 1n)
-      : authorizeTradingSession({ market: marketAddress, authority: auth.walletAddress, session: session!, sessionSigner: sessionSigner! }, BigInt(Date.now() + 3_600_000), 1n, { seatIndex: 0, actions: 0b1011, maxOrderNotional: 1_000_000n, maxCumulativeNotional: 10_000_000n, maximumExposure: 1_000_000n, maximumOpenOrders: 32 });
+      ? revokeTradingSession({ market: marketAddress, authority: auth.walletAddress, session: session!, sessionSigner: sessionSigner! }, 0)
+      : authorizeTradingSession({ market: marketAddress, authority: auth.walletAddress, payer: auth.walletAddress, sessionSigner: sessionSigner! }, BigInt(Date.now() + 3_600_000), { seatIndex: 0, actions: 0b1011, maxOrderNotional: 1_000_000n, maxCumulativeNotional: 10_000_000n, maximumExposure: 1_000_000n, maximumOpenOrders: 32 });
     setNotice(`Constructed ${revoke ? "RevokeTradingSession" : "AuthorizeTradingSession"} with ${ix.keys.length} accounts. No signature was requested.`);
   }
 
