@@ -1,6 +1,7 @@
 import { SELF, applyD1Migrations, env } from 'cloudflare:test';
 import { beforeAll, expect, it, vi } from 'vitest';
 import { runIngestionTick } from './index';
+import { eventLogLine } from './test-event-fixtures';
 
 const bindings = env as Env & { TEST_MIGRATIONS: Parameters<typeof applyD1Migrations>[1] };
 beforeAll(async () => { await applyD1Migrations(bindings.DB!, bindings.TEST_MIGRATIONS); });
@@ -38,7 +39,7 @@ it('runIngestionTick polls a registered market, decodes a real custody log, and 
   };
   expect((await SELF.fetch(request('/v1/ingest/market', market))).status).toBe(202);
 
-  const marketHex = 'ee'.repeat(32); const mintHex = 'ff'.repeat(32);
+  const marketHex = 'ee'.repeat(32);
   const fetcher = vi.fn(async (_input: unknown, init?: RequestInit) => {
     const body = JSON.parse(String(init!.body)) as { method: string; id: number; params: unknown[] };
     if (body.method === 'getSignaturesForAddress') {
@@ -52,7 +53,7 @@ it('runIngestionTick polls a registered market, decodes a real custody log, and 
         result: {
           slot: 10,
           transaction: { signatures: ['tick-sig-1'] },
-          meta: { err: null, logMessages: [`Program log: SS:VaultInitialized market=${marketHex} amount=0 seq=1 balance=0 mint=${mintHex}`] },
+          meta: { err: null, logMessages: [eventLogLine(400, 1, marketHex)] },
         },
       });
     }

@@ -2,7 +2,7 @@ import { PublicKey } from "@solana/web3.js";
 import { expect, test } from "vitest";
 import { STOCKSTREAM_PROGRAM_ID } from "./constants";
 import { MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID } from "./index";
-import { authorizeTradingSession, cancelOrder, commitMarket, createPerpMarket, decodeCustodyEvent, decodeInstruction, decodeMarketState, delegateMarket, deriveTradingSession, initializeExchange, initializeMarket, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateStockInstrument, withdrawInsuranceFunds, withdrawProtocolFees } from "./index";
+import { authorizeTradingSession, cancelOrder, commitMarket, createPerpMarket, decodeInstruction, decodeMarketState, decodeSeatAmountPayload, decodeStockStreamEvent, delegateMarket, deriveTradingSession, EVENT_SIZE, initializeExchange, initializeMarket, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateStockInstrument, withdrawInsuranceFunds, withdrawProtocolFees } from "./index";
 import { STOCKSTREAM_ACCOUNT_SIZE } from "./constants";
 
 const market = PublicKey.unique();
@@ -174,13 +174,44 @@ test("decodeMarketState golden vector: custody-ledger byte offsets match the Rus
   expect(() => decodeMarketState(marketHeaderFixture(1))).toThrow(/Invalid StockStream market header/);
 });
 
-test("decodeCustodyEvent parses a program log line emitted by pinocchio_log", () => {
-  const marketHex = "aa".repeat(32);
-  const mintHex = "bb".repeat(32);
-  const line = `Program log: SS:CollateralDeposited market=${marketHex} seat=4 amount=1000 seq=7 balance=1000 mint=${mintHex}`;
-  const event = decodeCustodyEvent(line);
-  expect(event).toEqual({ kind: "CollateralDeposited", market: marketHex, seat: 4, amount: 1000n, sequence: 7n, balance: 1000n, mint: mintHex });
-  const withoutSeat = decodeCustodyEvent(`SS:VaultInitialized market=${marketHex} amount=0 seq=1 balance=0 mint=${mintHex}`);
-  expect(withoutSeat?.seat).toBeUndefined();
-  expect(decodeCustodyEvent("Program log: not a custody event")).toBeNull();
+function encodeEventFixture(discriminator: number, sequence: bigint, market: Buffer, timestamp: bigint, payload: Buffer): Buffer {
+  const bytes = Buffer.alloc(EVENT_SIZE);
+  bytes.writeUInt16LE(discriminator, 0);
+  bytes.writeUInt8(1, 2); // abi_version
+  bytes.writeBigUInt64LE(sequence, 4);
+  market.copy(bytes, 12);
+  bytes.writeBigUInt64LE(timestamp, 44);
+  payload.copy(bytes, 52);
+  return bytes;
+}
+
+test("decodeStockStreamEvent parses a Program data line using the binary event ABI", () => {
+  const market = Buffer.alloc(32, 0xaa);
+  const payload = Buffer.alloc(48);
+  payload.writeUInt16LE(4, 0); // seatIndex
+  payload.writeBigUInt64LE(1000n, 2); // amount
+  payload.writeBigUInt64LE(1000n, 10); // balance
+  const bytes = encodeEventFixture(401, 7n, market, 1_700_000_000n, payload); // 401 = CollateralDeposited
+  const line = `Program data: ${bytes.toString("base64")}`;
+
+  const event = decodeStockStreamEvent(line);
+  expect(event).not.toBeNull();
+  expect(event?.kind).toBe("CollateralDeposited");
+  expect(event?.discriminator).toBe(401);
+  expect(event?.abiVersion).toBe(1);
+  expect(event?.sequence).toBe(7n);
+  expect(event?.market).toBe(market.toString("hex"));
+  expect(event?.timestamp).toBe(1_700_000_000n);
+  expect(decodeSeatAmountPayload(event!.payload)).toEqual({ seatIndex: 4, amount: 1000n, balance: 1000n });
+
+  expect(decodeStockStreamEvent("Program log: not an event")).toBeNull();
+  expect(decodeStockStreamEvent(`Program data: ${Buffer.alloc(10).toString("base64")}`)).toBeNull();
+});
+
+test("decodeStockStreamEvent preserves an unrecognized future discriminator instead of dropping it", () => {
+  const market = Buffer.alloc(32, 0x01);
+  const bytes = encodeEventFixture(9999, 1n, market, 0n, Buffer.alloc(48));
+  const event = decodeStockStreamEvent(`Program data: ${bytes.toString("base64")}`);
+  expect(event?.kind).toBe("Unknown(9999)");
+  expect(event?.discriminator).toBe(9999);
 });
