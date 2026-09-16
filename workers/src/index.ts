@@ -1,6 +1,6 @@
 import { MarketStream } from "./market-stream";
 import type { MarketDefinition, MarketEvent, MarketEventKind } from "./types";
-import { ProtocolRepository } from './repositories';
+import { IndexerRepository, ProtocolRepository, type IndexedWrite } from './repositories';
 
 export { MarketStream };
 
@@ -53,8 +53,15 @@ function bindings(env: Env): { DB: D1Database; MARKET_STREAM: DurableObjectNames
   return { DB: env.DB, MARKET_STREAM: env.MARKET_STREAM };
 }
 
-async function ingestEvent(event: MarketEvent, env: Env): Promise<void> {
+async function ingestEvent(event: MarketEvent, env: Env): Promise<IndexedWrite> {
   const { DB, MARKET_STREAM } = bindings(env);
+  if (!event.domain || event.sequence === undefined) throw new Error('sequenced domain event required');
+  const market = await DB.prepare('SELECT market_pda AS marketPda FROM markets WHERE symbol=?').bind(event.symbol).first<{ marketPda: string }>();
+  if (!market?.marketPda) throw new Error('market_not_registered');
+  const indexed = await new IndexerRepository(DB).append(
+    market.marketPda, event.domain, event.sequence, event.slot ?? 0, event.id, event, event.observedAt,
+  );
+  if (indexed.kind !== 'applied') return indexed;
   const result = await DB.prepare(
     `INSERT OR IGNORE INTO market_events (id, symbol, kind, slot, payload, observed_at)
      VALUES (?, ?, ?, ?, ?, ?)`,
@@ -63,6 +70,7 @@ async function ingestEvent(event: MarketEvent, env: Env): Promise<void> {
     .run();
 
   if (result.meta.changes === 1) await MARKET_STREAM.getByName(event.symbol).publish(event);
+  return indexed;
 }
 
 function asMarketDefinition(input: unknown): MarketDefinition | null {
@@ -114,7 +122,11 @@ export default {
         return json({ error: 'rate_limited' }, 429);
       const event = asMarketEvent(await request.json().catch(() => null));
       if (!event) return json({ error: "invalid_market_event" }, 400);
-      await ingestEvent(event, env);
+      let indexed: IndexedWrite;
+      try { indexed = await ingestEvent(event, env); } catch (error) {
+        return json({ error: error instanceof Error ? error.message : 'index_failed' }, 409);
+      }
+      if (indexed.kind === 'gap') return json({ error: 'sequence_gap', expected: indexed.expected }, 409);
       return json({ accepted: true }, 202);
     }
 
