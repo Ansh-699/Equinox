@@ -56,24 +56,22 @@ function decodeCustodyLogLine(line: string): DecodedCustodyEvent | null {
 }
 
 /**
- * Decodes every recognized custody event out of one transaction's program
- * logs. A transaction the runtime marked failed (`meta.err`) is skipped
- * entirely: a failed transaction's logs describe state that was rolled
- * back, so treating them as real events would apply changes that never
- * actually happened on-chain. Unrecognized log lines (from CPI'd programs,
- * `msg!` debug output elsewhere in this program, or a future/older custody
- * log shape) are silently skipped rather than throwing -- a single
- * malformed or foreign line must never abort ingestion of the rest of a
- * batch of transactions.
+ * Decodes every recognized custody event out of a raw list of program-log
+ * lines (shared by both entry points below: a `getTransaction` result's
+ * `meta.logMessages`, and a live `logsNotification`'s `value.logs`, which
+ * are the exact same strings on the wire). Unrecognized log lines (from
+ * CPI'd programs, `msg!` debug output elsewhere in this program, or a
+ * future/older custody log shape) are silently skipped rather than
+ * throwing -- a single malformed or foreign line must never abort
+ * ingestion of the rest of a batch.
  */
-export function decodeCustodyEvents(
-  transaction: RawTransactionResult,
+export function decodeCustodyLogMessages(
+  logMessages: readonly string[],
   domain: "l1" | "er",
+  slot: number | undefined,
+  signature: string | undefined,
   observedAt: number,
 ): MarketEvent[] {
-  if (transaction.meta?.err) return [];
-  const logMessages = transaction.meta?.logMessages ?? [];
-  const signature = transaction.transaction?.signatures?.[0];
   const events: MarketEvent[] = [];
   for (const line of logMessages) {
     const decoded = decodeCustodyLogLine(line);
@@ -83,7 +81,7 @@ export function decodeCustodyEvents(
       id,
       symbol: decoded.market,
       kind: "custody",
-      slot: transaction.slot,
+      slot,
       domain,
       sequence: decoded.sequence,
       payload: {
@@ -99,4 +97,30 @@ export function decodeCustodyEvents(
     });
   }
   return events;
+}
+
+/**
+ * Decodes every recognized custody event out of one `getTransaction`
+ * result's program logs. A transaction the runtime marked failed
+ * (`meta.err`) is skipped entirely: a failed transaction's logs describe
+ * state that was rolled back, so treating them as real events would apply
+ * changes that never actually happened on-chain. Used by gap-recovery and
+ * any historical backfill path (`chain-transports.ts::SolanaL1Transport.transaction`);
+ * the live path is `decodeCustodyLogMessages` called directly from a
+ * `logsNotification` (see `ingestion-pipeline.ts`), since that notification
+ * already carries the logs without a second RPC round-trip.
+ */
+export function decodeCustodyEvents(
+  transaction: RawTransactionResult,
+  domain: "l1" | "er",
+  observedAt: number,
+): MarketEvent[] {
+  if (transaction.meta?.err) return [];
+  return decodeCustodyLogMessages(
+    transaction.meta?.logMessages ?? [],
+    domain,
+    transaction.slot,
+    transaction.transaction?.signatures?.[0],
+    observedAt,
+  );
 }

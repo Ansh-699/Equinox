@@ -1,7 +1,15 @@
 import { DurableObject } from 'cloudflare:workers';
+import { PrivateSessionRepository } from './private-sessions';
 import type { MarketEvent, MarketSnapshot } from './types';
 type Domain = 'l1' | 'er';
 type State = { domain: Domain; sequence: number; resynchronizing: number; snapshot_json: string | null };
+/** Present on a socket's attachment only once its `?token=` has been
+ * verified against a real on-chain-owned trader seat (`private-sessions.ts`).
+ * A socket with no `private` field is public-only: it can never receive a
+ * `publishPrivate` message, by construction (see `broadcast`'s public path
+ * versus `publishPrivate` below -- they are never the same send loop). */
+type PrivateContext = { wallet: string; seatIndex: number };
+type Attachment = { pending: number; private?: PrivateContext };
 
 export class MarketStream extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -18,15 +26,31 @@ export class MarketStream extends DurableObject<Env> {
     return this.ctx.storage.sql.exec<State>('SELECT * FROM stream_state WHERE domain=?', domain).toArray()[0]
       ?? { domain, sequence: 0, resynchronizing: 0, snapshot_json: null };
   }
+  /** The public path: every connected socket receives the exact same
+   * bytes, public data only. Never called with anything containing
+   * private per-trader fields -- `publishPrivate` below is the only path
+   * that can ever reach a private field, and it never broadcasts. */
   private broadcast(message: unknown): void {
     const bytes = JSON.stringify(message);
     for (const socket of this.ctx.getWebSockets()) {
-      const attachment = socket.deserializeAttachment() as { pending: number } | null;
+      const attachment = socket.deserializeAttachment() as Attachment | null;
       if ((attachment?.pending ?? 0) >= 64) { socket.close(1013, 'Resnapshot required'); continue; }
       try {
         socket.send(bytes);
-        socket.serializeAttachment({ pending: (attachment?.pending ?? 0) + 1 });
+        socket.serializeAttachment({ ...attachment, pending: (attachment?.pending ?? 0) + 1 });
       } catch { socket.close(1011, 'Delivery failed'); }
+    }
+  }
+  /** Sends `payload` only to the socket(s) whose verified private context
+   * matches both `wallet` and `seatIndex` -- never to any other connected
+   * socket, public or otherwise. A caller with the wrong seat/wallet pair
+   * reaches no one, not a filtered/redacted version of the event. */
+  publishPrivate(wallet: string, seatIndex: number, payload: unknown): void {
+    const bytes = JSON.stringify({ type: 'private', payload });
+    for (const socket of this.ctx.getWebSockets()) {
+      const attachment = socket.deserializeAttachment() as Attachment | null;
+      if (!attachment?.private || attachment.private.wallet !== wallet || attachment.private.seatIndex !== seatIndex) continue;
+      try { socket.send(bytes); } catch { socket.close(1011, 'Delivery failed'); }
     }
   }
   publish(event: MarketEvent): 'applied' | 'duplicate' | 'gap' {
@@ -73,14 +97,31 @@ export class MarketStream extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
     if (request.method !== 'GET') return new Response('Method not allowed', { status: 405 });
     if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') return Response.json(this.snapshotEnvelope());
+    const url = new URL(request.url);
+    const token = url.searchParams.get('token');
+    let privateContext: PrivateContext | undefined;
+    if (token) {
+      const market = url.searchParams.get('market');
+      if (!market) return new Response('market is required with token', { status: 400 });
+      if (!this.env.DB) throw new Error('Required storage bindings are unavailable');
+      const session = await new PrivateSessionRepository(this.env.DB).verify(token, market, Date.now());
+      // A *presented* token that fails verification is rejected outright,
+      // never silently downgraded to an anonymous public connection --
+      // that would let a caller probe token validity without a clear
+      // signal, and would also mean "I asked for my own data" quietly
+      // becoming "you get the public feed" instead of an error.
+      if (!session) return new Response('invalid or expired private session token', { status: 401 });
+      privateContext = { wallet: session.wallet, seatIndex: session.seatIndex };
+    }
     const [client, server] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ pending: 0 });
+    server.serializeAttachment({ pending: 0, private: privateContext } satisfies Attachment);
     server.send(JSON.stringify({ type: 'snapshot', ...this.snapshotEnvelope() }));
     return new Response(null, { status: 101, webSocket: client });
   }
   webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): void {
-    if (message === 'ack') socket.serializeAttachment({ pending: 0 });
+    const attachment = socket.deserializeAttachment() as Attachment | null;
+    if (message === 'ack') socket.serializeAttachment({ ...attachment, pending: 0 });
     else if (message === 'snapshot') socket.send(JSON.stringify({ type: 'snapshot', ...this.snapshotEnvelope() }));
     else socket.close(1008, 'Unsupported client message');
   }

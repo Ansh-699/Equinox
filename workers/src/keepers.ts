@@ -23,9 +23,7 @@ export async function idempotent<T>(store: IdempotencyStore, key: string, work: 
   return result;
 }
 
-export function retryDelay(attempt: number, baseMs = 250, maxMs = 30_000): number {
-  return Math.min(maxMs, baseMs * 2 ** Math.max(0, attempt - 1));
-}
+export { retryDelay } from './backoff';
 
 export interface DurableKeeperRequest<T> {
   leaseKey: string;
@@ -63,7 +61,45 @@ export async function runDurableKeeper<T>(repository: ProtocolRepository, reques
   }
 }
 
-export function keeperLeaseKey(kind: 'cleanup' | 'pyth' | 'commit' | 'funding' | 'expiry', market?: string): string {
+export function keeperLeaseKey(kind: 'cleanup' | 'pyth' | 'commit' | 'funding' | 'expiry' | 'ingestion' | 'session', market?: string): string {
   return market ? `keeper:${kind}:${market}` : `keeper:${kind}`;
 }
-import { ProtocolRepository } from './repositories';
+
+export interface DurableKeeperWithDeadLetterRequest<T> extends DurableKeeperRequest<T> {
+  /** Stable identity for this specific piece of work (not the keeper kind
+   * itself) -- e.g. `funding:<marketPda>:<epochMs>` -- so a dead-letter
+   * entry tracks retries of *this* attempt, not the keeper's lease/tick
+   * identity in general. */
+  deadLetterId: string;
+  /** After this many recorded failures, `giveUp` is called instead of
+   * scheduling yet another retry -- an operator has to look at it. */
+  maxAttempts?: number;
+}
+
+/**
+ * `runDurableKeeper` plus a durable dead-letter record: on failure, the
+ * work is *also* recorded in `dead_letters` with a scheduled retry time
+ * (`repositories.ts::DeadLetterRepository`), and on success any prior
+ * dead-letter record for the same `deadLetterId` is cleared. The error
+ * still propagates to the caller exactly as `runDurableKeeper` already
+ * does -- this only adds durable retry bookkeeping, it does not swallow
+ * the failure.
+ */
+export async function runDurableKeeperWithDeadLetter<T>(
+  repository: ProtocolRepository,
+  deadLetters: DeadLetterRepository,
+  request: DurableKeeperWithDeadLetterRequest<T>,
+): Promise<T> {
+  try {
+    const value = await runDurableKeeper(repository, request);
+    await deadLetters.resolve(request.deadLetterId);
+    return value;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const { attempts } = await deadLetters.record(request.deadLetterId, request.leaseKey, { idempotencyKey: request.idempotencyKey }, message, request.now);
+    if (attempts >= (request.maxAttempts ?? 10)) await deadLetters.giveUp(request.deadLetterId, request.now + 365 * 24 * 60 * 60 * 1000);
+    throw error;
+  }
+}
+
+import { ProtocolRepository, DeadLetterRepository } from './repositories';

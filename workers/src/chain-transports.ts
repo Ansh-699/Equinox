@@ -22,9 +22,14 @@ export class JsonRpcTransport {
   }
 }
 
+export interface AccountInfoResult {
+  context: { slot: number };
+  value: { data: [string, string] | null; owner: string; lamports: number } | null;
+}
+
 export class SolanaL1Transport extends JsonRpcTransport {
   account(address: string, commitment: 'confirmed' | 'finalized' = 'finalized') {
-    return this.call<{ value: { data: [string, string] | null; owner: string; lamports: number } }>('getAccountInfo', [address, { encoding: 'base64', commitment }]);
+    return this.call<AccountInfoResult>('getAccountInfo', [address, { encoding: 'base64', commitment }]);
   }
   signatures(address: string, before?: string) {
     return this.call<Array<{ signature: string; slot: number; err: unknown }>>('getSignaturesForAddress', [address, { before, limit: 1000, commitment: 'confirmed' }]);
@@ -36,7 +41,7 @@ export class SolanaL1Transport extends JsonRpcTransport {
 
 export class MagicBlockErTransport extends JsonRpcTransport {
   account(address: string) {
-    return this.call<unknown>('getAccountInfo', [address, { encoding: 'base64', commitment: 'confirmed' }]);
+    return this.call<AccountInfoResult>('getAccountInfo', [address, { encoding: 'base64', commitment: 'confirmed' }]);
   }
   status(signature: string) {
     return this.call<unknown>('getSignatureStatuses', [[signature], { searchTransactionHistory: false }]);

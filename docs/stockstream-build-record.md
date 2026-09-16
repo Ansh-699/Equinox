@@ -409,3 +409,65 @@ and live fee/insurance withdrawal remain runtime-unverified (the same
 `invoke_with_program`/`invoke_signed_with_program` no-op-off-SBF limitation
 documented for Priorities 1-3 in `docs/magicblock.md` and `docs/oracle.md`).
 **Audit pending. Production not approved.**
+
+## Layout Formalization: MARKET_VERSION 2 (2026-09-17)
+
+The Priority-4 custody ledger fields became permanent (not scratch)
+protocol fields: `MARKET_VERSION` bumped `1 -> 2`; `validate()` rejects any
+stored version that doesn't match exactly, so a version-1 account is never
+silently reinterpreted. `clients/stockstream/src/index.ts::decodeMarketState`
+decodes the five new fields and enforces the same version check, cross-
+checked against `state.rs`'s byte offsets by a new Rust golden-vector test.
+Also added: two tests proving withdrawal health uses funding-settled and
+fee-settled equity, not a naive pre-settlement figure.
+
+| Item | Recorded value |
+| --- | --- |
+| Rust tests (debug/release) | `132 passed; 0 failed` each (+4) |
+| Root TypeScript tests | `43 passed; 0 failed` (+1) |
+| SBF artifact | `target/deploy/stockstream.so` |
+| SBF SHA-256 | `444bb2c8ae76b178ab7432e1f7d730d51a6910502d11e8fefe8574ab96b6774e` |
+| SBF size | `229,792` bytes (unchanged -- a version constant, not a layout size change) |
+
+A real, previously-passing test (`lib/rpc-transport.test.ts`) had a
+hardcoded version-1 fixture that had to be updated to version 2 -- concrete
+proof the version check is live and enforced end to end, not merely
+declared.
+
+## Priority 5/6: Durable L1/ER Indexer, Private Projections, Dead-Letter Keepers (2026-09-17)
+
+No Rust source changed in this pass, so the SBF artifact above still
+applies unchanged.
+
+Real WebSocket subscription transports for Solana L1 and the MagicBlock ER
+(`workers/src/ws-transport.ts`), the custody event decoder wired end to end
+into the durable D1 ingestion pipeline with a concrete gap-recovery account
+fetcher (`workers/src/ingestion-pipeline.ts`), a scheduled-worker ingestion
+tick (`workers/src/index.ts::runIngestionTick`), a foundational ER/L1
+execution-status reconciliation model (`workers/src/execution-status.ts`),
+access-controlled private trader projections over the existing
+`MarketStream` Durable Object (`workers/src/private-sessions.ts`, migration
+`0005_private_sessions.sql`), and a real dead-letter queue plus keeper
+health endpoint (`workers/src/repositories.ts::DeadLetterRepository`,
+`workers/src/keepers.ts::runDurableKeeperWithDeadLetter`,
+`GET /v1/health/keepers`). Full detail in `docs/worker.md`,
+`docs/indexer.md`, `docs/magicblock.md`, and `docs/security.md`.
+
+| Item | Recorded value |
+| --- | --- |
+| Worker (Vitest, real Miniflare/D1/DO) tests | `66 passed; 0 failed` (was 21 before this pass) |
+| Root TypeScript tests | `43 passed; 0 failed` (unchanged from the layout-formalization entry) |
+| Rust tests | unchanged (`132 passed` debug/release) -- no Rust source touched |
+| `npm run lint` (root) | passed |
+| `npx tsc --noEmit` (root and `workers/`) | passed |
+| `npm run build` (root) | passed |
+| SBF artifact | unchanged from the layout-formalization entry: `444bb2c8ae76b178ab7432e1f7d730d51a6910502d11e8fefe8574ab96b6774e`, `229,792` bytes |
+
+Honestly still open (see `docs/worker.md`'s per-section notes for detail):
+the WebSocket transport is not wired into the scheduled ingestion loop
+(HTTP polling is the currently-wired path); only custody events are
+decoded (no other event type is logged by the Rust program yet); ER/L1
+reconciliation is not wired to live on-chain commit data; and no keeper
+submits a signed transaction (Pyth price push, MagicBlock commit
+scheduling, funding settlement) -- that needs wallet/key-management
+infrastructure not yet built. **Audit pending. Production not approved.**
