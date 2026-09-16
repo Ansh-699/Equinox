@@ -238,6 +238,37 @@ fn authorize_trading_actor(
     Ok(())
 }
 
+fn consume_session_notional(session: &mut AccountView, notional: i128) -> ProgramResult {
+    if notional < 0
+        || !session.is_writable()
+        || !session.owned_by(&crate::ID)
+        || session.data_len() != TRADING_SESSION_SIZE
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let bytes = unsafe { session.borrow_unchecked_mut() };
+    let used = u64::from_le_bytes(
+        bytes[SESSION_USED_CUMULATIVE_NOTIONAL_OFFSET..SESSION_USED_CUMULATIVE_NOTIONAL_OFFSET + 8]
+            .try_into()
+            .unwrap(),
+    );
+    let maximum = u64::from_le_bytes(
+        bytes[SESSION_MAX_CUMULATIVE_NOTIONAL_OFFSET..SESSION_MAX_CUMULATIVE_NOTIONAL_OFFSET + 8]
+            .try_into()
+            .unwrap(),
+    );
+    let increment = u64::try_from(notional).map_err(|_| custom(StockStreamError::RiskViolation))?;
+    let next = used
+        .checked_add(increment)
+        .ok_or(custom(StockStreamError::RiskViolation))?;
+    if next > maximum {
+        return Err(custom(StockStreamError::RiskViolation));
+    }
+    bytes[SESSION_USED_CUMULATIVE_NOTIONAL_OFFSET..SESSION_USED_CUMULATIVE_NOTIONAL_OFFSET + 8]
+        .copy_from_slice(&next.to_le_bytes());
+    Ok(())
+}
+
 fn seat_at(data: &[u8], index: usize) -> Result<TraderSeat, ProgramError> {
     if index >= MAX_TRADER_SEATS {
         return Err(custom(StockStreamError::InvalidSeat));
@@ -1220,7 +1251,8 @@ fn place_order(
         )?;
         (snapshot_seat.trader != trader, snapshot_seat.trader)
     };
-    let (market_accounts, scratch_accounts) = accounts.split_at_mut(2);
+    let (market_accounts, remaining_accounts) = accounts.split_at_mut(2);
+    let (scratch_accounts, session_accounts) = remaining_accounts.split_at_mut(1);
     let scratch_bytes = scratch_data(&mut scratch_accounts[0], program_id)?;
     let mut scratch = SettlementScratchView::new(scratch_bytes)?;
     let data = market_data(&mut market_accounts[0], program_id)?;
@@ -1387,6 +1419,9 @@ fn place_order(
     scratch_header.status = ScratchStatus::Ready as u8;
     scratch.write_header(&scratch_header);
     scratch.clear();
+    if session_authorized {
+        consume_session_notional(&mut session_accounts[0], order_notional)?;
+    }
     Ok(())
 }
 
