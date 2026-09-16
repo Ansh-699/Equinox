@@ -2,7 +2,22 @@ use core::mem::size_of;
 
 use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
 
-use crate::{error::StockStreamError, handlers};
+use crate::{
+    error::StockStreamError,
+    events::{emit_event, payload_empty, payload_registry, EventKind},
+    handlers,
+};
+
+/// Registry-level events (Exchange/StockInstrument/PerpMarketCreated) have
+/// no dedicated monotonic sequence counter of their own -- `ExchangeConfig`
+/// and `StockInstrument` predate the market-level `global_event_sequence`
+/// convention and are governance-cadence, not high-frequency trading,
+/// state. `0` is used for all of them; an indexer distinguishes registry
+/// events from each other and from replays by transaction signature and
+/// slot, not by a per-event sequence. `EventHeader.market` holds the
+/// exchange/instrument/market address most relevant to the event (not
+/// always a `PerpMarket` account), documented per call site below.
+const REGISTRY_EVENT_SEQUENCE: u64 = 0;
 
 pub const EXCHANGE_DISCRIMINATOR: [u8; 8] = *b"STKEXC01";
 pub const INSTRUMENT_DISCRIMINATOR: [u8; 8] = *b"STKINS01";
@@ -111,6 +126,13 @@ pub fn initialize_exchange(program_id: &Address, accounts: &mut [AccountView]) -
     data[8..10].copy_from_slice(&1u16.to_le_bytes());
     data[10] = 1;
     data[11..43].copy_from_slice(&authority);
+    emit_event(
+        EventKind::ExchangeInitialized,
+        &accounts[0].address().to_bytes(),
+        REGISTRY_EVENT_SEQUENCE,
+        handlers::event_timestamp(),
+        &payload_empty(),
+    );
     Ok(())
 }
 
@@ -146,6 +168,13 @@ pub fn register_instrument(
     data[8..10].copy_from_slice(&1u16.to_le_bytes());
     data[10] = 1;
     data[11..43].copy_from_slice(&id);
+    emit_event(
+        EventKind::StockInstrumentRegistered,
+        &accounts[1].address().to_bytes(),
+        REGISTRY_EVENT_SEQUENCE,
+        handlers::event_timestamp(),
+        &payload_registry(&id),
+    );
     Ok(())
 }
 
@@ -181,6 +210,13 @@ pub fn update_instrument(
     data[75..79].copy_from_slice(&pyth_feed_id.to_le_bytes());
     data[79] = oracle_channel;
     data[107..111].copy_from_slice(&exponent.to_le_bytes());
+    emit_event(
+        EventKind::StockInstrumentUpdated,
+        &accounts[1].address().to_bytes(),
+        REGISTRY_EVENT_SEQUENCE,
+        handlers::event_timestamp(),
+        &payload_registry(&id),
+    );
     Ok(())
 }
 
@@ -205,6 +241,13 @@ pub fn suspend_instrument(
         return Err(custom(StockStreamError::InvalidInstruction));
     }
     data[111] = 1;
+    emit_event(
+        EventKind::StockInstrumentSuspended,
+        &accounts[1].address().to_bytes(),
+        REGISTRY_EVENT_SEQUENCE,
+        handlers::event_timestamp(),
+        &payload_registry(&id),
+    );
     Ok(())
 }
 
@@ -244,6 +287,7 @@ pub fn create_perp_market(
         return Err(custom(StockStreamError::InvalidInstruction));
     }
     let authority = accounts[2].address().clone();
+    let market_key = accounts[1].address().to_bytes();
     handlers::initialize_market_account(program_id, &mut accounts[1], &authority, &id)?;
     handlers::configure_market_oracle(
         program_id,
@@ -251,5 +295,13 @@ pub fn create_perp_market(
         pyth_feed_id,
         oracle_channel,
         price_exponent,
-    )
+    )?;
+    emit_event(
+        EventKind::PerpMarketCreated,
+        &market_key,
+        REGISTRY_EVENT_SEQUENCE,
+        handlers::event_timestamp(),
+        &payload_registry(&id),
+    );
+    Ok(())
 }

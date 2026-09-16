@@ -9,7 +9,6 @@ use pinocchio::sysvars::instructions::Instructions;
 #[cfg(any(target_os = "solana", target_arch = "bpf"))]
 use pinocchio::sysvars::{clock::Clock, Sysvar};
 use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
-use pinocchio_log::logger::Logger;
 use pinocchio_token::instructions::Transfer;
 
 use crate::{
@@ -143,7 +142,7 @@ pub const OFF_CHAIN_TEST_NOW: i64 = 0; // unused on-chain; keeps the constant de
 #[cfg(not(any(target_os = "solana", target_arch = "bpf")))]
 pub const OFF_CHAIN_TEST_NOW: i64 = 1_700_000_000;
 
-fn current_unix_timestamp() -> Result<i64, ProgramError> {
+pub(crate) fn current_unix_timestamp() -> Result<i64, ProgramError> {
     #[cfg(any(target_os = "solana", target_arch = "bpf"))]
     {
         Ok(Clock::get()?.unix_timestamp)
@@ -534,6 +533,7 @@ fn update_market_risk(
     }
     signer(&accounts[1])?;
     let authority = accounts[1].address().to_bytes();
+    let market_key = accounts[0].address().to_bytes();
     let data = market_data(&mut accounts[0], program_id)?;
     let mut header = initialized_header(data)?;
     if header.market_authority != authority {
@@ -542,7 +542,19 @@ fn update_market_risk(
     header.initial_margin_bps = initial;
     header.maintenance_margin_bps = maintenance;
     header.maximum_leverage = leverage;
-    write_header(data, &header)
+    let sequence = next_event_sequence(&mut header)?;
+    let timestamp = current_unix_timestamp()
+        .map(|t| t.max(0) as u64)
+        .unwrap_or(0);
+    write_header(data, &header)?;
+    crate::events::emit_event(
+        crate::events::EventKind::MarketRiskUpdated,
+        &market_key,
+        sequence,
+        timestamp,
+        &crate::events::payload_empty(),
+    );
+    Ok(())
 }
 
 fn transition_market(
@@ -555,13 +567,39 @@ fn transition_market(
     }
     signer(&accounts[1])?;
     let authority = accounts[1].address().to_bytes();
+    let market_key = accounts[0].address().to_bytes();
     let data = market_data(&mut accounts[0], program_id)?;
     let mut header = initialized_header(data)?;
     if header.market_authority != authority {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
     header.mode = mode;
-    write_header(data, &header)
+    let sequence = next_event_sequence(&mut header)?;
+    let timestamp = current_unix_timestamp()
+        .map(|t| t.max(0) as u64)
+        .unwrap_or(0);
+    write_header(data, &header)?;
+    // `dispatch` collapses several distinct opcodes into this single `mode`
+    // value before this handler ever runs (PAUSE_MARKET and CLOSE_MARKET
+    // both arrive as mode 0; RESUME_MARKET and RESOLVE_CORPORATE_ACTION
+    // both arrive as mode 1 -- see `instruction.rs::StockStreamInstruction::decode`),
+    // so this handler genuinely cannot distinguish `MarketClosed` from
+    // `MarketPaused`, or `CorporateActionResolved` from `MarketResumed`.
+    // Only the mode-distinguishable events are emitted here.
+    let kind = match mode {
+        0 => crate::events::EventKind::MarketPaused,
+        1 => crate::events::EventKind::MarketResumed,
+        2 => crate::events::EventKind::MarketCloseOnly,
+        _ => crate::events::EventKind::CorporateActionEntered,
+    };
+    crate::events::emit_event(
+        kind,
+        &market_key,
+        sequence,
+        timestamp,
+        &crate::events::payload_empty(),
+    );
+    Ok(())
 }
 
 fn scratch_data<'a>(
@@ -736,8 +774,15 @@ fn initialize_vault(program_id: &Address, accounts: &mut [AccountView]) -> Progr
     header.set_reconciliation_status(ReconciliationStatus::Reconciled);
     header.set_vault_surplus(0);
     let sequence = next_event_sequence(&mut header)?;
+    let timestamp = event_timestamp();
     write_header(data, &header)?;
-    log_custody_event("VaultInitialized", &market_key, None, 0, sequence, 0, &mint);
+    crate::events::emit_event(
+        crate::events::EventKind::VaultInitialized,
+        &market_key,
+        sequence,
+        timestamp,
+        &crate::events::payload_empty(),
+    );
     Ok(())
 }
 
@@ -804,17 +849,19 @@ fn deposit_collateral(
     Transfer::<&AccountView>::new(&rest[2], &rest[3], &rest[0], amount)
         .invoke_with_program(rest[5].address())?;
     write_seat(data, seat_index, &seat)?;
-    let mint = rest[4].address().to_bytes();
     let sequence = next_event_sequence(&mut header)?;
+    let timestamp = event_timestamp();
     write_header(data, &header)?;
-    log_custody_event(
-        "CollateralDeposited",
+    crate::events::emit_event(
+        crate::events::EventKind::CollateralDeposited,
         &market_key,
-        Some(seat_index as u16),
-        amount,
         sequence,
-        seat.available_collateral.max(0) as u64,
-        &mint,
+        timestamp,
+        &crate::events::payload_seat_amount(
+            seat_index as u16,
+            amount,
+            seat.available_collateral.max(0) as u64,
+        ),
     );
     Ok(())
 }
@@ -910,17 +957,15 @@ fn withdraw_collateral(
     Transfer::<&AccountView>::new(&rest[3], &rest[1], &rest[4], amount)
         .invoke_signed_with_program(&signer_seeds, rest[5].address())?;
     write_seat(data, seat_index, &seat)?;
-    let mint = rest[2].address().to_bytes();
     let sequence = next_event_sequence(&mut header)?;
+    let timestamp = event_timestamp();
     write_header(data, &header)?;
-    log_custody_event(
-        "CollateralWithdrawn",
+    crate::events::emit_event(
+        crate::events::EventKind::CollateralWithdrawn,
         &market_key,
-        Some(seat_index as u16),
-        amount,
         sequence,
-        vault_after,
-        &mint,
+        timestamp,
+        &crate::events::payload_seat_amount(seat_index as u16, amount, vault_after),
     );
     Ok(())
 }
@@ -966,56 +1011,6 @@ fn validate_custody_tokens(
     Ok(())
 }
 
-fn hex32(bytes: &[u8; 32]) -> [u8; 64] {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = [0u8; 64];
-    let mut i = 0;
-    while i < 32 {
-        out[i * 2] = HEX[(bytes[i] >> 4) as usize];
-        out[i * 2 + 1] = HEX[(bytes[i] & 0xf) as usize];
-        i += 1;
-    }
-    out
-}
-
-/// Emits one custody event as a Solana program log via `pinocchio_log`
-/// (`sol_log_` on-chain; `println!` off-chain, so this is exercisable in
-/// host tests without an SBF runtime). Logs, not account bytes, carry these
-/// events -- growing `MARKET_ACCOUNT_SIZE` for an event ring buffer would
-/// cascade into every existing offset/test in this program for no benefit
-/// an indexer cannot already get from transaction logs. `sequence` is
-/// `header.global_event_sequence`, the same monotonic counter fill events
-/// use, advanced by the caller before this is called.
-#[allow(clippy::too_many_arguments)]
-fn log_custody_event(
-    kind: &str,
-    market: &[u8; 32],
-    seat_index: Option<u16>,
-    amount: u64,
-    sequence: u64,
-    resulting_balance: u64,
-    mint: &[u8; 32],
-) {
-    let mut logger = Logger::<256>::default();
-    logger.append("SS:");
-    logger.append(kind);
-    logger.append(" market=");
-    logger.append(unsafe { core::str::from_utf8_unchecked(&hex32(market)) });
-    if let Some(seat) = seat_index {
-        logger.append(" seat=");
-        logger.append(seat as u64);
-    }
-    logger.append(" amount=");
-    logger.append(amount);
-    logger.append(" seq=");
-    logger.append(sequence);
-    logger.append(" balance=");
-    logger.append(resulting_balance);
-    logger.append(" mint=");
-    logger.append(unsafe { core::str::from_utf8_unchecked(&hex32(mint)) });
-    logger.log();
-}
-
 /// Advances and returns the market's shared monotonic event-sequence
 /// counter (also used for fill events), for a custody event about to be
 /// logged.
@@ -1025,6 +1020,16 @@ fn next_event_sequence(header: &mut MarketStateHeader) -> Result<u64, ProgramErr
         .checked_add(1)
         .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
     Ok(header.global_event_sequence)
+}
+
+/// The protocol clock value events are stamped with (`EventHeader::timestamp`).
+/// Never fails: a clock-sysvar error must not prevent an otherwise-valid
+/// state transition from committing, so this degrades to `0` rather than
+/// aborting the instruction over a logging concern.
+pub(crate) fn event_timestamp() -> u64 {
+    current_unix_timestamp()
+        .map(|t| t.max(0) as u64)
+        .unwrap_or(0)
 }
 
 /// Sums every seat's `available_collateral` -- the only field that ever
@@ -1084,16 +1089,15 @@ fn transfer_to_insurance_fund(
             .ok_or(custom(StockStreamError::ArithmeticOverflow))?,
     );
     let sequence = next_event_sequence(&mut header)?;
-    let mint = header.collateral_mint;
+    let timestamp = event_timestamp();
+    let insurance_fund_balance = header.insurance_fund_balance();
     write_header(data, &header)?;
-    log_custody_event(
-        "InsuranceFundChanged",
+    crate::events::emit_event(
+        crate::events::EventKind::InsuranceFundChanged,
         &market_key,
-        None,
-        amount,
         sequence,
-        header.insurance_fund_balance(),
-        &mint,
+        timestamp,
+        &crate::events::payload_seat_amount(crate::events::NO_SEAT, amount, insurance_fund_balance),
     );
     Ok(())
 }
@@ -1175,20 +1179,19 @@ fn withdraw_ledger_balance(
         header.set_protocol_fee_balance(updated_balance);
     }
     let sequence = next_event_sequence(&mut header)?;
-    let mint = header.collateral_mint;
+    let timestamp = event_timestamp();
     write_header(data, &header)?;
-    log_custody_event(
-        if from_insurance {
-            "InsuranceFundChanged"
-        } else {
-            "ProtocolFeeCollected"
-        },
+    let kind = if from_insurance {
+        crate::events::EventKind::InsuranceFundChanged
+    } else {
+        crate::events::EventKind::ProtocolFeesChanged
+    };
+    crate::events::emit_event(
+        kind,
         &market_key,
-        None,
-        amount,
         sequence,
-        updated_balance,
-        &mint,
+        timestamp,
+        &crate::events::payload_seat_amount(crate::events::NO_SEAT, amount, updated_balance),
     );
     Ok(())
 }
@@ -1256,16 +1259,15 @@ fn record_bad_debt(
     );
     write_seat(data, seat_index as usize, &seat)?;
     let sequence = next_event_sequence(&mut header)?;
-    let mint = header.collateral_mint;
+    let timestamp = event_timestamp();
+    let recognized_bad_debt = header.recognized_bad_debt();
     write_header(data, &header)?;
-    log_custody_event(
-        "BadDebtRecorded",
+    crate::events::emit_event(
+        crate::events::EventKind::BadDebtRecorded,
         &market_key,
-        Some(seat_index),
-        amount,
         sequence,
-        header.recognized_bad_debt(),
-        &mint,
+        timestamp,
+        &crate::events::payload_seat_amount(seat_index, amount, recognized_bad_debt),
     );
     Ok(())
 }
@@ -1304,16 +1306,15 @@ fn resolve_bad_debt(
             .ok_or(custom(StockStreamError::CustodyViolation))?,
     );
     let sequence = next_event_sequence(&mut header)?;
-    let mint = header.collateral_mint;
+    let timestamp = event_timestamp();
+    let recognized_bad_debt = header.recognized_bad_debt();
     write_header(data, &header)?;
-    log_custody_event(
-        "BadDebtResolved",
+    crate::events::emit_event(
+        crate::events::EventKind::BadDebtResolved,
         &market_key,
-        None,
-        amount,
         sequence,
-        header.recognized_bad_debt(),
-        &mint,
+        timestamp,
+        &crate::events::payload_seat_amount(crate::events::NO_SEAT, amount, recognized_bad_debt),
     );
     Ok(())
 }
@@ -1360,18 +1361,18 @@ fn reconcile_vault(program_id: &Address, accounts: &mut [AccountView]) -> Progra
         .and_then(|v| v.checked_sub(i128::from(header.recognized_bad_debt())))
         .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
     let previous_status = header.reconciliation_status();
-    let (status, surplus, event_kind) = if actual == expected {
+    let (status, surplus, kind) = if actual == expected {
         (
             ReconciliationStatus::Reconciled,
             0u64,
-            "ReconciliationRestored",
+            crate::events::EventKind::VaultReconciled,
         )
     } else if actual > expected {
         (
             ReconciliationStatus::SurplusDetected,
             u64::try_from(actual - expected)
                 .map_err(|_| custom(StockStreamError::ArithmeticOverflow))?,
-            "VaultSurplusDetected",
+            crate::events::EventKind::VaultSurplusDetected,
         )
     } else {
         let escalated = matches!(previous_status, 2 | 3);
@@ -1383,27 +1384,21 @@ fn reconcile_vault(program_id: &Address, accounts: &mut [AccountView]) -> Progra
                 ReconciliationStatus::DeficitDetected
             },
             0u64,
-            "VaultDeficitDetected",
+            crate::events::EventKind::VaultDeficitDetected,
         )
     };
     header.set_reconciliation_status(status);
     header.set_vault_surplus(surplus);
     let sequence = next_event_sequence(&mut header)?;
-    let mint = header.collateral_mint;
-    let deficit_or_surplus = if actual >= expected {
-        surplus
-    } else {
-        u64::try_from(expected - actual).unwrap_or(u64::MAX)
-    };
+    let timestamp = event_timestamp();
+    let expected_u64 = u64::try_from(expected).unwrap_or(u64::MAX);
     write_header(data, &header)?;
-    log_custody_event(
-        event_kind,
+    crate::events::emit_event(
+        kind,
         &market_key,
-        None,
-        deficit_or_surplus,
         sequence,
-        actual.max(0) as u64,
-        &mint,
+        timestamp,
+        &crate::events::payload_reconciliation(actual.max(0) as u64, expected_u64, status as u8),
     );
     Ok(())
 }
@@ -1601,6 +1596,7 @@ fn consume_oracle_update(
         return Err(custom(StockStreamError::OracleUnavailable));
     }
     let timestamp = verified.feed_update_timestamp_us / 1_000_000;
+    let market_key = accounts[0].address().to_bytes();
     let data = market_data(&mut accounts[0], program_id)?;
     let mut header = initialized_header(data)?;
     let configured_feed = u32::from_le_bytes(header.reserved_upgrade[64..68].try_into().unwrap());
@@ -1621,12 +1617,43 @@ fn consume_oracle_update(
     header.last_verified_oracle_price = verified.price;
     header.last_verified_oracle_timestamp = timestamp;
     header.oracle_valid = 1;
+    let previous_mode = header.mode;
     header.mode = match verified.session {
         0 | 1 | 2 => MarketMode::Open as u8,
         3 | 4 => MarketMode::CloseOnly as u8,
         _ => return Err(custom(StockStreamError::OracleUnavailable)),
     };
-    write_header(data, &header)
+    let sequence = next_event_sequence(&mut header)?;
+    write_header(data, &header)?;
+    crate::events::emit_event(
+        crate::events::EventKind::OracleUpdated,
+        &market_key,
+        sequence,
+        timestamp,
+        &crate::events::payload_oracle(
+            verified.price,
+            verified.exponent,
+            verified.confidence,
+            verified.session,
+        ),
+    );
+    if header.mode != previous_mode {
+        let sequence = next_event_sequence(&mut header)?;
+        write_header(data, &header)?;
+        crate::events::emit_event(
+            crate::events::EventKind::MarketSessionChanged,
+            &market_key,
+            sequence,
+            timestamp,
+            &crate::events::payload_oracle(
+                verified.price,
+                verified.exponent,
+                verified.confidence,
+                verified.session,
+            ),
+        );
+    }
+    Ok(())
 }
 
 // Real MagicBlock lifecycle CPI handlers (DelegateMarket, CommitMarket,
@@ -1768,7 +1795,28 @@ fn authorize_trading_session(
     session_state.max_exposure = maximum_exposure;
     session_state.max_open_orders = maximum_open_orders;
     let session_bytes = unsafe { accounts[2].borrow_unchecked_mut() };
-    session::write_session(session_bytes, &session_state)
+    session::write_session(session_bytes, &session_state)?;
+    // Re-acquire the market borrow: the original `data`/`header` above were
+    // only ever needed for the validation/seat lookup at the top of this
+    // function, and holding that borrow open across the CreateAccount CPI
+    // and every `accounts[1]`/`accounts[2]` access in between would
+    // conflict with them under the borrow checker (this is the same
+    // split-then-reacquire pattern used throughout this file whenever a
+    // handler needs the market header both before and after touching other
+    // accounts).
+    let data = market_data(&mut accounts[0], program_id)?;
+    let mut header = initialized_header(data)?;
+    let sequence = next_event_sequence(&mut header)?;
+    let timestamp = event_timestamp();
+    write_header(data, &header)?;
+    crate::events::emit_event(
+        crate::events::EventKind::TradingSessionAuthorized,
+        &market_addr.to_bytes(),
+        sequence,
+        timestamp,
+        &crate::events::payload_session(seat_index, &session_signer.to_bytes(), 0),
+    );
+    Ok(())
 }
 
 /// Accounts: `[market, owner (signer), session (writable, PDA), session_signer]`.
@@ -1797,7 +1845,20 @@ fn revoke_trading_session(
     // not an error -- there is no meaningful "unrevoke" to protect against.
     session_state.revoked = 1;
     let bytes = unsafe { accounts[2].borrow_unchecked_mut() };
-    session::write_session(bytes, &session_state)
+    session::write_session(bytes, &session_state)?;
+    let data = market_data(&mut accounts[0], program_id)?;
+    let mut header = initialized_header(data)?;
+    let sequence = next_event_sequence(&mut header)?;
+    let timestamp = event_timestamp();
+    write_header(data, &header)?;
+    crate::events::emit_event(
+        crate::events::EventKind::TradingSessionRevoked,
+        &market_addr.to_bytes(),
+        sequence,
+        timestamp,
+        &crate::events::payload_session(seat_index, &session_signer.to_bytes(), 0),
+    );
+    Ok(())
 }
 
 /// Accounts: `[market, owner (signer), session (writable, PDA), session_signer]`.
@@ -1912,6 +1973,18 @@ fn close_trading_session(
     accounts[1].set_lamports(owner_lamports.saturating_add(refund));
     let bytes = unsafe { accounts[2].borrow_unchecked_mut() };
     bytes.fill(0);
+    let data = market_data(&mut accounts[0], program_id)?;
+    let mut header = initialized_header(data)?;
+    let sequence = next_event_sequence(&mut header)?;
+    let timestamp = event_timestamp();
+    write_header(data, &header)?;
+    crate::events::emit_event(
+        crate::events::EventKind::TradingSessionClosed,
+        &market_addr.to_bytes(),
+        sequence,
+        timestamp,
+        &crate::events::payload_session(seat_index, &session_signer.to_bytes(), 0),
+    );
     Ok(())
 }
 
@@ -1921,8 +1994,9 @@ fn create_seat(program_id: &Address, accounts: &mut [AccountView], index: usize)
     }
     signer(&accounts[1])?;
     let trader = accounts[1].address().to_bytes();
+    let market_key = accounts[0].address().to_bytes();
     let data = market_data(&mut accounts[0], program_id)?;
-    let header = initialized_header(data)?;
+    let mut header = initialized_header(data)?;
     if index >= MAX_TRADER_SEATS {
         return Err(custom(StockStreamError::InvalidSeat));
     }
@@ -1942,7 +2016,18 @@ fn create_seat(program_id: &Address, accounts: &mut [AccountView], index: usize)
     seat.occupancy = 1;
     seat.trader = trader;
     seat.sequence = header.global_event_sequence;
-    write_seat(data, index, &seat)
+    write_seat(data, index, &seat)?;
+    let sequence = next_event_sequence(&mut header)?;
+    let timestamp = event_timestamp();
+    write_header(data, &header)?;
+    crate::events::emit_event(
+        crate::events::EventKind::TraderSeatCreated,
+        &market_key,
+        sequence,
+        timestamp,
+        &crate::events::payload_seat(index as u16),
+    );
+    Ok(())
 }
 
 fn close_seat(program_id: &Address, accounts: &mut [AccountView], index: usize) -> ProgramResult {
@@ -1951,8 +2036,9 @@ fn close_seat(program_id: &Address, accounts: &mut [AccountView], index: usize) 
     }
     signer(&accounts[1])?;
     let trader = accounts[1].address().to_bytes();
+    let market_key = accounts[0].address().to_bytes();
     let data = market_data(&mut accounts[0], program_id)?;
-    initialized_header(data)?;
+    let mut header = initialized_header(data)?;
     let seat = seat_at(data, index)?;
     if seat.trader != trader {
         return Err(custom(StockStreamError::InvalidSeat));
@@ -1960,7 +2046,18 @@ fn close_seat(program_id: &Address, accounts: &mut [AccountView], index: usize) 
     if !seat.can_close() {
         return Err(custom(StockStreamError::SeatNotEmpty));
     }
-    write_seat(data, index, &TraderSeat::empty())
+    write_seat(data, index, &TraderSeat::empty())?;
+    let sequence = next_event_sequence(&mut header)?;
+    let timestamp = event_timestamp();
+    write_header(data, &header)?;
+    crate::events::emit_event(
+        crate::events::EventKind::TraderSeatClosed,
+        &market_key,
+        sequence,
+        timestamp,
+        &crate::events::payload_seat(index as u16),
+    );
+    Ok(())
 }
 
 #[inline(never)]
@@ -2237,15 +2334,19 @@ fn place_order_core(
                 .ok_or(custom(StockStreamError::ArithmeticOverflow))?,
         );
         let sequence = next_event_sequence(&mut updated)?;
+        let timestamp = event_timestamp();
+        let protocol_fee_balance = updated.protocol_fee_balance();
         write_header(data, &updated)?;
-        log_custody_event(
-            "ProtocolFeeCollected",
+        crate::events::emit_event(
+            crate::events::EventKind::ProtocolFeesChanged,
             &market_address,
-            None,
-            fee_u64,
             sequence,
-            updated.protocol_fee_balance(),
-            &updated.collateral_mint,
+            timestamp,
+            &crate::events::payload_seat_amount(
+                crate::events::NO_SEAT,
+                fee_u64,
+                protocol_fee_balance,
+            ),
         );
     } else {
         write_header(data, &updated)?;
@@ -2786,6 +2887,21 @@ fn cancel_order(
         return Err(custom(StockStreamError::InvalidSeat));
     }
     cancel_order_core(data, seat_index, order_key)?;
+    let mut header = initialized_header(data)?;
+    let sequence = next_event_sequence(&mut header)?;
+    let timestamp = event_timestamp();
+    write_header(data, &header)?;
+    // `cancel_order_core` does not currently surface the removed leaf's
+    // side/price/quantity back to its caller, so this event carries the
+    // seat and order key only; `side=0xff` marks "not available" rather
+    // than a real bid/ask value.
+    crate::events::emit_event(
+        crate::events::EventKind::OrderCancelled,
+        &market_address,
+        sequence,
+        timestamp,
+        &crate::events::payload_order(seat_index as u16, order_key, 0xff, 0, 0),
+    );
     if let Some(trading_session) = trading_session {
         consume_session_action(&mut accounts[2], trading_session, 0, action_nonce, now)?;
     }
@@ -2802,6 +2918,7 @@ fn update_funding(
     }
     signer(&accounts[1])?;
     let authority = accounts[1].address().to_bytes();
+    let market_key = accounts[0].address().to_bytes();
     let data = market_data(&mut accounts[0], program_id)?;
     let mut header = initialized_header(data)?;
     if header.market_authority != authority {
@@ -2819,7 +2936,16 @@ fn update_funding(
     }
     header.funding_accumulator = accumulator;
     header.last_funding_timestamp = timestamp;
-    write_header(data, &header)
+    let sequence = next_event_sequence(&mut header)?;
+    write_header(data, &header)?;
+    crate::events::emit_event(
+        crate::events::EventKind::FundingAccumulatorUpdated,
+        &market_key,
+        sequence,
+        timestamp,
+        &crate::events::payload_funding(crate::events::NO_SEAT, accumulator, 0),
+    );
+    Ok(())
 }
 
 fn liquidate(
@@ -2875,6 +3001,8 @@ fn liquidate(
     )
     .map_err(risk_error)?;
     write_seat(data, seat_index, &seat)?;
+    let liquidation_sequence = next_event_sequence(&mut header)?;
+    let liquidation_timestamp = event_timestamp();
     if liquidation_fee > 0 {
         let fee_u64 = u64::try_from(liquidation_fee)
             .map_err(|_| custom(StockStreamError::ArithmeticOverflow))?;
@@ -2884,16 +3012,39 @@ fn liquidate(
                 .checked_add(fee_u64)
                 .ok_or(custom(StockStreamError::ArithmeticOverflow))?,
         );
-        let sequence = next_event_sequence(&mut header)?;
+        let fee_sequence = next_event_sequence(&mut header)?;
+        let protocol_fee_balance = header.protocol_fee_balance();
         write_header(data, &header)?;
-        log_custody_event(
-            "ProtocolFeeCollected",
+        crate::events::emit_event(
+            crate::events::EventKind::PositionLiquidated,
             &market_key,
-            Some(seat_index as u16),
-            fee_u64,
-            sequence,
-            header.protocol_fee_balance(),
-            &header.collateral_mint,
+            liquidation_sequence,
+            liquidation_timestamp,
+            &crate::events::payload_liquidation(
+                seat_index as u16,
+                quantity.unsigned_abs() as u64,
+                header.last_verified_oracle_price,
+            ),
+        );
+        crate::events::emit_event(
+            crate::events::EventKind::ProtocolFeesChanged,
+            &market_key,
+            fee_sequence,
+            event_timestamp(),
+            &crate::events::payload_seat_amount(seat_index as u16, fee_u64, protocol_fee_balance),
+        );
+    } else {
+        write_header(data, &header)?;
+        crate::events::emit_event(
+            crate::events::EventKind::PositionLiquidated,
+            &market_key,
+            liquidation_sequence,
+            liquidation_timestamp,
+            &crate::events::payload_liquidation(
+                seat_index as u16,
+                quantity.unsigned_abs() as u64,
+                header.last_verified_oracle_price,
+            ),
         );
     }
     Ok(())

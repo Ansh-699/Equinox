@@ -41,7 +41,7 @@ use pinocchio_system::instructions::CreateAccount;
 
 use crate::{
     error::StockStreamError,
-    handlers::{custom, initialized_header, market_data, write_header},
+    handlers::{custom, event_timestamp, initialized_header, market_data, write_header},
     registry::PERP_MARKET_SEED,
     scratch::{
         derive_settlement_scratch, ScratchStatus, SettlementScratchHeader, SETTLEMENT_SCRATCH_LEN,
@@ -346,7 +346,28 @@ pub fn delegate_market(
         header.set_commit_interval_ms(COMMIT_INTERVAL_MS);
         header.set_expected_commit_sequence(1);
         header.set_pending_undelegation(false);
+        let sequence = header
+            .global_event_sequence
+            .checked_add(1)
+            .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
+        header.global_event_sequence = sequence;
+        let delegation_sequence = header.delegation_sequence();
         write_header(data, &header)?;
+        // The Delegation Program CPI below either succeeds (this whole
+        // instruction, this write included, commits) or fails (the runtime
+        // reverts every write in this instruction atomically) -- a failed
+        // transaction's logs are still visible over RPC, which is exactly
+        // why every indexer-side decoder in this program checks
+        // `meta.err` and discards all events from a failed transaction
+        // wholesale, rather than relying on emission order relative to
+        // the CPI.
+        crate::events::emit_event(
+            crate::events::EventKind::MarketDelegated,
+            &market_key.to_bytes(),
+            sequence,
+            event_timestamp(),
+            &crate::events::payload_delegation(&validator.to_bytes(), delegation_sequence),
+        );
     }
 
     // 1. Create the buffer PDA (owned by StockStream) sized to hold a full
@@ -540,17 +561,32 @@ fn commit_market_inner(
     let data = market_data(&mut accounts[0], program_id)?;
     let mut header = initialized_header(data)?;
     header.set_last_committed_sequence(sequence);
-    match kind {
+    let event_kind = match kind {
         CommitKind::CommitOnly => {
             header.set_expected_commit_sequence(sequence.saturating_add(1));
+            crate::events::EventKind::CommitRequested
         }
         CommitKind::CommitAndUndelegate => {
             header.set_delegation_status(DelegationStatus::Undelegating);
             header.set_pending_undelegation(true);
             header.set_expected_final_commit_sequence(sequence);
+            crate::events::EventKind::UndelegationRequested
         }
-    }
-    write_header(data, &header)
+    };
+    let event_sequence = header
+        .global_event_sequence
+        .checked_add(1)
+        .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
+    header.global_event_sequence = event_sequence;
+    write_header(data, &header)?;
+    crate::events::emit_event(
+        event_kind,
+        &market_key.to_bytes(),
+        event_sequence,
+        event_timestamp(),
+        &crate::events::payload_delegation(&header.validator(), sequence),
+    );
+    Ok(())
 }
 
 pub fn commit_market(
@@ -684,6 +720,7 @@ pub fn external_undelegate(
         market_bytes.copy_from_slice(&buffer_bytes);
     }
 
+    let market_key = accounts[0].address().to_bytes();
     let data = market_data(&mut accounts[0], program_id)?;
     let mut header = initialized_header(data)?;
     if header.delegation_status() != DelegationStatus::Undelegating as u8
@@ -695,5 +732,19 @@ pub fn external_undelegate(
     header.set_delegation_status(DelegationStatus::Restored);
     header.set_pending_undelegation(false);
     header.set_last_committed_sequence(final_sequence);
-    write_header(data, &header)
+    let event_sequence = header
+        .global_event_sequence
+        .checked_add(1)
+        .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
+    header.global_event_sequence = event_sequence;
+    let validator = header.validator();
+    write_header(data, &header)?;
+    crate::events::emit_event(
+        crate::events::EventKind::MarketRestored,
+        &market_key,
+        event_sequence,
+        event_timestamp(),
+        &crate::events::payload_delegation(&validator, final_sequence),
+    );
+    Ok(())
 }
