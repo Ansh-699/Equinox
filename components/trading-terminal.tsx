@@ -128,9 +128,11 @@ export function TradingTerminal() {
     // (lib/browser-session.ts). One main-wallet signature authorizes
     // trading; trades are then signed by the session key alone.
     void createSession(auth.walletAddress, marketAddress, 0).then((created) => {
+      const info = lookupSession(auth.walletAddress!, marketAddress, 0);
+      const signerAddress = created.sessionSignerAddress;
       setNotice(created.reused
-        ? `Reused browser session key for PDA ${created.sessionPda}. One main-wallet approval will authorize it on-chain.`
-        : `New browser session key ${created.keyId} created (memory only). PDA ${created.sessionPda}. One main-wallet approval will authorize it.`);
+        ? `Reused browser session key (${(info?.sessionSignerAddress ?? created.sessionSignerAddress).slice(0, 6)}…) for PDA ${created.sessionPda}. One main-wallet approval will authorize it on-chain.`
+        : `New browser session key created (memory only, key ${(info?.sessionSignerAddress ?? created.sessionSignerAddress).slice(0, 6)}…). PDA ${created.sessionPda}. One main-wallet approval will authorize it.`);
     }).catch((error: unknown) => setNotice(error instanceof Error ? error.message : "Session key creation failed"));
   }
 
