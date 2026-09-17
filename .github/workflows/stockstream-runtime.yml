@@ -7,6 +7,7 @@ on:
       - "programs/stockstream/**"
       - "toolchain/**"
       - "scripts/install-stockstream-toolchain.sh"
+      - "scripts/verify-sbf-artifact.py"
 
 jobs:
   runtime:
@@ -18,9 +19,21 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: Install one matching Agave release
         run: bash scripts/install-stockstream-toolchain.sh
-      - name: Verify artifact headers
+      - name: Verify artifact headers and identity (Gate 2 regression check)
         run: |
           file target/deploy/stockstream.so
           readelf -h target/deploy/stockstream.so
+          python3 scripts/verify-sbf-artifact.py target/deploy/stockstream.so
+      - name: Verify the SBF artifact is reproducible from a clean worktree
+        run: |
+          cp target/deploy/stockstream.so /tmp/stockstream-working-tree.so
+          rm -rf /tmp/stockstream-repro
+          git worktree add --detach /tmp/stockstream-repro HEAD
+          (
+            cd /tmp/stockstream-repro
+            cargo build-sbf --manifest-path programs/stockstream/Cargo.toml --features bpf-entrypoint
+          )
+          cmp /tmp/stockstream-working-tree.so /tmp/stockstream-repro/target/deploy/stockstream.so
+          git worktree remove --force /tmp/stockstream-repro
       - name: Execute runtime harness
         run: cargo test -p stockstream --features runtime-tests --test runtime_initialize -- --nocapture
