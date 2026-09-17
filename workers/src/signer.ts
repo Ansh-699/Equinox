@@ -179,26 +179,206 @@ export class MockSigner implements Signer {
   }
 }
 
+/** What a Worker secret binding must supply to construct a production
+ * signer for one role. Both fields are opaque strings because Worker
+ * secrets are always strings at runtime -- this module does the parsing. */
+export interface ProductionSignerSecret {
+  role: SignerRole;
+  /** An Ed25519 private key, either PKCS8-DER base64-encoded or a JWK JSON
+   * string (`{"kty":"OKP","crv":"Ed25519","d":...,"x":...}`) -- whichever
+   * format the KMS/secret-store this is sourced from produces. */
+  privateKeyMaterial: string;
+  /** The public key this role's signer is expected to derive, as 64-char
+   * lowercase hex or base64 -- a misconfigured or silently-rotated secret
+   * is rejected at construction time rather than signing with the wrong
+   * key. */
+  expectedPublicKey: string;
+}
+
+function parsePublicKeyString(value: string): Uint8Array {
+  if (/^[0-9a-f]{64}$/i.test(value)) {
+    const bytes = new Uint8Array(32);
+    for (let i = 0; i < 32; i += 1) bytes[i] = parseInt(value.slice(i * 2, i * 2 + 2), 16);
+    return bytes;
+  }
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  if (bytes.length !== 32) throw new Error("expected public key must decode to exactly 32 bytes");
+  return bytes;
+}
+
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) diff |= a[i] ^ b[i];
+  return diff === 0;
+}
+
+/** Parses either PKCS8-DER-base64 or JWK-JSON private key material into
+ * the raw 32-byte Ed25519 seed PKCS8 wraps. Configuration errors here are
+ * deliberately redacted: the thrown message never includes any byte of
+ * the input, only a description of what shape was expected, so a
+ * misconfigured secret can be diagnosed from logs without ever placing
+ * key material in them. */
+function seedFromPrivateKeyMaterial(material: string): Uint8Array {
+  const trimmed = material.trim();
+  try {
+    if (trimmed.startsWith("{")) {
+      const jwk = JSON.parse(trimmed) as { kty?: string; crv?: string; d?: string };
+      if (jwk.kty !== "OKP" || jwk.crv !== "Ed25519" || !jwk.d) {
+        throw new Error("shape mismatch");
+      }
+      const binary = atob(jwk.d.replace(/-/g, "+").replace(/_/g, "/"));
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+      if (bytes.length !== 32) throw new Error("wrong length");
+      return bytes;
+    }
+    const binary = atob(trimmed);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    // Accept either a bare 32-byte seed or a full PKCS8 DER envelope.
+    if (bytes.length === 32) return bytes;
+    if (bytes.length === PKCS8_ED25519_PREFIX.length + 32 && bytes.slice(0, PKCS8_ED25519_PREFIX.length).every((b, i) => b === PKCS8_ED25519_PREFIX[i])) {
+      return bytes.slice(PKCS8_ED25519_PREFIX.length);
+    }
+    throw new Error("wrong length or unrecognized PKCS8 envelope");
+  } catch {
+    throw new Error(
+      "malformed private key material: expected a JWK JSON object ({kty:'OKP',crv:'Ed25519',d:...}) " +
+        "or a base64-encoded 32-byte seed / PKCS8 DER envelope -- redacted, not logging the value itself",
+    );
+  }
+}
+
 /**
- * The production deployment boundary. Deliberately unimplemented: a real
- * production keeper signer must be backed by a Worker secret binding plus
- * an encrypted-key or remote-signing service (a KMS/HSM API, or a
- * dedicated signing microservice this Worker calls over HTTPS), never a
- * plaintext key baked into source or environment. Which service that is
- * is an infrastructure/deployment decision outside this codebase's scope
- * (no credentials or endpoints for one exist here), so this throws rather
- * than faking a working implementation. This blocks *live production
- * deployment*, not code completion -- every keeper job and transport this
- * module supports is written against the `Signer` interface and already
- * works end-to-end against the dev/test adapters above.
+ * The real production signer: imports an Ed25519 key from a Worker secret
+ * binding and validates its derived public key against the configured
+ * `expectedPublicKey` before it will sign anything. The `CryptoKey` used
+ * for actual signing (`sign()`) is imported non-extractable; a second,
+ * momentarily-extractable import is used only once, at construction, to
+ * derive the public key for that validation, and is never retained after
+ * validation returns.
+ *
+ * Never exports or returns private-key bytes to any caller, and never
+ * places key material in a thrown error or log line -- every failure
+ * message here is a fixed, redacted description, never a stringified
+ * secret.
  */
-export function createProductionSigner(_keyId: string): Signer {
-  throw new Error(
-    "createProductionSigner is not implemented: production keeper signing requires a " +
-      "secret-backed encrypted key store or a remote KMS/HSM signing service, which is an " +
-      "infrastructure decision with no credentials available in this codebase. Use " +
-      "LocalKeypairSigner (dev) or DeterministicTestSigner/MockSigner (tests) until one is wired up.",
-  );
+export class SecretBackedSigner implements Signer {
+  public readonly keyId: string;
+  private readonly seed: Uint8Array;
+  private readonly expectedPublicKey: Uint8Array;
+  private statePromise: Promise<{ signingKey: CryptoKey; publicKey: Uint8Array }> | undefined;
+
+  constructor(secret: ProductionSignerSecret, requestedRole: SignerRole) {
+    if (secret.role !== requestedRole) {
+      throw new Error(`signer role mismatch: this secret is bound to "${secret.role}", not "${requestedRole}"`);
+    }
+    this.keyId = `production:${requestedRole}`;
+    this.seed = seedFromPrivateKeyMaterial(secret.privateKeyMaterial);
+    this.expectedPublicKey = parsePublicKeyString(secret.expectedPublicKey);
+  }
+
+  private async state() {
+    if (!this.statePromise) {
+      this.statePromise = (async () => {
+        const pkcs8 = pkcs8FromSeed(this.seed);
+        // Extractable only transiently, to derive the public key; discarded
+        // (never assigned to `this`) once validation below completes.
+        const extractableKey = await crypto.subtle.importKey("pkcs8", pkcs8, { name: "Ed25519" }, true, ["sign"]);
+        const jwk = (await crypto.subtle.exportKey("jwk", extractableKey)) as JsonWebKey;
+        const publicKeyHandle = await crypto.subtle.importKey(
+          "jwk",
+          { kty: "OKP", crv: "Ed25519", x: jwk.x },
+          { name: "Ed25519" },
+          true,
+          ["verify"],
+        );
+        const publicKey = new Uint8Array((await crypto.subtle.exportKey("raw", publicKeyHandle)) as ArrayBuffer);
+        if (!bytesEqual(publicKey, this.expectedPublicKey)) {
+          throw new Error(
+            `signer public key mismatch for ${this.keyId}: the imported key does not derive the configured public key -- redacted, not logging either key`,
+          );
+        }
+        const signingKey = await crypto.subtle.importKey("pkcs8", pkcs8, { name: "Ed25519" }, false, ["sign"]);
+        return { signingKey, publicKey };
+      })();
+    }
+    return this.statePromise;
+  }
+
+  async publicKey(): Promise<Uint8Array> {
+    return (await this.state()).publicKey;
+  }
+
+  async sign(message: Uint8Array): Promise<Uint8Array> {
+    const { signingKey } = await this.state();
+    return new Uint8Array(await crypto.subtle.sign("Ed25519", signingKey, message));
+  }
+
+  async health(): Promise<SignerHealth> {
+    try {
+      await this.state();
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, detail: error instanceof Error ? error.message : "signer health check failed" };
+    }
+  }
+}
+
+/**
+ * The production deployment boundary. Falls back to the historical
+ * throwing behavior when `secret` is omitted (no Worker secret configured
+ * for this role yet) -- that failure blocks *live* deployment for this
+ * role, not code completion. When a secret *is* provided, constructs a
+ * real `SecretBackedSigner` against it.
+ */
+export function createProductionSigner(role: SignerRole, secret?: ProductionSignerSecret): Signer {
+  if (!secret) {
+    throw new Error(
+      `createProductionSigner("${role}") has no secret configured: production keeper signing requires a ` +
+        "Worker secret binding supplying a private key and its expected public key for this role. Use " +
+        "LocalKeypairSigner (dev) or DeterministicTestSigner/MockSigner (tests) until one is wired up.",
+    );
+  }
+  return new SecretBackedSigner(secret, role);
+}
+
+/**
+ * Adapter shape for a future remote KMS/HSM signing service: this Worker
+ * would send the message to sign over HTTPS and receive a signature back,
+ * never holding key material itself. No such service exists yet (no
+ * endpoint or credentials are available in this codebase), but the
+ * interface is defined now so `RemoteSigner` below only needs a real
+ * `fetch`-based implementation dropped in later, not a redesign of every
+ * caller that depends on `Signer`.
+ */
+export interface RemoteSignerTransport {
+  publicKey(): Promise<Uint8Array>;
+  sign(message: Uint8Array): Promise<Uint8Array>;
+  health(): Promise<SignerHealth>;
+}
+
+/** Delegates every `Signer` operation to a `RemoteSignerTransport` --
+ * e.g. an HTTPS call to a KMS/HSM-backed signing microservice. This class
+ * holds no key material at all; it is exactly as secure as the transport
+ * given to it. */
+export class RemoteSigner implements Signer {
+  constructor(public readonly keyId: string, private readonly transport: RemoteSignerTransport) {}
+
+  async publicKey(): Promise<Uint8Array> {
+    return this.transport.publicKey();
+  }
+
+  async sign(message: Uint8Array): Promise<Uint8Array> {
+    return this.transport.sign(message);
+  }
+
+  async health(): Promise<SignerHealth> {
+    return this.transport.health();
+  }
 }
 
 /** Every distinct role a keeper signer can be issued for. Adding a new
