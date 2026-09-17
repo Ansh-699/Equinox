@@ -193,3 +193,119 @@ export class DeadLetterRepository {
   }
 }
 
+export type TxAttemptStatus = 'submitted' | 'confirmed' | 'finalized' | 'failed' | 'expired' | 'timeout';
+export interface TxAttempt {
+  id: string;
+  keeper: string;
+  marketPda: string;
+  domain: 'l1' | 'er';
+  signature: string | null;
+  status: TxAttemptStatus;
+  error: string | null;
+  submittedAt: number;
+  resolvedAt: number | null;
+}
+
+/** Priority 8: durable record of every transaction a keeper job submits,
+ * independent of the generic `operation_keys` idempotency ledger -- this
+ * is an audit trail keyed by keeper+market (many attempts per idempotency
+ * key are expected: a blockhash-expired attempt is resubmitted under a
+ * fresh signature but the same logical operation), not a replay guard. */
+export class TxAttemptRepository {
+  constructor(private readonly db: D1Database) {}
+
+  async submitted(id: string, keeper: string, marketPda: string, domain: 'l1' | 'er', signature: string, now: number): Promise<void> {
+    await this.db
+      .prepare(`INSERT INTO tx_attempts(id,keeper,market_pda,domain,signature,status,submitted_at)
+        VALUES(?,?,?,?,?,'submitted',?)`)
+      .bind(id, keeper, marketPda, domain, signature, now)
+      .run();
+  }
+
+  async resolved(id: string, status: Exclude<TxAttemptStatus, 'submitted'>, error: string | null, now: number): Promise<void> {
+    await this.db.prepare('UPDATE tx_attempts SET status=?,error=?,resolved_at=? WHERE id=?').bind(status, error, now, id).run();
+  }
+
+  async recentForMarket(marketPda: string, keeper: string, limit = 20): Promise<TxAttempt[]> {
+    const result = await this.db
+      .prepare(`SELECT id,keeper,market_pda AS marketPda,domain,signature,status,error,submitted_at AS submittedAt,resolved_at AS resolvedAt
+        FROM tx_attempts WHERE market_pda=? AND keeper=? ORDER BY submitted_at DESC LIMIT ?`)
+      .bind(marketPda, keeper, limit)
+      .all<TxAttempt>();
+    return result.results;
+  }
+}
+
+/** Wires up `oracle_updates` (0003_protocol_projection.sql), previously
+ * declared but never written to. `dedupe` is the Pyth keeper's own
+ * defense against resubmitting a feed update it has already acted on --
+ * independent of `lib/server/pyth-keeper.ts::PythKeeper`'s in-memory
+ * `lastTimestamp`/`lastHash` check, which does not survive a Worker
+ * restart or a second isolate. */
+export class OracleUpdateRepository {
+  constructor(private readonly db: D1Database) {}
+
+  async alreadyApplied(marketPda: string, timestamp: number, payloadHash: string): Promise<boolean> {
+    const row = await this.db
+      .prepare('SELECT payload_hash AS payloadHash FROM oracle_updates WHERE market_pda=? AND timestamp=?')
+      .bind(marketPda, timestamp)
+      .first<{ payloadHash: string }>();
+    return row !== null && row.payloadHash === payloadHash;
+  }
+
+  async record(marketPda: string, feedId: string, timestamp: number, payloadHash: string, status: 'submitted' | 'confirmed' | 'rejected', now: number): Promise<void> {
+    await this.db
+      .prepare(`INSERT INTO oracle_updates(market_pda,feed_id,timestamp,payload_hash,status,observed_at)
+        VALUES(?,?,?,?,?,?) ON CONFLICT(market_pda,timestamp) DO UPDATE SET status=excluded.status,observed_at=excluded.observed_at`)
+      .bind(marketPda, feedId, timestamp, payloadHash, status, now)
+      .run();
+  }
+}
+
+/** Wires up `commit_records` (0003_protocol_projection.sql), previously
+ * declared but never written to. One row per commit *sequence* attempted
+ * for a market, so the MagicBlock commit keeper can tell "have I already
+ * requested this sequence" apart from "is this sequence confirmed yet"
+ * without re-deriving it from `tx_attempts`. */
+export class CommitRecordRepository {
+  constructor(private readonly db: D1Database) {}
+
+  async lastRequestedSequence(marketPda: string): Promise<number> {
+    const row = await this.db
+      .prepare('SELECT MAX(sequence) AS sequence FROM commit_records WHERE market_pda=?')
+      .bind(marketPda)
+      .first<{ sequence: number | null }>();
+    return row?.sequence ?? 0;
+  }
+
+  async record(marketPda: string, sequence: number, domain: 'l1' | 'er', status: 'requested' | 'confirmed' | 'finalized' | 'failed', signature: string | null, now: number): Promise<void> {
+    await this.db
+      .prepare(`INSERT INTO commit_records(market_pda,sequence,domain,status,signature,observed_at)
+        VALUES(?,?,?,?,?,?) ON CONFLICT(market_pda,sequence) DO UPDATE SET status=excluded.status,signature=excluded.signature,observed_at=excluded.observed_at`)
+      .bind(marketPda, sequence, domain, status, signature, now)
+      .run();
+  }
+}
+
+/** Durable continuation cursor for a bounded, resumable sweep (the
+ * expiry/invalid-order cleanup keeper's own requirement: "persist a
+ * continuation cursor; resume after restart" rather than always
+ * restarting a sweep from the beginning). `cursor` is opaque JSON --
+ * whatever shape the keeper that owns it needs (e.g. `{ seatIndex }`). */
+export class KeeperCursorRepository {
+  constructor(private readonly db: D1Database) {}
+
+  async get(keeper: string, marketPda: string): Promise<unknown | null> {
+    const row = await this.db.prepare('SELECT cursor_json AS cursorJson FROM keeper_cursors WHERE keeper=? AND market_pda=?').bind(keeper, marketPda).first<{ cursorJson: string }>();
+    return row ? JSON.parse(row.cursorJson) : null;
+  }
+
+  async set(keeper: string, marketPda: string, cursor: unknown, now: number): Promise<void> {
+    await this.db
+      .prepare(`INSERT INTO keeper_cursors(keeper,market_pda,cursor_json,updated_at) VALUES(?,?,?,?)
+        ON CONFLICT(keeper,market_pda) DO UPDATE SET cursor_json=excluded.cursor_json,updated_at=excluded.updated_at`)
+      .bind(keeper, marketPda, JSON.stringify(cursor), now)
+      .run();
+  }
+}
+

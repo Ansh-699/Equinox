@@ -1,6 +1,6 @@
 import { env, applyD1Migrations } from 'cloudflare:test';
 import { beforeAll, expect, it } from 'vitest';
-import { IndexerRepository, ProtocolRepository } from './repositories';
+import { CommitRecordRepository, IndexerRepository, KeeperCursorRepository, OracleUpdateRepository, ProtocolRepository, TxAttemptRepository } from './repositories';
 import { runDurableKeeper } from './keepers';
 
 const bindings = env as Env & { TEST_MIGRATIONS: Parameters<typeof applyD1Migrations>[1] };
@@ -59,6 +59,42 @@ it('persists ordered indexer cursors, suppresses duplicates, and replaces a proj
   await indexer.replaceSnapshot('market-a', 'er', 3, 12, { bids: [] }, 4);
   expect(await indexer.snapshot('market-a', 'er')).toEqual({ sequence: 3, snapshot: { bids: [] } });
   expect(await indexer.append('market-a', 'er', 4, 13, 'event-4', { type: 'fill' }, 5)).toEqual({ kind: 'applied' });
+});
+
+it('records and resolves a keeper transaction attempt, and lists recent attempts for a market', async () => {
+  const repo = new TxAttemptRepository(db);
+  await repo.submitted('attempt-1', 'pyth', 'market-tx', 'l1', 'sig-1', 1000);
+  await repo.resolved('attempt-1', 'confirmed', null, 1005);
+  const recent = await repo.recentForMarket('market-tx', 'pyth');
+  expect(recent).toHaveLength(1);
+  expect(recent[0]).toMatchObject({ id: 'attempt-1', signature: 'sig-1', status: 'confirmed', resolvedAt: 1005 });
+});
+
+it('dedupes an oracle update by exact timestamp+hash and treats a different hash at the same timestamp as new', async () => {
+  const repo = new OracleUpdateRepository(db);
+  expect(await repo.alreadyApplied('market-oracle', 100, 'hash-a')).toBe(false);
+  await repo.record('market-oracle', 'feed-1', 100, 'hash-a', 'confirmed', 1000);
+  expect(await repo.alreadyApplied('market-oracle', 100, 'hash-a')).toBe(true);
+  expect(await repo.alreadyApplied('market-oracle', 100, 'hash-b')).toBe(false);
+});
+
+it('tracks the last requested commit sequence per market independent of confirmation status', async () => {
+  const repo = new CommitRecordRepository(db);
+  expect(await repo.lastRequestedSequence('market-commit')).toBe(0);
+  await repo.record('market-commit', 1, 'er', 'requested', 'sig-1', 1000);
+  await repo.record('market-commit', 2, 'er', 'requested', 'sig-2', 1001);
+  expect(await repo.lastRequestedSequence('market-commit')).toBe(2);
+  await repo.record('market-commit', 2, 'l1', 'confirmed', 'sig-2', 1002);
+  expect(await repo.lastRequestedSequence('market-commit')).toBe(2);
+});
+
+it('persists a keeper continuation cursor across a simulated restart', async () => {
+  const repo = new KeeperCursorRepository(db);
+  expect(await repo.get('cleanup', 'market-cursor')).toBeNull();
+  await repo.set('cleanup', 'market-cursor', { seatIndex: 12 }, 1000);
+  expect(await new KeeperCursorRepository(db).get('cleanup', 'market-cursor')).toEqual({ seatIndex: 12 });
+  await repo.set('cleanup', 'market-cursor', { seatIndex: 40 }, 1001);
+  expect(await repo.get('cleanup', 'market-cursor')).toEqual({ seatIndex: 40 });
 });
 
 it('runs a durable keeper once and returns its persisted result on a duplicate schedule', async () => {
