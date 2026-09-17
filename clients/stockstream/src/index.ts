@@ -45,8 +45,9 @@ export interface LedgerWithdrawalAccounts { market: AddressInput; authority: Add
 /** `authority` must be the market's `emergencyAuthority`. */
 export interface BadDebtAccounts { market: AddressInput; authority: AddressInput; }
 export interface ReconcileAccounts { market: AddressInput; vault: AddressInput; mint: AddressInput; tokenProgram: AddressInput; }
-export interface DelegationAccounts { market: AddressInput; authority: AddressInput; instrument: AddressInput; payer: AddressInput; scratchAccounts?: AddressInput[]; }
-export interface CommitAccounts { market: AddressInput; authority: AddressInput; payer: AddressInput; scratchAccounts?: AddressInput[]; }
+export interface DelegationAccounts { market: AddressInput; authority: AddressInput; instrument: AddressInput; payer: AddressInput; clusterAccounts?: AddressInput[]; }
+export interface CommitAccounts { market: AddressInput; authority: AddressInput; payer: AddressInput; clusterAccounts?: AddressInput[]; }
+export interface ClusterMemberAccounts { market: AddressInput; authority: AddressInput; member: AddressInput; payer: AddressInput; }
 
 /** MagicBlock Delegation Program: `DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh`. */
 export const MAGICBLOCK_DELEGATION_PROGRAM_ID = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
@@ -554,8 +555,49 @@ export function delegateMarket(accounts: DelegationAccounts, validator: AddressI
     accountMeta(MAGICBLOCK_DELEGATION_PROGRAM_ID, false, false),
     accountMeta(SystemProgram.programId, false, false),
     accountMeta(STOCKSTREAM_PROGRAM_KEY, false, false),
-    ...(accounts.scratchAccounts ?? []).map((a) => accountMeta(a, false, true)),
+    // Trailing cluster accounts are boundary-gated (scratch must be Empty),
+    // not delegated here -- each member is delegated separately by
+    // `delegateClusterMember`, batchable as post-instructions in the same L1
+    // transaction.
+    ...(accounts.clusterAccounts ?? []).map((a) => accountMeta(a, false, true)),
   ]);
+}
+/**
+ * One delegated hot-cluster member: a settlement-scratch PDA (`Empty`) or a
+ * `TradingSession` PDA, delegated to the market's validator by the same
+ * Delegation-Program `Delegate` CPI the market itself uses, with its own
+ * buffer/record/metadata PDAs derived from the member's address. Account
+ * order mirrors `programs/stockstream/src/magicblock.rs::delegate_cluster_member`.
+ */
+export function delegateClusterMember(accounts: ClusterMemberAccounts, validator: AddressInput): TransactionInstruction {
+  const market = publicKey(accounts.market);
+  const member = publicKey(accounts.member);
+  const validatorKey = publicKey(validator);
+  const [buffer] = PublicKey.findProgramAddressSync([Buffer.from("buffer"), member.toBuffer()], STOCKSTREAM_PROGRAM_KEY);
+  const [delegationRecord] = PublicKey.findProgramAddressSync([Buffer.from("delegation"), member.toBuffer()], MAGICBLOCK_DELEGATION_PROGRAM_ID);
+  const [delegationMetadata] = PublicKey.findProgramAddressSync([Buffer.from("delegation-metadata"), member.toBuffer()], MAGICBLOCK_DELEGATION_PROGRAM_ID);
+  const data = new Uint8Array(33); data[0] = STOCKSTREAM_INSTRUCTION.delegateClusterMember; data.set(validatorKey.toBytes(), 1);
+  return instruction(data, [
+    accountMeta(market, false, false),
+    accountMeta(accounts.authority, true, false),
+    accountMeta(member, false, true),
+    accountMeta(buffer, false, true),
+    accountMeta(delegationRecord, false, true),
+    accountMeta(delegationMetadata, false, true),
+    accountMeta(accounts.payer, true, true),
+    accountMeta(MAGICBLOCK_DELEGATION_PROGRAM_ID, false, false),
+    accountMeta(SystemProgram.programId, false, false),
+    accountMeta(STOCKSTREAM_PROGRAM_KEY, false, false),
+  ]);
+}
+/** A member's own delegate-buffer / record / metadata PDAs (client-side derivation mirror). */
+export function deriveClusterMemberPdas(member: AddressInput): { buffer: PublicKey; delegationRecord: PublicKey; delegationMetadata: PublicKey } {
+  const memberKey = publicKey(member);
+  return {
+    buffer: PublicKey.findProgramAddressSync([Buffer.from("buffer"), memberKey.toBuffer()], STOCKSTREAM_PROGRAM_KEY)[0],
+    delegationRecord: PublicKey.findProgramAddressSync([Buffer.from("delegation"), memberKey.toBuffer()], MAGICBLOCK_DELEGATION_PROGRAM_ID)[0],
+    delegationMetadata: PublicKey.findProgramAddressSync([Buffer.from("delegation-metadata"), memberKey.toBuffer()], MAGICBLOCK_DELEGATION_PROGRAM_ID)[0],
+  };
 }
 function commitInstruction(discriminator: number, accounts: CommitAccounts, sequence: bigint | number): TransactionInstruction {
   const data = new Uint8Array(9); data[0] = discriminator; writeUnsigned(data, 1, checkedUnsigned(sequence, 64, "sequence"), 8);
@@ -565,7 +607,7 @@ function commitInstruction(discriminator: number, accounts: CommitAccounts, sequ
     accountMeta(accounts.payer, true, true),
     accountMeta(MAGICBLOCK_MAGIC_CONTEXT_ID, false, true),
     accountMeta(MAGICBLOCK_MAGIC_PROGRAM_ID, false, false),
-    ...(accounts.scratchAccounts ?? []).map((a) => accountMeta(a, false, true)),
+    ...(accounts.clusterAccounts ?? []).map((a) => accountMeta(a, false, true)),
   ]);
 }
 export function commitMarket(accounts: CommitAccounts, sequence: bigint | number): TransactionInstruction { return commitInstruction(STOCKSTREAM_INSTRUCTION.commitMarket, accounts, sequence); }
@@ -671,7 +713,7 @@ export function transitionMarket(accounts: InstructionAccounts, mode: "pause" | 
 
 export function decodeInstruction(data: Uint8Array): InstructionFixture {
   if (data.length === 0) throw new RangeError("Empty instruction");
-  const names: Record<number, string> = { 0: "InitializeMarket", 1: "CreateTraderSeat", 2: "CloseTraderSeat", 3: "PlaceOrder", 4: "CancelOrder", 5: "CancelAll", 6: "UpdateFunding", 7: "Liquidate", 8: "InitializeSettlementScratch", 9: "InitializeVault", 10: "DepositCollateral", 11: "WithdrawCollateral", 12: "ConsumeOracleUpdate", 13: "DelegateMarket", 14: "CommitMarket", 15: "CommitAndUndelegate", 16: "UndelegationCallback", 17: "AuthorizeTradingSession", 18: "RevokeTradingSession", 19: "InitializeExchange", 20: "RegisterStockInstrument", 21: "CreatePerpMarket", 22: "UpdateStockInstrument", 23: "SuspendStockInstrument", 24: "UpdateMarketRisk", 25: "PauseMarket", 26: "ResumeMarket", 27: "SetCloseOnly", 28: "EnterCorporateAction", 29: "ResolveCorporateAction", 30: "CloseMarket", 31: "UpdateTradingSessionLimits", 32: "CloseTradingSession", 33: "ReplaceOrder", 34: "TransferToInsuranceFund", 35: "WithdrawProtocolFees", 36: "WithdrawInsuranceFunds", 37: "RecordBadDebt", 38: "ResolveBadDebt", 39: "ReconcileVault", 40: "UpdateExchangeConfig" };
+  const names: Record<number, string> = { 0: "InitializeMarket", 1: "CreateTraderSeat", 2: "CloseTraderSeat", 3: "PlaceOrder", 4: "CancelOrder", 5: "CancelAll", 6: "UpdateFunding", 7: "Liquidate", 8: "InitializeSettlementScratch", 9: "InitializeVault", 10: "DepositCollateral", 11: "WithdrawCollateral", 12: "ConsumeOracleUpdate", 13: "DelegateMarket", 14: "CommitMarket", 15: "CommitAndUndelegate", 16: "UndelegationCallback", 17: "AuthorizeTradingSession", 18: "RevokeTradingSession", 19: "InitializeExchange", 20: "RegisterStockInstrument", 21: "CreatePerpMarket", 22: "UpdateStockInstrument", 23: "SuspendStockInstrument", 24: "UpdateMarketRisk", 25: "PauseMarket", 26: "ResumeMarket", 27: "SetCloseOnly", 28: "EnterCorporateAction", 29: "ResolveCorporateAction", 30: "CloseMarket", 31: "UpdateTradingSessionLimits", 32: "CloseTradingSession", 33: "ReplaceOrder", 34: "TransferToInsuranceFund", 35: "WithdrawProtocolFees", 36: "WithdrawInsuranceFunds", 37: "RecordBadDebt", 38: "ResolveBadDebt", 39: "ReconcileVault", 40: "UpdateExchangeConfig", 41: "DelegateClusterMember" };
   const name = names[data[0]];
   if (!name) throw new RangeError("Unknown instruction");
   return { name, data: data.slice() };

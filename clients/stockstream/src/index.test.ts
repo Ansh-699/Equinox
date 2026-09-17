@@ -1,8 +1,8 @@
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { expect, test } from "vitest";
 import { STOCKSTREAM_PROGRAM_ID } from "./constants";
-import { MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID } from "./index";
-import { authorizeTradingSession, cancelOrder, commitMarket, createPerpMarket, decodeFillPayload, decodeInstruction, decodeMarketState, decodeSeatAmountPayload, decodeStockStreamEvent, delegateMarket, deriveTradingSession, EVENT_SIZE, initializeExchange, initializeMarket, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateExchangeConfig, updateStockInstrument, withdrawInsuranceFunds, withdrawProtocolFees, EXCHANGE_CONFIG_FIELD } from "./index";
+import { MAGICBLOCK_DELEGATION_PROGRAM_ID, MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID, STOCKSTREAM_PROGRAM_KEY } from "./index";
+import { authorizeTradingSession, cancelOrder, commitMarket, delegateClusterMember, deriveClusterMemberPdas, createPerpMarket, decodeFillPayload, decodeInstruction, decodeMarketState, decodeSeatAmountPayload, decodeStockStreamEvent, delegateMarket, deriveTradingSession, EVENT_SIZE, initializeExchange, initializeMarket, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateExchangeConfig, updateStockInstrument, withdrawInsuranceFunds, withdrawProtocolFees, EXCHANGE_CONFIG_FIELD } from "./index";
 import { STOCKSTREAM_ACCOUNT_SIZE } from "./constants";
 
 const market = PublicKey.unique();
@@ -58,11 +58,27 @@ test("integration constructors preserve discriminators, account order and signer
   const commitIx = commitMarket({ market, authority, payer }, 4n);
   expect(decodeInstruction(commitIx.data).name).toBe("CommitMarket");
   expect(commitIx.keys.map((key) => key.pubkey.toBase58())).toEqual([market, authority, payer, MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID].map((k) => k.toBase58()));
-  const delegateIx = delegateMarket({ market, authority, instrument, payer, scratchAccounts: [settlementScratch] }, validator);
+  const delegateIx = delegateMarket({ market, authority, instrument, payer, clusterAccounts: [settlementScratch] }, validator);
   expect(decodeInstruction(delegateIx.data).name).toBe("DelegateMarket");
   expect(Array.from(delegateIx.data.slice(1))).toEqual(Array.from(validator.toBytes()));
   expect(delegateIx.keys).toHaveLength(11);
   expect(delegateIx.keys[10]).toEqual({ pubkey: settlementScratch, isSigner: false, isWritable: true });
+  const memberIx = delegateClusterMember({ market, authority, member: settlementScratch, payer }, validator);
+  expect(decodeInstruction(memberIx.data).name).toBe("DelegateClusterMember");
+  expect(Array.from(memberIx.data.slice(1))).toEqual(Array.from(validator.toBytes()));
+  expect(memberIx.keys).toHaveLength(10);
+  expect(memberIx.keys.map((key) => [key.pubkey.toBase58(), key.isSigner, key.isWritable])).toEqual([
+    [market.toBase58(), false, false],
+    [authority.toBase58(), true, false],
+    [settlementScratch.toBase58(), false, true],
+    [deriveClusterMemberPdas(settlementScratch).buffer.toBase58(), false, true],
+    [deriveClusterMemberPdas(settlementScratch).delegationRecord.toBase58(), false, true],
+    [deriveClusterMemberPdas(settlementScratch).delegationMetadata.toBase58(), false, true],
+    [payer.toBase58(), true, true],
+    [MAGICBLOCK_DELEGATION_PROGRAM_ID.toBase58(), false, false],
+    [SystemProgram.programId.toBase58(), false, false],
+    [STOCKSTREAM_PROGRAM_KEY.toBase58(), false, false],
+  ]);
   const session = authorizeTradingSession({ market, authority, payer: authority, sessionSigner: PublicKey.unique() }, 99n, { seatIndex: 0, actions: 3, maxOrderNotional: 10n, maxCumulativeNotional: 20n, maximumExposure: 30n, maximumOpenOrders: 2 });
   expect(decodeInstruction(session.data).name).toBe("AuthorizeTradingSession");
   expect(session.data).toHaveLength(46);

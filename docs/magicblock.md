@@ -9,39 +9,97 @@ field (program constant `magicblock::COMMIT_INTERVAL_MS` in
 `programs/stockstream/src/magicblock.rs`) — see § Commit policy for why this
 is a delegation argument, not a keeper knob.
 
-**Settlement scratch and the hot cluster (Priority 10 exit requirement).**
-The production matcher writes per-seat settlement scratch PDAs
+**Settlement scratch and the hot cluster (RESOLVED, 2026-09-17 — Priority 10
+exit requirement).** The matcher writes per-seat settlement scratch PDAs
 (`["settlement", market, seat_index_le]`, `docs/settlement-scratch.md`) as
-writable accounts inside `PlaceOrder`. On the ER, **every writable account in
-a transaction must live in the same execution domain**: an ER transaction
-cannot write the delegated market account and an L1-resident, non-delegated
-scratch PDA together (mixed writable domains are already rejected client-side
-by `lib/magicblock.ts::rejectMixedWritableDomains`). Active scratch PDAs must
-therefore be delegated together with the market as one hot cluster:
+writable accounts inside `PlaceOrder`/`ReplaceOrder`, and session-signed
+trading additionally writes the `TradingSession` PDA (nonce/notional
+consumption, `programs/stockstream/src/handlers.rs::authorize_trading_actor`).
+On the ER, **every writable account in a transaction must live in the same
+execution domain**: an ER transaction cannot write the delegated market
+account and an L1-resident, non-delegated writable account together (the ER
+runtime rejects mixed domains; client-side, `lib/magicblock.ts::
+validateTransactionAccountDomain` enforces the same matrix before
+submission). The hot cluster is therefore delegated member-by-member:
 
 ```
-Delegated hot cluster:
+Delegated hot cluster (all to ONE validator):
 - Market account (arenas, seats, funding, event ring, delegation lifecycle)
-- Active traders' settlement scratch PDAs (must be Empty at delegation)
-- Delegated fee payer (+ the ER validator's magic_fee_vault)
+- Active traders' settlement scratch PDAs (must be Empty at delegation;
+  opcode 41 `DelegateClusterMember`, batchable post-instructions)
+- Session traders' TradingSession PDAs (same opcode, after authorization)
+- Delegated fee payer (future; see fee economics below)
 ```
 
-The program already enforces the lifecycle gate that makes this safe:
-`magicblock::require_scratch_accounts_empty` accepts scratch PDAs as trailing
-accounts on `DelegateMarket`, `CommitMarket`, and `CommitAndUndelegate` and
-requires every one to be `Empty` — no in-flight settlement plan may cross a
-delegation boundary. Scratch PDAs are not committed to L1 by the market
-commit path (they are working memory and must be `Empty` at every successful
-boundary, `docs/settlement-scratch.md`); they ride undelegation back to L1 as
-Empty program-owned accounts. **Exit test (Priority 10):** delegate market +
-scratch (+ fee payer) → submit a crossing order through the production
-settlement path → scratch goes Empty→Planning→Ready→Empty inside the one
-instruction → commit the market → undelegate → verify no mixed
-writable-account routing occurred and the scratch account is Empty (or
-closed, per policy) after restore. The alternative — ER-native ephemeral
-accounts for scratch — is unproven for this program's PDA validation,
-lifecycle, capacity, and atomic-rollback requirements and is not the
-selected path.
+**Resolution (option B — separately delegated to the same validator).** Each
+member is delegated by the same Delegation-Program `Delegate` CPI the market
+uses (`dlp_api` `DelegateArgs` with the member's own borsh seeds payload: 3
+seeds for scratch `["settlement", market, seat_le]`, 5 seeds for session
+`["trading_session", owner, market, seat_le, session_signer]`; buffer PDA
+`["buffer", member]` under StockStream, record/metadata PDAs derived from the
+member's address under the delegation program — verified byte-for-byte
+against `dlp_api`'s own borsh serialization in `tests/magicblock.rs`).
+`delegate_cluster_member` (opcode 41) requires the market to be already
+delegated **to that exact validator** and keeps the market account READ-ONLY
+(a delegated account must never be written on L1). The alternatives were
+considered and rejected: **(A)** embedding scratch inside the market account
+would change `MARKET_ACCOUNT_SIZE` (222,752) and the version-2 layout freeze
+for a working-memory region; **(C)** ER-native ephemeral accounts are
+unproven for this program's PDA validation, lifecycle, capacity, and
+atomic-rollback requirements; **(D)** eliminating scratch is impossible — the
+matcher's working memory exceeds the stack allowance and it must operate
+directly on account bytes.
+
+**Account-domain matrix** (writable accounts per instruction; L1/ER domain of
+the writable set; commit behavior while delegated):
+
+| Instruction | Writable accounts | Domain | Delegated? | Commit behavior |
+| --- | --- | --- | --- | --- |
+| PlaceOrder | market, seat scratch, session PDA (session-signed) | ER | all three required | committed in the market's commit intent bundle (`Standalone([2,3,...])`) |
+| ReplaceOrder | market, seat scratch, session PDA | ER | all three | same |
+| ReduceOnlyClose (PlaceOrder variant) | market, seat scratch, session PDA | ER | all three | same |
+| CancelOrder / CancelAll | market, session PDA (session-signed) | ER | both | same |
+| Funding (UpdateFunding) | market | ER | market | same |
+| Liquidation (LIQUIDATE) | market | ER | market | same |
+| Expiry/invalid cleanup | inside matching (market, placing seat scratch) | ER | both | same |
+| ConsumeOracleUpdate | market + Pyth fee/treasury | **L1-only** | Pyth accounts can never be delegated | while delegated, live prices flow through a separately delegated ephemeral-oracle feed read instead (`docs/oracle.md`, `magicblock-labs/real-time-pricing-oracle` pattern) |
+| Deposit / Withdrawal | vault, custody token accounts | **L1-only** | vaults are never delegated | n/a |
+| DelegateMarket / DelegateClusterMember / CommitMarket / CommitAndUndelegate | payer, buffers, records | L1 | n/a (delegation lifecycle runs on L1) | n/a |
+
+Enforcement: `magicblock::validate_cluster_member` gates trailing accounts on
+`DelegateMarket` and committed accounts on `CommitMarket`/
+`CommitAndUndelegate` (scratch must be `Empty` — no in-flight settlement plan
+may cross a boundary; sessions must re-derive their PDA); the external-
+undelegate callback routes on the replayed seeds and recreates the right
+account kind with restoration-mismatch validation
+(`magicblock::validate_restored_scratch` / `validate_restored_session`).
+Client-side, `lib/magicblock.ts::validateTransactionAccountDomain` rejects a
+mixed/invalid cluster before submission (`lib/magicblock-domain.test.ts`).
+
+**Commit economics (verified 2026-09-17 against
+docs.magicblock.gg/pages/ephemeral-rollups-ers/introduction/fees-and-commit-economics,
+checked against source on 2026-08-20 upstream):** the delegation deposit
+(delegation record + metadata rent) is charged at undelegation as `300,000`
+lamports session fee + `100,000` per commit after the first, capped at the
+deposit. Without a delegated fee payer, commits 1–10 are accepted and commit
+11 fails (`0xA0000000`); a commit-and-undelegate still runs. With a delegated
+fee payer + the validator's `magic_fee_vault`
+(`["magic-fee-vault", validator]` under the delegation program,
+`dlp_api::pda`), commits 1–25 are free and every commit from the 26th costs
+`100,000` lamports **per committed account**, taken live from the delegated
+fee payer. A 128-per-seat delegated scratch design would therefore cost
+`12.8M` lamports per commit after commit 25 — unacceptable; the selected
+policy delegates only the scratch/session PDAs of seats actually trading
+during the ER session (for the devnet lifecycle run: 2 scratch + 2 session +
+market = 5 committed accounts → ≤500k lamports/commit live after commit 25,
+well inside the ≤10-commit no-fee-payer window for a bounded run).
+
+**Exit test (Priority 10):** delegate market → delegate each cluster member
+(scratch/session, same validator) → submit a crossing order through the
+production settlement path on the ER → scratch goes Empty→Planning→Ready→
+Empty inside the one instruction → commit the whole cluster → undelegate →
+verify no mixed writable-account routing occurred and every member restored
+byte-exactly (scratch Empty or closed per policy; session fields intact).
 
 ## Real CPI implementation
 
