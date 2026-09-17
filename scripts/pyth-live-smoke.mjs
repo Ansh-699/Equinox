@@ -9,13 +9,15 @@ import WebSocket from "ws";
 
 const key = process.env.PYTH_PRO_API_KEY;
 if (!key || key.length < 8) { console.error("PYTH_PRO_API_KEY is not set in the environment"); process.exit(1); }
-const endpoints = process.env.PYTH_PRO_ENDPOINTS
-  ? process.env.PYTH_PRO_ENDPOINTS.split(",")
-  : [
-      "wss://pyth-lazer-0.dourolabs.app/v1/stream",
-      "wss://pyth-lazer-1.dourolabs.app/v1/stream",
-      "wss://pyth-lazer-2.dourolabs.app/v1/stream",
-    ];
+const endpoints = process.argv.includes("--local")
+  ? ["ws://127.0.0.1:45678", "ws://127.0.0.1:45678", "ws://127.0.0.1:45678"]
+  : process.env.PYTH_PRO_ENDPOINTS
+    ? process.env.PYTH_PRO_ENDPOINTS.split(",")
+    : [
+        "wss://pyth-lazer-0.dourolabs.app/v1/stream",
+        "wss://pyth-lazer-1.dourolabs.app/v1/stream",
+        "wss://pyth-lazer-2.dourolabs.app/v1/stream",
+      ];
 const feedId = Number(process.env.PYTH_PRO_FEED_ID ?? "33");
 console.log(`connecting to ${endpoints.length} endpoints, feed ${feedId}...`);
 
