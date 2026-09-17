@@ -558,3 +558,205 @@ fn pinocchio_system_id() -> Address {
     // otherwise depend on `pinocchio_system`).
     Address::new_from_array([0u8; 32])
 }
+
+// ---------------------------------------------------------------------
+// Deterministic mark-price funding (runtime): the deployed program derives
+// the funding bound from the LIVE book, not caller data. Each test plants a
+// real arena and drives the deployed program's UpdateFunding.
+// ---------------------------------------------------------------------
+
+impl Env {
+    fn oracle(&mut self, price: i64, _timestamp: u64) {
+        let mut data = self.market_data();
+        unsafe {
+            let header = data.as_mut_ptr() as *mut MarketStateHeader;
+            (*header).mode = MarketMode::Open as u8;
+            (*header).oracle_valid = 1;
+            (*header).last_verified_oracle_price = price;
+            (*header).last_verified_oracle_timestamp = 1;
+        }
+        self.write_market_data(data);
+    }
+
+    fn book(&mut self, bid: i64, ask: i64) {
+        use stockstream::book::{
+            Arena, OrderInput, SelfTradeBehavior, Side, TimeInForce, TreeKind,
+        };
+        let mut data = self.market_data();
+        for (offset, side, price) in [
+            (stockstream::state::BID_ARENA_OFFSET, Side::Bid, bid),
+            (stockstream::state::ASK_ARENA_OFFSET, Side::Ask, ask),
+        ] {
+            let mut arena = Arena::new();
+            if price > 0 {
+                let leaf = OrderInput {
+                    side,
+                    tree: TreeKind::Fixed,
+                    owner: 1,
+                    price_or_offset: price,
+                    sequence: 1,
+                    quantity: 10,
+                    expires_at: u64::MAX,
+                    peg_limit: i64::MAX,
+                    client_order_id: 1,
+                    time_in_force: TimeInForce::GoodTilCancelled,
+                    post_only: false,
+                    self_trade_behavior: SelfTradeBehavior::AbortTransaction,
+                }
+                .leaf()
+                .unwrap();
+                arena.insert(TreeKind::Fixed, leaf).unwrap();
+            }
+            unsafe {
+                ptr::write_unaligned(data.as_mut_ptr().add(offset) as *mut Arena, arena);
+            }
+        }
+        self.write_market_data(data);
+    }
+}
+
+#[test]
+fn runtime_mark_funding_admits_only_bounded_increments() {
+    let mut env = setup();
+    env.oracle(100, 1);
+    env.plant_book(); // bid 96 / ask 98 -> on-chain mark 97, basis -300 bps
+                      // Cap = min(1 bps/sec * elapsed, |basis|): elapsed 42 -> 42.
+    env.send(
+        &update_funding_data(40, 42),
+        &[
+            writable(env.market),
+            readonly_signer(env.authority.pubkey()),
+        ],
+    )
+    .expect("a 40-accumulator increment within the mark-derived cap");
+    assert_eq!({ env.header().funding_accumulator }, 40);
+
+    // A 5_000 increment (way beyond the cap) must be rejected by the real
+    // program, not just by host-side unit tests.
+    let mut env2 = setup();
+    env2.oracle(100, 1);
+    env2.plant_book();
+    let rejected = env2.send(
+        &update_funding_data(5_000, 42),
+        &[
+            writable(env2.market),
+            readonly_signer(env2.authority.pubkey()),
+        ],
+    );
+    assert!(
+        rejected.is_err(),
+        "unbounded funding must be rejected on-chain"
+    );
+}
+
+#[test]
+fn runtime_mark_funding_empty_book_means_zero_basis_means_zero_funding() {
+    let mut env = setup();
+    env.oracle(100, 1);
+    env.book(0, 0); // explicit empty book
+                    // No book: the mark falls back to the verified index -> basis 0 -> the
+                    // submitted increment must be 0.
+    let rejected = env.send(
+        &update_funding_data(10, 42),
+        &[
+            writable(env.market),
+            readonly_signer(env.authority.pubkey()),
+        ],
+    );
+    assert!(
+        rejected.is_err(),
+        "an empty book has zero basis: any nonzero increment must be rejected on-chain"
+    );
+}
+
+#[test]
+fn runtime_mark_funding_stale_oracle_rejects() {
+    let mut env = setup();
+    env.plant_book();
+    // Clear the verified oracle (stale feed).
+    let mut data = env.market_data();
+    unsafe {
+        let header = data.as_mut_ptr() as *mut MarketStateHeader;
+        (*header).oracle_valid = 0;
+    }
+    env.write_market_data(data);
+    // oracle_valid = 0: the mark computation must refuse, so funding is
+    // rejected entirely (no fallback price).
+    let rejected = env.send(
+        &update_funding_data(1, 42),
+        &[
+            writable(env.market),
+            readonly_signer(env.authority.pubkey()),
+        ],
+    );
+    assert!(rejected.is_err(), "stale oracle must reject funding");
+}
+
+#[test]
+fn runtime_mark_funding_halted_market_rejects() {
+    let mut env = setup();
+    env.oracle(100, 1);
+    env.plant_book();
+    let mut data = env.market_data();
+    unsafe {
+        let header = data.as_mut_ptr() as *mut MarketStateHeader;
+        (*header).mode = MarketMode::Paused as u8;
+    }
+    env.write_market_data(data);
+    let rejected = env.send(
+        &update_funding_data(10, 42),
+        &[
+            writable(env.market),
+            readonly_signer(env.authority.pubkey()),
+        ],
+    );
+    assert!(rejected.is_err(), "a paused market must reject funding");
+}
+
+#[test]
+fn runtime_mark_funding_extreme_book_is_clamped() {
+    // One-sided extreme bid: bid 10_000 (100x index) with an ask side absent
+    // -> BookOneSided clamped to index + 5% = 105 -> basis +500 bps.
+    let mut env = setup();
+    env.oracle(100, 1);
+    env.book(10_000, 0); // bids only
+                         // elapsed=42 -> absolute cap 42 bps < basis 500 -> bound = 42
+    env.send(
+        &update_funding_data(42, 42),
+        &[
+            writable(env.market),
+            readonly_signer(env.authority.pubkey()),
+        ],
+    )
+    .expect("42 bps within the clamp-derived basis bound");
+    assert_eq!({ env.header().funding_accumulator }, 42);
+    // ...and 43 more would exceed the per-second cap on the next second.
+    let rejected = env.send(
+        &update_funding_data(85, 43),
+        &[
+            writable(env.market),
+            readonly_signer(env.authority.pubkey()),
+        ],
+    );
+    assert!(
+        rejected.is_err(),
+        "85 more bps in 1 second must be rejected"
+    );
+}
+
+#[test]
+fn runtime_mark_funding_positive_basis() {
+    let mut env = setup();
+    env.oracle(100, 1);
+    env.book(103, 105); // mid 104 -> basis +400 bps
+                        // elapsed=40 -> cap min(40, 400) = 40
+    env.send(
+        &update_funding_data(40, 40),
+        &[
+            writable(env.market),
+            readonly_signer(env.authority.pubkey()),
+        ],
+    )
+    .expect("40 bps within the +400 bps basis");
+    assert_eq!({ env.header().funding_accumulator }, 40);
+}
