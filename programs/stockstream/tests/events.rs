@@ -348,6 +348,8 @@ fn newly_wired_session_liquidation_and_magicblock_discriminators_encode_correctl
         (DelegationRequested, payload_delegation(&[5u8; 32], 1)),
         (CommitSequenceChanged, payload_delegation(&[5u8; 32], 2)),
         (RestorationPending, payload_delegation(&[5u8; 32], 3)),
+        (MarketClosed, payload_empty()),
+        (CorporateActionResolved, payload_empty()),
     ];
     let mut discriminators = std::collections::HashSet::new();
     for (kind, payload) in cases {

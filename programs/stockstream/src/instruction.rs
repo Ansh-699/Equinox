@@ -63,6 +63,20 @@ pub struct PlaceOrderData {
     pub action_nonce: u64,
 }
 
+/// The distinct semantic reason for a `TransitionMarket` instruction,
+/// preserved alongside the resulting `mode` so a handler can emit the
+/// correct event even when two opcodes resolve to the same `mode`.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum MarketTransitionAction {
+    Pause = 0,
+    Resume = 1,
+    SetCloseOnly = 2,
+    EnterCorporateAction = 3,
+    ResolveCorporateAction = 4,
+    Close = 5,
+}
+
 pub enum StockStreamInstruction {
     InitializeMarket,
     CreateTraderSeat {
@@ -167,6 +181,17 @@ pub enum StockStreamInstruction {
     },
     TransitionMarket {
         mode: u8,
+        /// The specific opcode that produced this transition. Several of
+        /// the six `TransitionMarket`-shaped opcodes resolve to the same
+        /// `mode` (`PAUSE_MARKET`/`CLOSE_MARKET` both mean `Paused`;
+        /// `RESUME_MARKET`/`RESOLVE_CORPORATE_ACTION` both mean `Open`) --
+        /// `mode` alone is not enough to tell them apart, which used to
+        /// make it impossible for `transition_market` to emit the correct
+        /// distinct event (e.g. `MarketClosed` vs `MarketPaused`). Every
+        /// opcode is on the wire as its own distinct byte already; this
+        /// field just carries that same distinction forward into the
+        /// decoded instruction instead of discarding it.
+        action: MarketTransitionAction,
     },
     /// Moves `amount` from the protocol fee ledger to the insurance fund
     /// ledger. Internal book-transfer only: no tokens move (both balances
@@ -379,16 +404,30 @@ impl StockStreamInstruction {
                     .ok_or(ProgramError::InvalidInstructionData)?,
                 maximum_leverage: read_u32(data, 5).ok_or(ProgramError::InvalidInstructionData)?,
             }),
-            Some(PAUSE_MARKET) if data.len() == 1 => Ok(Self::TransitionMarket { mode: 0 }),
-            Some(RESUME_MARKET) if data.len() == 1 => Ok(Self::TransitionMarket { mode: 1 }),
-            Some(SET_CLOSE_ONLY) if data.len() == 1 => Ok(Self::TransitionMarket { mode: 2 }),
-            Some(ENTER_CORPORATE_ACTION) if data.len() == 1 => {
-                Ok(Self::TransitionMarket { mode: 3 })
-            }
-            Some(RESOLVE_CORPORATE_ACTION) if data.len() == 1 => {
-                Ok(Self::TransitionMarket { mode: 1 })
-            }
-            Some(CLOSE_MARKET) if data.len() == 1 => Ok(Self::TransitionMarket { mode: 0 }),
+            Some(PAUSE_MARKET) if data.len() == 1 => Ok(Self::TransitionMarket {
+                mode: 0,
+                action: MarketTransitionAction::Pause,
+            }),
+            Some(RESUME_MARKET) if data.len() == 1 => Ok(Self::TransitionMarket {
+                mode: 1,
+                action: MarketTransitionAction::Resume,
+            }),
+            Some(SET_CLOSE_ONLY) if data.len() == 1 => Ok(Self::TransitionMarket {
+                mode: 2,
+                action: MarketTransitionAction::SetCloseOnly,
+            }),
+            Some(ENTER_CORPORATE_ACTION) if data.len() == 1 => Ok(Self::TransitionMarket {
+                mode: 3,
+                action: MarketTransitionAction::EnterCorporateAction,
+            }),
+            Some(RESOLVE_CORPORATE_ACTION) if data.len() == 1 => Ok(Self::TransitionMarket {
+                mode: 1,
+                action: MarketTransitionAction::ResolveCorporateAction,
+            }),
+            Some(CLOSE_MARKET) if data.len() == 1 => Ok(Self::TransitionMarket {
+                mode: 0,
+                action: MarketTransitionAction::Close,
+            }),
             Some(TRANSFER_TO_INSURANCE_FUND) if data.len() == 9 => {
                 Ok(Self::TransferToInsuranceFund {
                     amount: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
