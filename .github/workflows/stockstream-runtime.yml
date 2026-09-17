@@ -55,3 +55,6 @@ jobs:
         run: |
           cargo test -p stockstream --features runtime-tests --test runtime_initialize
           cargo test -p stockstream --features runtime-tests --test runtime_settlement
+          cargo test -p stockstream --features runtime-tests --test runtime_tokenkeg
+          cargo test -p stockstream --features runtime-tests --test runtime_deposit
+          cargo test -p stockstream --features runtime-tests --test runtime_withdraw
