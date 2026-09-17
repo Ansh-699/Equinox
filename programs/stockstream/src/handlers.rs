@@ -414,6 +414,9 @@ pub fn dispatch(
         StockStreamInstruction::CreateMarketAccount => {
             crate::registry::create_market_account(program_id, accounts)
         }
+        StockStreamInstruction::CreateInstrumentAccount { instrument_id } => {
+            crate::registry::create_instrument_account(program_id, accounts, &instrument_id)
+        }
         StockStreamInstruction::CommitMarket { sequence } => {
             crate::magicblock::commit_market(program_id, accounts, sequence)
         }

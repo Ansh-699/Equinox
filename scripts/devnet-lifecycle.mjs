@@ -102,28 +102,52 @@ async function stageSetup() {
   Buffer.from(`LIFECYCLE-${Date.now()}`, "latin1").copy(instrumentId);
 
   const exchange = Keypair.generate();
-  const instrument = Keypair.generate();
+  const instrumentPda = PublicKey.findProgramAddressSync(
+    [Buffer.from("instrument"), instrumentId], PROGRAM_ID)[0];
   const marketPda = PublicKey.findProgramAddressSync(
-    [Buffer.from("perp-market"), instrument.publicKey.toBuffer()], PROGRAM_ID)[0];
-  const lamports = await Promise.all(
-    [EXCHANGE_SIZE, INSTRUMENT_SIZE, MARKET_SIZE].map((s) => CONNECTION.getMinimumBalanceForRentExemption(s)),
-  );
+    [Buffer.from("perp-market"), instrumentPda.toBuffer()], PROGRAM_ID)[0];
+  const exchangeLamports = await CONNECTION.getMinimumBalanceForRentExemption(256);
 
-  await send("create exchange/instrument/market accounts", [
-    SystemProgram.createAccount({ fromPubkey: authority.publicKey, newAccountPubkey: exchange.publicKey, lamports: lamports[0], space: EXCHANGE_SIZE, programId: PROGRAM_ID }),
-    SystemProgram.createAccount({ fromPubkey: authority.publicKey, newAccountPubkey: instrument.publicKey, lamports: lamports[1], space: INSTRUMENT_SIZE, programId: PROGRAM_ID }),
-    SystemProgram.createAccount({ fromPubkey: authority.publicKey, newAccountPubkey: marketPda, lamports: lamports[2], space: MARKET_SIZE, programId: PROGRAM_ID }),
-  ], [authority, exchange, instrument, instrument]);
+  // Exchange: an ordinary keypair-funded program account (256 bytes).
+  await send("create exchange account", [
+    SystemProgram.createAccount({ fromPubkey: authority.publicKey, newAccountPubkey: exchange.publicKey, lamports: exchangeLamports, space: 256, programId: PROGRAM_ID }),
+  ], [authority, exchange]);
+
+  // Instrument PDA: created by opcode 43 (128 bytes, within the inner-CPI
+  // realloc cap, so one instruction does fund + allocate + assign).
+  await send("create instrument account (program CPI)", [new TransactionInstruction({
+    programId: PROGRAM_ID,
+    // [0]=instrument PDA (w) [1]=payer(w+signer) [2]=system
+    keys: [wr(instrumentPda), wsg(authority.publicKey), ro(SystemProgram.programId)],
+    data: Buffer.from([43, ...instrumentId]),
+  })], [authority]);
+
+  // Market PDA: opcode 42 grows it incrementally (10,240 B per instruction
+  // is Solana's account-realloc cap). One call stages the first allocation,
+  // then the client repeats the instruction until the account reaches the
+  // full MARKET_SIZE.
+  const createStep = () => new TransactionInstruction({
+    programId: PROGRAM_ID,
+    // [0]=instrument(ro) [1]=market PDA (w) [2]=payer(w+signer) [3]=system
+    keys: [ro(instrumentPda), wr(marketPda), wsg(authority.publicKey), ro(SystemProgram.programId)],
+    data: Buffer.from([42]),
+  });
+  await send("create market account (first chunk)", [createStep()], [authority]);
+  for (;;) {
+    const info = await CONNECTION.getAccountInfo(marketPda, "confirmed");
+    if (info && info.data.length === MARKET_SIZE) break;
+    await send(`grow market account (${info ? info.data.length : 0}/${MARKET_SIZE})`, [createStep()], [authority]);
+  }
 
   await send("initialize exchange", [new TransactionInstruction({
     programId: PROGRAM_ID, keys: [wr(exchange.publicKey), sg(authority.publicKey)], data: Buffer.from([19]),
   })], [authority]);
   await send("register instrument", [new TransactionInstruction({
-    programId: PROGRAM_ID, keys: [ro(exchange.publicKey), wr(instrument.publicKey), sg(authority.publicKey)],
+    programId: PROGRAM_ID, keys: [ro(exchange.publicKey), wr(instrumentPda), sg(authority.publicKey)],
     data: Buffer.from([20, ...instrumentId]),
   })], [authority]);
   await send("update instrument (oracle config)", [new TransactionInstruction({
-    programId: PROGRAM_ID, keys: [ro(exchange.publicKey), wr(instrument.publicKey), sg(authority.publicKey)],
+    programId: PROGRAM_ID, keys: [ro(exchange.publicKey), wr(instrumentPda), sg(authority.publicKey)],
     // [22, id@1(32), pythFeedId u32@33 = 33, channel u8@37 = 1, exponent i32@38 = -6]
     data: Buffer.from([22, ...instrumentId, 33, 0, 0, 0, 1, 0xfa, 0xff, 0xff, 0xff]),
   })], [authority]);
@@ -132,8 +156,8 @@ async function stageSetup() {
     data: Buffer.from([21, ...instrumentId]),
   })], [authority]);
 
-  const header = await CONNECTION.getAccountInfo(marketPda, "confirmed");
-  const initialized = header && header.data.length === MARKET_SIZE && header.data.readUInt8(10) === 1;
+  const info = await CONNECTION.getAccountInfo(marketPda, "confirmed");
+  const initialized = info && info.data.length === MARKET_SIZE && info.data.readUInt8(10) === 1;
   if (!initialized) throw new Error("market account not initialized on L1");
   save({ instrumentId: [...instrumentId], exchange: exchange.publicKey.toBase58(), instrument: instrument.publicKey.toBase58(), market: marketPda.toBase58() });
   log("MARKET =", marketPda.toBase58());
