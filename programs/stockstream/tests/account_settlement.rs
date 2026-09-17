@@ -1487,3 +1487,62 @@ fn self_trade_decrement_take_creates_no_fill_and_leaves_the_own_order_resting() 
     };
     assert_eq!(bid.leaf_counts[0], 0, "the order was fully decremented");
 }
+
+#[test]
+fn ioc_cancel_provide_removes_the_own_order_and_never_rests_a_residual() {
+    let f = fixture();
+    place(&f, true, &order_data(1, 0, 2, 100, 0, 161)).unwrap();
+    place(&f, false, &order_data(1, 1, 4, 100, 0, 162)).unwrap();
+    // flags = IOC (bit 1) | CancelProvide (bits 3-4 = 001) => 0b0000_1010
+    place(&f, true, &order_data(0, 0, 5, 110, 10, 163)).unwrap();
+    let data = unsafe { f.market.view.borrow_unchecked() };
+    let own = unsafe { &*(data.as_ptr().add(TRADER_SEAT_OFFSET) as *const TraderSeat) };
+    let other = unsafe {
+        &*(data.as_ptr().add(TRADER_SEAT_OFFSET + TRADER_SEAT_SIZE) as *const TraderSeat)
+    };
+    let own_position = own.base_position;
+    let other_position = other.base_position;
+    assert_eq!(own_position, 4, "filled only against the other seat");
+    assert_eq!(other_position, -4);
+    let ask = unsafe {
+        &*(data.as_ptr().add(stockstream::state::ASK_ARENA_OFFSET)
+            as *const stockstream::book::Arena)
+    };
+    assert_eq!(ask.leaf_counts[0], 0);
+    let bid = unsafe {
+        &*(data.as_ptr().add(stockstream::state::BID_ARENA_OFFSET)
+            as *const stockstream::book::Arena)
+    };
+    assert_eq!(bid.leaf_counts[0], 0, "the IOC residual must not rest");
+}
+
+#[test]
+fn ioc_decrement_take_creates_no_self_fill_and_never_rests_a_residual() {
+    let f = fixture();
+    place(&f, true, &order_data(1, 0, 2, 100, 0, 171)).unwrap();
+    place(&f, false, &order_data(1, 1, 1, 101, 0, 172)).unwrap();
+    // flags = IOC (bit 1) | DecrementTake (bits 3-4 = 010) => 0b0001_0010
+    place(&f, true, &order_data(0, 0, 5, 110, 18, 173)).unwrap();
+    let data = unsafe { f.market.view.borrow_unchecked() };
+    let own = unsafe { &*(data.as_ptr().add(TRADER_SEAT_OFFSET) as *const TraderSeat) };
+    let other = unsafe {
+        &*(data.as_ptr().add(TRADER_SEAT_OFFSET + TRADER_SEAT_SIZE) as *const TraderSeat)
+    };
+    let own_position = own.base_position;
+    let other_position = other.base_position;
+    assert_eq!(
+        own_position, 1,
+        "no self-fill; only the lot against the other seat"
+    );
+    assert_eq!(other_position, -1);
+    let ask = unsafe {
+        &*(data.as_ptr().add(stockstream::state::ASK_ARENA_OFFSET)
+            as *const stockstream::book::Arena)
+    };
+    assert_eq!(ask.leaf_counts[0], 1, "the own maker is left untouched");
+    let bid = unsafe {
+        &*(data.as_ptr().add(stockstream::state::BID_ARENA_OFFSET)
+            as *const stockstream::book::Arena)
+    };
+    assert_eq!(bid.leaf_counts[0], 0, "the IOC residual must not rest");
+}

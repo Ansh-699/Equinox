@@ -190,3 +190,26 @@ fn self_trade_decrement_take_continues_matching_the_next_trader() {
     assert!(!plan.actions[0].remove);
     assert_eq!(plan.actions[1].handle, other_handle);
 }
+
+#[test]
+fn post_only_rejection_takes_precedence_over_self_trade_handling() {
+    let bids = Arena::new();
+    let mut asks = Arena::new();
+    let maker = order(Side::Ask, TreeKind::Fixed, 100, 1);
+    insert(&mut asks, maker);
+    let mut taker = order(Side::Bid, TreeKind::Fixed, 110, 2);
+    taker.owner = maker.owner;
+    taker.post_only = true;
+    // `CancelProvide` would otherwise remove the trader's own resting order
+    // and then execute against the next trader -- neither may happen for a
+    // post-only order that would have crossed at all.
+    taker.self_trade_behavior = SelfTradeBehavior::CancelProvide;
+
+    let plan = plan_limit_arenas(&bids, &asks, taker, Some(100), 1, limits()).unwrap();
+
+    assert!(plan.post_only_rejected, "post-only must reject first");
+    assert!(!plan.self_trade_aborted);
+    assert_eq!(plan.self_cancelled, 0, "no STP action may be planned");
+    assert_eq!(plan.action_count, 0, "the book must be untouched");
+    assert_eq!(plan.fill_count, 0);
+}
