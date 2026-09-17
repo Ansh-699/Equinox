@@ -7,6 +7,7 @@ import { decodeCustodyEvents } from './event-decoder';
 import { AccountSnapshotFetcher } from './ingestion-pipeline';
 import { MarketIndexer } from './indexer-service';
 import { isWithdrawalDisplaySafe, reconcileMarketExecutionStatus } from './execution-status';
+import { PrivateSessionRepository, publishSeatProjection, seatsAffectedByEvent } from './private-sessions';
 
 export { MarketStream };
 
@@ -158,7 +159,23 @@ export async function runIngestionTick(env: Env, fetcher: typeof fetch = fetch):
       let transaction: unknown;
       try { transaction = await l1.transaction(entry.signature); } catch { continue; }
       const events = decodeCustodyEvents(transaction as Parameters<typeof decodeCustodyEvents>[0], 'l1', Date.now());
-      for (const event of events) { await indexer.ingest(market.marketPda, event); eventsIngested += 1; }
+      for (const event of events) {
+        await indexer.ingest(market.marketPda, event);
+        eventsIngested += 1;
+        // Best-effort private-projection push: never lets a decode/publish
+        // failure for one event block ingesting the rest of the batch, and
+        // never blocks on it -- the durable D1 event record above is
+        // already the source of truth a client can resnapshot from.
+        const discriminator = event.payload.discriminator;
+        const payload = event.payload.payload;
+        if (typeof discriminator === 'number' && typeof payload === 'string' && env.DB) {
+          const sessions = new PrivateSessionRepository(env.DB);
+          const stream = env.MARKET_STREAM!.getByName(definitionByPda.get(market.marketPda)?.symbol ?? market.marketPda);
+          for (const seatIndex of seatsAffectedByEvent(discriminator, payload)) {
+            await publishSeatProjection(l1, sessions, stream, market.marketPda, seatIndex, Date.now()).catch(() => {});
+          }
+        }
+      }
     }
   }
   return { marketsPolled: markets.results.length, eventsIngested };
