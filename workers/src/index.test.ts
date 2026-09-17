@@ -142,7 +142,9 @@ it('runKeeperOrchestrationTick discovers a registered market and produces a summ
     throw new Error(`unexpected RPC method ${body.method}`);
   }) as unknown as typeof fetch;
 
-  const result = await runKeeperOrchestrationTick({ ...bindings, SOLANA_RPC_URL: 'https://l1.fixture.test' } as unknown as Env, fetcher);
+  // A devnet-recognized endpoint: the devnet-only guard must not block the
+  // orchestration tick in this scenario (no signer configured -> observation-only).
+  const result = await runKeeperOrchestrationTick({ ...bindings, SOLANA_RPC_URL: 'http://localhost:8899' } as unknown as Env, fetcher);
   expect(result.ran).toBe(true);
   // The fixture market's account can't be decoded (mock returns null), so
   // it's excluded from results and recorded as a discovery error instead

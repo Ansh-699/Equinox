@@ -8,6 +8,8 @@ interface __BaseEnv_Env {
 	MARKET_STREAM?: DurableObjectNamespace<import("./index").MarketStream>;
 	PRIVY_APP_SECRET?: string;
 	PYTH_PRO_API_KEY?: string;
+	PYTH_PRO_ENDPOINTS?: string;
+	KEEPER_KEYPAIR_JSON?: string;
 	SOLANA_RPC_URL?: string;
 	SOLANA_WS_URL?: string;
 	MAGIC_ROUTER_URL?: string;

@@ -16,6 +16,9 @@ import {
   type KeeperTransactionContext,
 } from "./transactions";
 import type { Signer } from "./signer";
+import { resolveKeeperSigning, type KeeperSigningResolution } from "./keeper-signer";
+import { createLivePythUpdateSource, pythSourceHealth, type PythProClientConfig } from "./pyth-source";
+import type { PythLazerPool } from "./pyth-lazer-client";
 
 /**
  * Configuration classification and fail-safe wiring for the production
@@ -58,13 +61,35 @@ export interface KeeperConfigHealth {
   magicRouter: KeeperHealthState;
 }
 
+/** Credential-presence classification for the health endpoint. The live
+ * Lazer subscription is implemented (`pyth-lazer-client.ts`); "ready"
+ * therefore requires the real redundancy floor: a key plus all three
+ * documented endpoints. */
 export function classifyKeeperConfiguration(env: Env): KeeperConfigHealth {
+  const endpoints = (env.PYTH_PRO_ENDPOINTS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const pythConfig: PythProClientConfig = {
+    apiKey: env.PYTH_PRO_API_KEY,
+    endpoints: endpoints.length > 0 ? endpoints : DEFAULT_PYTH_PRO_ENDPOINTS,
+    feedId: "0",
+    minChannel: "fixed_rate@200ms",
+  };
   return {
-    pyth: "configuration_blocked", // live wss://pyth-lazer-* subscription not implemented regardless of key presence
-    signer: "configuration_blocked", // no keeper-signing secret binding exists in this deployment's Env yet
+    pyth: pythSourceHealth(pythConfig),
+    signer: env.KEEPER_KEYPAIR_JSON && env.KEEPER_PUBLIC_KEY ? "ready" : "configuration_blocked",
     magicRouter: env.MAGIC_ROUTER_URL || env.MAGICBLOCK_RPC_URL ? "ready" : "configuration_blocked",
   };
 }
+
+/** Documented default endpoints (docs.pyth.network); overridable via
+ * `PYTH_PRO_ENDPOINTS` for tests. */
+export const DEFAULT_PYTH_PRO_ENDPOINTS = [
+  "wss://pyth-lazer-0.dourolabs.app/v1/stream",
+  "wss://pyth-lazer-1.dourolabs.app/v1/stream",
+  "wss://pyth-lazer-2.dourolabs.app/v1/stream",
+] as const;
 
 /** Default equity-market calendar applied to every discovered market until
  * a per-market calendar is stored in the registry -- NYSE-style regular/
@@ -109,13 +134,37 @@ function buildersFor(authority: string) {
  * when a job-specific credential (Pyth key, signer) is missing; those
  * degrade their own job instead (`signer: null`, `pythSource: null`).
  */
-export async function buildOrchestratorDeps(env: Env, fetcher: typeof fetch, signer: Signer | null, keeperPublicKey: string | undefined): Promise<OrchestratorDeps | null> {
+export async function buildOrchestratorDeps(
+  env: Env,
+  fetcher: typeof fetch,
+  signer: Signer | null,
+  keeperPublicKey: string | undefined,
+  options: { pythPool?: PythLazerPool } = {},
+): Promise<OrchestratorDeps | null> {
   if (!env.DB || !env.SOLANA_RPC_URL) return null;
   const l1 = new SolanaL1Transport(env.SOLANA_RPC_URL, fetcher);
   const er = new MagicRouterTransport(env.MAGIC_ROUTER_URL ?? env.MAGICBLOCK_RPC_URL ?? env.SOLANA_RPC_URL, fetcher);
   const authority = keeperPublicKey ?? env.KEEPER_PUBLIC_KEY;
   const registry = await loadMarketRegistry(env.DB);
   const calendars = new Map(registry.map((row) => [row.marketPda, DEFAULT_CALENDAR] as const));
+  // Live Pyth source only when the credential classification is ready AND
+  // the (optional) live pool is wired in by the caller.
+  let pythSource: OrchestratorDeps["pythSource"] = null;
+  if (options.pythPool) {
+    const endpoints = (env.PYTH_PRO_ENDPOINTS ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    const config: PythProClientConfig = {
+      apiKey: env.PYTH_PRO_API_KEY,
+      endpoints: endpoints.length > 0 ? endpoints : [...DEFAULT_PYTH_PRO_ENDPOINTS],
+      feedId: "0",
+      minChannel: "fixed_rate@200ms",
+    };
+    if (pythSourceHealth(config) === "ready") {
+      pythSource = createLivePythUpdateSource(config, options.pythPool);
+    }
+  }
   return {
     db: env.DB,
     l1,
@@ -124,10 +173,26 @@ export async function buildOrchestratorDeps(env: Env, fetcher: typeof fetch, sig
     // No authority (no keeper public key configured) means no builder can
     // address a valid instruction; treat exactly like no signer.
     buildersFor: authority ? buildersFor(authority) : () => { throw new Error("no keeper public key configured"); },
-    pythSource: null, // see pyth-source.ts: live subscription not implemented
+    pythSource,
     calendars,
     fundingPolicy: DEFAULT_FUNDING_POLICY,
     now: () => Date.now(),
     holder: "scheduled-worker",
   };
+}
+
+/** The full LOCAL_DEVNET startup sequence: resolve the keeper signing
+ * boundary (network guard, key validation, redacted failures), then build
+ * the orchestrator deps with the validated signer. The resolution is
+ * returned even when signing is disabled so the caller can report the
+ * exact startup state (`observation-only` / `signer-ready` /
+ * `signer-invalid` / `configuration-blocked`). */
+export async function startKeeperRuntime(
+  env: Env,
+  fetcher: typeof fetch,
+  pythPool?: PythLazerPool,
+): Promise<{ resolution: KeeperSigningResolution; deps: Awaited<ReturnType<typeof buildOrchestratorDeps>> | null }> {
+  const resolution = await resolveKeeperSigning(env);
+  const deps = await buildOrchestratorDeps(env, fetcher, resolution.signer, env.KEEPER_PUBLIC_KEY, { pythPool });
+  return { resolution, deps };
 }
