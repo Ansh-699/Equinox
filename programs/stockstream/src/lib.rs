@@ -18,6 +18,7 @@ pub mod handlers;
 pub mod initialize_market;
 pub mod instruction;
 pub mod magicblock;
+pub mod mark;
 pub mod registry;
 pub mod risk;
 pub mod scratch;

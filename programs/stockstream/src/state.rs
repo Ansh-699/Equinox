@@ -226,6 +226,9 @@ pub const RESERVED_VAULT_SURPLUS: usize = 147; // ..155
 /// Number of delegated hot-cluster member accounts recorded at delegation
 /// time (`delegate_market`'s trailing accounts; see `magicblock.rs`).
 pub const RESERVED_CLUSTER_MEMBER_COUNT: usize = 155;
+/// Max book-derived mark deviation from the verified index, in basis
+/// points (i16 LE; 0 = the `mark::DEFAULT_MAX_MARK_DEVIATION_BPS` default).
+pub const RESERVED_MAX_MARK_DEVIATION_BPS: usize = 156; // ..158
 
 /// Vault reconciliation status, stored at
 /// `reserved_upgrade[RESERVED_RECONCILIATION_STATUS]`. See `ReconcileVault`
@@ -364,6 +367,25 @@ impl MarketStateHeader {
 
     pub fn set_cluster_member_count(&mut self, value: u8) {
         self.reserved_upgrade[RESERVED_CLUSTER_MEMBER_COUNT] = value;
+    }
+
+    pub fn max_mark_deviation_bps(&self) -> i64 {
+        let raw = i16::from_le_bytes(
+            self.reserved_upgrade
+                [RESERVED_MAX_MARK_DEVIATION_BPS..RESERVED_MAX_MARK_DEVIATION_BPS + 2]
+                .try_into()
+                .unwrap(),
+        );
+        if raw <= 0 {
+            crate::mark::DEFAULT_MAX_MARK_DEVIATION_BPS
+        } else {
+            raw as i64
+        }
+    }
+
+    pub fn set_max_mark_deviation_bps(&mut self, value: i64) {
+        self.reserved_upgrade[RESERVED_MAX_MARK_DEVIATION_BPS..RESERVED_MAX_MARK_DEVIATION_BPS + 2]
+            .copy_from_slice(&(value as i16).to_le_bytes());
     }
 
     /// L1 withdrawals and deposits are only safe when the market is not
