@@ -2262,6 +2262,17 @@ fn place_order_core(
         time_in_force: tif,
         post_only: is_post_only,
     };
+    // `input.leaf()` is pure (derives the price/time key from side/price/
+    // sequence without touching book state), so it is safe to call here,
+    // before matching, purely to recover the same key a resting order would
+    // carry -- even one that fully matches and never rests. The event
+    // itself is not emitted until after settlement succeeds (see below):
+    // reserving/persisting its sequence this early, before the order's
+    // fate (including a possible post-only rejection) is known, would mean
+    // writing the account before success is certain, breaking this
+    // function's no-partial-writes-on-failure invariant that a post-only
+    // rejection or plan-staleness error depends on.
+    let order_key = input.leaf().map_err(book_error)?.key;
     let now = header.last_verified_oracle_timestamp;
     let scratch_before = scratch.read_header();
     // Scratch is bound to the trader seat's owner, not the delegated session
@@ -2321,6 +2332,28 @@ fn place_order_core(
     updated.global_order_sequence = scratch_result.final_order_sequence;
     updated.global_event_sequence = scratch_result.final_event_sequence;
     updated.current_open_interest = scratch_result.open_interest_after;
+    // Emitted only now that settlement has actually succeeded (a post-only
+    // rejection or a stale-plan error above already returned before this
+    // point, leaving the account untouched). Its sequence is reserved
+    // *after* any fills this same order produced (`final_event_sequence`
+    // already advanced past them), so an indexer must not assume
+    // `OrderPlaced` always sorts ahead of its own same-instruction fills --
+    // only that both share one transaction and a monotonic sequence space.
+    let order_sequence = next_event_sequence(&mut updated)?;
+    let order_timestamp = event_timestamp();
+    crate::events::emit_event(
+        crate::events::EventKind::OrderPlaced,
+        &market_address,
+        order_sequence,
+        order_timestamp,
+        &crate::events::payload_order(
+            order.seat_index,
+            order_key,
+            order.side,
+            current_price,
+            order.quantity,
+        ),
+    );
     // Maker+taker fees charged this instruction (already deducted from the
     // relevant seats' `realized_pnl` by `apply_fill`) are credited to the
     // protocol fee ledger here, atomically with the rest of the settlement.
@@ -2553,9 +2586,17 @@ fn plan_seat_results(
         }
         scratch.write_seat_result(slot, &maker)?;
         let event = FillEvent {
+            // `header.global_event_sequence` is the *last used* sequence
+            // (every other event kind assigns via `next_event_sequence`'s
+            // increment-then-assign convention), so the first fill in this
+            // instruction must take `+ 1`, not reuse the current value --
+            // otherwise it collides with whatever event last advanced this
+            // same counter (e.g. a trailing `OrderPlaced` from a prior
+            // instruction, or a custody event on this market).
             sequence: header
                 .global_event_sequence
-                .checked_add(fill_index as u64)
+                .checked_add(1)
+                .and_then(|v| v.checked_add(fill_index as u64))
                 .ok_or(custom(StockStreamError::ArithmeticOverflow))?,
             maker_seat: fill.maker,
             taker_seat: fill.taker,

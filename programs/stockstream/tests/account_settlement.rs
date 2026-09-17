@@ -782,10 +782,11 @@ fn serialized_market_can_create_seats_and_settle_crossing_orders() {
     let open_interest = header.current_open_interest;
     let event_sequence = header.global_event_sequence;
     assert_eq!(open_interest, 10);
-    // 2 (TraderSeatCreated for each of the two seats) + 1 (the fill itself,
-    // no fee credited since this test's smaller notional floors to a zero
-    // taker fee -- see `crossing_fill_credits_the_protocol_fee_ledger`).
-    assert_eq!(event_sequence, 3);
+    // 2 (TraderSeatCreated for each of the two seats) + 1 (maker's
+    // OrderPlaced) + 1 (taker's OrderPlaced) + 1 (the fill itself, no fee
+    // credited since this test's smaller notional floors to a zero taker
+    // fee -- see `crossing_fill_credits_the_protocol_fee_ledger`).
+    assert_eq!(event_sequence, 5);
     // The fill-event ring is a modular buffer keyed by the *shared*
     // protocol-wide event sequence (`global_event_sequence`), not a
     // fill-only counter that always starts at 0 -- the two preceding
@@ -905,11 +906,12 @@ fn crossing_fill_credits_the_protocol_fee_ledger() {
     let protocol_fee_balance = header.protocol_fee_balance();
     // The fee-crediting branch shares the market's fill-event sequence
     // counter, so it must also have advanced past the fill's own increment,
-    // not reset or duplicate it: 2 (TraderSeatCreated x2) + 1 (the fill) +
-    // 1 (ProtocolFeesChanged).
+    // not reset or duplicate it: 2 (TraderSeatCreated x2) + 1 (maker's
+    // OrderPlaced) + 1 (taker's OrderPlaced) + 1 (the fill) + 1
+    // (ProtocolFeesChanged).
     let event_sequence = header.global_event_sequence;
     assert_eq!(protocol_fee_balance, 500);
-    assert_eq!(event_sequence, 4);
+    assert_eq!(event_sequence, 6);
 }
 
 #[test]
@@ -1086,16 +1088,27 @@ fn mvp_reduce_only_increase_rejects_before_mutation() {
 
 #[test]
 fn mvp_event_ring_wraps_from_final_slot_to_zero() {
+    // Every placed order now also emits its own `OrderPlaced` event (see
+    // `events.rs`), emitted only after settlement succeeds -- its sequence
+    // is reserved *after* any fills the same instruction produced, via
+    // `next_event_sequence`. Fills *within a single instruction* still get
+    // consecutive sequences (`plan_seat_results` assigns
+    // `header.global_event_sequence + 1 + fill_index`, `+1` because that
+    // field holds the *last used* sequence, not the next available one),
+    // so this test crosses two resting makers with a single two-quantity
+    // taker order to get an exact, adjacent (127, 128) fill pair spanning
+    // the ring's wrap point.
     let mut f = fixture();
     unsafe {
         let data = f.market.view.borrow_unchecked_mut();
         let header = &mut *(data.as_mut_ptr() as *mut MarketStateHeader);
-        header.global_event_sequence = 127;
+        header.global_event_sequence = 124;
     }
-    place(&f, true, &order_data(1, 0, 1, 100, 0, 151)).unwrap();
-    place(&f, false, &order_data(0, 1, 1, 110, 0, 152)).unwrap();
-    place(&f, true, &order_data(1, 0, 1, 100, 0, 153)).unwrap();
-    place(&f, false, &order_data(0, 1, 1, 110, 0, 154)).unwrap();
+    place(&f, true, &order_data(1, 0, 1, 100, 0, 151)).unwrap(); // maker ask #1, OrderPlaced -> 125
+    place(&f, true, &order_data(1, 0, 1, 100, 0, 152)).unwrap(); // maker ask #2, OrderPlaced -> 126
+                                                                 // Taker bid crosses both resting asks in one instruction: fill #1 = 127,
+                                                                 // fill #2 = 128 (wraps to slot 0), then its own OrderPlaced takes 129.
+    place(&f, false, &order_data(0, 1, 2, 110, 0, 153)).unwrap();
     let data = unsafe { f.market.view.borrow_unchecked() };
     let last = unsafe {
         &*(data
@@ -1110,6 +1123,39 @@ fn mvp_event_ring_wraps_from_final_slot_to_zero() {
     let last_sequence = last.sequence;
     let zero_sequence = zero.sequence;
     assert_eq!((last_sequence, zero_sequence), (127, 128));
+}
+
+/// Regression test for a real sequence-collision bug: `global_event_sequence`
+/// holds the *last used* sequence (every non-fill event kind assigns via
+/// `next_event_sequence`'s increment-then-assign convention), so a fill
+/// sequence formula that reused that value directly as its own 0-indexed
+/// base (instead of `+ 1`) would silently collide with whatever event last
+/// advanced the counter -- here, a resting order's own trailing
+/// `OrderPlaced` immediately followed by a second order that crosses it.
+#[test]
+fn a_resting_orders_placed_event_never_collides_with_a_later_crossing_fills_sequence() {
+    let f = fixture();
+    place(&f, true, &order_data(1, 0, 5, 100, 0, 161)).unwrap();
+    let maker_placed_sequence = {
+        let data = unsafe { f.market.view.borrow_unchecked() };
+        unsafe { &*(data.as_ptr() as *const MarketStateHeader) }.global_event_sequence
+    };
+    place(&f, false, &order_data(0, 1, 5, 110, 0, 162)).unwrap();
+    let data = unsafe { f.market.view.borrow_unchecked() };
+    let header = unsafe { &*(data.as_ptr() as *const MarketStateHeader) };
+    let final_sequence = header.global_event_sequence;
+    // The fill's own sequence is `final_sequence - 1` (the taker's trailing
+    // OrderPlaced took the very last slot); it must be strictly greater
+    // than the maker's OrderPlaced sequence, never equal to it.
+    let fill_sequence = final_sequence - 1;
+    assert!(fill_sequence > maker_placed_sequence);
+    let event_offset = stockstream::state::FILL_EVENT_OFFSET
+        + (fill_sequence as usize % stockstream::state::FILL_EVENT_CAPACITY)
+            * stockstream::state::FILL_EVENT_SIZE;
+    let event =
+        unsafe { &*(data.as_ptr().add(event_offset) as *const stockstream::state::FillEvent) };
+    let event_sequence = event.sequence;
+    assert_eq!(event_sequence, fill_sequence);
 }
 
 #[test]
