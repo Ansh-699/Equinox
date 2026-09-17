@@ -175,7 +175,12 @@ export class ProtocolKeeperOrchestrator {
     const keeperDeps = this.keeperDeps();
     const signer = this.deps.signer;
     const now = this.deps.now();
-    const builders = this.deps.buildersFor(marketPda);
+    // Lazy: buildersFor may throw (e.g. no keeper public key configured to
+    // address instructions with) -- deferring construction until a branch
+    // that already confirmed `signer` is present means a missing signer
+    // alone can never turn into a per-market `error` instead of the
+    // intended "observation only" outcomes below.
+    const builders = () => this.deps.buildersFor(marketPda);
 
     // 1. Pyth oracle update.
     if (!this.deps.pythSource) {
@@ -183,7 +188,7 @@ export class ProtocolKeeperOrchestrator {
     } else if (!signer) {
       result.pyth = { ran: false, reason: "no keeper signer configured; observation only" };
     } else {
-      result.pyth = await runPythKeeperTick(keeperDeps, this.deps.l1, signer, builders.pyth, this.deps.pythSource, marketPda, new OracleUpdateRepository(this.deps.db));
+      result.pyth = await runPythKeeperTick(keeperDeps, this.deps.l1, signer, builders().pyth, this.deps.pythSource, marketPda, new OracleUpdateRepository(this.deps.db));
     }
 
     // 2. Session/status transition.
@@ -195,7 +200,7 @@ export class ProtocolKeeperOrchestrator {
     } else {
       const targetStatus = deriveTargetSessionStatus(calendar, now, this.deps.pythTradingStatus?.get(marketPda));
       const currentMode = currentModeFor(market.state.mode);
-      result.session = await runMarketSessionKeeperTick(keeperDeps, this.deps.l1, signer, builders.session, marketPda, targetStatus, currentMode);
+      result.session = await runMarketSessionKeeperTick(keeperDeps, this.deps.l1, signer, builders().session, marketPda, targetStatus, currentMode);
     }
 
     // 3. Funding update (needs the freshest oracle state, hence after Pyth).
@@ -206,7 +211,7 @@ export class ProtocolKeeperOrchestrator {
     } else if (!signer) {
       result.funding = { ran: false, reason: "no keeper signer configured; observation only" };
     } else {
-      result.funding = await runFundingKeeperTick(keeperDeps, this.deps.l1, signer, builders.funding, marketPda, fundingDecision.input);
+      result.funding = await runFundingKeeperTick(keeperDeps, this.deps.l1, signer, builders().funding, marketPda, fundingDecision.input);
     }
 
     // 4. Liquidation: bounded discovery over the account bytes we already
@@ -220,7 +225,7 @@ export class ProtocolKeeperOrchestrator {
       const { candidates, nextCursor } = scanLiquidationCandidates(accountBytes, header, stored?.seatIndex ?? 0, this.limits.maxLiquidationCandidatesPerMarket);
       await cursors.set("liquidation", marketPda, { seatIndex: nextCursor }, Date.now());
       for (const candidate of candidates) {
-        const outcome = await runLiquidationKeeperTick(keeperDeps, this.deps.l1, signer, builders.liquidation, marketPda, toKeeperCandidate(candidate), async () => {
+        const outcome = await runLiquidationKeeperTick(keeperDeps, this.deps.l1, signer, builders().liquidation, marketPda, toKeeperCandidate(candidate), async () => {
           const reread = await reReadLiquidationCandidate(this.deps.l1, marketPda, candidate);
           if (reread.status === "liquidatable") return reread.result;
           return { isLiquidatable: false, oracleValid: reread.status !== "stale-oracle", quantity: 0n };
@@ -239,14 +244,14 @@ export class ProtocolKeeperOrchestrator {
       // resting-order count, so the sweep budget is a configured constant
       // rather than the book's actual size. Upgrade path: decode
       // bid/ask arena occupancy once a book reader exists.
-      result.cleanup = await runCleanupKeeperTick(keeperDeps, this.deps.l1, signer, builders.cleanup, marketPda, new KeeperCursorRepository(this.deps.db), this.limits.cleanupSweepBudget);
+      result.cleanup = await runCleanupKeeperTick(keeperDeps, this.deps.l1, signer, builders().cleanup, marketPda, new KeeperCursorRepository(this.deps.db), this.limits.cleanupSweepBudget);
     }
 
     // 6. MagicBlock commit/reconciliation -- seals the resulting state.
     if (!signer) {
       result.commit = { ran: false, reason: "no keeper signer configured; observation only" };
     } else {
-      result.commit = await this.runCommit(marketPda, result, signer, keeperDeps, builders);
+      result.commit = await this.runCommit(marketPda, result, signer, keeperDeps, builders());
     }
 
     return result;

@@ -8,6 +8,8 @@ import { AccountSnapshotFetcher } from './ingestion-pipeline';
 import { MarketIndexer } from './indexer-service';
 import { isWithdrawalDisplaySafe, reconcileMarketExecutionStatus } from './execution-status';
 import { PrivateSessionRepository, publishSeatProjection, seatsAffectedByEvent } from './private-sessions';
+import { buildOrchestratorDeps, classifyKeeperConfiguration } from './keeper-config';
+import { ProtocolKeeperOrchestrator, type OrchestratorRunSummary } from './keeper-orchestrator';
 
 export { MarketStream };
 
@@ -224,6 +226,23 @@ export async function fetchExecutionStatus(
   };
 }
 
+/**
+ * Priority 8, Section 11: the production scheduled keeper path. No
+ * keeper-signing secret binding exists in this deployment's `Env` yet
+ * (`signer.ts::createProductionSigner` requires one) -- `signer` is `null`
+ * until one is provisioned, which safely degrades every job to
+ * discovery/observation only (`ProtocolKeeperOrchestrator`'s own
+ * documented fail-safe), never blocking ingestion, auth, or the public
+ * API. Exported (like `runIngestionTick`) so tests can inject a fetcher.
+ */
+export async function runKeeperOrchestrationTick(env: Env, fetcher: typeof fetch = fetch): Promise<{ ran: boolean; reason?: string; summary?: OrchestratorRunSummary }> {
+  const signer = null; // see this function's doc comment
+  const deps = await buildOrchestratorDeps(env, fetcher, signer, env.KEEPER_PUBLIC_KEY);
+  if (!deps) return { ran: false, reason: 'RPC endpoint not configured' };
+  const summary = await new ProtocolKeeperOrchestrator(deps).run();
+  return { ran: true, summary };
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -248,6 +267,7 @@ export default {
         checkedAt: now,
         deadLetters: { due: due.length, entries: due.map((d) => ({ id: d.id, operation: d.operation, attempts: d.attempts, error: d.error })) },
         leases: leases.results.map((lease) => ({ ...lease, active: lease.expiresAt > now })),
+        keeperConfiguration: classifyKeeperConfiguration(env),
       });
     }
 
@@ -340,6 +360,16 @@ export default {
         now, leaseTtlMs: 55_000, idempotencyTtlMs: 5 * 60_000,
         work: () => runIngestionTick(env),
       }).catch(() => {}); // a lease/idempotency conflict here just means another instance is already ticking; never let it fail the whole scheduled invocation.
+
+      // The six keeper jobs (Pyth, session, funding, liquidation, cleanup,
+      // commit). ProtocolKeeperOrchestrator owns its own internal lease
+      // ("scheduler:keepers") and per-market/per-job idempotency, so this
+      // is a direct call, not another runDurableKeeper wrapper -- double
+      // -leasing the same tick would just contend with itself. A failure
+      // here (e.g. a transport error before any market-level try/catch
+      // applies) must never take down ingestion/cleanup, which already ran
+      // above.
+      await runKeeperOrchestrationTick(env).catch(() => {});
     }
   },
 } satisfies ExportedHandler<Env>;
