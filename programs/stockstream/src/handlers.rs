@@ -3199,7 +3199,46 @@ fn update_funding(
     else {
         return Err(ProgramError::InvalidInstructionData);
     };
-    if timestamp < header.last_funding_timestamp || accumulator < header.funding_accumulator {
+    if timestamp < header.last_funding_timestamp {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    // The program computes the mark itself from the live book plus the
+    // verified oracle (see `mark.rs`): the submitted accumulator increment
+    // may never exceed what that mark justifies, so a malicious keeper
+    // cannot select an arbitrary funding rate. The increment is bounded by
+    // the per-elapsed-second absolute cap AND the mark/index basis
+    // (whichever is smaller), symmetric in sign so negative bases bound
+    // negative funding equally.
+    {
+        // Read-only arena snapshots for the mark computation (the arenas
+        // live inside the same market account; the header write below is
+        // the only mutation this instruction makes).
+        let bids: Arena =
+            unsafe { *(data.as_ptr().add(crate::state::BID_ARENA_OFFSET) as *const Arena) };
+        let asks: Arena =
+            unsafe { *(data.as_ptr().add(crate::state::ASK_ARENA_OFFSET) as *const Arena) };
+        let mark =
+            crate::mark::executable_mark(&bids, &asks, &header, header.last_verified_oracle_price)?;
+        let index = header.last_verified_oracle_price;
+        let basis_bps = (mark.price as i128 - index as i128)
+            .checked_mul(10_000)
+            .and_then(|value| value.checked_div(index as i128))
+            .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
+        let elapsed = timestamp.saturating_sub(header.last_funding_timestamp);
+        // Absolute per-second funding-rate cap, independent of the basis.
+        const FUNDING_CAP_BPS_PER_SEC: i128 = 1;
+        let cap = FUNDING_CAP_BPS_PER_SEC
+            .checked_mul(elapsed as i128)
+            .ok_or(custom(StockStreamError::ArithmeticOverflow))?
+            .min(basis_bps.abs());
+        let requested_increment = (accumulator as i128)
+            .checked_sub(header.funding_accumulator as i128)
+            .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
+        if requested_increment.abs() > cap {
+            return Err(custom(StockStreamError::InvalidInstruction));
+        }
+    }
+    if accumulator < header.funding_accumulator {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
     header.funding_accumulator = accumulator;
