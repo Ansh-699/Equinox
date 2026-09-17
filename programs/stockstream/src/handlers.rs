@@ -3210,13 +3210,15 @@ fn update_funding(
     // (whichever is smaller), symmetric in sign so negative bases bound
     // negative funding equally.
     {
-        // Read-only arena snapshots for the mark computation (the arenas
-        // live inside the same market account; the header write below is
-        // the only mutation this instruction makes).
-        let bids: Arena =
-            unsafe { *(data.as_ptr().add(crate::state::BID_ARENA_OFFSET) as *const Arena) };
-        let asks: Arena =
-            unsafe { *(data.as_ptr().add(crate::state::ASK_ARENA_OFFSET) as *const Arena) };
+        // Read-only arena borrows for the mark computation (the arenas live
+        // inside the same market account; the header write below is the
+        // only mutation this instruction makes). NEVER copy an Arena by
+        // value here: a 90,640-byte stack object overflows the SBPF stack
+        // frame immediately (verified by the runtime harness).
+        let bids: &Arena =
+            unsafe { &*(data.as_ptr().add(crate::state::BID_ARENA_OFFSET) as *const Arena) };
+        let asks: &Arena =
+            unsafe { &*(data.as_ptr().add(crate::state::ASK_ARENA_OFFSET) as *const Arena) };
         let mark =
             crate::mark::executable_mark(&bids, &asks, &header, header.last_verified_oracle_price)?;
         let index = header.last_verified_oracle_price;

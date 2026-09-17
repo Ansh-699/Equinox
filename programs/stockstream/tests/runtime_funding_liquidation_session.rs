@@ -92,6 +92,55 @@ impl Env {
             (*header).emergency_authority = authority;
         }
         self.write_market_data(data);
+        // Plant a resting two-sided book (bid 96 / ask 98 with indexes above
+        // NONE) so the on-chain mark lands at mid 97 and the funding basis is
+        // nonzero: the bounded-funding policy funds from the mark basis, not
+        // from caller instruction data.
+        self.plant_book();
+    }
+
+    /// Plants a resting fixed-price leaf on each side of the book, so the
+    /// deployed program's mark computation lands at mid 97 (basis -300bps vs
+    /// index 100). Uses the real arena types so the packed(8) node layout is
+    /// exactly the one the program validates.
+    fn plant_book(&mut self) {
+        use stockstream::book::{
+            Arena, LeafNode, OrderInput, SelfTradeBehavior, Side, TimeInForce, TreeKind,
+        };
+
+        let mut bids = Arena::new();
+        let mut asks = Arena::new();
+        let leaf = |side: Side, price: i64| -> LeafNode {
+            OrderInput {
+                side,
+                tree: TreeKind::Fixed,
+                owner: 1,
+                price_or_offset: price,
+                sequence: 1,
+                quantity: 10,
+                expires_at: u64::MAX,
+                peg_limit: i64::MAX,
+                client_order_id: 1,
+                time_in_force: stockstream::book::TimeInForce::GoodTilCancelled,
+                post_only: false,
+                self_trade_behavior: SelfTradeBehavior::AbortTransaction,
+            }
+            .leaf()
+            .unwrap()
+        };
+        bids.insert(TreeKind::Fixed, leaf(Side::Bid, 96)).unwrap();
+        asks.insert(TreeKind::Fixed, leaf(Side::Ask, 98)).unwrap();
+
+        let mut data = self.market_data();
+        unsafe {
+            let bid_base =
+                data.as_mut_ptr().add(stockstream::state::BID_ARENA_OFFSET) as *mut Arena;
+            ptr::write_unaligned(bid_base, bids);
+            let ask_base =
+                data.as_mut_ptr().add(stockstream::state::ASK_ARENA_OFFSET) as *mut Arena;
+            ptr::write_unaligned(ask_base, asks);
+        }
+        self.write_market_data(data);
     }
 
     fn create_seat(&mut self, seat: u16) -> Result<u64, String> {
@@ -180,9 +229,12 @@ fn update_funding_data(accumulator: i128, timestamp: u64) -> Vec<u8> {
 #[test]
 fn funding_accumulator_advances_and_records_the_timestamp() {
     let mut env = setup();
+    // The bounded-funding policy computes the allowed increment on-chain
+    // from the live book: elapsed=42s and a resting book mid of 97
+    // (basis -300bps vs index 100) admit an increment of at most 42.
     let cu = env
         .send(
-            &update_funding_data(5_000, 42),
+            &update_funding_data(40, 42),
             &[
                 writable(env.market),
                 readonly_signer(env.authority.pubkey()),
@@ -195,7 +247,7 @@ fn funding_accumulator_advances_and_records_the_timestamp() {
     );
     eprintln!("compute units (UpdateFunding): {cu}");
     let header = env.header();
-    assert_eq!({ header.funding_accumulator }, 5_000);
+    assert_eq!({ header.funding_accumulator }, 40);
     assert_eq!({ header.last_funding_timestamp }, 42);
 }
 
@@ -203,7 +255,7 @@ fn funding_accumulator_advances_and_records_the_timestamp() {
 fn funding_rejects_a_regression_in_accumulator_or_timestamp() {
     let mut env = setup();
     env.send(
-        &update_funding_data(5_000, 42),
+        &update_funding_data(40, 42),
         &[
             writable(env.market),
             readonly_signer(env.authority.pubkey()),
@@ -224,7 +276,7 @@ fn funding_rejects_a_regression_in_accumulator_or_timestamp() {
     let header = env.header();
     assert_eq!(
         { header.funding_accumulator },
-        5_000,
+        40,
         "state must be unchanged after the rejected instruction"
     );
 }
