@@ -21,6 +21,17 @@ import {
   WalletCards
 } from "lucide-react";
 import { useAppAuth } from "@/components/app-providers";
+import {
+  buildSessionSignedTransaction,
+  createSession,
+  destroySession,
+  isSessionUsable,
+  lookupSession,
+  submitToRelayer,
+  SESSION_ACTION,
+  type SessionPolicy,
+  type SessionStatus,
+} from "@/lib/session-trading";
 import { authorizeTradingSession, cancelAll, createTraderSeat, depositCollateral, initializeSettlementScratch, initializeVault, previewPlaceOrder, revokeTradingSession, withdrawCollateral } from "@/clients/stockstream/src";
 import { PERP_MARKETS, marketForSymbol } from "@/lib/markets";
 
@@ -48,6 +59,7 @@ export function TradingTerminal() {
   const [marketSymbol, setMarketSymbol] = useState(process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_SYMBOL ?? PERP_MARKETS[0].symbol);
   const [book, setBook] = useState<{ bids: BookLevel[]; asks: BookLevel[] }>({ bids: [], asks: [] });
   const [marketFeedStatus, setMarketFeedStatus] = useState<"connecting" | "live" | "unavailable">(marketApiUrl ? "connecting" : "unavailable");
+  const [sessionStatus, setSessionStatus] = useState<SessionStatus | null>(null);
   const marketConfig = marketForSymbol(marketSymbol);
   const marketAddress = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_ADDRESS ?? marketConfig.marketPda;
   const active = false;
@@ -110,14 +122,16 @@ export function TradingTerminal() {
   }
 
   function constructSessionAction(revoke = false) {
+    void revoke;
     if (!auth.walletAddress || !marketAddress) { setNotice("Configure the market address and sign in before constructing session actions."); return; }
-    const session = process.env.NEXT_PUBLIC_STOCKSTREAM_SESSION_ACCOUNT;
-    const sessionSigner = process.env.NEXT_PUBLIC_STOCKSTREAM_SESSION_SIGNER;
-    if (!session || !sessionSigner) { setNotice("Trading session action blocked: session account and signer public key are not configured."); return; }
-    const ix = revoke
-      ? revokeTradingSession({ market: marketAddress, authority: auth.walletAddress, session: session!, sessionSigner: sessionSigner! }, 0)
-      : authorizeTradingSession({ market: marketAddress, authority: auth.walletAddress, payer: auth.walletAddress, sessionSigner: sessionSigner! }, BigInt(Date.now() + 3_600_000), { seatIndex: 0, actions: 0b1011, maxOrderNotional: 1_000_000n, maxCumulativeNotional: 10_000_000n, maximumExposure: 1_000_000n, maximumOpenOrders: 32 });
-    setNotice(`Constructed ${revoke ? "RevokeTradingSession" : "AuthorizeTradingSession"} with ${ix.keys.length} accounts. No signature was requested.`);
+    // Session keys are generated and held in the browser only
+    // (lib/browser-session.ts). One main-wallet signature authorizes
+    // trading; trades are then signed by the session key alone.
+    void createSession(auth.walletAddress, marketAddress, 0).then((created) => {
+      setNotice(created.reused
+        ? `Reused browser session key for PDA ${created.sessionPda}. One main-wallet approval will authorize it on-chain.`
+        : `New browser session key ${created.keyId} created (memory only). PDA ${created.sessionPda}. One main-wallet approval will authorize it.`);
+    }).catch((error: unknown) => setNotice(error instanceof Error ? error.message : "Session key creation failed"));
   }
 
   function constructCancelAll() {

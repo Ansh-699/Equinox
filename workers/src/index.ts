@@ -10,6 +10,7 @@ import { isWithdrawalDisplaySafe, reconcileMarketExecutionStatus } from './execu
 import { PrivateSessionRepository, publishSeatProjection, seatsAffectedByEvent } from './private-sessions';
 import { classifyKeeperConfiguration, startKeeperRuntime } from './keeper-config';
 import { resolveKeeperSigning } from './keeper-signer';
+import { relaySessionTransaction } from './session-relayer';
 import { ProtocolKeeperOrchestrator, type OrchestratorRunSummary } from './keeper-orchestrator';
 
 export { MarketStream };
@@ -322,6 +323,43 @@ export default {
       const symbol = parts[2].toUpperCase();
       const market = await bindings(env).DB.prepare("SELECT symbol, instrument_id AS instrumentId, market_index AS marketIndex, market_pda AS marketPda, vault_pda AS vaultPda, status, oracle_feed_id AS oracleFeedId, session_policy AS sessionPolicy FROM markets WHERE symbol = ?").bind(symbol).first<MarketDefinition>();
       return market ? json(market) : json({ error: "market_not_found" }, 404);
+    }
+
+    // Priority 8, Section 15: the session-key relayer. Authenticated like
+    // every operational route (bearer); rate limited per caller; validates
+    // the session-key-signed transaction independently (fee payer = this
+    // relayer, opcode allowlist), co-signs the exact same message bytes,
+    // and submits through the domain the client picked. Never forwards a
+    // transaction that failed validation.
+    if (request.method === "POST" && url.pathname === "/v1/relay/session") {
+      if (!isAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
+      if (!await new ProtocolRepository(bindings(env).DB).allow('relay', 200, 60_000, Date.now()))
+        return json({ error: 'rate_limited' }, 429);
+      const body = await request.json().catch(() => null) as {
+        transactionBase64?: string;
+        expectedProgramAddress?: string;
+        sessionSignerAddress?: string;
+        domain?: string;
+      } | null;
+      if (!body?.transactionBase64 || !body.expectedProgramAddress || !body.sessionSignerAddress) {
+        return json({ error: "invalid_request" }, 400);
+      }
+      const relayerSigner = (globalThis as { __stockstreamRelayerSigner?: import('./signer').Signer }).__stockstreamRelayerSigner;
+      if (!relayerSigner) return json({ error: "relayer_signer_unconfigured" }, 503);
+      const transport = body.domain === "er"
+        ? new MagicBlockErTransport(env.MAGIC_ROUTER_URL ?? env.MAGICBLOCK_RPC_URL ?? env.SOLANA_RPC_URL!, fetch)
+        : new SolanaL1Transport(env.SOLANA_RPC_URL!, fetch);
+      const outcome = await relaySessionTransaction(
+        {
+          transactionBase64: body.transactionBase64,
+          expectedProgramAddress: body.expectedProgramAddress,
+          sessionSignerAddress: body.sessionSignerAddress,
+        },
+        relayerSigner,
+        transport,
+      );
+      if ("error" in outcome) return json({ error: outcome.error }, 400);
+      return json({ accepted: true, signature: outcome.signature }, 202);
     }
 
     if (parts[0] === "v1" && parts[1] === "markets" && parts.length === 4) {
