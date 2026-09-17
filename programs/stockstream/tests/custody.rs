@@ -448,6 +448,21 @@ fn withdraw_is_blocked_while_delegated_and_allowed_once_restored() {
     let mut accounts = withdraw_accounts(&f, &destination, &vault_authority_account);
     assert!(process_instruction(&ID, &mut accounts, &withdraw_data(0, 1_000)).is_err());
 
+    // `Undelegating` (the delegation program's external-undelegate callback
+    // has not yet landed, so the account's authoritative state may still be
+    // on the ER) must block withdrawal exactly like `Delegated` -- it is
+    // not `NotDelegated`/`Restored`, and the seat's collateral figure here
+    // could still be stale relative to whatever the ER has settled.
+    header_mut(&mut f.market).set_delegation_status(DelegationStatus::Undelegating);
+    let mut accounts = withdraw_accounts(&f, &destination, &vault_authority_account);
+    assert!(process_instruction(&ID, &mut accounts, &withdraw_data(0, 1_000)).is_err());
+    let seat = seat_mut(&mut f.market, 0);
+    let unchanged = seat.available_collateral;
+    assert_eq!(
+        unchanged, 10_000,
+        "a blocked withdrawal must not partially debit the seat"
+    );
+
     // Regression test for the Priority 1/4 integration defect: a `Restored`
     // market (status 3) must be withdrawable, exactly like `NotDelegated`.
     // Before the fix, `validate_custody_tokens` independently rejected any

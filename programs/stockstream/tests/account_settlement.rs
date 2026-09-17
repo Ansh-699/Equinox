@@ -1158,6 +1158,34 @@ fn a_resting_orders_placed_event_never_collides_with_a_later_crossing_fills_sequ
     assert_eq!(event_sequence, fill_sequence);
 }
 
+/// Security/failure-path coverage: `global_event_sequence` at `u64::MAX`
+/// must reject the next event-emitting instruction with
+/// `ArithmeticOverflow` (`next_event_sequence`'s `checked_add`), not wrap
+/// around and silently reuse sequence `0` -- a wrapped sequence would
+/// collide with the very first event this market ever emitted.
+#[test]
+fn event_sequence_at_u64_max_is_rejected_rather_than_wrapping() {
+    let mut f = fixture();
+    unsafe {
+        let data = f.market.view.borrow_unchecked_mut();
+        let header = &mut *(data.as_mut_ptr() as *mut MarketStateHeader);
+        header.global_event_sequence = u64::MAX;
+    }
+    let mut update_funding = vec![6u8];
+    update_funding.extend_from_slice(&1i128.to_le_bytes());
+    update_funding.extend_from_slice(&1u64.to_le_bytes());
+    let mut accounts = [f.market.view.clone(), f.maker.view.clone()];
+    let result = process_instruction(&ID, &mut accounts, &update_funding);
+    assert!(result.is_err());
+    let data = unsafe { f.market.view.borrow_unchecked() };
+    let sequence = unsafe { &*(data.as_ptr() as *const MarketStateHeader) }.global_event_sequence;
+    assert_eq!(
+        sequence,
+        u64::MAX,
+        "a rejected instruction must not advance the sequence at all"
+    );
+}
+
 /// Handler-level (not just event-codec) coverage for `Liquidate`: exercises
 /// the real instruction through `process_instruction`, including the new
 /// `LiquidationStarted`/`PositionChanged`/`MarginChanged`/`PositionLiquidated`
@@ -1237,6 +1265,76 @@ fn cancel_all_removes_every_resting_order_and_succeeds() {
     let data = unsafe { f.market.view.borrow_unchecked() };
     let seat = unsafe { &*(data.as_ptr().add(TRADER_SEAT_OFFSET) as *const TraderSeat) };
     assert_eq!(seat.open_order_count, 0);
+}
+
+/// Security/failure-path coverage: cross-market account substitution.
+/// Market A's seat-0 settlement scratch is a validly-derived, validly-
+/// owned PDA -- just not *this instruction's* market. `place_order`
+/// derives its own expected scratch PDA from `accounts[0]` (the market
+/// actually named in the instruction) and must reject any other account
+/// there, even one that is a completely legitimate scratch for a
+/// different, equally real market.
+#[test]
+fn place_order_rejects_a_settlement_scratch_derived_for_a_different_market() {
+    let mut market_a = account(
+        Address::new_from_array([201; 32]),
+        ID,
+        MARKET_ACCOUNT_SIZE,
+        false,
+        true,
+    );
+    let mut market_b = account(
+        Address::new_from_array([202; 32]),
+        ID,
+        MARKET_ACCOUNT_SIZE,
+        false,
+        true,
+    );
+    let trader = account(Address::new_from_array([203; 32]), ID, 0, true, false);
+
+    for market in [&market_a, &market_b] {
+        let mut a = [market.view.clone(), trader.view.clone()];
+        process_instruction(&ID, &mut a, &[0]).unwrap();
+    }
+    set_open_oracle(&mut market_a, *trader.view.address());
+    set_open_oracle(&mut market_b, *trader.view.address());
+    for market in [&market_a, &market_b] {
+        let mut a = [market.view.clone(), trader.view.clone()];
+        process_instruction(&ID, &mut a, &[1, 0, 0]).unwrap();
+    }
+    credit(&mut market_a, 0, 1_000_000);
+    credit(&mut market_b, 0, 1_000_000);
+
+    let scratch_a = account(
+        derive_settlement_scratch(market_a.view.address(), 0, &ID),
+        ID,
+        SETTLEMENT_SCRATCH_LEN,
+        false,
+        true,
+    );
+    {
+        let mut a = [
+            market_a.view.clone(),
+            trader.view.clone(),
+            scratch_a.view.clone(),
+        ];
+        process_instruction(&ID, &mut a, &[8, 0, 0]).unwrap();
+    }
+
+    // Place an order on market B, but pass market A's own scratch account.
+    let before = unsafe { market_b.view.borrow_unchecked() }.to_vec();
+    let mut accounts = [
+        market_b.view.clone(),
+        trader.view.clone(),
+        scratch_a.view.clone(),
+    ];
+    let result = process_instruction(&ID, &mut accounts, &order_data(1, 0, 1, 100, 0, 500));
+    assert!(result.is_err());
+    assert_eq!(
+        before,
+        unsafe { market_b.view.borrow_unchecked() },
+        "a rejected cross-market scratch substitution must not mutate market B at all"
+    );
 }
 
 #[test]
