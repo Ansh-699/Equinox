@@ -29,8 +29,17 @@ outlive one stateless `scheduled` invocation without a Durable-Object-
 hosted connection, which doesn't exist yet -- the currently-wired path
 polls over HTTP instead); only custody events are decoded (order/fill/
 funding/liquidation/oracle/delegation/session events aren't logged by the
-Rust program yet, so there's nothing to decode for them); ER/L1
-reconciliation is not wired to live on-chain commit-observation data; and
-no keeper yet *submits* a signed transaction (Pyth price push, MagicBlock
-commit scheduling, funding settlement) -- that needs wallet/key
-infrastructure this Worker doesn't have. 66 Worker tests total.
+Rust program yet, so there's nothing to decode for them, except see the
+update below).
+
+**Update:** the program now emits a complete 61-kind versioned binary
+event ABI (`docs/events.md`); both the TypeScript client SDK decoder and
+this Worker's `event-decoder.ts` decode it across every transport path
+(live `logsNotification`, historical `getTransaction` backfill). ER/L1
+reconciliation is now wired to real on-chain reads (`execution-status.ts`,
+see `docs/magicblock.md`). All six keeper jobs now exist
+(`keeper-jobs.ts`, see `docs/transports.md`) with real lease/idempotency/
+transport/confirmation wiring; the one remaining gap is real Solana
+wire-format transaction construction inside them (`TransactionBuilder`,
+an interfaced-out dependency boundary, not missing logic). 155 Worker
+tests total (up from 66).

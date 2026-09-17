@@ -37,5 +37,21 @@ not approved.
 Still open for the Worker specifically: no Privy JWT verification happens
 in the Worker itself (delegated to the Next.js app's existing session
 store, `lib/auth/session.ts`, over a service-to-service channel not yet
-built); no keeper submits a signed transaction yet, so there is no wallet/
-key-management surface to review there yet either.
+built).
+
+**Update:** a real keeper signer/wallet-management surface now exists
+(`workers/src/signer.ts`) and has been reviewed as part of this session's
+own security/failure-path pass (not an independent audit): private-key
+material is never exported or logged, every configuration-error message
+is redacted, the production signer's actual signing key is
+non-extractable, and a keeper signer structurally cannot be the program's
+upgrade authority, a user's withdrawal authority, or a Privy embedded
+wallet (none of those are `Signer` implementations anywhere in the
+module). This session also closed four real coverage gaps found by a
+dedicated audit of 21 adversarial scenarios: cross-market account
+substitution, withdrawal-blocked-while-`Undelegating`, event-sequence
+overflow at `u64::MAX`, and a genuine robustness bug in
+`runIngestionTick` where one market's failed resnapshot silently aborted
+processing for every other market in the same tick (fixed). See the
+`complete core security and failure-path testing` commit. **Audit
+pending. Production not approved.**

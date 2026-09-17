@@ -108,7 +108,22 @@ It exists so the indexer/UI never displays ER-accepted state as if it were
 L1-committed truth, and never silently advances past a sequence that
 doesn't follow monotonically from what it last observed (any such
 conflict is `reconciliation_error`, requiring an explicit, named recovery
-call rather than self-healing). It is not yet wired to real on-chain
-commit-schedule/commit-observation data -- that would mean decoding actual
-delegation-program/magic-program account state, which hasn't been built.
-9 tests in `execution-status.test.ts`.
+call rather than self-healing).
+
+**Update:** now wired to real on-chain state. `decodeDelegationFields`
+decodes a market account's delegation status/sequence/commit-sequence
+fields at their verified byte offsets; `reconcileFromL1` drives the state
+machine from those decoded fields plus the ER's own observed event
+sequence when currently delegated; `reconcileMarketExecutionStatus`
+orchestrates the full read-decode-persist-publish cycle
+(`ExecutionStatusRepository`, new `execution_status` table) and is exposed
+via `GET /v1/markets/:symbol/execution-status`, publishing changes through
+`MarketStream.publishExecutionStatus`. A first observation of an
+already-mid-lifecycle market bootstraps directly into the matching status
+rather than replaying every intermediate transition. Not live-network
+verified. 20 tests in `execution-status.test.ts` (up from 9).
+
+Also see `docs/transports.md` for the MagicBlock commit keeper and
+`classifyWritableAccountDomain`'s L1/ER write routing (which fixed a real
+bug this session: it checked for `DelegationStatus::Undelegating` at the
+wrong numeric value, `4` instead of `2`).

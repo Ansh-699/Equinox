@@ -95,3 +95,17 @@ parsing, not a runtime-verified live update. There is no official signed
 fixture available without `PYTH_PRO_API_KEY`, so the "valid" fixture is
 structurally well-formed and deterministic, not cryptographically signed.
 Live authenticated verification remains unverified.
+
+**Update:** `consume_oracle_update` now emits `OracleUpdated` and (when
+the session-driven mode changed) `MarketSessionChanged` via the versioned
+binary event ABI (`docs/events.md`). `OracleRejected`/`OracleStale`/
+`OracleRecovered` remain unwired: every rejection path returns a program
+error (the whole transaction fails, and any indexer already discards a
+failed transaction's logs via `meta.err`, so a "rejected" event could
+never actually reach an indexer), and no on-chain staleness-marking
+instruction exists. The Pyth oracle keeper's real orchestration (lease,
+durable dedup by timestamp+hash, submit, confirm) is now implemented in
+`workers/src/keeper-jobs.ts::runPythKeeperTick` -- see `docs/transports.md`;
+the actual signed-payload fetch and Ed25519+`ConsumeOracleUpdate`
+instruction construction remain in `lib/server/pyth-keeper.ts`
+(unchanged this session), injected into the keeper as a `PythUpdateSource`.

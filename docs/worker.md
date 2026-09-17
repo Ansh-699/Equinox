@@ -129,8 +129,21 @@ ready for them; the actual signing keeper jobs are the next real blocker.
 
 ## Testing
 
-66 Vitest tests, run against the real `@cloudflare/vitest-pool-workers`
+155 Vitest tests (up from 66), run against the real `@cloudflare/vitest-pool-workers`
 Miniflare environment (real D1 migrations via `applyD1Migrations`, real
 `MarketStream` Durable Object via `env.MARKET_STREAM.getByName(...)`, real
 `SELF.fetch`) -- not plain JavaScript fakes standing in for Cloudflare
 primitives.
+
+**Update:** the Worker now has a real write-path transaction transport
+(`chain-transports.ts`), a real production-capable keeper signer
+(`signer.ts`), all six concrete keeper jobs (`keeper-jobs.ts`), ER/L1
+execution-status reconciliation wired to real on-chain reads
+(`execution-status.ts`), and a complete private-trader-projection push
+path (`private-sessions.ts::publishSeatProjection`, wired into
+`runIngestionTick`). See `docs/transports.md` and `docs/events.md` for
+detail. The one remaining interfaced-out piece is real Solana
+wire-format transaction construction/signing inside a keeper job
+(`TransactionBuilder`, documented in `docs/transports.md`) -- this
+`workers/` package has zero runtime dependencies and no
+`@solana/web3.js`-equivalent serializer.
