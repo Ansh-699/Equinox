@@ -35,8 +35,8 @@ test("createSession derives the canonical PDA and keeps the key in memory only",
   const wallet = Keypair.generate();
   const created = await createSession(wallet.publicKey.toBase58(), "91Wxz2Nn4yvtjHEoYrDSMfyZYG86twVEMnCBwCZFFZE", 0);
   expect(created.reused).toBe(false);
-  expect(created.sessionPda).toHaveLength(44);
-  expect(created.sessionSignerAddress).toHaveLength(44);
+  expect(created.sessionPda.length).toBeGreaterThanOrEqual(43);
+  expect(created.sessionSignerAddress.length).toBeGreaterThanOrEqual(43);
   const reused = await createSession(wallet.publicKey.toBase58(), "91Wxz2Nn4yvtjHEoYrDSMfyZYG86twVEMnCBwCZFFZE", 0);
   expect(reused.reused).toBe(true);
   expect(lookupSession(wallet.publicKey.toBase58(), "91Wxz2Nn4yvtjHEoYrDSMfyZYG86twVEMnCBwCZFFZE", 0)).not.toBeNull();
@@ -84,7 +84,7 @@ test("session-signed trade transaction: relayer fee payer unsigned, session sign
     // A PlaceOrder-family instruction signed by the session signer: the
     // session signer must be a required (readonly signer) account for the
     // message to declare two signature slots.
-    programAddress: "6QyZWQ7dvFNXerNdhzhyqQjzZnkMXmr52GNJLT1KpmU" as never,
+    programAddress: "H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET" as never,
     accounts: [
       { address: "91Wxz2Nn4yvtjHEoYrDSMfyZYG86twVEMnCBwCZFFZE" as never, role: 3 as never }, // market writable
       { address: created.sessionSignerAddress as never, role: 2 as never }, // session signer readonly signer

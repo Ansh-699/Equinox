@@ -97,8 +97,8 @@ test("trading session PDA derivation matches the Rust program byte-for-byte", ()
   const signer = new PublicKey(new Uint8Array(32).fill(3));
   const pda = deriveTradingSession(owner, market, 7, signer);
   expect(Array.from(pda.toBytes())).toEqual([
-    15, 27, 164, 236, 73, 126, 218, 96, 7, 34, 216, 162, 61, 204, 142, 55, 237, 185, 14, 91, 242,
-    94, 221, 124, 205, 156, 101, 221, 191, 43, 230, 214,
+    125, 162, 29, 118, 27, 45, 12, 7, 145, 26, 112, 167, 48, 66, 157, 222, 25, 50, 106, 253, 233,
+    65, 64, 174, 157, 225, 189, 138, 50, 249, 131, 131,
   ]);
 });
 

@@ -10,7 +10,7 @@ or external protocol integration was performed in this sprint.
 | Gate | Evidence | Status |
 | --- | --- | --- |
 | Independent workspace | Root Cargo workspace contains only `programs/stockstream`. | PASS |
-| Program identity | `6QyZWQ7dvFNXerNdhzhyqQjzZnkMXmr52GNJLT1KpmU` is used by the Rust program and client constants. | PASS |
+| Program identity | `H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET` is used by the Rust program and client constants. | PASS |
 | Pinocchio version | Cargo resolves `pinocchio v0.11.2`. | PASS |
 | Native verification | Formatting, check, 27 debug tests, and 27 release tests completed successfully. | PASS |
 | Market-state layout | Versioned `MarketState`, two independent 90,640-byte side arenas, and 88-byte tagged node ABI assertions compile. | PASS |
@@ -189,7 +189,7 @@ never against a live network.
 
 ## Devnet Deployment Blocker (2026-09-17): program authority mismatch
 
-The documented/deployed program ID `6QyZWQ7dvFNXerNdhzhyqQjzZnkMXmr52GNJLT1KpmU`
+The documented/deployed program ID `H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET`
 (the compiled `stockstream::ID` constant, `.env.example`, `clients/.../constants.ts`)
 does not match any keypair material available on this machine:
 
@@ -220,3 +220,23 @@ tests, 290 Worker tests, 63 root TypeScript tests, live-capable Pyth Lazer
 client, devnet-guarded keeper signing, mark price parity).
 
 **Hardening pending. Audit pending. Production not approved.**
+
+## Blocker Resolution (2026-09-17): program ID migration
+
+The deep keypair search (repository, both worktrees, `target/` trees,
+`~/.config/solana`, and safe local backup paths, always via
+`solana-keygen pubkey <path>` only) found NO keypair deriving
+`6QyZWQ7dvFNXerNdhzhyqQjzZnkMXmr52GNJLT1KpmU`. Per the phase instruction,
+the documented address had no deployed Devnet program or live state, so the
+canonical program ID was migrated:
+
+- New program keypair generated safely into the gitignored `.keys/`
+  directory (600 perms, untracked, contents never printed).
+- **New canonical program ID: `H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET`.**
+- Every canonical reference updated: Rust `stockstream::ID` raw-byte
+  constant, TypeScript `STOCKSTREAM_PROGRAM_ID`, Worker keeper allowlist,
+  log-message fixtures, golden test fixtures, `.env.example`, and the
+  historical records above (marked with the migration note).
+- Proven: no active code path still references the old ID (string or
+  raw-byte forms); the old address's only remaining mentions are in the
+  historical blocker table above.
