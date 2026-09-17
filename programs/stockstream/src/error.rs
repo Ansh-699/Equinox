@@ -27,6 +27,7 @@ pub enum StockStreamError {
     InvalidTradingSession = 0x6016,
     SessionNonceReplay = 0x6017,
     CustodyViolation = 0x6018,
+    SelfTradeAborted = 0x6019,
 }
 
 impl From<StockStreamError> for ProgramError {

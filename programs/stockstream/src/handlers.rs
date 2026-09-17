@@ -2244,7 +2244,7 @@ fn place_order_core(
     if header.oracle_valid == 0 || header.last_verified_oracle_price <= 0 {
         return Err(custom(StockStreamError::OracleUnavailable));
     }
-    if order.side > 1 || order.tree > 1 || order.flags & !7 != 0 {
+    if order.side > 1 || order.tree > 1 || order.flags & !31 != 0 {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
     let side = if order.side == Side::Bid as u8 {
@@ -2263,6 +2263,11 @@ fn place_order_core(
     } else {
         TimeInForce::GoodTilCancelled
     };
+    // Bits 3-4 of the same flags byte (5 of its 8 bits were unused): the
+    // explicit self-trade-prevention mode, packed in rather than growing
+    // the instruction's wire size.
+    let self_trade_behavior = crate::book::SelfTradeBehavior::from_u8((order.flags >> 3) & 0b11)
+        .ok_or(custom(StockStreamError::InvalidInstruction))?;
     let current_price = if tree == TreeKind::Fixed {
         order.price_or_offset
     } else {
@@ -2330,6 +2335,7 @@ fn place_order_core(
         client_order_id: order.client_order_id,
         time_in_force: tif,
         post_only: is_post_only,
+        self_trade_behavior,
     };
     // `input.leaf()` is pure (derives the price/time key from side/price/
     // sequence without touching book state), so it is safe to call here,
@@ -2378,6 +2384,14 @@ fn place_order_core(
     if scratch.plan().post_only_rejected {
         scratch.abort_to(&scratch_before);
         return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    if scratch.plan().self_trade_aborted {
+        // `SelfTradeBehavior::AbortTransaction`: exactly like
+        // `post_only_rejected` above, the *plan* is valid -- it is the
+        // order that is refused. Nothing is applied, so the trader's own
+        // resting order survives and no crossed book is left behind.
+        scratch.abort_to(&scratch_before);
+        return Err(custom(StockStreamError::SelfTradeAborted));
     }
     apply_settlement_plan(data, scratch.plan())?;
     if scratch.plan().remaining > 0
@@ -2468,6 +2482,22 @@ fn place_order_core(
             sequence,
             event_timestamp(),
             &crate::events::payload_seat_amount(crate::events::NO_SEAT, expired_removed as u64, 0),
+        );
+    }
+    // Self-trade prevention actually acted on this instruction
+    // (`CancelProvide` removed the trader's own resting order, or
+    // `DecrementTake` reduced this order's remaining quantity without
+    // touching the maker). `AbortTransaction` never reaches this point --
+    // it already returned above with nothing applied.
+    let self_cancelled = scratch.plan().self_cancelled;
+    if self_cancelled > 0 {
+        let sequence = next_event_sequence(&mut updated)?;
+        crate::events::emit_event(
+            crate::events::EventKind::SelfTradePrevented,
+            &market_address,
+            sequence,
+            event_timestamp(),
+            &crate::events::payload_seat_amount(order.seat_index, self_cancelled as u64, 0),
         );
     }
     // Maker+taker fees charged this instruction (already deducted from the
