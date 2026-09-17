@@ -409,6 +409,28 @@ fn custody_ledger_field_offsets_match_the_typescript_decoder() {
     );
 }
 
+/// Every field the Worker's authoritative market-state reader
+/// (`clients/stockstream/src/index.ts::decodeMarketState`) reads beyond the
+/// custody ledger above, cross-checked with `core::mem::offset_of!` rather
+/// than hand-counted -- `MarketStateHeader` is `packed(1)` so hand-counting
+/// happens to work here, but this is the same class of bug the `packed(8)`
+/// `TraderSeat` layout already caught once.
+#[test]
+fn worker_market_state_reader_offsets_match_the_rust_header_layout() {
+    use core::mem::offset_of;
+    assert_eq!(offset_of!(MarketStateHeader, mode), 11);
+    assert_eq!(offset_of!(MarketStateHeader, market_authority), 12);
+    assert_eq!(offset_of!(MarketStateHeader, emergency_authority), 76);
+    assert_eq!(offset_of!(MarketStateHeader, maintenance_margin_bps), 194);
+    assert_eq!(offset_of!(MarketStateHeader, maker_fee_bps), 198);
+    assert_eq!(offset_of!(MarketStateHeader, taker_fee_bps), 200);
+    assert_eq!(offset_of!(MarketStateHeader, current_open_interest), 238);
+    assert_eq!(offset_of!(MarketStateHeader, global_event_sequence), 262);
+    assert_eq!(offset_of!(MarketStateHeader, funding_accumulator), 270);
+    assert_eq!(offset_of!(MarketStateHeader, last_funding_timestamp), 286);
+    assert_eq!(offset_of!(MarketStateHeader, oracle_valid), 294);
+}
+
 /// `MARKET_VERSION` was bumped from `1` to `2` when the custody ledger
 /// fields above became permanent (Priority 4, see `state.rs`); a
 /// `1`-tagged account must be rejected outright, not silently reinterpreted

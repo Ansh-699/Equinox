@@ -683,6 +683,15 @@ export interface MarketStateView {
   initialized: boolean;
   mode: number;
   marketAuthority: PublicKey;
+  /** Required signer for `Liquidate` (`handlers::liquidate` checks `authority == header.emergency_authority`). */
+  emergencyAuthority: PublicKey;
+  maintenanceMarginBps: number;
+  makerFeeBps: number;
+  takerFeeBps: number;
+  currentOpenInterest: bigint;
+  globalEventSequence: bigint;
+  fundingAccumulator: bigint;
+  lastFundingTimestamp: bigint;
   oracleValid: boolean;
   lastVerifiedOraclePrice: bigint;
   lastVerifiedOracleTimestamp: bigint;
@@ -719,7 +728,25 @@ export function decodeMarketState(data: Uint8Array): MarketStateView {
   if (view.getUint32(311, true) !== 512 || view.getUint32(315, true) !== 91152 ||
       view.getUint32(319, true) !== 181792 || view.getUint32(323, true) !== 214560)
     throw new RangeError('Invalid StockStream regions');
-  return { discriminator, version, initialized: view.getUint8(10) === 1, mode: view.getUint8(11), marketAuthority: new PublicKey(data.slice(12, 44)), oracleValid: view.getUint8(294) === 1, lastVerifiedOraclePrice: view.getBigInt64(295, true), lastVerifiedOracleTimestamp: view.getBigUint64(303, true), bidArenaOffset: view.getUint32(311, true), askArenaOffset: view.getUint32(315, true), traderSeatOffset: view.getUint32(319, true), fillEventOffset: view.getUint32(323, true), protocolFeeBalance: view.getBigUint64(449, true), insuranceFundBalance: view.getBigUint64(457, true), recognizedBadDebt: view.getBigUint64(465, true), reconciliationStatus: view.getUint8(473), vaultSurplus: view.getBigUint64(474, true) };
+  return {
+    discriminator, version,
+    initialized: view.getUint8(10) === 1,
+    mode: view.getUint8(11),
+    marketAuthority: new PublicKey(data.slice(12, 44)),
+    emergencyAuthority: new PublicKey(data.slice(76, 108)),
+    maintenanceMarginBps: view.getUint16(194, true),
+    makerFeeBps: view.getUint16(198, true),
+    takerFeeBps: view.getUint16(200, true),
+    currentOpenInterest: readSignedLE(data, 238, 16),
+    globalEventSequence: view.getBigUint64(262, true),
+    fundingAccumulator: readSignedLE(data, 270, 16),
+    lastFundingTimestamp: view.getBigUint64(286, true),
+    oracleValid: view.getUint8(294) === 1,
+    lastVerifiedOraclePrice: view.getBigInt64(295, true),
+    lastVerifiedOracleTimestamp: view.getBigUint64(303, true),
+    bidArenaOffset: view.getUint32(311, true), askArenaOffset: view.getUint32(315, true), traderSeatOffset: view.getUint32(319, true), fillEventOffset: view.getUint32(323, true),
+    protocolFeeBalance: view.getBigUint64(449, true), insuranceFundBalance: view.getBigUint64(457, true), recognizedBadDebt: view.getBigUint64(465, true), reconciliationStatus: view.getUint8(473), vaultSurplus: view.getBigUint64(474, true),
+  };
 }
 
 export interface BookMetadata { version: number; fixedRoot: number; peggedRoot: number; fixedLeaves: number; peggedLeaves: number; bumpIndex: number; freeHead: number; freeLength: number; }
