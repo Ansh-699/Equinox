@@ -136,23 +136,97 @@ pub fn derive_perp_market(program_id: &Address, instrument: &Address) -> Address
     Address::find_program_address(&[PERP_MARKET_SEED, instrument.as_ref()], program_id).0
 }
 
-/// Opcode 42: creates the perp-market PDA account itself.
+/// Opcode 43: creates the stock-instrument PDA account itself (128 bytes,
+/// within one allocate's 10,240-byte inner-instruction cap, so one CPI does
+/// fund + allocate + assign in a single instruction).
+///
+/// Accounts:
+/// 0. `[WRITE]`          the instrument PDA to create (must not exist)
+/// 1. `[WRITE, SIGNER]`  payer
+/// 2. `[]`               the system program
+/// 3. `[]`               the instrument id (32 bytes, via instruction data)
+pub fn create_instrument_account(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    id: &[u8; 32],
+) -> ProgramResult {
+    use pinocchio::sysvars::{rent::Rent, Sysvar};
+
+    if accounts.len() != 3 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    if !accounts[0].is_writable() || !accounts[1].is_signer() || !accounts[1].is_writable() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    if *accounts[2].address() != pinocchio_system::ID {
+        return Err(ProgramError::InvalidAccountOwner);
+    }
+    if accounts[0].data_len() != 0 {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let (expected, bump) = Address::find_program_address(&[INSTRUMENT_SEED, id], program_id);
+    if expected != *accounts[0].address() {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let bump_slice = [bump];
+    let seeds = [
+        pinocchio::cpi::Seed::from(INSTRUMENT_SEED),
+        pinocchio::cpi::Seed::from(id.as_ref()),
+        pinocchio::cpi::Seed::from(&bump_slice),
+    ];
+    let signer = pinocchio::cpi::Signer::from(&seeds);
+    pinocchio_system::instructions::Allocate {
+        account: &accounts[0],
+        space: INSTRUMENT_SIZE as u64,
+    }
+    .invoke_signed(core::slice::from_ref(&signer))?;
+    let rent = Rent::get()?;
+    let lamports = rent.try_minimum_balance(INSTRUMENT_SIZE)?;
+    let deficit = lamports.saturating_sub(accounts[0].lamports());
+    if deficit > 0 {
+        pinocchio_system::instructions::Transfer {
+            from: &accounts[1],
+            to: &accounts[0],
+            lamports: deficit,
+        }
+        .invoke()?;
+    }
+    pinocchio_system::instructions::Assign {
+        account: &accounts[0],
+        owner: program_id,
+    }
+    .invoke_signed(core::slice::from_ref(&signer))
+}
+
+/// Opcode 42: creates (or grows) the perp-market PDA account itself.
 ///
 /// A PDA cannot sign a client transaction, so the client cannot pre-create
 /// the market account the way `CreatePerpMarket` expects (`account_data`
 /// requires a program-owned, exactly-`MARKET_ACCOUNT_SIZE`-byte account).
-/// This instruction CPIs the System Program's `create_account` signed by
-/// the market PDA's own seeds — the same CPI pattern `delegate_market`
-/// already uses for the delegate buffer — so the whole delegation
-/// lifecycle is reachable on L1.
+///
+/// Solana caps every inner-instruction account growth at
+/// `MAX_PERMITTED_DATA_INCREASE` (10,240 bytes), so the 222,752-byte market
+/// account is built INCREMENTALLY: each call performs exactly one growth
+/// step and the client repeats the instruction (typically many of them in
+/// one transaction) until the account reaches `MARKET_ACCOUNT_SIZE`. The
+/// stages are:
+///
+/// 1. data_len == 0 (system-owned): fund to the rent-exempt minimum, then
+///    `system::allocate(10,240)` + `system::assign(StockStream)` via CPIs
+///    signed by the market PDA's own seeds;
+/// 2. data_len < MARKET_ACCOUNT_SIZE (program-owned): `AccountView::resize`
+///    by up to 10,240 bytes (the runtime's own realloc, owner-only);
+/// 3. data_len == MARKET_ACCOUNT_SIZE: no-op success (idempotent, so the
+///    client may simply loop until it reaches the full size).
 ///
 /// Accounts:
 /// 0. `[]`               the instrument PDA the market's seeds derive from
-/// 1. `[WRITE]`          the market PDA to create (must not exist)
+/// 1. `[WRITE]`          the market PDA being built
 /// 2. `[WRITE, SIGNER]`  payer (funds the rent-exempt minimum)
 /// 3. `[]`               the system program
 pub fn create_market_account(program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
     use crate::state::MARKET_ACCOUNT_SIZE;
+    use pinocchio::sysvars::{rent::Rent, Sysvar};
 
     if accounts.len() != 4 {
         return Err(ProgramError::NotEnoughAccountKeys);
@@ -163,9 +237,6 @@ pub fn create_market_account(program_id: &Address, accounts: &mut [AccountView])
     if *accounts[3].address() != pinocchio_system::ID {
         return Err(ProgramError::InvalidAccountOwner);
     }
-    if accounts[1].data_len() != 0 {
-        return Err(custom(StockStreamError::InvalidInstruction));
-    }
     let instrument = *accounts[0].address();
     let market_key = *accounts[1].address();
     let (expected_market, market_bump) =
@@ -174,24 +245,77 @@ pub fn create_market_account(program_id: &Address, accounts: &mut [AccountView])
         return Err(custom(StockStreamError::InvalidInstruction));
     }
 
-    use pinocchio::sysvars::{rent::Rent, Sysvar};
-    let rent = Rent::get()?;
-    let market_bump_slice =
-        [Address::find_program_address(&[PERP_MARKET_SEED, instrument.as_ref()], program_id).1];
+    let data_len = accounts[1].data_len();
+    if data_len == MARKET_ACCOUNT_SIZE && accounts[1].owned_by(program_id) {
+        // Already fully created (idempotent).
+        return Ok(());
+    }
+
+    let market_bump_slice = [market_bump];
     let market_seeds = [
         pinocchio::cpi::Seed::from(PERP_MARKET_SEED),
         pinocchio::cpi::Seed::from(instrument.as_ref()),
         pinocchio::cpi::Seed::from(&market_bump_slice),
     ];
     let market_signer = pinocchio::cpi::Signer::from(&market_seeds);
-    pinocchio_system::instructions::CreateAccount {
-        from: &accounts[2],
-        to: &accounts[1],
-        lamports: rent.try_minimum_balance(MARKET_ACCOUNT_SIZE)?,
-        space: MARKET_ACCOUNT_SIZE as u64,
-        owner: program_id,
+
+    if data_len == 0 {
+        if accounts[1].owned_by(program_id) || !accounts[1].owned_by(&pinocchio_system::ID) {
+            return Err(custom(StockStreamError::InvalidInstruction));
+        }
+        // Order matters: the System Program's `allocate` requires the
+        // account to hold ZERO lamports, so allocate FIRST (the rent-exempt
+        // check only runs at the END of the whole instruction), then fund to
+        // the rent-exempt minimum of the FULL market size, then assign.
+        // 1. Allocate the first (10,240-byte) chunk via CPI.
+        pinocchio_system::instructions::Allocate {
+            account: &accounts[1],
+            space: 10_240,
+        }
+        .invoke_signed(core::slice::from_ref(&market_signer))?;
+        // 2. Fund to the rent-exempt minimum for the FULL market size.
+        let rent = Rent::get()?;
+        let needed = rent.try_minimum_balance(MARKET_ACCOUNT_SIZE)?;
+        let deficit = needed.saturating_sub(accounts[1].lamports());
+        if deficit > 0 {
+            pinocchio_system::instructions::Transfer {
+                from: &accounts[2],
+                to: &accounts[1],
+                lamports: deficit,
+            }
+            .invoke()?;
+        }
+        // 3. Assign ownership to this program, so every later growth is a
+        //    plain program-side realloc.
+        pinocchio_system::instructions::Assign {
+            account: &accounts[1],
+            owner: program_id,
+        }
+        .invoke_signed(core::slice::from_ref(&market_signer))?;
+        return Ok(());
     }
-    .invoke_signed(core::slice::from_ref(&market_signer))
+
+    // Growth phase: the market PDA must be StockStream-owned now.
+    if !accounts[1].owned_by(program_id) {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    if data_len > MARKET_ACCOUNT_SIZE {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    // The runtime caps every instruction's account-data growth at
+    // MAX_PERMITTED_DATA_INCREASE (10,240 bytes) and grows the storage from
+    // the account descriptor's own `data_len` field (the field the SVM
+    // documents as "Modifiable by programs"). solana-account-view 2.0 has
+    // no resize API, so the growth is written through the descriptor
+    // directly -- the same write the runtime performs for `close()` and the
+    // same mechanism `AccountInfo::realloc` uses on the program side.
+    const MAX_PERMITTED_DATA_INCREASE: usize = 10_240;
+    let target = (data_len + MAX_PERMITTED_DATA_INCREASE).min(MARKET_ACCOUNT_SIZE);
+    unsafe {
+        let account = accounts[1].account_mut_ptr();
+        core::ptr::write_unaligned(&mut (*account).data_len as *mut u64, target as u64);
+    }
+    Ok(())
 }
 
 fn account_data<'a>(
