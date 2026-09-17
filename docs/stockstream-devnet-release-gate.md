@@ -186,3 +186,37 @@ tested against a real mock JSON-RPC HTTP handler and a real D1 database,
 never against a live network.
 
 **Hardening pending. Audit pending. Production not approved.**
+
+## Devnet Deployment Blocker (2026-09-17): program authority mismatch
+
+The documented/deployed program ID `6QyZWQ7dvFNXerNdhzhyqQjzZnkMXmr52GNJLT1KpmU`
+(the compiled `stockstream::ID` constant, `.env.example`, `clients/.../constants.ts`)
+does not match any keypair material available on this machine:
+
+| Keypair | Derived address |
+| --- | --- |
+| `.keys/stockstream-program-keypair.json` (600 perms, gitignored) | `6QyZWQw7dvFNXerNdhzhyqQjzZnkMXmr52GNJLT1KpmU` |
+| `target/deploy/stockstream-keypair.json` (build default) | `gkPwvyYwDa7Ed5JkfvSGh2RPeakVYstFm5HEcWEZAqo` |
+| `~/.config/solana/id.json` (deploy authority, devnet, 0.86 SOL) | `A5sV4PkkVM4gm3rejACvKFgxEMmj8ouGsffSKT5qYVc8` |
+
+`build-record.md`'s Phase-1 entry claims the `.keys` file holds the keypair
+"used for the recorded program ID" -- it demonstrably does not (the recorded
+ID and the keypair's own derived address differ). Deploying the verified
+artifact under any of the available keypairs would place the program at an
+address its own `process_instruction` rejects (`program_id != &ID` ->
+`IncorrectProgramId` on every instruction), and changing the compiled
+program ID to match the available keypair is explicitly forbidden for this
+phase.
+
+**Resolution requires a user decision:** provide the keypair that derives
+`6QyZWQ7dvF...` (the original program keypair), or explicitly authorize a
+program-ID change (a breaking change: every embedded constant, `.env`,
+client, and fixture must move together, and any pre-existing deployed
+program at the documented ID must be re-examined). Deployment, the devnet
+InitializeMarket smoke test, and the MagicBlock delegation/ER lifecycle run
+are therefore BLOCKED pending that decision; everything not requiring the
+deployed program was completed this phase (199 Rust tests, 34 SBF runtime
+tests, 290 Worker tests, 63 root TypeScript tests, live-capable Pyth Lazer
+client, devnet-guarded keeper signing, mark price parity).
+
+**Hardening pending. Audit pending. Production not approved.**
