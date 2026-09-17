@@ -141,3 +141,12 @@ old one was already cancelled, the whole instruction returns `Err`, and the
 Solana runtime reverts every account write made during it -- the cancelled
 order, its released margin reserve, and the session's nonce/notional are all
 restored to exactly their pre-instruction state.
+
+**Update:** every scoped-session event kind is now wired into the
+versioned binary event ABI (`docs/events.md`): `TradingSessionAuthorized`,
+`TradingSessionLimitsUpdated`, `TradingSessionActionConsumed` (emitted
+after every session-consuming action across `PlaceOrder`, `ReplaceOrder`,
+`CancelOrder`, `CancelAll`, always as the *last* thing that instruction
+does), `TradingSessionRevoked`, `TradingSessionClosed`. `ReplaceOrder`
+itself now also emits `OrderReplaced` and `CancelAll` emits
+`CancelAllProgress`.

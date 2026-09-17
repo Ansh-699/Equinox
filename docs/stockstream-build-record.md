@@ -466,8 +466,21 @@ health endpoint (`workers/src/repositories.ts::DeadLetterRepository`,
 Honestly still open (see `docs/worker.md`'s per-section notes for detail):
 the WebSocket transport is not wired into the scheduled ingestion loop
 (HTTP polling is the currently-wired path); only custody events are
-decoded (no other event type is logged by the Rust program yet); ER/L1
-reconciliation is not wired to live on-chain commit data; and no keeper
-submits a signed transaction (Pyth price push, MagicBlock commit
-scheduling, funding settlement) -- that needs wallet/key-management
-infrastructure not yet built. **Audit pending. Production not approved.**
+decoded).
+
+**Update (this session):** the program now emits a complete 61-kind
+versioned binary event ABI (`docs/events.md`), 50 of which are wired into
+real production handlers; ER/L1 reconciliation is now wired to real
+on-chain reads (`docs/magicblock.md`); all six keeper jobs exist with
+real lease/idempotency/transport/confirmation wiring and a real
+production-capable signer (`docs/transports.md`) -- the one remaining
+gap there is real Solana wire-format transaction construction inside a
+keeper job, an interfaced-out dependency boundary (`workers/` has zero
+runtime dependencies), not missing logic. Rebuilt the SBF artifact in a
+clean disposable worktree with the correct `--features bpf-entrypoint`
+flag (omitting it silently produces a ~1.3KB stub with no entrypoint):
+253,424 bytes,
+SHA-256 `63a4274f2ac1c95afa53299b986c8eb02cc206d64af7706a4e411c3caa8b1ec6`,
+byte-identical across the clean worktree and the working tree. 155 Rust
+tests, 155 Worker tests, 46 root TypeScript tests. **Audit pending.
+Production not approved.**

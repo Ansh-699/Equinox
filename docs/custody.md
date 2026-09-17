@@ -329,5 +329,11 @@ machine (`Reconciled` -> `SurplusDetected` -> `DeficitDetected` ->
 As with Priorities 1-3, `invoke_with_program`/`invoke_signed_with_program`
 being no-ops off the SBF target means these are wire-conformance plus
 full pre-CPI-validation tests, not proof that a real token transfer
-executes correctly on a live cluster. **Audit pending. Production not
-approved.**
+executes correctly on a live cluster.
+
+**Update:** all 10 custody events now use the versioned binary event ABI
+(`docs/events.md`), migrated off the earlier Priority-4 text-based
+`SS:<Kind> ...` log format, which the program no longer emits at all.
+Withdrawal-blocked coverage was extended to the `Undelegating` status
+(previously only `Delegated`/`Restored` were tested) -- see
+`docs/security.md`. **Audit pending. Production not approved.**

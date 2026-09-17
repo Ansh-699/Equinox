@@ -30,3 +30,12 @@ maintenance-margin and reserved-order-margin requirement:
 withdrawal_buffer`. No governance instruction currently sets a
 non-zero per-market buffer; introducing one later means passing a
 header-stored value into this same call, not changing the formula.
+
+**Update:** `liquidate` now emits `LiquidationStarted`, `PositionChanged`,
+`MarginChanged`, and `PositionLiquidated` (plus a conditional
+`ProtocolFeesChanged`) for every liquidation, and `place_order_core`
+emits `FundingSettled` for the taker seat's own funding settlement (see
+`docs/events.md`). `BankruptcyRecorded`/`InsuranceApplied` remain
+unwired: no automatic bankruptcy-detection or insurance-backstop logic
+exists inside `liquidate` today, only the separate, manual
+`record_bad_debt`/`resolve_bad_debt` governance path.

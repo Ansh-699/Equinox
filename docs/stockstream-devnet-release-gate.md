@@ -167,7 +167,22 @@ substantially real, not aspirational:
 | Dead-letter handling | IMPLEMENTED / UNIT TESTED | First code ever to use the previously-inert `dead_letters` table; bounded-attempt give-up; `GET /v1/health/keepers`. |
 | Signing keeper jobs (Pyth push, commit scheduling, funding settlement) | NOT IMPLEMENTED | No wallet/key-management infrastructure exists in the Worker yet -- this is the next real blocker for Priority 6. |
 
-Worker test count: `66 passed; 0 failed` (real Miniflare/D1/Durable-Object
-environment, not plain JS fakes), up from `21`.
+Worker test count: `155 passed; 0 failed` (real Miniflare/D1/Durable-Object
+environment, not plain JS fakes), up from `66`.
+
+**Update (this session):** completed the versioned binary event ABI (61
+kinds, 50 wired into production handlers), production keeper signer,
+L1/Magic Router transaction transports with real confirmation semantics,
+all six keeper jobs, ER/L1 execution-status reconciliation, private
+trader projection push, and a dedicated adversarial/failure-path test
+pass (21 scenarios reviewed, 4 real gaps found and closed -- see
+`docs/security.md`). Rust: 155 tests (up from 132). Root TypeScript: 46
+tests. SBF artifact rebuilt in a clean disposable worktree:
+253,424 bytes, SHA-256
+`63a4274f2ac1c95afa53299b986c8eb02cc206d64af7706a4e411c3caa8b1ec6`. No
+live Solana L1, MagicBlock ER, Pyth, or Privy credentials/endpoints were
+available or used this session -- every transport/keeper/signer above is
+tested against a real mock JSON-RPC HTTP handler and a real D1 database,
+never against a live network.
 
 **Hardening pending. Audit pending. Production not approved.**
