@@ -61,7 +61,7 @@ export async function runDurableKeeper<T>(repository: ProtocolRepository, reques
   }
 }
 
-export function keeperLeaseKey(kind: 'cleanup' | 'pyth' | 'commit' | 'funding' | 'expiry' | 'ingestion' | 'session', market?: string): string {
+export function keeperLeaseKey(kind: 'cleanup' | 'pyth' | 'commit' | 'funding' | 'expiry' | 'ingestion' | 'session' | 'liquidation', market?: string): string {
   return market ? `keeper:${kind}:${market}` : `keeper:${kind}`;
 }
 
