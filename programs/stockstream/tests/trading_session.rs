@@ -1067,6 +1067,7 @@ fn cancel_order_consumes_nonce_and_no_notional() {
         client_order_id: 1,
         time_in_force: stockstream::book::TimeInForce::GoodTilCancelled,
         post_only: true,
+        self_trade_behavior: stockstream::book::SelfTradeBehavior::AbortTransaction,
     }
     .leaf()
     .unwrap()
@@ -1168,6 +1169,7 @@ fn replace_order_succeeds_and_loses_time_priority() {
         client_order_id: 1,
         time_in_force: stockstream::book::TimeInForce::GoodTilCancelled,
         post_only: true,
+        self_trade_behavior: stockstream::book::SelfTradeBehavior::AbortTransaction,
     }
     .leaf()
     .unwrap()
@@ -1233,6 +1235,7 @@ fn replace_order_failure_leaves_the_original_order_and_session_untouched() {
         client_order_id: 1,
         time_in_force: stockstream::book::TimeInForce::GoodTilCancelled,
         post_only: true,
+        self_trade_behavior: stockstream::book::SelfTradeBehavior::AbortTransaction,
     }
     .leaf()
     .unwrap()

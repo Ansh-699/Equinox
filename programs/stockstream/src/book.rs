@@ -801,6 +801,39 @@ impl MarketState {
     }
 }
 
+/// Encoded in `PlaceOrderData.flags` bits 3-4 (2 bits: 0-2 valid, 3
+/// reserved/rejected) -- packed into the existing flags byte rather than
+/// growing the instruction's wire size, since 5 of its 8 bits were already
+/// unused.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SelfTradeBehavior {
+    /// Reject the whole instruction before any persistent settlement --
+    /// the maker order, taker state, margin, and sequences are all left
+    /// exactly as they were.
+    AbortTransaction = 0,
+    /// Remove the resting maker order belonging to the same trader,
+    /// release its reserved margin, and continue matching against the
+    /// next best resting order. No fill, no position/open-interest
+    /// change for the removed order.
+    CancelProvide = 1,
+    /// Reduce the taker's remaining quantity by the self-crossed amount
+    /// without touching the maker order at all -- it stays resting,
+    /// unchanged, exactly as it was.
+    DecrementTake = 2,
+}
+
+impl SelfTradeBehavior {
+    pub fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::AbortTransaction),
+            1 => Some(Self::CancelProvide),
+            2 => Some(Self::DecrementTake),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct OrderInput {
     pub side: Side,
@@ -814,6 +847,7 @@ pub struct OrderInput {
     pub client_order_id: u64,
     pub time_in_force: TimeInForce,
     pub post_only: bool,
+    pub self_trade_behavior: SelfTradeBehavior,
 }
 
 impl OrderInput {
@@ -965,6 +999,14 @@ pub struct PlanAction {
     pub key: u128,
     pub owner: u32,
     pub expected_quantity: u64,
+    /// `DecrementTake` self-trade prevention's skip marker: registers this
+    /// `(handle, tree)` in the plan's virtual view so the scanner does not
+    /// select it again this instruction, without ever actually applying a
+    /// state change to it -- `apply_settlement_plan` skips a phantom
+    /// action entirely, and `best_virtual_candidate` treats its virtual
+    /// quantity as zero regardless of `new_quantity`. `false` for every
+    /// other action kind (fills, real removals, real reductions).
+    pub phantom: bool,
 }
 
 #[repr(C, packed(8))]
@@ -977,6 +1019,10 @@ pub struct PlannedMatch {
     pub expired_removed: u8,
     pub self_cancelled: u8,
     pub post_only_rejected: bool,
+    /// `SelfTradeBehavior::AbortTransaction` was hit -- mirrors
+    /// `post_only_rejected`'s own "abort the whole instruction, apply
+    /// nothing" contract exactly.
+    pub self_trade_aborted: bool,
     pub actions: [PlanAction; MAX_PLAN_ACTIONS],
     pub action_count: u8,
     pub expected_oracle_price: i64,
@@ -998,10 +1044,11 @@ impl PlanAction {
         key: 0,
         owner: 0,
         expected_quantity: 0,
+        phantom: false,
     };
 }
 
-const _: [(); core::mem::size_of::<PlanAction>()] = [(); 48];
+const _: [(); core::mem::size_of::<PlanAction>()] = [(); 56];
 const _: [(); core::mem::size_of::<PlannedMatch>()] = [(); core::mem::size_of::<PlannedMatch>()];
 pub type SettlementPlan = PlannedMatch;
 
@@ -1040,6 +1087,7 @@ pub fn plan_limit_arenas(
         expired_removed: 0,
         self_cancelled: 0,
         post_only_rejected: false,
+        self_trade_aborted: false,
         actions: [PlanAction::EMPTY; MAX_PLAN_ACTIONS],
         action_count: 0,
         expected_oracle_price: 0,
@@ -1093,6 +1141,7 @@ pub fn plan_limit_arenas_into(
         expired_removed: 0,
         self_cancelled: 0,
         post_only_rejected: false,
+        self_trade_aborted: false,
         actions: [PlanAction::EMPTY; MAX_PLAN_ACTIONS],
         action_count: 0,
         expected_oracle_price: 0,
@@ -1152,6 +1201,7 @@ pub fn plan_limit_arenas_into(
                                 key: leaf.key,
                                 owner: leaf.owner,
                                 expected_quantity: leaf.quantity,
+                                phantom: false,
                             },
                         )?;
                     }
@@ -1189,21 +1239,56 @@ pub fn plan_limit_arenas_into(
             break;
         }
         if leaf.owner == order.owner {
-            add_plan_action(
-                &mut plan,
-                &mut virtual_count,
-                PlanAction {
-                    handle,
-                    side: opposite,
-                    tree,
-                    remove: true,
-                    new_quantity: 0,
-                    key: leaf.key,
-                    owner: leaf.owner,
-                    expected_quantity: leaf.quantity,
-                },
-            )?;
-            plan.self_cancelled = plan.self_cancelled.saturating_add(1);
+            match order.self_trade_behavior {
+                SelfTradeBehavior::AbortTransaction => {
+                    plan.self_trade_aborted = true;
+                    break;
+                }
+                SelfTradeBehavior::CancelProvide => {
+                    add_plan_action(
+                        &mut plan,
+                        &mut virtual_count,
+                        PlanAction {
+                            handle,
+                            side: opposite,
+                            tree,
+                            remove: true,
+                            new_quantity: 0,
+                            key: leaf.key,
+                            owner: leaf.owner,
+                            expected_quantity: leaf.quantity,
+                            phantom: false,
+                        },
+                    )?;
+                    plan.self_cancelled = plan.self_cancelled.saturating_add(1);
+                }
+                SelfTradeBehavior::DecrementTake => {
+                    // The maker order is left completely untouched -- this
+                    // phantom action only registers `(handle, tree)` in the
+                    // plan's virtual view (see `best_virtual_candidate`) so
+                    // the scanner does not select it again this
+                    // instruction; `apply_settlement_plan` never applies a
+                    // phantom action to real state.
+                    let decrement = leaf.quantity.min(plan.remaining);
+                    plan.remaining -= decrement;
+                    add_plan_action(
+                        &mut plan,
+                        &mut virtual_count,
+                        PlanAction {
+                            handle,
+                            side: opposite,
+                            tree,
+                            remove: false,
+                            new_quantity: leaf.quantity,
+                            key: leaf.key,
+                            owner: leaf.owner,
+                            expected_quantity: leaf.quantity,
+                            phantom: true,
+                        },
+                    )?;
+                    plan.self_cancelled = plan.self_cancelled.saturating_add(1);
+                }
+            }
             continue;
         }
         let amount = leaf.quantity.min(plan.remaining);
@@ -1233,6 +1318,7 @@ pub fn plan_limit_arenas_into(
                 key: leaf.key,
                 owner: leaf.owner,
                 expected_quantity: leaf.quantity,
+                phantom: false,
             },
         )?;
     }
@@ -1296,7 +1382,15 @@ fn best_virtual_candidate(
             while i < virtual_count {
                 if virtuals[i].handle == handle && virtuals[i].tree == tree {
                     removed = virtuals[i].remove;
-                    quantity = virtuals[i].new_quantity;
+                    // A phantom action (DecrementTake) never changes the
+                    // real leaf, but must still make the scanner skip it
+                    // for the rest of this instruction -- treated as
+                    // zero-quantity here regardless of `new_quantity`.
+                    quantity = if virtuals[i].phantom {
+                        0
+                    } else {
+                        virtuals[i].new_quantity
+                    };
                     break;
                 }
                 i += 1;

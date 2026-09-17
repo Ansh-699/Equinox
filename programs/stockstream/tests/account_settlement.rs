@@ -5,7 +5,10 @@ use pinocchio::{
     Address,
 };
 use stockstream::{
-    book::{plan_limit_arenas_into, Arena, MatchLimits, OrderInput, Side, TimeInForce, TreeKind},
+    book::{
+        plan_limit_arenas_into, Arena, MatchLimits, OrderInput, SelfTradeBehavior, Side,
+        TimeInForce, TreeKind,
+    },
     handlers::validate_planned_settlement_for_test,
     process_instruction,
     scratch::{
@@ -634,6 +637,7 @@ fn prepare_crossing_plan(f: &mut Fixture) -> (OrderInput, MarketStateHeader, Tra
         client_order_id: 702,
         time_in_force: TimeInForce::GoodTilCancelled,
         post_only: false,
+        self_trade_behavior: SelfTradeBehavior::AbortTransaction,
     };
     let scratch_data = unsafe { f.taker_scratch.view.borrow_unchecked_mut() };
     let mut scratch = SettlementScratchView::new(scratch_data).unwrap();
@@ -1393,4 +1397,93 @@ fn mvp_stale_plan_rejects_changed_maker_and_market_snapshots() {
     assert_eq!(scratch_before_validate, unsafe {
         f.taker_scratch.view.borrow_unchecked()
     });
+}
+
+#[test]
+fn self_trade_abort_preserves_market_scratch_and_event_sequence() {
+    let f = fixture();
+    place(&f, true, &order_data(1, 0, 4, 100, 0, 131)).unwrap();
+    let market_before = unsafe { f.market.view.borrow_unchecked() }.to_vec();
+    let scratch_before = unsafe { f.maker_scratch.view.borrow_unchecked() }.to_vec();
+    let sequence_before = {
+        let data = unsafe { f.market.view.borrow_unchecked() };
+        let header = unsafe { &*(data.as_ptr() as *const MarketStateHeader) };
+        header.global_event_sequence
+    };
+    match place(&f, true, &order_data(0, 0, 4, 110, 0, 132)) {
+        Err(pinocchio::error::ProgramError::Custom(0x6019)) => {}
+        other => panic!("expected SelfTradeAborted, got {other:?}"),
+    }
+    assert_eq!(market_before, unsafe { f.market.view.borrow_unchecked() });
+    assert_eq!(scratch_before, unsafe {
+        f.maker_scratch.view.borrow_unchecked()
+    });
+    let sequence_after = {
+        let data = unsafe { f.market.view.borrow_unchecked() };
+        let header = unsafe { &*(data.as_ptr() as *const MarketStateHeader) };
+        header.global_event_sequence
+    };
+    assert_eq!(sequence_before, sequence_after);
+}
+
+#[test]
+fn self_trade_cancel_provide_removes_the_own_order_and_fills_the_next_seat() {
+    let f = fixture();
+    place(&f, true, &order_data(1, 0, 4, 100, 0, 141)).unwrap();
+    place(&f, false, &order_data(1, 1, 4, 100, 0, 142)).unwrap();
+    place(&f, true, &order_data(0, 0, 4, 110, 8, 143)).unwrap();
+    let data = unsafe { f.market.view.borrow_unchecked() };
+    let own = unsafe { &*(data.as_ptr().add(TRADER_SEAT_OFFSET) as *const TraderSeat) };
+    let other = unsafe {
+        &*(data.as_ptr().add(TRADER_SEAT_OFFSET + TRADER_SEAT_SIZE) as *const TraderSeat)
+    };
+    let own_position = own.base_position;
+    let other_position = other.base_position;
+    assert_eq!(own_position, 4, "only the fill moves the taker's position");
+    assert_eq!(other_position, -4);
+    let ask = unsafe {
+        &*(data.as_ptr().add(stockstream::state::ASK_ARENA_OFFSET)
+            as *const stockstream::book::Arena)
+    };
+    assert_eq!(ask.leaf_counts[0], 0);
+    let bid = unsafe {
+        &*(data.as_ptr().add(stockstream::state::BID_ARENA_OFFSET)
+            as *const stockstream::book::Arena)
+    };
+    assert_eq!(bid.leaf_counts[0], 0);
+}
+
+#[test]
+fn self_trade_decrement_take_creates_no_fill_and_leaves_the_own_order_resting() {
+    let f = fixture();
+    place(&f, true, &order_data(1, 0, 10, 100, 0, 151)).unwrap();
+    let sequence_before = {
+        let data = unsafe { f.market.view.borrow_unchecked() };
+        let header = unsafe { &*(data.as_ptr() as *const MarketStateHeader) };
+        header.global_event_sequence
+    };
+    place(&f, true, &order_data(0, 0, 4, 110, 16, 152)).unwrap();
+    let data = unsafe { f.market.view.borrow_unchecked() };
+    let header = unsafe { &*(data.as_ptr() as *const MarketStateHeader) };
+    let seat = unsafe { &*(data.as_ptr().add(TRADER_SEAT_OFFSET) as *const TraderSeat) };
+    let seat_position = seat.base_position;
+    let open_interest = header.current_open_interest;
+    let event_sequence = header.global_event_sequence;
+    assert_eq!(seat_position, 0, "no fill may be created");
+    assert_eq!(open_interest, 0);
+    assert_eq!(
+        event_sequence,
+        sequence_before + 2,
+        "OrderPlaced plus the SelfTradePrevented record"
+    );
+    let ask = unsafe {
+        &*(data.as_ptr().add(stockstream::state::ASK_ARENA_OFFSET)
+            as *const stockstream::book::Arena)
+    };
+    assert_eq!(ask.leaf_counts[0], 1, "the own resting order survives");
+    let bid = unsafe {
+        &*(data.as_ptr().add(stockstream::state::BID_ARENA_OFFSET)
+            as *const stockstream::book::Arena)
+    };
+    assert_eq!(bid.leaf_counts[0], 0, "the order was fully decremented");
 }

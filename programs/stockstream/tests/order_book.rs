@@ -1,7 +1,7 @@
 use stockstream::book::{
     match_limit, normalized_key, pegged_state, plan_limit_arenas, price_time_key, AnyNode, Arena,
-    BookError, LastFreeNode, MarketState, MatchLimits, OrderInput, PeggedState, Side, TimeInForce,
-    TreeKind, ARENA_CAPACITY,
+    BookError, LastFreeNode, MarketState, MatchLimits, OrderInput, PeggedState, SelfTradeBehavior,
+    Side, TimeInForce, TreeKind, ARENA_CAPACITY,
 };
 
 fn order(side: Side, tree: TreeKind, price: i64, sequence: u64) -> OrderInput {
@@ -17,6 +17,7 @@ fn order(side: Side, tree: TreeKind, price: i64, sequence: u64) -> OrderInput {
         client_order_id: sequence,
         time_in_force: TimeInForce::GoodTilCancelled,
         post_only: false,
+        self_trade_behavior: SelfTradeBehavior::AbortTransaction,
     }
 }
 
