@@ -261,6 +261,23 @@ export default {
       return json({ ok: true, service: "stockstream-market-api", environment: env.ENVIRONMENT });
     }
 
+    // Local e2e diagnostics: which server-only bindings the runtime sees
+    // (presence booleans only -- never values).
+    if (request.method === "GET" && url.pathname === "/debug/env-presence") {
+      return json({
+        SOLANA_RPC_URL: !!env.SOLANA_RPC_URL,
+        SOLANA_WS_URL: !!env.SOLANA_WS_URL,
+        MAGIC_ROUTER_URL: !!env.MAGIC_ROUTER_URL,
+        MAGICBLOCK_RPC_URL: !!env.MAGICBLOCK_RPC_URL,
+        MAGICBLOCK_VALIDATOR: !!env.MAGICBLOCK_VALIDATOR,
+        PYTH_PRO_API_KEY: !!env.PYTH_PRO_API_KEY,
+        KEEPER_KEYPAIR_JSON: !!env.KEEPER_KEYPAIR_JSON,
+        KEEPER_PUBLIC_KEY: !!env.KEEPER_PUBLIC_KEY,
+        INGESTION_TOKEN: !!env.INGESTION_TOKEN,
+        DB: !!env.DB,
+      });
+    }
+
     // Priority 6: keeper health/metrics. Authorized like the other
     // operational routes -- due dead-letter counts and per-kind lease
     // freshness are operational detail, not public information.
