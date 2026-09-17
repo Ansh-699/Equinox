@@ -140,14 +140,20 @@ fn program_ids_and_discriminator_match_the_real_crates() {
         MAGIC_CONTEXT_ID.to_bytes(),
         magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY.to_bytes()
     );
+    // These five must be checked against the pinned official crate, not
+    // against a repeated literal: production now hand-encodes them (see
+    // `magicblock.rs`), so a literal-vs-literal assertion would guard nothing.
     assert_eq!(
         EXTERNAL_UNDELEGATE_DISCRIMINATOR,
-        [196, 28, 41, 206, 48, 37, 51, 167]
+        dlp_api::consts::EXTERNAL_UNDELEGATE_DISCRIMINATOR
     );
-    assert_eq!(DELEGATION_RECORD_TAG, b"delegation");
-    assert_eq!(DELEGATION_METADATA_TAG, b"delegation-metadata");
-    assert_eq!(DELEGATE_BUFFER_TAG, b"buffer");
-    assert_eq!(UNDELEGATE_BUFFER_TAG, b"undelegate-buffer");
+    assert_eq!(DELEGATION_RECORD_TAG, dlp_api::pda::DELEGATION_RECORD_TAG);
+    assert_eq!(
+        DELEGATION_METADATA_TAG,
+        dlp_api::pda::DELEGATION_METADATA_TAG
+    );
+    assert_eq!(DELEGATE_BUFFER_TAG, dlp_api::pda::DELEGATE_BUFFER_TAG);
+    assert_eq!(UNDELEGATE_BUFFER_TAG, dlp_api::pda::UNDELEGATE_BUFFER_TAG);
     assert_eq!(COMMIT_INTERVAL_MS, 30_000);
 }
 

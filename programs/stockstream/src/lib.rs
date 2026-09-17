@@ -1,13 +1,15 @@
 #![no_std]
 
-// The MagicBlock delegation/magic-program API crates pull in a `std`-linked
-// `solana-address` build (required, not optional, by their own manifests) for
-// the sbpf-solana-solana target. That collides with `nostd_panic_handler!`'s
-// own `#[panic_handler]` (duplicate `panic_impl` lang item), so this program
-// uses the std-compatible panic handler instead. No heap allocator is added:
-// `no_allocator!()` in the entrypoint module is unchanged, so a reachable
-// allocation still fails to link rather than silently costing compute.
-pinocchio::default_panic_handler!();
+// The MagicBlock delegation/magic-program API crates used to pull a
+// `std`-linked `solana-address` build into this target, which forced the
+// std-compatible panic handler. They are dev-dependencies only now (see
+// `magicblock.rs`): that std linkage is exactly what made the linker tag the
+// SBF ELF `ELFOSABI_GNU`, a header the SBF loader rejects outright. With the
+// graph fully `no_std` the standard no-std panic handler applies. No heap
+// allocator is added: `no_allocator!()` in the entrypoint module is
+// unchanged, so a reachable allocation still fails to link rather than
+// silently costing compute.
+pinocchio::nostd_panic_handler!();
 
 pub mod book;
 pub mod error;
