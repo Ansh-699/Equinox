@@ -111,16 +111,28 @@ function base64ToBytes(base64: string): Uint8Array {
   return bytes;
 }
 
-/** Fetches one market account through the given transport (L1 or ER -- the
- * caller decides the domain) and decodes its header. `null` for a missing
+/** Fetches one market account's raw bytes through the given transport (L1
+ * or ER -- the caller decides the domain). `null` for a missing account.
+ * Callers needing both the header and a seat (e.g. the liquidation
+ * scanner) should use this once and decode both from the same bytes,
+ * rather than fetching the account twice. */
+export async function fetchAuthoritativeMarketAccountBytes(
+  transport: SolanaL1Transport | MagicRouterTransport,
+  marketPda: string,
+): Promise<Uint8Array | null> {
+  const result = await transport.multipleAccounts([marketPda]);
+  const account = result.value[0];
+  if (!account || account.data === null) return null;
+  return base64ToBytes(account.data[0]);
+}
+
+/** Fetches one market account and decodes its header. `null` for a missing
  * account, an account too short to hold a header, or a header that fails
  * `decodeMarketHeader`'s own checks. */
 export async function fetchAuthoritativeMarketState(
   transport: SolanaL1Transport | MagicRouterTransport,
   marketPda: string,
 ): Promise<MarketState | null> {
-  const result = await transport.multipleAccounts([marketPda]);
-  const account = result.value[0];
-  if (!account || account.data === null) return null;
-  return decodeMarketHeader(base64ToBytes(account.data[0]));
+  const bytes = await fetchAuthoritativeMarketAccountBytes(transport, marketPda);
+  return bytes ? decodeMarketHeader(bytes) : null;
 }
