@@ -760,3 +760,128 @@ fn runtime_mark_funding_positive_basis() {
     .expect("40 bps within the +400 bps basis");
     assert_eq!({ env.header().funding_accumulator }, 40);
 }
+
+// ---------------------------------------------------------------------
+// Mark-price runtime coverage additions (pegged roots, locked book,
+// integer rounding), each executing the deployed program's funding guard.
+// ---------------------------------------------------------------------
+impl Env {
+    fn pegged_leaf(&mut self, side: u8, offset: i64, peg_limit: i64) {
+        use stockstream::book::{
+            Arena, LeafNode, OrderInput, SelfTradeBehavior, TimeInForce, TreeKind,
+        };
+        let mut data = self.market_data();
+        let (offset_arena, side) = if side == 0 {
+            (
+                stockstream::state::BID_ARENA_OFFSET,
+                stockstream::book::Side::Bid,
+            )
+        } else {
+            (
+                stockstream::state::ASK_ARENA_OFFSET,
+                stockstream::book::Side::Ask,
+            )
+        };
+        let mut arena =
+            unsafe { ptr::read_unaligned(data.as_ptr().add(offset_arena) as *const Arena) };
+        let leaf = OrderInput {
+            side,
+            tree: TreeKind::OraclePegged,
+            owner: 2,
+            price_or_offset: offset,
+            sequence: 9,
+            quantity: 5,
+            expires_at: u64::MAX,
+            peg_limit,
+            client_order_id: 9,
+            time_in_force: TimeInForce::GoodTilCancelled,
+            post_only: false,
+            self_trade_behavior: SelfTradeBehavior::AbortTransaction,
+        }
+        .leaf()
+        .unwrap();
+        arena.insert(TreeKind::OraclePegged, leaf).unwrap();
+        unsafe {
+            ptr::write_unaligned(data.as_mut_ptr().add(offset_arena) as *mut Arena, arena);
+        }
+        self.write_market_data(data);
+    }
+}
+
+#[test]
+fn runtime_mark_pegged_root_drives_funding_bound() {
+    // Oracle 100; pegged BID at oracle+3 = 103 only (no asks) -> one-sided
+    // mark 103 -> basis +300 bps; peg_limit MAX (valid peg).
+    let mut env = setup();
+    env.oracle(100, 1);
+    env.book(0, 0);
+    env.pegged_leaf(0, 3, i64::MAX);
+    // elapsed=40 -> absolute cap min(40, 300) = 40
+    env.send(
+        &update_funding_data(40, 40),
+        &[
+            writable(env.market),
+            readonly_signer(env.authority.pubkey()),
+        ],
+    )
+    .expect("pegged one-sided bid funds from the clamped mark basis");
+    assert_eq!({ env.header().funding_accumulator }, 40);
+}
+
+#[test]
+fn runtime_mark_invalid_pegged_order_excluded() {
+    // Pegged bid with peg_limit 50: evaluated price 103 > 50 -> Invalid ->
+    // excluded from the mark -> empty book -> index fallback -> zero basis.
+    let mut env = setup();
+    env.oracle(100, 1);
+    env.book(0, 0);
+    env.pegged_leaf(0, 3, 50);
+    let rejected = env.send(
+        &update_funding_data(10, 40),
+        &[
+            writable(env.market),
+            readonly_signer(env.authority.pubkey()),
+        ],
+    );
+    assert!(
+        rejected.is_err(),
+        "an invalid pegged order must not create a basis"
+    );
+}
+
+#[test]
+fn runtime_mark_locked_book_falls_back_to_index() {
+    // Locked book: best bid == best ask (locked books arise only from
+    // corruption; valid matching never leaves them). Mark = index.
+    let mut env = setup();
+    env.oracle(100, 1);
+    env.book(100, 100);
+    let rejected = env.send(
+        &update_funding_data(10, 40),
+        &[
+            writable(env.market),
+            readonly_signer(env.authority.pubkey()),
+        ],
+    );
+    assert!(
+        rejected.is_err(),
+        "a locked book's basis is zero: nonzero increments must be rejected"
+    );
+}
+
+#[test]
+fn runtime_mark_integer_rounding_deterministic() {
+    // bid 96 / ask 97: floor((96+97)/2) = 96 (round-half-down); basis -400.
+    let mut env = setup();
+    env.oracle(100, 1);
+    env.book(96, 97);
+    env.send(
+        &update_funding_data(40, 40),
+        &[
+            writable(env.market),
+            readonly_signer(env.authority.pubkey()),
+        ],
+    )
+    .expect("40 bps within the floored mid's basis");
+    assert_eq!({ env.header().funding_accumulator }, 40);
+}
