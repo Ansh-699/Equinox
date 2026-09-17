@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { MagicRouterTransport, RpcFailure, SolanaRpcTransport } from './rpc-transport';
 import { STOCKSTREAM_ACCOUNT_SIZE, STOCKSTREAM_PROGRAM_ID } from '../clients/stockstream/src/constants';
 
-const marketAddress = '6QyZWQ7dvFNXerNdhzhyqQjzZnkMXmr52GNJLT1KpmU';
+const marketAddress = 'H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET';
 const signature = '2'.repeat(64);
 function response(id: number, result: unknown) { return new Response(JSON.stringify({jsonrpc:'2.0',id,result}), {headers:{'content-type':'application/json'}}); }
 function marketBytes(commit = 4n, event = 7n) {

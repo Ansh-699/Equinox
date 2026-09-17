@@ -1,4 +1,4 @@
-export const STOCKSTREAM_PROGRAM_ID = "6QyZWQ7dvFNXerNdhzhyqQjzZnkMXmr52GNJLT1KpmU";
+export const STOCKSTREAM_PROGRAM_ID = "H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET";
 
 export const STOCKSTREAM_INSTRUCTION = {
   initializeMarket: 0,

@@ -23,7 +23,7 @@ import {
 import { LocalKeypairSigner } from "./signer";
 import { signAndSerializeTransaction } from "./transactions";
 
-const STOCKSTREAM_PROGRAM = "6QyZWQ7dvFNXerNdhzhyqQjzZnkMXmr52GNJLT1KpmU";
+const STOCKSTREAM_PROGRAM = "H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET";
 
 /** A fresh Solana-CLI-style JSON keypair per test. */
 function keypairMaterial(): string {

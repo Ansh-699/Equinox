@@ -8,7 +8,7 @@ Scope: standalone program-foundation milestone only
 | Rust | `rustc 1.98.0 (88d9e12ae 2026-08-18)` |
 | Solana / Agave CLI | `solana-cli 4.2.1 (src:75f9b5b4; feat:21b0d33a, client:Agave)` |
 | Pinocchio | `0.11.2` exactly |
-| StockStream program ID | `6QyZWQ7dvFNXerNdhzhyqQjzZnkMXmr52GNJLT1KpmU` |
+| StockStream program ID | `H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET` |
 | SBF artifact | `target/deploy/stockstream.so` |
 | SBF SHA-256 | `c298700f1dc22690e9988bc59e8b8c8bc76dc70c6e321105cc19400deb052e79` |
 
