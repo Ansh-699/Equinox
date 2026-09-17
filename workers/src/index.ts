@@ -8,7 +8,8 @@ import { AccountSnapshotFetcher } from './ingestion-pipeline';
 import { MarketIndexer } from './indexer-service';
 import { isWithdrawalDisplaySafe, reconcileMarketExecutionStatus } from './execution-status';
 import { PrivateSessionRepository, publishSeatProjection, seatsAffectedByEvent } from './private-sessions';
-import { buildOrchestratorDeps, classifyKeeperConfiguration } from './keeper-config';
+import { classifyKeeperConfiguration, startKeeperRuntime } from './keeper-config';
+import { resolveKeeperSigning } from './keeper-signer';
 import { ProtocolKeeperOrchestrator, type OrchestratorRunSummary } from './keeper-orchestrator';
 
 export { MarketStream };
@@ -235,12 +236,19 @@ export async function fetchExecutionStatus(
  * documented fail-safe), never blocking ingestion, auth, or the public
  * API. Exported (like `runIngestionTick`) so tests can inject a fetcher.
  */
-export async function runKeeperOrchestrationTick(env: Env, fetcher: typeof fetch = fetch): Promise<{ ran: boolean; reason?: string; summary?: OrchestratorRunSummary }> {
-  const signer = null; // see this function's doc comment
-  const deps = await buildOrchestratorDeps(env, fetcher, signer, env.KEEPER_PUBLIC_KEY);
-  if (!deps) return { ran: false, reason: 'RPC endpoint not configured' };
+export async function runKeeperOrchestrationTick(env: Env, fetcher: typeof fetch = fetch): Promise<{ ran: boolean; reason?: string; summary?: OrchestratorRunSummary; signerState?: string }> {
+  const { resolution, deps } = await startKeeperRuntime(env, fetcher);
+  // Startup-state discipline: `observation-only`, `signer-invalid`, and
+  // `configuration-blocked` all resolve to signer null inside
+  // `startKeeperRuntime`, which degrades every job to
+  // discovery/observation-only (the orchestrator's own documented
+  // fail-safe) without blocking ingestion, auth, or the public API.
+  if (resolution.state !== 'signer-ready' && resolution.state !== 'observation-only') {
+    return { ran: false, reason: resolution.detail, signerState: resolution.state };
+  }
+  if (!deps) return { ran: false, reason: 'RPC endpoint not configured', signerState: resolution.state };
   const summary = await new ProtocolKeeperOrchestrator(deps).run();
-  return { ran: true, summary };
+  return { ran: true, summary, signerState: resolution.state };
 }
 
 export default {
@@ -267,7 +275,7 @@ export default {
         checkedAt: now,
         deadLetters: { due: due.length, entries: due.map((d) => ({ id: d.id, operation: d.operation, attempts: d.attempts, error: d.error })) },
         leases: leases.results.map((lease) => ({ ...lease, active: lease.expiresAt > now })),
-        keeperConfiguration: classifyKeeperConfiguration(env),
+        keeperConfiguration: { ...classifyKeeperConfiguration(env), signerState: (await resolveKeeperSigning(env)).state },
       });
     }
 

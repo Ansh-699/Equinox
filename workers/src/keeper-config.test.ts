@@ -14,10 +14,14 @@ describe("classifyKeeperConfiguration", () => {
     expect(classifyKeeperConfiguration({ MAGIC_ROUTER_URL: "https://router.test" } as Env).magicRouter).toBe("ready");
   });
 
-  it("reports pyth and signer as configuration_blocked (no live subscription / no signer secret binding exists yet)", () => {
+  it("reports pyth ready only with a key AND the full three-endpoint redundancy; signer only with validated material", () => {
+    // Key present but no endpoints configured -> falls back to the three
+    // documented defaults, which with a key IS the documented ready state.
     const health = classifyKeeperConfiguration({ PYTH_PRO_API_KEY: "k" } as Env);
-    expect(health.pyth).toBe("configuration_blocked");
+    expect(health.pyth).toBe("ready");
     expect(health.signer).toBe("configuration_blocked");
+    // No key at all stays blocked.
+    expect(classifyKeeperConfiguration({} as Env).pyth).toBe("configuration_blocked");
   });
 });
 
