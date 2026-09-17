@@ -9,21 +9,36 @@ on:
       - "scripts/install-stockstream-toolchain.sh"
       - "scripts/verify-sbf-artifact.py"
 
+# The single authoritative toolchain pin lives in toolchain/stockstream-runtime.env
+# and is consumed by scripts/install-stockstream-toolchain.sh. Do not restate a
+# version here -- two authoritative versions is how the 2.2.20/4.2.1 mismatch
+# happened in the first place.
 jobs:
   runtime:
     runs-on: ubuntu-24.04
-    env:
-      AGAVE_VERSION: 2.2.20
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - name: Install one matching Agave release
+
+      - name: Install the pinned Agave toolchain
         run: bash scripts/install-stockstream-toolchain.sh
+
+      - name: Host gates
+        run: |
+          cargo fmt --check
+          cargo check -p stockstream
+          cargo test -p stockstream
+          cargo test -p stockstream --release
+
+      - name: Build the SBF artifact
+        run: cargo build-sbf --manifest-path programs/stockstream/Cargo.toml --features bpf-entrypoint
+
       - name: Verify artifact headers and identity (Gate 2 regression check)
         run: |
           file target/deploy/stockstream.so
           readelf -h target/deploy/stockstream.so
           python3 scripts/verify-sbf-artifact.py target/deploy/stockstream.so
+
       - name: Verify the SBF artifact is reproducible from a clean worktree
         run: |
           cp target/deploy/stockstream.so /tmp/stockstream-working-tree.so
@@ -35,5 +50,8 @@ jobs:
           )
           cmp /tmp/stockstream-working-tree.so /tmp/stockstream-repro/target/deploy/stockstream.so
           git worktree remove --force /tmp/stockstream-repro
-      - name: Execute runtime harness
-        run: cargo test -p stockstream --features runtime-tests --test runtime_initialize -- --nocapture
+
+      - name: Runtime harness against the real .so
+        run: |
+          cargo test -p stockstream --features runtime-tests --test runtime_initialize
+          cargo test -p stockstream --features runtime-tests --test runtime_settlement
