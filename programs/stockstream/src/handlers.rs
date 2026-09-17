@@ -404,6 +404,13 @@ pub fn dispatch(
             accounts,
             Address::new_from_array(validator),
         ),
+        StockStreamInstruction::DelegateClusterMember { validator } => {
+            crate::magicblock::delegate_cluster_member(
+                program_id,
+                accounts,
+                Address::new_from_array(validator),
+            )
+        }
         StockStreamInstruction::CommitMarket { sequence } => {
             crate::magicblock::commit_market(program_id, accounts, sequence)
         }

@@ -28,6 +28,7 @@ pub enum StockStreamError {
     SessionNonceReplay = 0x6017,
     CustodyViolation = 0x6018,
     SelfTradeAborted = 0x6019,
+    MagicBlockClusterTooLarge = 0x601A,
 }
 
 impl From<StockStreamError> for ProgramError {
