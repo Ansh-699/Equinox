@@ -1929,7 +1929,29 @@ fn update_trading_session_limits(
         .checked_add(1)
         .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
     let bytes = unsafe { accounts[2].borrow_unchecked_mut() };
-    session::write_session(bytes, &session_state)
+    session::write_session(bytes, &session_state)?;
+    let market_key = accounts[0].address().to_bytes();
+    let data = market_data(&mut accounts[0], program_id)?;
+    let mut header = initialized_header(data)?;
+    let sequence = next_event_sequence(&mut header)?;
+    let timestamp = event_timestamp();
+    write_header(data, &header)?;
+    // Reuses the `payload_session` nonce slot to carry the session's own
+    // `session_generation` counter -- there is no nonce being consumed by
+    // a limits update, but the generation number serves the same
+    // "which version of this session is this" purpose for an indexer.
+    crate::events::emit_event(
+        crate::events::EventKind::TradingSessionLimitsUpdated,
+        &market_key,
+        sequence,
+        timestamp,
+        &crate::events::payload_session(
+            seat_index,
+            &session_signer.to_bytes(),
+            session_state.session_generation.into(),
+        ),
+    );
+    Ok(())
 }
 
 /// Accounts: `[market, owner (signer, writable), session (writable, PDA), session_signer]`.
@@ -2139,6 +2161,13 @@ fn place_order(
             order.action_nonce,
             now,
         )?;
+        emit_session_action_consumed(
+            program_id,
+            accounts,
+            order.seat_index,
+            &trading_session.session_signer,
+            order.action_nonce,
+        )?;
     }
     Ok(())
 }
@@ -2230,7 +2259,8 @@ fn place_order_core(
     {
         return Err(custom(StockStreamError::RiskViolation));
     }
-    risk::settle_funding(&mut taker, header.funding_accumulator).map_err(risk_error)?;
+    let taker_funding_payment =
+        risk::settle_funding(&mut taker, header.funding_accumulator).map_err(risk_error)?;
     let order_notional =
         risk::notional(order.quantity as i128, current_price as i128).map_err(risk_error)?;
     let required =
@@ -2326,7 +2356,7 @@ fn place_order_core(
             .insert(resting.tree, resting.leaf().map_err(book_error)?)
             .map_err(book_error)?;
     }
-    apply_scratch_results(data, &scratch)?;
+    apply_scratch_results(data, &scratch, &market_address)?;
     let scratch_result = scratch.read_header();
     let mut updated = header;
     updated.global_order_sequence = scratch_result.final_order_sequence;
@@ -2354,6 +2384,53 @@ fn place_order_core(
             order.quantity,
         ),
     );
+    // The taker seat's own per-instruction funding settlement (maker-side
+    // settlements, inside `plan_seat_results`, are not covered -- wiring
+    // them would mean reserving event sequences from inside the matching
+    // loop, which already produces one collision bug this session; left as
+    // a deliberate, documented scope decision rather than risking another).
+    if taker_funding_payment != 0 {
+        let sequence = next_event_sequence(&mut updated)?;
+        crate::events::emit_event(
+            crate::events::EventKind::FundingSettled,
+            &market_address,
+            sequence,
+            event_timestamp(),
+            &crate::events::payload_funding(
+                order.seat_index,
+                header.funding_accumulator,
+                taker_funding_payment,
+            ),
+        );
+    }
+    // Resting orders the matching engine swept off the book while walking
+    // past the incoming order's price (a stale owner-occupancy slot, or one
+    // whose `expires_at` had already passed) -- see `plan_limit_arenas_into`.
+    // The plan only tracks *counts*, not each removed order's own seat/key,
+    // so these are emitted as a single market-level record per instruction
+    // rather than one event per removed order.
+    let invalid_removed = scratch.plan().invalid_removed;
+    if invalid_removed > 0 {
+        let sequence = next_event_sequence(&mut updated)?;
+        crate::events::emit_event(
+            crate::events::EventKind::InvalidOrderRemoved,
+            &market_address,
+            sequence,
+            event_timestamp(),
+            &crate::events::payload_seat_amount(crate::events::NO_SEAT, invalid_removed as u64, 0),
+        );
+    }
+    let expired_removed = scratch.plan().expired_removed;
+    if expired_removed > 0 {
+        let sequence = next_event_sequence(&mut updated)?;
+        crate::events::emit_event(
+            crate::events::EventKind::OrderExpired,
+            &market_address,
+            sequence,
+            event_timestamp(),
+            &crate::events::payload_seat_amount(crate::events::NO_SEAT, expired_removed as u64, 0),
+        );
+    }
     // Maker+taker fees charged this instruction (already deducted from the
     // relevant seats' `realized_pnl` by `apply_fill`) are credited to the
     // protocol fee ledger here, atomically with the rest of the settlement.
@@ -2487,6 +2564,30 @@ fn replace_order(
         seat_owner,
         session_authorized,
     )?;
+    // Carries the *old* order's key alongside the new order's shape -- the
+    // new order's own key is recoverable from the `OrderPlaced` event
+    // `place_order_core` already emitted for it a moment ago.
+    {
+        let market_key = accounts[0].address().to_bytes();
+        let data = market_data(&mut accounts[0], program_id)?;
+        let mut header = initialized_header(data)?;
+        let sequence = next_event_sequence(&mut header)?;
+        let timestamp = event_timestamp();
+        write_header(data, &header)?;
+        crate::events::emit_event(
+            crate::events::EventKind::OrderReplaced,
+            &market_key,
+            sequence,
+            timestamp,
+            &crate::events::payload_order(
+                order.seat_index,
+                old_order_key,
+                order.side,
+                order.price_or_offset,
+                order.quantity,
+            ),
+        );
+    }
     if let Some(trading_session) = trading_session {
         consume_session_action(
             &mut accounts[3],
@@ -2494,6 +2595,13 @@ fn replace_order(
             order_notional,
             order.action_nonce,
             now,
+        )?;
+        emit_session_action_consumed(
+            program_id,
+            accounts,
+            order.seat_index,
+            &trading_session.session_signer,
+            order.action_nonce,
         )?;
     }
     Ok(())
@@ -2685,7 +2793,11 @@ fn plan_seat_results(
     Ok(total_fee)
 }
 
-fn apply_scratch_results(data: &mut [u8], scratch: &SettlementScratchView) -> ProgramResult {
+fn apply_scratch_results(
+    data: &mut [u8],
+    scratch: &SettlementScratchView,
+    market_address: &[u8; 32],
+) -> ProgramResult {
     let header = scratch.read_header();
     if header.status != ScratchStatus::Ready as u8 {
         return Err(custom(StockStreamError::InvalidSettlementScratch));
@@ -2699,6 +2811,16 @@ fn apply_scratch_results(data: &mut [u8], scratch: &SettlementScratchView) -> Pr
         )?;
         slot += 1;
     }
+    // Whether the *incoming* order (the one this instruction placed) ends
+    // this instruction with no quantity left unfilled -- used to classify
+    // every fill this instruction produced as `OrderFilled` or
+    // `OrderPartiallyFilled`. This is a per-instruction, not a per-fill,
+    // classification: a fill that fully closes one maker's resting order
+    // can still leave the taker's larger incoming order partially filled,
+    // and this program does not track maker-side fill completion
+    // separately, so every fill in one instruction shares the incoming
+    // order's own completion state.
+    let taker_order_fully_filled = scratch.plan().remaining == 0;
     let mut event = 0usize;
     while event < header.event_count as usize {
         let value = scratch.event(event)?;
@@ -2713,6 +2835,28 @@ fn apply_scratch_results(data: &mut [u8], scratch: &SettlementScratchView) -> Pr
                 FILL_EVENT_SIZE,
             );
         }
+        // Reuses the ring buffer's own `value.sequence` as this binary
+        // event's header sequence: the program-log record and the
+        // event-ring record refer to the exact same logical fill, so they
+        // must share one sequence number rather than each consuming a
+        // fresh one.
+        crate::events::emit_event(
+            if taker_order_fully_filled {
+                crate::events::EventKind::OrderFilled
+            } else {
+                crate::events::EventKind::OrderPartiallyFilled
+            },
+            market_address,
+            value.sequence,
+            value.timestamp,
+            &crate::events::payload_fill(
+                value.maker_seat,
+                value.taker_seat,
+                value.price,
+                value.quantity,
+                value.sequence,
+            ),
+        );
         event += 1;
     }
     Ok(())
@@ -2945,6 +3089,13 @@ fn cancel_order(
     );
     if let Some(trading_session) = trading_session {
         consume_session_action(&mut accounts[2], trading_session, 0, action_nonce, now)?;
+        emit_session_action_consumed(
+            program_id,
+            accounts,
+            seat_index as u16,
+            &trading_session.session_signer,
+            action_nonce,
+        )?;
     }
     Ok(())
 }
@@ -3028,6 +3179,18 @@ fn liquidate(
     } else {
         quantity
     };
+    let started_sequence = next_event_sequence(&mut header)?;
+    crate::events::emit_event(
+        crate::events::EventKind::LiquidationStarted,
+        &market_key,
+        started_sequence,
+        event_timestamp(),
+        &crate::events::payload_liquidation(
+            seat_index as u16,
+            quantity.unsigned_abs() as u64,
+            header.last_verified_oracle_price,
+        ),
+    );
     let liquidation_fee = risk::apply_fill(
         &mut seat,
         signed,
@@ -3042,6 +3205,30 @@ fn liquidate(
     )
     .map_err(risk_error)?;
     write_seat(data, seat_index, &seat)?;
+    let position_sequence = next_event_sequence(&mut header)?;
+    crate::events::emit_event(
+        crate::events::EventKind::PositionChanged,
+        &market_key,
+        position_sequence,
+        event_timestamp(),
+        &crate::events::payload_position(
+            seat_index as u16,
+            seat.base_position,
+            seat.quote_entry_value,
+        ),
+    );
+    let margin_sequence = next_event_sequence(&mut header)?;
+    crate::events::emit_event(
+        crate::events::EventKind::MarginChanged,
+        &market_key,
+        margin_sequence,
+        event_timestamp(),
+        &crate::events::payload_seat_amount(
+            seat_index as u16,
+            seat.reserved_margin.max(0) as u64,
+            0,
+        ),
+    );
     let liquidation_sequence = next_event_sequence(&mut header)?;
     let liquidation_timestamp = event_timestamp();
     if liquidation_fee > 0 {
@@ -3164,7 +3351,7 @@ fn cancel_all(
     seat.open_ask_exposure = seat
         .open_ask_exposure
         .saturating_sub(total.ask_quantity as i128);
-    let header = initialized_header(data)?;
+    let mut header = initialized_header(data)?;
     let released = risk::initial_margin(
         total.reserved_notional.min(i128::MAX as u128) as i128,
         header.initial_margin_bps,
@@ -3172,8 +3359,53 @@ fn cancel_all(
     .map_err(risk_error)?;
     seat.reserved_margin = seat.reserved_margin.saturating_sub(released);
     write_seat(data, seat_index, &seat)?;
+    let sequence = next_event_sequence(&mut header)?;
+    let timestamp = event_timestamp();
+    write_header(data, &header)?;
+    crate::events::emit_event(
+        crate::events::EventKind::CancelAllProgress,
+        &market_address,
+        sequence,
+        timestamp,
+        &crate::events::payload_seat_amount(seat_index as u16, total.count as u64, 0),
+    );
     if let Some(trading_session) = trading_session {
         consume_session_action(&mut accounts[2], trading_session, 0, action_nonce, now)?;
+        emit_session_action_consumed(
+            program_id,
+            accounts,
+            seat_index as u16,
+            &trading_session.session_signer,
+            action_nonce,
+        )?;
     }
+    Ok(())
+}
+
+/// Emitted after a scoped-session action (`PlaceOrder`, `ReplaceOrder`,
+/// `CancelOrder`, `CancelAll`) has already fully succeeded and consumed
+/// this session's nonce/notional -- always the *last* thing an instruction
+/// does, after the primary event for that action, so its sequence sorts
+/// after whatever action it is reporting on.
+fn emit_session_action_consumed(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    seat_index: u16,
+    session_signer: &[u8; 32],
+    nonce: u64,
+) -> ProgramResult {
+    let market_key = accounts[0].address().to_bytes();
+    let data = market_data(&mut accounts[0], program_id)?;
+    let mut header = initialized_header(data)?;
+    let sequence = next_event_sequence(&mut header)?;
+    let timestamp = event_timestamp();
+    write_header(data, &header)?;
+    crate::events::emit_event(
+        crate::events::EventKind::TradingSessionActionConsumed,
+        &market_key,
+        sequence,
+        timestamp,
+        &crate::events::payload_session(seat_index, session_signer, nonce),
+    );
     Ok(())
 }

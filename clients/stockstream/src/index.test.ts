@@ -2,7 +2,7 @@ import { PublicKey } from "@solana/web3.js";
 import { expect, test } from "vitest";
 import { STOCKSTREAM_PROGRAM_ID } from "./constants";
 import { MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID } from "./index";
-import { authorizeTradingSession, cancelOrder, commitMarket, createPerpMarket, decodeInstruction, decodeMarketState, decodeSeatAmountPayload, decodeStockStreamEvent, delegateMarket, deriveTradingSession, EVENT_SIZE, initializeExchange, initializeMarket, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateStockInstrument, withdrawInsuranceFunds, withdrawProtocolFees } from "./index";
+import { authorizeTradingSession, cancelOrder, commitMarket, createPerpMarket, decodeFillPayload, decodeInstruction, decodeMarketState, decodeSeatAmountPayload, decodeStockStreamEvent, delegateMarket, deriveTradingSession, EVENT_SIZE, initializeExchange, initializeMarket, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateStockInstrument, withdrawInsuranceFunds, withdrawProtocolFees } from "./index";
 import { STOCKSTREAM_ACCOUNT_SIZE } from "./constants";
 
 const market = PublicKey.unique();
@@ -214,4 +214,51 @@ test("decodeStockStreamEvent preserves an unrecognized future discriminator inst
   const event = decodeStockStreamEvent(`Program data: ${bytes.toString("base64")}`);
   expect(event?.kind).toBe("Unknown(9999)");
   expect(event?.discriminator).toBe(9999);
+});
+
+// Golden vectors for the discriminators newly wired into production Rust
+// handlers this session (`handlers.rs`/`magicblock.rs`): OrderFilled and
+// OrderPartiallyFilled share `payload_fill`'s byte shape but a distinct
+// discriminator (204 vs 203); the rest exercise the session/liquidation/
+// MagicBlock payload shapes now emitted by real handlers.
+test("decodeStockStreamEvent distinguishes OrderFilled from OrderPartiallyFilled sharing the fill payload shape", () => {
+  const market = Buffer.alloc(32, 0xbb);
+  const fillPayload = Buffer.alloc(48);
+  fillPayload.writeUInt32LE(1, 0); // makerSeat
+  fillPayload.writeUInt32LE(2, 4); // takerSeat
+  fillPayload.writeBigInt64LE(100n, 8); // price
+  fillPayload.writeBigUInt64LE(5n, 16); // quantity
+  fillPayload.writeBigUInt64LE(10n, 24); // fillSequence
+
+  const full = decodeStockStreamEvent(`Program data: ${encodeEventFixture(204, 10n, market, 0n, fillPayload).toString("base64")}`);
+  expect(full?.kind).toBe("OrderFilled");
+  expect(decodeFillPayload(full!.payload)).toEqual({ makerSeat: 1, takerSeat: 2, price: 100n, quantity: 5n, fillSequence: 10n });
+
+  const partial = decodeStockStreamEvent(`Program data: ${encodeEventFixture(203, 11n, market, 0n, fillPayload).toString("base64")}`);
+  expect(partial?.kind).toBe("OrderPartiallyFilled");
+  expect(partial?.discriminator).not.toBe(full?.discriminator);
+});
+
+test("decodeStockStreamEvent decodes the newly-wired session, liquidation, and MagicBlock event kinds", () => {
+  const market = Buffer.alloc(32, 0xcc);
+  const cases: Array<[number, string]> = [
+    [206, "CancelAllProgress"],
+    [207, "OrderReplaced"],
+    [702, "TradingSessionActionConsumed"],
+    [304, "LiquidationStarted"],
+    [300, "PositionChanged"],
+    [301, "MarginChanged"],
+    [303, "FundingSettled"],
+    [209, "InvalidOrderRemoved"],
+    [208, "OrderExpired"],
+    [600, "DelegationRequested"],
+    [603, "CommitSequenceChanged"],
+    [605, "RestorationPending"],
+  ];
+  for (const [discriminator, name] of cases) {
+    const bytes = encodeEventFixture(discriminator, 1n, market, 0n, Buffer.alloc(48));
+    const event = decodeStockStreamEvent(`Program data: ${bytes.toString("base64")}`);
+    expect(event?.kind).toBe(name);
+    expect(event?.discriminator).toBe(discriminator);
+  }
 });

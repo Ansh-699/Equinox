@@ -1158,6 +1158,87 @@ fn a_resting_orders_placed_event_never_collides_with_a_later_crossing_fills_sequ
     assert_eq!(event_sequence, fill_sequence);
 }
 
+/// Handler-level (not just event-codec) coverage for `Liquidate`: exercises
+/// the real instruction through `process_instruction`, including the new
+/// `LiquidationStarted`/`PositionChanged`/`MarginChanged`/`PositionLiquidated`
+/// event-sequence bumps this session wired in, none of which any existing
+/// test previously reached (every prior liquidation-adjacent test called
+/// `risk::` functions directly, never the `Liquidate` instruction itself).
+#[test]
+fn liquidate_instruction_reduces_an_undercollateralized_position_and_advances_events() {
+    let mut f = fixture();
+    // Maker rests an ask, taker crosses it to open a +10 position at price 100.
+    place(&f, true, &order_data(1, 0, 10, 100, 0, 201)).unwrap();
+    place(&f, false, &order_data(0, 1, 10, 100, 0, 202)).unwrap();
+    let sequence_before_liquidation = {
+        let data = unsafe { f.market.view.borrow_unchecked() };
+        unsafe { &*(data.as_ptr() as *const MarketStateHeader) }.global_event_sequence
+    };
+    // Zero the taker's (seat 1) collateral: at the 10% default maintenance
+    // margin, a 10-unit position at price 100 (notional 1,000) requires 100
+    // of equity to stay healthy, so a fresh, still-at-entry-price position
+    // with zero collateral is unambiguously liquidatable.
+    credit(&mut f.market, 1, 0);
+    let position_before = {
+        let data = unsafe { f.market.view.borrow_unchecked() };
+        let seat = unsafe {
+            &*(data.as_ptr().add(TRADER_SEAT_OFFSET + TRADER_SEAT_SIZE) as *const TraderSeat)
+        };
+        seat.base_position
+    };
+    assert_eq!(position_before, 10);
+    // `Liquidate { seat_index: 1, max_quantity: u64::MAX }`, accounts
+    // `[market, emergency_authority (signer)]` -- `fixture()`'s
+    // `set_open_oracle` made the maker the emergency authority.
+    let mut liquidate_ix = vec![7u8];
+    liquidate_ix.extend_from_slice(&1u16.to_le_bytes());
+    liquidate_ix.extend_from_slice(&u64::MAX.to_le_bytes());
+    let mut accounts = [f.market.view.clone(), f.maker.view.clone()];
+    process_instruction(&ID, &mut accounts, &liquidate_ix).unwrap();
+    let data = unsafe { f.market.view.borrow_unchecked() };
+    let seat = unsafe {
+        &*(data.as_ptr().add(TRADER_SEAT_OFFSET + TRADER_SEAT_SIZE) as *const TraderSeat)
+    };
+    let position_after = seat.base_position;
+    let liquidation_state = seat.liquidation_state;
+    let header = unsafe { &*(data.as_ptr() as *const MarketStateHeader) };
+    let sequence_after_liquidation = header.global_event_sequence;
+    // Partial liquidation (half the position, per `partial_liquidation_quantity`).
+    assert_eq!(position_after, 5);
+    assert_eq!(
+        liquidation_state,
+        stockstream::state::LiquidationState::Liquidatable as u8
+    );
+    // At least LiquidationStarted + PositionChanged + MarginChanged +
+    // PositionLiquidated advanced the sequence (a fee may add one more).
+    assert!(sequence_after_liquidation - sequence_before_liquidation >= 4);
+}
+
+/// Handler-level coverage for a *successful* `CancelAll`: the only existing
+/// `CancelAll` call in this file exercises the session-rejection path
+/// (`is_err()`), never the real success path this session wired
+/// `CancelAllProgress` into.
+#[test]
+fn cancel_all_removes_every_resting_order_and_succeeds() {
+    let f = fixture();
+    place(&f, true, &order_data(1, 0, 1, 100, 0, 171)).unwrap();
+    place(&f, true, &order_data(1, 0, 1, 101, 0, 172)).unwrap();
+    let data = unsafe { f.market.view.borrow_unchecked() };
+    let seat = unsafe { &*(data.as_ptr().add(TRADER_SEAT_OFFSET) as *const TraderSeat) };
+    assert_eq!(seat.open_order_count, 2);
+    // `CancelAll { seat_index: 0, max_cancellations: 10, action_nonce: 0 }`,
+    // accounts `[market, owner (signer)]` -- the same 2-account direct-owner
+    // shape `mvp_cancellation_releases_exact_remaining_reserve_once` already
+    // uses successfully for `CancelOrder`.
+    let mut cancel_all_ix = vec![5u8, 0, 0, 10];
+    cancel_all_ix.extend_from_slice(&0u64.to_le_bytes());
+    let mut accounts = [f.market.view.clone(), f.maker.view.clone()];
+    process_instruction(&ID, &mut accounts, &cancel_all_ix).unwrap();
+    let data = unsafe { f.market.view.borrow_unchecked() };
+    let seat = unsafe { &*(data.as_ptr().add(TRADER_SEAT_OFFSET) as *const TraderSeat) };
+    assert_eq!(seat.open_order_count, 0);
+}
+
 #[test]
 fn mvp_stale_plan_rejects_changed_maker_and_market_snapshots() {
     let mut f = fixture();
