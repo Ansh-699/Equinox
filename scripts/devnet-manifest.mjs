@@ -83,7 +83,7 @@ const push = async (label, address, expected) => manifest.push(await inspect(lab
 const known = [
   ["exchange", state.exchange, {}],
   ["instrument", state.instrument, {}],
-  ["market", state.market, { reusableOverride: true, reusable: false }],
+  ["market", state.market, {}],
   ["mint", state.mint, { owner: TOKEN_PROGRAM }],
   ["sessionA", state.sessionA, {}],
   ["sessionB", state.sessionB, {}],
@@ -101,10 +101,17 @@ for (const [label, address, extra] of known) {
       ? info.data.readUInt8(10) === 1 : undefined,
     delegationStatus: info && info.owner.toBase58() === PROGRAM_ID.toBase58() && info.data.length > 330
       ? (["NotDelegated", "Delegated", "Undelegating", "Restored"][info.data[327 + 2]] ?? `raw ${info.data[327 + 2]}`) : undefined,
-    reusable: info !== null, recreate: info === null,
-    nextAction: info ? "reuse (rent already paid)" : `recreate ${label}`,
     ...extra,
   };
+  // On-chain validity probe for program-owned registry accounts: an account
+  // that exists but does not decode as its expected type is stale.
+  if (info) {
+    const isProgramOwned = entry.owner === PROGRAM_ID.toBase58();
+    if (label === "market" && (!isProgramOwned || entry.dataLen !== 222_752 || entry.initialized !== true)) {
+      entry.reusable = false;
+      entry.nextAction = "data invalid on-chain: recreate the market";
+    }
+  }
   manifest.push(entry);
 }
 

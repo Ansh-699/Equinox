@@ -446,6 +446,75 @@ const STAGES = {
   delegate: stageDelegate, status: stageStatus, er: stageEr,
   undelegate: stageUndelegate, withdraw: stageWithdraw,
 };
-const stage = process.argv[2] || "help";
-if (STAGES[stage]) await STAGES[stage]();
-else console.log("usage: node scripts/devnet-lifecycle.mjs [setup|custody|sessions|delegate|status|er|undelegate|withdraw]");
+
+
+// -------------------------------------------------- resumable runner ----
+// Stage table with per-stage preconditions and dry-run support. Each stage
+// reads current state first (never duplicates mutations), classifies itself
+// complete/pending/blocked, and persists signatures into the checkpoint.
+const STAGE_ORDER = [
+  ["setup", { needsSol: 2.2, description: "exchange + instrument + market PDA creation/initialization" }],
+  ["custody", { needsSol: 0.6, description: "mint, ATAs, vault, seats, deposits" }],
+  ["sessions", { needsSol: 0.05, description: "scratch init + session authorization (2 traders)" }],
+  ["delegate", { needsSol: 0.12, description: "DelegateMarket + 4x DelegateClusterMember" }],
+  ["er", { needsSol: 0.05, description: "ER-domain execution proof via CommitMarket" }],
+  ["undelegate", { needsSol: 0.05, description: "CommitAndUndelegate + restoration" }],
+  ["withdraw", { needsSol: 0.05, description: "collateral withdrawal after restoration" }],
+];
+const COMPLETE_FLAGS = {
+  setup: "market", custody: "depositedB", sessions: "sessionB",
+  delegate: "delegated", er: "commitSignature",
+  undelegate: "undelegateSignature", withdraw: "withdrawn",
+};
+
+async function runLifecycle(opts = {}) {
+  const state = load();
+  // Read-only funding check: the runner classifies every incomplete stage
+  // by the deploy wallet's LIVE balance, not a guess.
+  const balance = await CONNECTION.getBalance(authority.publicKey) / 1e9;
+  const minimum = STAGE_ORDER.reduce((s, [, m]) => s + m.needsSol, 0);
+  const funded = balance >= minimum;
+  const plan = [];
+  let blocked = false;
+  for (const [stage, meta] of STAGE_ORDER) {
+    const complete = state[COMPLETE_FLAGS[stage]] !== undefined;
+    let status;
+    if (complete) status = "complete";
+    else if (funded || opts.forcePending) status = "pending";
+    else status = blocked ? "planned_not_submitted" : "funding_blocked";
+    plan.push({ stage, needsSol: meta.needsSol, description: meta.description, status });
+    if (status === "funding_blocked") blocked = true;
+  }
+  const summary = { dryRun: opts.dryRun ?? false, walletSOL: balance, minimumSOL: minimum, plan };
+  if (!opts.dryRun) save({ lifecyclePlan: summary });
+  return summary;
+}
+
+function runStage(stage, opts = {}) {
+  if (opts.dryRun) return runLifecycle({ ...opts });
+  const fn = STAGES[stage];
+  if (!fn) throw new Error(`unknown stage ${stage}`);
+  return fn();
+}
+
+const nonFlag = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+const stageArg = nonFlag[0] ?? "plan";
+const dryRun = process.argv.includes("--dry-run");
+if (STAGES[stageArg] && !dryRun) {
+  await STAGES[stageArg]();
+} else if (stageArg === "plan") {
+  console.log(JSON.stringify(await runLifecycle({ dryRun }), null, 2));
+} else if (stageArg === "all") {
+  const plan = await runLifecycle({ dryRun });
+  const firstPending = plan.plan.find((s) => s.status === "pending" || s.status === "funding_blocked");
+  if (!firstPending) {
+    console.log("all stages complete");
+  } else if (dryRun) {
+    console.log(`dry-run: next incomplete stage ${firstPending.stage} (${firstPending.status}); no transaction submitted`);
+  } else if (STAGES[firstPending.stage]) {
+    await STAGES[firstPending.stage]();
+  }
+} else {
+  console.log("usage: node scripts/devnet-lifecycle.mjs [--dry-run] [setup|custody|sessions|delegate|status|er|undelegate|withdraw|plan|all]");
+}
+process.exit(0);
