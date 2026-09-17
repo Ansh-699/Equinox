@@ -4229,6 +4229,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "spl-token-interface"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7143c4e676984047a400e2fbd7ac29a1659f2b1b52b897cfde19316b562e4589"
+dependencies = [
+ "arrayref",
+ "bytemuck",
+ "num-derive",
+ "num-traits",
+ "num_enum",
+ "solana-instruction",
+ "solana-program-error",
+ "solana-program-option",
+ "solana-program-pack",
+ "solana-pubkey 3.0.0",
+ "solana-sdk-ids",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4250,8 +4270,11 @@ dependencies = [
  "solana-instruction",
  "solana-keypair",
  "solana-message 4.4.1",
+ "solana-program-option",
+ "solana-program-pack",
  "solana-signer",
  "solana-transaction",
+ "spl-token-interface",
 ]
 
 [[package]]
