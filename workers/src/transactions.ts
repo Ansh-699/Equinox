@@ -83,6 +83,12 @@ class DataWriter {
     return this;
   }
 
+  u32(value: number): this {
+    if (!Number.isInteger(value) || value < 0 || value > 0xffffffff) throw new RangeError(`u32 out of range: ${value}`);
+    this.bytes.push(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff);
+    return this;
+  }
+
   private unsigned(value: bigint, bytes: number): this {
     const mask = (1n << BigInt(bytes * 8)) - 1n;
     if (value < 0n || value > mask) throw new RangeError(`unsigned ${bytes * 8}-bit out of range: ${value}`);
@@ -361,6 +367,34 @@ export function consumeOracleUpdateInstruction(programAddress: string, accounts:
 }
 
 // ---------------------------------------------------------------------
+// Compute Budget (native program) -- not a StockStream opcode, but every
+// keeper transaction below prepends a SetComputeUnitLimit instruction so
+// its compute allocation is a deliberate, bounded choice rather than the
+// runtime's 200k-per-instruction default. Small, fixed, well-documented
+// wire format (https://docs.rs/solana-compute-budget-interface) -- hand-
+// encoded with the same DataWriter every other instruction here uses
+// rather than adding a dependency for two instruction variants.
+// ---------------------------------------------------------------------
+
+export const COMPUTE_BUDGET_PROGRAM_ID = "ComputeBudget111111111111111111111111111111";
+
+/** Discriminant 2: `SetComputeUnitLimit(units: u32)`. */
+export function setComputeUnitLimitInstruction(units: number): Instruction {
+  return instruction(COMPUTE_BUDGET_PROGRAM_ID, [], new DataWriter().u8(2).u32(units).build());
+}
+
+/** Discriminant 3: `SetComputeUnitPrice(microLamports: u64)` -- a priority fee, omitted unless the caller opts in. */
+export function setComputeUnitPriceInstruction(microLamports: bigint): Instruction {
+  return instruction(COMPUTE_BUDGET_PROGRAM_ID, [], new DataWriter().u8(3).u64(microLamports).build());
+}
+
+/** Conservative default: every keeper instruction this module encodes is a
+ * single StockStream instruction, well under the runtime's per-instruction
+ * default of 200,000 CU (the most expensive recorded in real SBF runtime
+ * tests is Liquidate at ~7,700 CU -- see runtime_funding_liquidation_session.rs). */
+const DEFAULT_COMPUTE_UNIT_LIMIT = 60_000;
+
+// ---------------------------------------------------------------------
 // Signing + serialization
 // ---------------------------------------------------------------------
 
@@ -375,6 +409,11 @@ export interface SignedTransactionRequest {
    * one, so it defaults to the library's own "never expires" sentinel.
    */
   lastValidBlockHeight?: bigint;
+  /** `null` omits the compute-budget instruction entirely (e.g. a test
+   * asserting an exact instruction list); omitted defaults to
+   * `DEFAULT_COMPUTE_UNIT_LIMIT`. */
+  computeUnitLimit?: number | null;
+  computeUnitPriceMicroLamports?: bigint;
 }
 
 /**
@@ -383,8 +422,12 @@ export interface SignedTransactionRequest {
  * transaction's signature dictionary keyed by the signer's own address.
  */
 export async function signAndSerializeTransaction(request: SignedTransactionRequest): Promise<string> {
-  const { instructions, signer, recentBlockhash, lastValidBlockHeight } = request;
+  const { instructions, signer, recentBlockhash, lastValidBlockHeight, computeUnitLimit, computeUnitPriceMicroLamports } = request;
   const signerAddress = address(getBase58Decoder().decode(await signer.publicKey()));
+
+  const computeBudgetInstructions: Instruction[] = [];
+  if (computeUnitLimit !== null) computeBudgetInstructions.push(setComputeUnitLimitInstruction(computeUnitLimit ?? DEFAULT_COMPUTE_UNIT_LIMIT));
+  if (computeUnitPriceMicroLamports !== undefined) computeBudgetInstructions.push(setComputeUnitPriceInstruction(computeUnitPriceMicroLamports));
 
   const message = pipe(
     createTransactionMessage({ version: 0 }),
@@ -394,7 +437,7 @@ export async function signAndSerializeTransaction(request: SignedTransactionRequ
         { blockhash: recentBlockhash as never, lastValidBlockHeight: lastValidBlockHeight ?? 2n ** 64n - 1n },
         m,
       ),
-    (m) => appendTransactionMessageInstructions(instructions, m),
+    (m) => appendTransactionMessageInstructions([...computeBudgetInstructions, ...instructions], m),
   );
 
   const compiled = compileTransaction(message);
