@@ -494,8 +494,8 @@ pub fn dispatch(
             maintenance_margin_bps,
             maximum_leverage,
         ),
-        StockStreamInstruction::TransitionMarket { mode } => {
-            transition_market(program_id, accounts, mode)
+        StockStreamInstruction::TransitionMarket { mode, action } => {
+            transition_market(program_id, accounts, mode, action)
         }
         StockStreamInstruction::TransferToInsuranceFund { amount } => {
             transfer_to_insurance_fund(program_id, accounts, amount)
@@ -561,6 +561,7 @@ fn transition_market(
     program_id: &Address,
     accounts: &mut [AccountView],
     mode: u8,
+    action: crate::instruction::MarketTransitionAction,
 ) -> ProgramResult {
     if accounts.len() < 2 || mode > MarketMode::Emergency as u8 {
         return Err(custom(StockStreamError::InvalidInstruction));
@@ -579,18 +580,19 @@ fn transition_market(
         .map(|t| t.max(0) as u64)
         .unwrap_or(0);
     write_header(data, &header)?;
-    // `dispatch` collapses several distinct opcodes into this single `mode`
-    // value before this handler ever runs (PAUSE_MARKET and CLOSE_MARKET
-    // both arrive as mode 0; RESUME_MARKET and RESOLVE_CORPORATE_ACTION
-    // both arrive as mode 1 -- see `instruction.rs::StockStreamInstruction::decode`),
-    // so this handler genuinely cannot distinguish `MarketClosed` from
-    // `MarketPaused`, or `CorporateActionResolved` from `MarketResumed`.
-    // Only the mode-distinguishable events are emitted here.
-    let kind = match mode {
-        0 => crate::events::EventKind::MarketPaused,
-        1 => crate::events::EventKind::MarketResumed,
-        2 => crate::events::EventKind::MarketCloseOnly,
-        _ => crate::events::EventKind::CorporateActionEntered,
+    // `action` is the original opcode's own identity, preserved through
+    // `decode` specifically so this handler can emit the correct distinct
+    // event even where two opcodes share the same resulting `mode`
+    // (`PAUSE_MARKET`/`CLOSE_MARKET` both mean `Paused`;
+    // `RESUME_MARKET`/`RESOLVE_CORPORATE_ACTION` both mean `Open`).
+    use crate::instruction::MarketTransitionAction as Action;
+    let kind = match action {
+        Action::Pause => crate::events::EventKind::MarketPaused,
+        Action::Resume => crate::events::EventKind::MarketResumed,
+        Action::SetCloseOnly => crate::events::EventKind::MarketCloseOnly,
+        Action::EnterCorporateAction => crate::events::EventKind::CorporateActionEntered,
+        Action::ResolveCorporateAction => crate::events::EventKind::CorporateActionResolved,
+        Action::Close => crate::events::EventKind::MarketClosed,
     };
     crate::events::emit_event(
         kind,
