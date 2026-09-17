@@ -136,6 +136,64 @@ pub fn derive_perp_market(program_id: &Address, instrument: &Address) -> Address
     Address::find_program_address(&[PERP_MARKET_SEED, instrument.as_ref()], program_id).0
 }
 
+/// Opcode 42: creates the perp-market PDA account itself.
+///
+/// A PDA cannot sign a client transaction, so the client cannot pre-create
+/// the market account the way `CreatePerpMarket` expects (`account_data`
+/// requires a program-owned, exactly-`MARKET_ACCOUNT_SIZE`-byte account).
+/// This instruction CPIs the System Program's `create_account` signed by
+/// the market PDA's own seeds — the same CPI pattern `delegate_market`
+/// already uses for the delegate buffer — so the whole delegation
+/// lifecycle is reachable on L1.
+///
+/// Accounts:
+/// 0. `[]`               the instrument PDA the market's seeds derive from
+/// 1. `[WRITE]`          the market PDA to create (must not exist)
+/// 2. `[WRITE, SIGNER]`  payer (funds the rent-exempt minimum)
+/// 3. `[]`               the system program
+pub fn create_market_account(program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
+    use crate::state::MARKET_ACCOUNT_SIZE;
+
+    if accounts.len() != 4 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    if !accounts[1].is_writable() || !accounts[2].is_signer() || !accounts[2].is_writable() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    if *accounts[3].address() != pinocchio_system::ID {
+        return Err(ProgramError::InvalidAccountOwner);
+    }
+    if accounts[1].data_len() != 0 {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let instrument = *accounts[0].address();
+    let market_key = *accounts[1].address();
+    let (expected_market, market_bump) =
+        Address::find_program_address(&[PERP_MARKET_SEED, instrument.as_ref()], program_id);
+    if expected_market != market_key {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+
+    use pinocchio::sysvars::{rent::Rent, Sysvar};
+    let rent = Rent::get()?;
+    let market_bump_slice =
+        [Address::find_program_address(&[PERP_MARKET_SEED, instrument.as_ref()], program_id).1];
+    let market_seeds = [
+        pinocchio::cpi::Seed::from(PERP_MARKET_SEED),
+        pinocchio::cpi::Seed::from(instrument.as_ref()),
+        pinocchio::cpi::Seed::from(&market_bump_slice),
+    ];
+    let market_signer = pinocchio::cpi::Signer::from(&market_seeds);
+    pinocchio_system::instructions::CreateAccount {
+        from: &accounts[2],
+        to: &accounts[1],
+        lamports: rent.try_minimum_balance(MARKET_ACCOUNT_SIZE)?,
+        space: MARKET_ACCOUNT_SIZE as u64,
+        owner: program_id,
+    }
+    .invoke_signed(core::slice::from_ref(&market_signer))
+}
+
 fn account_data<'a>(
     account: &'a mut AccountView,
     program_id: &Address,
