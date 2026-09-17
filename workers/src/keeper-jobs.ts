@@ -9,22 +9,22 @@
  * for retry (`classifyRpcError`), dead-letter exhausted ones
  * (`runDurableKeeperWithDeadLetter`), and release the lease.
  *
- * What is deliberately an injected interface rather than inline code: the
- * actual Solana wire-format transaction construction and signing
- * (`TransactionBuilder` below). Encoding a StockStream instruction and
- * serializing a signed transaction message requires the same
- * `@solana/web3.js`-shaped primitives `clients/stockstream/src/index.ts`
- * and `lib/server/pyth-keeper.ts` already use -- neither is a dependency of
- * this `workers/` package (its `package.json` has no runtime dependencies
- * at all), so hand-rolling a second, parallel wire-format serializer here
- * under this session's time budget would risk a subtle, untested encoding
- * bug in code that moves funds. Every other part of each job below --
- * lease/fencing, idempotency, on-chain state reads, dedup/interval/sequence
- * decisions, submission, confirmation, durable attempt storage, retry
- * classification, dead-lettering -- is real and independently tested. This
- * is an honest dependency boundary (see `signer.ts`'s
- * `RemoteSignerTransport` for the same pattern applied to signing), not a
- * placeholder for logic that could otherwise be written.
+ * `TransactionBuilder` (below) is an injected interface rather than inline
+ * code, so each job stays agnostic to wire-format details. `transactions.ts`
+ * is the concrete implementation of that boundary (real `@solana/kit`
+ * instruction encoders, transaction compilation, and `Signer`-backed
+ * signing) and exports a factory per job (`fundingKeeperBuilder`,
+ * `sessionKeeperBuilder`, `liquidationKeeperBuilder`, `cleanupKeeperBuilder`,
+ * `pythKeeperBuilder`, `magicBlockCommitKeeperBuilder`). What remains
+ * unwired is the production `scheduled()` entrypoint (`index.ts`) actually
+ * invoking these ticks on a cron with live inputs -- a funding-rate source,
+ * a liquidation-candidate scanner, a session calendar, and a Pyth Lazer
+ * client -- none of which exist as production integrations yet; every job
+ * below is independently tested against synthetic inputs, not live state.
+ * Every other part of each job -- lease/fencing, idempotency, on-chain state
+ * reads, dedup/interval/sequence decisions, submission, confirmation,
+ * durable attempt storage, retry classification, dead-lettering -- is real
+ * and independently tested.
  */
 
 import { classifyRpcError, MagicRouterTransport, SolanaL1Transport, type ConfirmationOutcome } from './chain-transports';
@@ -203,7 +203,16 @@ export interface CommitKeeperInput {
   undelegate: boolean;
 }
 
-const COMMIT_INTERVAL_MS = 30_000;
+/**
+ * Minimum interval between the commit keeper's own scheduling ticks. This is
+ * deliberately independent of the delegation-time automatic commit frequency
+ * (30,000 ms, encoded into the Delegate instruction's commit_frequency_ms by
+ * the Rust program — see `lib/magicblock.ts::DELEGATION_COMMIT_FREQUENCY_MS`):
+ * the delegation program auto-commits on that cadence regardless of this
+ * keeper's tick rate, so per-market commit policy requires a program-side
+ * change, not a Worker setting.
+ */
+const MIN_COMMIT_TICK_MS = 30_000;
 
 export async function runMagicBlockCommitKeeperTick(
   deps: KeeperDeps,
@@ -215,8 +224,8 @@ export async function runMagicBlockCommitKeeperTick(
   currentErSequence: number,
   lastCommitTickAt: number,
 ): Promise<KeeperOutcome> {
-  if (deps.now() - lastCommitTickAt < COMMIT_INTERVAL_MS) {
-    return { ran: false, reason: `commit interval not yet elapsed (target ${COMMIT_INTERVAL_MS}ms)` };
+  if (deps.now() - lastCommitTickAt < MIN_COMMIT_TICK_MS) {
+    return { ran: false, reason: `commit interval not yet elapsed (target ${MIN_COMMIT_TICK_MS}ms)` };
   }
   const lastRequested = await commitRecords.lastRequestedSequence(marketPda);
   if (currentErSequence <= lastRequested) {
