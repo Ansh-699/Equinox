@@ -53,10 +53,20 @@ use crate::{
 // Ground-truth constants (see docs/magicblock.md).
 // ---------------------------------------------------------------------
 
-/// `dlp_api::fast::ID` -- the Pinocchio-native alias for
 /// `DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh`, the official MagicBlock
 /// Delegation Program.
-pub const DELEGATION_PROGRAM_ID: Address = dlp_api::fast::ID;
+///
+/// Hand-encoded raw bytes rather than `dlp_api::fast::ID`: linking the
+/// published API crate into the SBF binary drags in its std-linked
+/// `solana-program` graph, and linking std makes the linker tag the ELF
+/// `ELFOSABI_GNU` -- a header the SBF loader rejects outright
+/// (`solana-sbpf`'s `ElfError::WrongAbi`). `tests/magicblock.rs` asserts
+/// these exact bytes equal `dlp_api::fast::ID`, so the local literal cannot
+/// silently drift from the pinned official crate.
+pub const DELEGATION_PROGRAM_ID: Address = Address::new_from_array([
+    181, 183, 0, 225, 242, 87, 58, 192, 204, 6, 34, 1, 52, 74, 207, 151, 184, 53, 6, 235, 140, 229,
+    25, 152, 204, 98, 126, 24, 147, 128, 167, 62,
+]);
 
 /// `Magic11111111111111111111111111111111111111`, the MagicBlock Magic
 /// Program. `magicblock-magic-program-api` only exposes this as its own
@@ -75,14 +85,16 @@ pub const MAGIC_CONTEXT_ID: Address = Address::new_from_array([
 ]);
 
 /// The delegation program's required external-undelegate callback
-/// discriminator (`dlp_api::consts::EXTERNAL_UNDELEGATE_DISCRIMINATOR`).
-pub const EXTERNAL_UNDELEGATE_DISCRIMINATOR: [u8; 8] =
-    dlp_api::consts::EXTERNAL_UNDELEGATE_DISCRIMINATOR;
+/// discriminator (`dlp_api::consts::EXTERNAL_UNDELEGATE_DISCRIMINATOR`,
+/// asserted in `tests/magicblock.rs`).
+pub const EXTERNAL_UNDELEGATE_DISCRIMINATOR: [u8; 8] = [196, 28, 41, 206, 48, 37, 51, 167];
 
-pub const DELEGATION_RECORD_TAG: &[u8] = dlp_api::pda::DELEGATION_RECORD_TAG;
-pub const DELEGATION_METADATA_TAG: &[u8] = dlp_api::pda::DELEGATION_METADATA_TAG;
-pub const DELEGATE_BUFFER_TAG: &[u8] = dlp_api::pda::DELEGATE_BUFFER_TAG;
-pub const UNDELEGATE_BUFFER_TAG: &[u8] = dlp_api::pda::UNDELEGATE_BUFFER_TAG;
+// PDA seed tags, hand-encoded from `dlp_api::pda::*` (all asserted in
+// `tests/magicblock.rs` so none can drift from the pinned crate).
+pub const DELEGATION_RECORD_TAG: &[u8] = b"delegation";
+pub const DELEGATION_METADATA_TAG: &[u8] = b"delegation-metadata";
+pub const DELEGATE_BUFFER_TAG: &[u8] = b"buffer";
+pub const UNDELEGATE_BUFFER_TAG: &[u8] = b"undelegate-buffer";
 
 /// Required commit interval: `commit_frequency_ms` must be exactly this.
 pub const COMMIT_INTERVAL_MS: u32 = 30_000;
