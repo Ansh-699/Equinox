@@ -411,6 +411,9 @@ pub fn dispatch(
                 Address::new_from_array(validator),
             )
         }
+        StockStreamInstruction::CreateMarketAccount => {
+            crate::registry::create_market_account(program_id, accounts)
+        }
         StockStreamInstruction::CommitMarket { sequence } => {
             crate::magicblock::commit_market(program_id, accounts, sequence)
         }

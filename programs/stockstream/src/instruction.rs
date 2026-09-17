@@ -16,6 +16,12 @@ pub const WITHDRAW_COLLATERAL: u8 = 11;
 pub const CONSUME_ORACLE_UPDATE: u8 = 12;
 pub const DELEGATE_MARKET: u8 = 13;
 pub const DELEGATE_CLUSTER_MEMBER: u8 = 41;
+/// Creates the perp-market PDA account itself via a real system
+/// `create_account` CPI signed by the market PDA's seeds: a PDA cannot sign
+/// a client transaction, so without this helper NO perp market can be
+/// created on L1 (deployment gap, mirrors `delegate_market`'s own buffer
+/// creation pattern).
+pub const CREATE_MARKET_ACCOUNT: u8 = 42;
 pub const COMMIT_MARKET: u8 = 14;
 pub const COMMIT_AND_UNDELEGATE: u8 = 15;
 /// Reserved: the real external-undelegate callback uses the delegation
@@ -156,6 +162,9 @@ pub enum StockStreamInstruction {
     DelegateClusterMember {
         validator: [u8; 32],
     },
+    /// CPI-creates the perp-market PDA account (payer-funded, program-owned,
+    /// `MARKET_ACCOUNT_SIZE` bytes). See `registry::create_market_account`.
+    CreateMarketAccount,
     CommitMarket {
         sequence: u64,
     },
