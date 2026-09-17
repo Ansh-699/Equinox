@@ -109,9 +109,7 @@ fn fresh() -> Fixture {
 }
 
 fn data(svm: &LiteSVM, address: Address) -> Vec<u8> {
-    svm.get_account(&address)
-        .expect("account must exist")
-        .data
+    svm.get_account(&address).expect("account must exist").data
 }
 
 fn mint_state(svm: &LiteSVM, address: Address) -> Mint {
@@ -147,9 +145,14 @@ fn initialize_mint(
     mint: Address,
     authority: &Keypair,
 ) -> Result<u64, String> {
-    let ix =
-        token_ix::initialize_mint2(&TOKEN_PROGRAM_ID, &mint, &authority.pubkey(), None, DECIMALS)
-            .expect("builder");
+    let ix = token_ix::initialize_mint2(
+        &TOKEN_PROGRAM_ID,
+        &mint,
+        &authority.pubkey(),
+        None,
+        DECIMALS,
+    )
+    .expect("builder");
     send(svm, payer, ix, &[payer])
 }
 
@@ -370,7 +373,10 @@ fn initialization_produces_the_expected_mint_and_account_state() {
     let mint = mint_state(&fx.svm, fx.mint);
     assert!(mint.is_initialized, "mint must be initialized");
     assert_eq!(mint.decimals, DECIMALS);
-    assert_eq!(mint.mint_authority, COption::Some(fx.mint_authority.pubkey()));
+    assert_eq!(
+        mint.mint_authority,
+        COption::Some(fx.mint_authority.pubkey())
+    );
     assert_eq!(
         mint.freeze_authority,
         COption::None,
@@ -398,7 +404,10 @@ fn initialization_produces_the_expected_mint_and_account_state() {
         );
         assert!(!account.executable, "data accounts must not be executable");
         assert!(
-            account.lamports >= fx.svm.minimum_balance_for_rent_exemption(account.data.len()),
+            account.lamports
+                >= fx
+                    .svm
+                    .minimum_balance_for_rent_exemption(account.data.len()),
             "accounts must remain rent-exempt"
         );
     }
@@ -507,9 +516,15 @@ fn rejected_instructions_leave_the_token_state_byte_for_byte_unchanged() {
     let supply_before = mint_state(&fx.svm, fx.mint).supply;
 
     // 1. MintTo signed by an authority that does not match the mint.
-    let wrong_mint_authority =
-        token_ix::mint_to(&TOKEN_PROGRAM_ID, &fx.mint, &fx.token_a, &attacker.pubkey(), &[], 1)
-            .unwrap();
+    let wrong_mint_authority = token_ix::mint_to(
+        &TOKEN_PROGRAM_ID,
+        &fx.mint,
+        &fx.token_a,
+        &attacker.pubkey(),
+        &[],
+        1,
+    )
+    .unwrap();
     assert!(
         send(
             &mut fx.svm,
@@ -589,13 +604,7 @@ fn rejected_instructions_leave_the_token_state_byte_for_byte_unchanged() {
     )
     .unwrap();
     assert!(
-        send(
-            &mut fx.svm,
-            &fx.payer,
-            overdraft,
-            &[&fx.payer, &fx.owner_a]
-        )
-        .is_err(),
+        send(&mut fx.svm, &fx.payer, overdraft, &[&fx.payer, &fx.owner_a]).is_err(),
         "a transfer larger than the source balance must be rejected"
     );
     assert_unchanged(&fx, &before);

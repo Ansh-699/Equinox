@@ -21,8 +21,8 @@
 use std::path::PathBuf;
 use std::ptr;
 
-use litesvm::LiteSVM;
 use litesvm::types::TransactionMetadata;
+use litesvm::LiteSVM;
 use solana_account::Account;
 use solana_address::Address;
 use solana_instruction::{account_meta::AccountMeta, Instruction};
@@ -99,6 +99,9 @@ fn send(
     instruction: Instruction,
     extra_signers: &[&Keypair],
 ) -> Result<TransactionMetadata, String> {
+    // Rotate the blockhash so repeated identical instructions stay distinct:
+    // LiteSVM rejects a re-sent transaction by signature.
+    svm.expire_blockhash();
     let message = Message::new(&[instruction], Some(&payer.pubkey()));
     let blockhash = svm.latest_blockhash();
     let mut signers: Vec<&Keypair> = vec![payer];
@@ -142,7 +145,8 @@ fn seat(svm: &LiteSVM, market: Address, index: usize) -> TraderSeat {
     unsafe {
         ptr::read_unaligned(
             data.as_ptr()
-                .add(TRADER_SEAT_OFFSET + index * TRADER_SEAT_SIZE) as *const TraderSeat,
+                .add(TRADER_SEAT_OFFSET + index * TRADER_SEAT_SIZE)
+                as *const TraderSeat,
         )
     }
 }
@@ -173,7 +177,9 @@ fn token_data(svm: &LiteSVM, address: Address) -> Vec<u8> {
 }
 
 fn token_amount(svm: &LiteSVM, address: Address) -> u64 {
-    TokenAccount::unpack(&token_data(svm, address)).unwrap().amount
+    TokenAccount::unpack(&token_data(svm, address))
+        .unwrap()
+        .amount
 }
 
 /// Full custody environment: an open market with a configured vault, one
@@ -253,14 +259,8 @@ fn setup() -> Env {
     let seat_slot = Address::new_unique();
     install(&mut svm, seat_slot, Vec::new(), Address::default());
 
-    let init_mint = token_ix::initialize_mint2(
-        &TOKENKEG,
-        &mint,
-        &authority.pubkey(),
-        None,
-        DECIMALS,
-    )
-    .unwrap();
+    let init_mint =
+        token_ix::initialize_mint2(&TOKENKEG, &mint, &authority.pubkey(), None, DECIMALS).unwrap();
     send(&mut svm, &authority, init_mint, &[]).expect("InitializeMint2");
 
     let init_source =
@@ -448,7 +448,8 @@ fn deposit_moves_tokens_into_the_vault_and_credits_the_seat() {
     assert_eq!(seat_before, 0, "a fresh seat starts with no collateral");
 
     let instruction = standard_deposit(&env, DEPOSIT_AMOUNT);
-    let metadata = deposit_and_send(&mut env, instruction).expect("DepositCollateral via real Tokenkeg CPI");
+    let metadata =
+        deposit_and_send(&mut env, instruction).expect("DepositCollateral via real Tokenkeg CPI");
     assert!(
         metadata.compute_units_consumed > 0,
         "deposit must consume compute units, got {}",
@@ -458,8 +459,16 @@ fn deposit_moves_tokens_into_the_vault_and_credits_the_seat() {
     let source_after = token_amount(&env.svm, env.source);
     let vault_after = token_amount(&env.svm, env.vault);
     let seat_after = seat(&env.svm, env.market, 0).available_collateral;
-    assert_eq!(source_after, source_before - DEPOSIT_AMOUNT, "source decreases exactly");
-    assert_eq!(vault_after, vault_before + DEPOSIT_AMOUNT, "vault increases exactly");
+    assert_eq!(
+        source_after,
+        source_before - DEPOSIT_AMOUNT,
+        "source decreases exactly"
+    );
+    assert_eq!(
+        vault_after,
+        vault_before + DEPOSIT_AMOUNT,
+        "vault increases exactly"
+    );
     assert_eq!(
         seat_after,
         seat_before + i128::from(DEPOSIT_AMOUNT),
