@@ -9,3 +9,4 @@ target/
 .keys/
 workers/.dev.vars
 workers/.wrangler/
+test-ledger/
