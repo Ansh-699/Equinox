@@ -1,6 +1,6 @@
 import { SELF, applyD1Migrations, env } from 'cloudflare:test';
 import { beforeAll, expect, it, vi } from 'vitest';
-import { fetchExecutionStatus, runIngestionTick } from './index';
+import { fetchExecutionStatus, runIngestionTick, runKeeperOrchestrationTick } from './index';
 import { eventLogLine } from './test-event-fixtures';
 
 const bindings = env as Env & { TEST_MIGRATIONS: Parameters<typeof applyD1Migrations>[1] };
@@ -114,12 +114,38 @@ it('fetchExecutionStatus reports undefined without an RPC endpoint configured, a
   expect(await fetchExecutionStatus({ ...bindings, SOLANA_RPC_URL: 'https://l1.fixture.test' } as unknown as Env, 'NOPE-PERP', env.MARKET_STREAM!.getByName('x'), fetcher)).toBe('not_found');
 });
 
-it('reports keeper health (leases and due dead letters), and requires authorization', async () => {
+it('reports keeper health (leases, due dead letters, and job configuration), and requires authorization', async () => {
   const unauthorized = await SELF.fetch(new Request('https://stockstream.test/v1/health/keepers'));
   expect(unauthorized.status).toBe(401);
   const response = await SELF.fetch(new Request('https://stockstream.test/v1/health/keepers', { headers: { Authorization: `Bearer ${token}` } }));
   expect(response.status).toBe(200);
-  const body = await response.json<{ deadLetters: { due: number }; leases: unknown[] }>();
+  const body = await response.json<{ deadLetters: { due: number }; leases: unknown[]; keeperConfiguration: { pyth: string; signer: string; magicRouter: string } }>();
   expect(typeof body.deadLetters.due).toBe('number');
   expect(Array.isArray(body.leases)).toBe(true);
+  expect(body.keeperConfiguration.signer).toBe('configuration_blocked');
+});
+
+it('runKeeperOrchestrationTick is a no-op when no RPC endpoint is configured, rather than throwing', async () => {
+  const result = await runKeeperOrchestrationTick({ ...bindings, SOLANA_RPC_URL: undefined } as unknown as Env);
+  expect(result.ran).toBe(false);
+});
+
+it('runKeeperOrchestrationTick discovers a registered market and produces a summary without a keeper signer configured', async () => {
+  await bindings.DB!.prepare(
+    `INSERT INTO markets (symbol, instrument_id, market_index, market_pda, vault_pda, status, oracle_feed_id, session_policy, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(symbol) DO UPDATE SET market_pda=excluded.market_pda`,
+  ).bind('ORCH-PERP', 'instrument-orch', 9001, 'orch-market-pda', 'orch-vault', 'active', 'feed-orch', 'regular', Date.now()).run();
+
+  const fetcher = vi.fn(async (_input: unknown, init?: RequestInit) => {
+    const body = JSON.parse(String((init as RequestInit).body)) as { id: number; method: string };
+    if (body.method === 'getMultipleAccounts') return Response.json({ jsonrpc: '2.0', id: body.id, result: { context: { slot: 1 }, value: [null] } });
+    throw new Error(`unexpected RPC method ${body.method}`);
+  }) as unknown as typeof fetch;
+
+  const result = await runKeeperOrchestrationTick({ ...bindings, SOLANA_RPC_URL: 'https://l1.fixture.test' } as unknown as Env, fetcher);
+  expect(result.ran).toBe(true);
+  // The fixture market's account can't be decoded (mock returns null), so
+  // it's excluded from results and recorded as a discovery error instead
+  // -- one broken market must never throw out of the scheduled tick.
+  expect(result.summary?.discoveryErrors.some((e) => e.marketPda === 'orch-market-pda')).toBe(true);
 });
