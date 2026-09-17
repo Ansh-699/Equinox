@@ -4,8 +4,12 @@ import { SolanaL1Transport } from "./chain-transports";
 import {
   PrivateSessionRepository,
   SeatOwnershipMismatch,
+  decodeTraderSeatProjection,
   issuePrivateProjectionToken,
+  publishSeatProjection,
   seatOwner,
+  seatsAffectedByEvent,
+  type PrivateProjectionSink,
 } from "./private-sessions";
 
 const bindings = env as Env & { TEST_MIGRATIONS: Parameters<typeof applyD1Migrations>[1] };
@@ -85,4 +89,77 @@ it("loses access once the token has expired", async () => {
 it("returns null for an unoccupied seat rather than a false owner", async () => {
   const transport = await transportFor(marketWithSeat(0, false, OWNER_BYTES));
   expect(await seatOwner(transport, "market-e", 0)).toBeNull();
+});
+
+/** Sets every `TraderSeat` field at its verified byte offset (see
+ * `SEAT_FIELD_OFFSETS` in `private-sessions.ts`, cross-checked against
+ * `programs/stockstream/src/state.rs` via `core::mem::offset_of!`), on top
+ * of the existing `marketWithSeat` fixture. */
+function fullSeatBytes(seatIndex: number, fields: { availableCollateral: bigint; reservedMargin: bigint; basePosition: bigint; realizedPnl: bigint; openOrderCount: number; liquidationState: number; sequence: bigint }): Uint8Array {
+  const bytes = marketWithSeat(seatIndex, true, OWNER_BYTES);
+  const start = TRADER_SEAT_OFFSET + seatIndex * 256;
+  const view = new DataView(bytes.buffer);
+  const writeI128 = (offset: number, value: bigint) => {
+    let v = value < 0n ? value + (1n << 128n) : value;
+    for (let i = 0; i < 16; i += 1) { bytes[start + offset + i] = Number(v & 0xffn); v >>= 8n; }
+  };
+  writeI128(40, fields.availableCollateral);
+  writeI128(56, fields.reservedMargin);
+  writeI128(72, fields.basePosition);
+  writeI128(104, fields.realizedPnl);
+  view.setUint32(start + 168, fields.openOrderCount, true);
+  bytes[start + 172] = fields.liquidationState;
+  view.setBigUint64(start + 176, fields.sequence, true);
+  return bytes;
+}
+
+it("decodeTraderSeatProjection decodes every seat field from its verified offset, including negative i128 values", () => {
+  const bytes = fullSeatBytes(3, { availableCollateral: 1_000n, reservedMargin: 100n, basePosition: -50n, realizedPnl: -25n, openOrderCount: 2, liquidationState: 1, sequence: 9n });
+  const projection = decodeTraderSeatProjection(bytes, 3);
+  expect(projection).toMatchObject({
+    seatIndex: 3, availableCollateral: 1_000n, reservedMargin: 100n, basePosition: -50n, realizedPnl: -25n,
+    openOrderCount: 2, liquidationState: 1, sequence: 9n,
+  });
+  expect(projection?.owner.length).toBeGreaterThan(0);
+});
+
+it("decodeTraderSeatProjection returns null for an unoccupied seat", () => {
+  const bytes = marketWithSeat(0, false, OWNER_BYTES);
+  expect(decodeTraderSeatProjection(bytes, 0)).toBeNull();
+});
+
+it("seatsAffectedByEvent extracts the single seat for a seat-scoped payload, both seats for a fill, and none for a market-level event", () => {
+  function payload(writer: (view: DataView) => void): string {
+    const bytes = new Uint8Array(48);
+    writer(new DataView(bytes.buffer));
+    let binary = ""; for (const b of bytes) binary += String.fromCharCode(b);
+    return btoa(binary);
+  }
+  // OrderPlaced (202): seat at [0..2].
+  expect(seatsAffectedByEvent(202, payload((v) => v.setUint16(0, 5, true)))).toEqual([5]);
+  // OrderFilled (204): makerSeat u32 at [0..4], takerSeat u32 at [4..8].
+  expect(seatsAffectedByEvent(204, payload((v) => { v.setUint32(0, 1, true); v.setUint32(4, 2, true); }))).toEqual([1, 2]);
+  // OracleUpdated (500): no seat at all.
+  expect(seatsAffectedByEvent(500, payload(() => {}))).toEqual([]);
+  // FundingAccumulatorUpdated (302) with NO_SEAT sentinel: market-level, no seat.
+  expect(seatsAffectedByEvent(302, payload((v) => v.setUint16(0, 0xffff, true)))).toEqual([]);
+});
+
+it("publishSeatProjection resolves the live session's wallet, decodes the projection, and pushes it to the sink", async () => {
+  const repo = new PrivateSessionRepository(bindings.DB!);
+  const owner = (await seatOwner(await transportFor(marketWithSeat(4, true, OWNER_BYTES)), "market-proj", 4))!;
+  await issuePrivateProjectionToken(repo, await transportFor(marketWithSeat(4, true, OWNER_BYTES)), owner, "market-proj", 4, 60_000, 1_000);
+  const transport = await transportFor(fullSeatBytes(4, { availableCollateral: 500n, reservedMargin: 50n, basePosition: 10n, realizedPnl: 5n, openOrderCount: 1, liquidationState: 0, sequence: 1n }));
+  const pushed: Array<{ wallet: string; seatIndex: number }> = [];
+  const sink: PrivateProjectionSink = { publishPrivate: (wallet, seatIndex) => { pushed.push({ wallet, seatIndex }); } };
+  const result = await publishSeatProjection(transport, repo, sink, "market-proj", 4, 1_500);
+  expect(result).toBe(true);
+  expect(pushed).toEqual([{ wallet: owner, seatIndex: 4 }]);
+});
+
+it("publishSeatProjection is a no-op when nobody currently holds a live session for the seat", async () => {
+  const repo = new PrivateSessionRepository(bindings.DB!);
+  const transport = await transportFor(marketWithSeat(9, true, OWNER_BYTES));
+  const sink: PrivateProjectionSink = { publishPrivate: () => { throw new Error("must not be called"); } };
+  expect(await publishSeatProjection(transport, repo, sink, "market-no-session", 9, 1_000)).toBe(false);
 });

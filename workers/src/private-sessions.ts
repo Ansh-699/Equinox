@@ -35,6 +35,88 @@ const TRADER_SEAT_OFFSET = 181_792;
 const TRADER_SEAT_SIZE = 256;
 const MAX_TRADER_SEATS = 128;
 
+/** `TraderSeat` field byte offsets *relative to the seat's own start*,
+ * verified against `programs/stockstream/src/state.rs::TraderSeat` via
+ * `core::mem::offset_of!` (it is `#[repr(C, packed(8))]`, not tightly
+ * packed -- hand-computing these from field sizes alone gives wrong
+ * values once an `i128` field forces 8-byte alignment padding). */
+const SEAT_FIELD_OFFSETS = {
+  occupancy: 0,
+  trader: 1,
+  availableCollateral: 40,
+  reservedMargin: 56,
+  basePosition: 72,
+  quoteEntryValue: 88,
+  realizedPnl: 104,
+  lastFundingAccumulator: 120,
+  openBidExposure: 136,
+  openAskExposure: 152,
+  openOrderCount: 168,
+  liquidationState: 172,
+  sequence: 176,
+} as const;
+
+export interface TraderSeatProjection {
+  seatIndex: number;
+  owner: string;
+  availableCollateral: bigint;
+  reservedMargin: bigint;
+  basePosition: bigint;
+  quoteEntryValue: bigint;
+  realizedPnl: bigint;
+  lastFundingAccumulator: bigint;
+  openBidExposure: bigint;
+  openAskExposure: bigint;
+  openOrderCount: number;
+  liquidationState: number;
+  sequence: bigint;
+}
+
+function readI128(bytes: Uint8Array, offset: number): bigint {
+  let value = 0n;
+  for (let i = 15; i >= 0; i -= 1) value = (value << 8n) | BigInt(bytes[offset + i]);
+  const signBit = 1n << 127n;
+  return value >= signBit ? value - (signBit << 1n) : value;
+}
+
+/**
+ * Decodes the complete private per-trader projection for one seat directly
+ * out of a market account's raw bytes: seat identity, position, entry
+ * value, collateral, reserved margin, realized PnL, funding accumulator,
+ * open exposure, order count, and liquidation status -- every
+ * `TraderSeat` field this session's spec calls for except equity/
+ * unrealized PnL, which are deliberately *not* computed here: that math
+ * already exists once, authoritatively, in
+ * `programs/stockstream/src/risk.rs::equity`/`unrealized_pnl`, and
+ * reimplementing it a second time in TypeScript risks the two silently
+ * diverging. A caller with the market's current oracle price can compute
+ * them from these raw fields using the same formulas risk.rs documents.
+ * Returns `null` for an out-of-range or unoccupied seat -- there is
+ * nothing private to project for a seat nobody owns.
+ */
+export function decodeTraderSeatProjection(marketBytes: Uint8Array, seatIndex: number): TraderSeatProjection | null {
+  if (!Number.isInteger(seatIndex) || seatIndex < 0 || seatIndex >= MAX_TRADER_SEATS) return null;
+  const start = TRADER_SEAT_OFFSET + seatIndex * TRADER_SEAT_SIZE;
+  if (marketBytes.length < start + TRADER_SEAT_SIZE) return null;
+  if (marketBytes[start + SEAT_FIELD_OFFSETS.occupancy] !== 1) return null;
+  const view = new DataView(marketBytes.buffer, marketBytes.byteOffset, marketBytes.byteLength);
+  return {
+    seatIndex,
+    owner: base58Encode(marketBytes.slice(start + SEAT_FIELD_OFFSETS.trader, start + SEAT_FIELD_OFFSETS.trader + 32)),
+    availableCollateral: readI128(marketBytes, start + SEAT_FIELD_OFFSETS.availableCollateral),
+    reservedMargin: readI128(marketBytes, start + SEAT_FIELD_OFFSETS.reservedMargin),
+    basePosition: readI128(marketBytes, start + SEAT_FIELD_OFFSETS.basePosition),
+    quoteEntryValue: readI128(marketBytes, start + SEAT_FIELD_OFFSETS.quoteEntryValue),
+    realizedPnl: readI128(marketBytes, start + SEAT_FIELD_OFFSETS.realizedPnl),
+    lastFundingAccumulator: readI128(marketBytes, start + SEAT_FIELD_OFFSETS.lastFundingAccumulator),
+    openBidExposure: readI128(marketBytes, start + SEAT_FIELD_OFFSETS.openBidExposure),
+    openAskExposure: readI128(marketBytes, start + SEAT_FIELD_OFFSETS.openAskExposure),
+    openOrderCount: view.getUint32(start + SEAT_FIELD_OFFSETS.openOrderCount, true),
+    liquidationState: marketBytes[start + SEAT_FIELD_OFFSETS.liquidationState],
+    sequence: view.getBigUint64(start + SEAT_FIELD_OFFSETS.sequence, true),
+  };
+}
+
 function base64ToBytes(base64: string): Uint8Array {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -135,10 +217,107 @@ export class PrivateSessionRepository {
     const tokenHash = await sha256Hex(token);
     await this.db.prepare(`UPDATE private_sessions SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL`).bind(now, tokenHash).run();
   }
+
+  /** The wallet a live (non-revoked, unexpired) private session most
+   * recently claimed for this seat -- used to route a projection update
+   * to the right socket without a second on-chain read per event. This is
+   * an approximation, not a re-verification of current on-chain ownership
+   * (that already happened once, in `issuePrivateProjectionToken`, at
+   * issuance time): if a seat changes owner without the old owner's
+   * session ever being revoked, this can return a stale wallet until that
+   * session expires. Acceptable for routing an update to a live socket --
+   * `market-stream.ts`'s own `attachment.private` match (populated from
+   * this same verified-at-connect-time session) is what actually gates
+   * delivery, not this lookup. */
+  async walletForSeat(marketPda: string, seatIndex: number, now: number): Promise<string | null> {
+    const row = await this.db
+      .prepare(`SELECT wallet FROM private_sessions
+        WHERE market_pda = ? AND seat_index = ? AND revoked_at IS NULL AND expires_at > ?
+        ORDER BY created_at DESC LIMIT 1`)
+      .bind(marketPda, seatIndex, now)
+      .first<{ wallet: string }>();
+    return row?.wallet ?? null;
+  }
 }
 
 export class SeatOwnershipMismatch extends Error {
   constructor() { super("wallet does not own the requested trader seat"); }
+}
+
+/** Discriminators whose `events.rs` payload shape carries a single seat
+ * index in its first two bytes (`payload_seat`/`payload_seat_amount`/
+ * `payload_order`/`payload_position`/`payload_funding`/
+ * `payload_liquidation`/`payload_session`) -- see
+ * `clients/stockstream/src/index.ts`'s matching decoders, the source of
+ * truth for every payload layout this function relies on. */
+const SINGLE_SEAT_AT_OFFSET_ZERO = new Set([
+  200, 201, // TraderSeatCreated, TraderSeatClosed
+  202, 205, 206, 207, 208, 209, // OrderPlaced, OrderCancelled, CancelAllProgress, OrderReplaced, OrderExpired, InvalidOrderRemoved
+  300, 301, 302, 303, 304, 305, // PositionChanged, MarginChanged, FundingAccumulatorUpdated, FundingSettled, LiquidationStarted, PositionLiquidated
+  401, 402, 403, 404, 405, 406, // CollateralDeposited, CollateralWithdrawn, ProtocolFeesChanged, InsuranceFundChanged, BadDebtRecorded, BadDebtResolved
+  700, 701, 702, 703, 704, // TradingSession*
+]);
+const FILL_DISCRIMINATORS = new Set([203, 204]); // OrderPartiallyFilled, OrderFilled
+
+function decodeBase64(data: string): Uint8Array {
+  const binary = atob(data);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+/**
+ * Every trader seat a decoded StockStream event pertains to (a fill
+ * touches two: maker and taker), or an empty array for a market-level
+ * event with no single owning seat, or one carrying `NO_SEAT` (0xffff).
+ * `payload` is the event's own base64-encoded 48-byte payload, exactly as
+ * `event-decoder.ts` stores it on `MarketEvent.payload.payload`.
+ */
+export function seatsAffectedByEvent(discriminator: number, payloadBase64: string): number[] {
+  const bytes = decodeBase64(payloadBase64);
+  if (bytes.length < 8) return [];
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (FILL_DISCRIMINATORS.has(discriminator)) {
+    const maker = view.getUint32(0, true);
+    const taker = view.getUint32(4, true);
+    return [maker, taker].filter((seat) => seat !== 0xffff_ffff);
+  }
+  if (SINGLE_SEAT_AT_OFFSET_ZERO.has(discriminator)) {
+    const seat = view.getUint16(0, true);
+    return seat === 0xffff ? [] : [seat];
+  }
+  return [];
+}
+
+export interface PrivateProjectionSink {
+  publishPrivate(wallet: string, seatIndex: number, payload: unknown): void;
+}
+
+/**
+ * Ties the pieces above together: decodes the projection for `seatIndex`
+ * from the market's current raw bytes, resolves which wallet currently
+ * holds a live private session for that seat, and pushes the projection
+ * to `sink` (a `MarketStream` DO stub in production). A no-op (not an
+ * error) when the seat is unoccupied or nobody currently holds a live
+ * session for it -- there is no socket that could receive the update
+ * either way.
+ */
+export async function publishSeatProjection(
+  transport: SolanaL1Transport | MagicBlockErTransport,
+  sessions: PrivateSessionRepository,
+  sink: PrivateProjectionSink,
+  marketPda: string,
+  seatIndex: number,
+  now: number,
+): Promise<boolean> {
+  const wallet = await sessions.walletForSeat(marketPda, seatIndex, now);
+  if (!wallet) return false;
+  const result = await transport.account(marketPda);
+  if (!result.value?.data) return false;
+  const projection = decodeTraderSeatProjection(base64ToBytes(result.value.data[0]), seatIndex);
+  if (!projection) return false;
+  sink.publishPrivate(wallet, seatIndex, projection);
+  return true;
 }
 
 /**
