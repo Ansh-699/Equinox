@@ -113,6 +113,7 @@ fn delegated_market(market: Address, authority: [u8; 32]) -> Vec<u8> {
     header.market_authority = authority;
     header.set_delegation_status(DelegationStatus::Delegated);
     header.set_validator(VALIDATOR.to_bytes());
+    header.set_expected_commit_sequence(1);
     unsafe {
         ptr::copy_nonoverlapping(
             &header as *const MarketStateHeader as *const u8,
@@ -507,5 +508,239 @@ fn assert_code(result: &Result<Transaction, String>, code: u32) {
         text.contains(&format!("0x{code:x}"))
             || text.contains(&format!("Custom {{ code: {code} }}")),
         "expected custom error 0x{code:x}, got: {text}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// Remaining cluster-policy gates, executed against the deployed program.
+// ---------------------------------------------------------------------
+
+#[test]
+fn commit_rejects_a_non_member_trailing_account() {
+    let mut env = setup();
+    env.svm
+        .set_account(
+            env.market,
+            Account {
+                lamports: env
+                    .svm
+                    .minimum_balance_for_rent_exemption(MARKET_ACCOUNT_SIZE),
+                data: delegated_market(env.market, env.authority.pubkey().to_bytes()),
+                owner: ID,
+                executable: false,
+                rent_epoch: 0,
+            },
+        )
+        .unwrap();
+    // CommitMarket with a trailing account that is NOT a cluster member
+    // (program-owned 256B but not a valid session PDA).
+    let foreign = Address::new_unique();
+    install(
+        &mut env.svm,
+        foreign,
+        vec![0u8; 256],
+        Address::new_from_array([9; 32]),
+    );
+    let commit_data = {
+        let mut d = vec![14u8];
+        d.extend_from_slice(&1u64.to_le_bytes());
+        d
+    };
+    env.svm.expire_blockhash();
+    let instruction = Instruction {
+        program_id: ID,
+        accounts: vec![
+            AccountMeta {
+                pubkey: env.market,
+                is_signer: false,
+                is_writable: true,
+            },
+            AccountMeta {
+                pubkey: env.authority.pubkey(),
+                is_signer: true,
+                is_writable: false,
+            },
+            AccountMeta {
+                pubkey: env.authority.pubkey(),
+                is_signer: true,
+                is_writable: true,
+            },
+            AccountMeta {
+                pubkey: stockstream::magicblock::MAGIC_CONTEXT_ID,
+                is_signer: false,
+                is_writable: true,
+            },
+            AccountMeta {
+                pubkey: stockstream::magicblock::MAGIC_PROGRAM_ID,
+                is_signer: false,
+                is_writable: false,
+            },
+            AccountMeta {
+                pubkey: foreign,
+                is_signer: false,
+                is_writable: true,
+            },
+        ],
+        data: commit_data,
+    };
+    let message = Message::new(&[instruction], Some(&env.authority.pubkey()));
+    let blockhash = env.svm.latest_blockhash();
+    let transaction = Transaction::new(&[&env.authority], message, blockhash);
+    let failed = env
+        .svm
+        .send_transaction(transaction)
+        .expect_err("a non-member trailing commit account must be rejected");
+    let text = format!("{:?} | {}", failed.err, failed.meta.pretty_logs());
+    assert!(
+        text.contains("0x600e") || text.contains("24590"),
+        "expected MagicBlockInvalidAccount, got {text}"
+    );
+}
+
+#[test]
+fn commit_accepts_a_market_only_bundle_and_hits_the_cpi() {
+    let mut env = setup();
+    // ER-side clone: program-owned with Delegated status (see the replay test).
+    env.svm
+        .set_account(
+            env.market,
+            Account {
+                lamports: env
+                    .svm
+                    .minimum_balance_for_rent_exemption(MARKET_ACCOUNT_SIZE),
+                data: delegated_market(env.market, env.authority.pubkey().to_bytes()),
+                owner: ID,
+                executable: false,
+                rent_epoch: 0,
+            },
+        )
+        .unwrap();
+    // Commit-only (sequence 1): every validation gate must pass so the
+    // failure is exactly the (absent) Magic Program CPI.
+    let commit_data = {
+        let mut d = vec![14u8];
+        d.extend_from_slice(&1u64.to_le_bytes());
+        d
+    };
+    env.svm.expire_blockhash();
+    let instruction = Instruction {
+        program_id: ID,
+        accounts: vec![
+            AccountMeta {
+                pubkey: env.market,
+                is_signer: false,
+                is_writable: true,
+            },
+            AccountMeta {
+                pubkey: env.authority.pubkey(),
+                is_signer: true,
+                is_writable: false,
+            },
+            AccountMeta {
+                pubkey: env.authority.pubkey(),
+                is_signer: true,
+                is_writable: true,
+            },
+            AccountMeta {
+                pubkey: stockstream::magicblock::MAGIC_CONTEXT_ID,
+                is_signer: false,
+                is_writable: true,
+            },
+            AccountMeta {
+                pubkey: stockstream::magicblock::MAGIC_PROGRAM_ID,
+                is_signer: false,
+                is_writable: false,
+            },
+        ],
+        data: commit_data,
+    };
+    let message = Message::new(&[instruction], Some(&env.authority.pubkey()));
+    let blockhash = env.svm.latest_blockhash();
+    let transaction = Transaction::new(&[&env.authority], message, blockhash);
+    let failed = env
+        .svm
+        .send_transaction(transaction)
+        .expect_err("the CPI target is absent");
+    let text = format!("{:?} | {}", failed.err, failed.meta.pretty_logs());
+    assert!(
+        !text.contains("0x600e")
+            && !text.contains("0x6010")
+            && !text.contains("0x6013")
+            && !text.contains("0x6011"),
+        "commit validation gates must pass before the CPI; got {text}"
+    );
+}
+
+#[test]
+fn commit_rejects_a_replayed_sequence() {
+    let mut env = setup();
+    // The ER-side clone of a delegated market keeps its ORIGINAL owner
+    // (StockStream) and delegation fields — simulate that by re-installing
+    // the market program-owned with Delegated status.
+    env.svm
+        .set_account(
+            env.market,
+            Account {
+                lamports: env
+                    .svm
+                    .minimum_balance_for_rent_exemption(MARKET_ACCOUNT_SIZE),
+                data: delegated_market(env.market, env.authority.pubkey().to_bytes()),
+                owner: ID,
+                executable: false,
+                rent_epoch: 0,
+            },
+        )
+        .unwrap();
+    // The fixture's expected commit sequence after delegation is 1; a
+    // sequence of 2 must be rejected with MagicBlockSequenceReplay (0x6011)
+    // BEFORE the CPI.
+    let commit_data = {
+        let mut d = vec![14u8];
+        d.extend_from_slice(&2u64.to_le_bytes());
+        d
+    };
+    env.svm.expire_blockhash();
+    let instruction = Instruction {
+        program_id: ID,
+        accounts: vec![
+            AccountMeta {
+                pubkey: env.market,
+                is_signer: false,
+                is_writable: true,
+            },
+            AccountMeta {
+                pubkey: env.authority.pubkey(),
+                is_signer: true,
+                is_writable: false,
+            },
+            AccountMeta {
+                pubkey: env.authority.pubkey(),
+                is_signer: true,
+                is_writable: true,
+            },
+            AccountMeta {
+                pubkey: stockstream::magicblock::MAGIC_CONTEXT_ID,
+                is_signer: false,
+                is_writable: true,
+            },
+            AccountMeta {
+                pubkey: stockstream::magicblock::MAGIC_PROGRAM_ID,
+                is_signer: false,
+                is_writable: false,
+            },
+        ],
+        data: commit_data,
+    };
+    let message = Message::new(&[instruction], Some(&env.authority.pubkey()));
+    let blockhash = env.svm.latest_blockhash();
+    let transaction = Transaction::new(&[&env.authority], message, blockhash);
+    let failed = env
+        .svm
+        .send_transaction(transaction)
+        .expect_err("sequence replay must fail");
+    let text = format!("{:?} | {}", failed.err, failed.meta.pretty_logs());
+    assert!(
+        text.contains("0x6011") || text.contains("24593"),
+        "expected MagicBlockSequenceReplay, got {text}"
     );
 }
