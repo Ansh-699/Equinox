@@ -30,8 +30,15 @@ solana-account = "=4.3.2"
 solana-instruction = "=3.4.1"
 solana-keypair = "=3.1.2"
 solana-message = "=4.4.1"
+solana-program-option = "=3.1.0"
+solana-program-pack = "=3.1.0"
 solana-signer = "=3.0.1"
 solana-transaction = "=4.1.6"
+# Runtime-test-only: the official legacy SPL Token instruction builders and pack
+# helpers, pinned to the exact version LiteSVM 0.16.0 dev-depends on. LiteSVM::new()
+# installs the bundled spl_token-3.5.0.so at Tokenkeg; this crate supplies the
+# encoders and state types only, so it never enters the SBF production graph.
+spl-token-interface = "=3.0.0"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))', 'cfg(target_feature, values("static-syscalls"))'] }
