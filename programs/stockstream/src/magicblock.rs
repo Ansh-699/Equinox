@@ -346,12 +346,24 @@ pub fn delegate_market(
         header.set_commit_interval_ms(COMMIT_INTERVAL_MS);
         header.set_expected_commit_sequence(1);
         header.set_pending_undelegation(false);
+        let requested_sequence = header
+            .global_event_sequence
+            .checked_add(1)
+            .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
+        header.global_event_sequence = requested_sequence;
+        let delegation_sequence = header.delegation_sequence();
+        crate::events::emit_event(
+            crate::events::EventKind::DelegationRequested,
+            &market_key.to_bytes(),
+            requested_sequence,
+            event_timestamp(),
+            &crate::events::payload_delegation(&validator.to_bytes(), delegation_sequence),
+        );
         let sequence = header
             .global_event_sequence
             .checked_add(1)
             .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
         header.global_event_sequence = sequence;
-        let delegation_sequence = header.delegation_sequence();
         write_header(data, &header)?;
         // The Delegation Program CPI below either succeeds (this whole
         // instruction, this write included, commits) or fails (the runtime
@@ -578,6 +590,7 @@ fn commit_market_inner(
         .checked_add(1)
         .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
     header.global_event_sequence = event_sequence;
+    let expected_commit_sequence = header.expected_commit_sequence();
     write_header(data, &header)?;
     crate::events::emit_event(
         event_kind,
@@ -586,6 +599,23 @@ fn commit_market_inner(
         event_timestamp(),
         &crate::events::payload_delegation(&header.validator(), sequence),
     );
+    if matches!(kind, CommitKind::CommitOnly) {
+        let data = market_data(&mut accounts[0], program_id)?;
+        let mut header = initialized_header(data)?;
+        let sequence_changed_event = header
+            .global_event_sequence
+            .checked_add(1)
+            .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
+        header.global_event_sequence = sequence_changed_event;
+        write_header(data, &header)?;
+        crate::events::emit_event(
+            crate::events::EventKind::CommitSequenceChanged,
+            &market_key.to_bytes(),
+            sequence_changed_event,
+            event_timestamp(),
+            &crate::events::payload_delegation(&header.validator(), expected_commit_sequence),
+        );
+    }
     Ok(())
 }
 
@@ -729,6 +759,26 @@ pub fn external_undelegate(
         return Err(custom(StockStreamError::MagicBlockInvalidCallback));
     }
     let final_sequence = header.expected_final_commit_sequence();
+    // `RestorationPending` and `MarketRestored` both fall inside this one
+    // callback instruction (the delegation program's undelegate CPI hands
+    // back the fully-committed account atomically -- there is no separate,
+    // on-chain-observable "pending" phase between them), so they are
+    // emitted back to back rather than across two instructions, the same
+    // pattern already used for `LiquidationStarted`/`PositionLiquidated`
+    // and `DelegationRequested`/`MarketDelegated`.
+    let pending_sequence = header
+        .global_event_sequence
+        .checked_add(1)
+        .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
+    header.global_event_sequence = pending_sequence;
+    let validator = header.validator();
+    crate::events::emit_event(
+        crate::events::EventKind::RestorationPending,
+        &market_key,
+        pending_sequence,
+        event_timestamp(),
+        &crate::events::payload_delegation(&validator, final_sequence),
+    );
     header.set_delegation_status(DelegationStatus::Restored);
     header.set_pending_undelegation(false);
     header.set_last_committed_sequence(final_sequence);
@@ -737,7 +787,6 @@ pub fn external_undelegate(
         .checked_add(1)
         .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
     header.global_event_sequence = event_sequence;
-    let validator = header.validator();
     write_header(data, &header)?;
     crate::events::emit_event(
         crate::events::EventKind::MarketRestored,

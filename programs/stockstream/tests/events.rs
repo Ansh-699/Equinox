@@ -294,3 +294,70 @@ fn events_for_different_markets_are_distinguishable() {
     let b = encode_event(EventKind::MarketPaused, &market_b, 1, 0, &payload_empty());
     assert_ne!(&a[12..44], &b[12..44]);
 }
+
+/// Golden vectors for the discriminators newly wired into production
+/// handlers this session (`handlers.rs`/`magicblock.rs`): each of these
+/// previously existed only as an `EventKind` variant with no real emission
+/// site. Confirms the exact encoded bytes for a full fill vs. a partial
+/// fill (sharing the same `payload_fill` shape but a different
+/// discriminator), and for the newly-wired session/liquidation/MagicBlock
+/// kinds.
+#[test]
+fn newly_wired_order_and_fill_discriminators_encode_correctly() {
+    let full = encode_event(
+        EventKind::OrderFilled,
+        &MARKET,
+        10,
+        0,
+        &payload_fill(1, 2, 100, 5, 10),
+    );
+    assert_eq!(
+        u16::from_le_bytes(full[0..2].try_into().unwrap()),
+        EventKind::OrderFilled as u16
+    );
+    let partial = encode_event(
+        EventKind::OrderPartiallyFilled,
+        &MARKET,
+        11,
+        0,
+        &payload_fill(1, 2, 100, 3, 11),
+    );
+    assert_eq!(
+        u16::from_le_bytes(partial[0..2].try_into().unwrap()),
+        EventKind::OrderPartiallyFilled as u16
+    );
+    assert_ne!(full[0..2], partial[0..2]);
+}
+
+#[test]
+fn newly_wired_session_liquidation_and_magicblock_discriminators_encode_correctly() {
+    use EventKind::*;
+    let cases = [
+        (CancelAllProgress, payload_seat_amount(3, 2, 0)),
+        (OrderReplaced, payload_order(1, 42, 0, 100, 5)),
+        (
+            TradingSessionActionConsumed,
+            payload_session(2, &[9u8; 32], 7),
+        ),
+        (LiquidationStarted, payload_liquidation(4, 50, 100)),
+        (PositionChanged, payload_position(4, -50, -5_000)),
+        (MarginChanged, payload_seat_amount(4, 25, 0)),
+        (FundingSettled, payload_funding(4, 1_000, -20)),
+        (InvalidOrderRemoved, payload_seat_amount(NO_SEAT, 2, 0)),
+        (OrderExpired, payload_seat_amount(NO_SEAT, 1, 0)),
+        (DelegationRequested, payload_delegation(&[5u8; 32], 1)),
+        (CommitSequenceChanged, payload_delegation(&[5u8; 32], 2)),
+        (RestorationPending, payload_delegation(&[5u8; 32], 3)),
+    ];
+    let mut discriminators = std::collections::HashSet::new();
+    for (kind, payload) in cases {
+        let bytes = encode_event(kind, &MARKET, 1, 0, &payload);
+        let discriminator = u16::from_le_bytes(bytes[0..2].try_into().unwrap());
+        assert_eq!(discriminator, kind as u16);
+        assert_eq!(&bytes[52..], &payload[..]);
+        assert!(
+            discriminators.insert(discriminator),
+            "duplicate discriminator in golden vector case list"
+        );
+    }
+}
