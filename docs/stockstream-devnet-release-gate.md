@@ -240,3 +240,29 @@ canonical program ID was migrated:
 - Proven: no active code path still references the old ID (string or
   raw-byte forms); the old address's only remaining mentions are in the
   historical blocker table above.
+
+## Devnet Deployment Verified (2026-09-17)
+
+| Item | Recorded value |
+| --- | --- |
+| Program ID | `H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET` |
+| ProgramData | `GCLwk9aFz8cz4etHv4cibqSwaKBa2ubQUgPRhRiHqTP2` |
+| Upgrade authority | `A5sV4PkkVM4gm3rejACvKFgxEMmj8ouGsffSKT5qYVc8` (deploy authority; also the market authority for the smoke market) |
+| Deploy signature | `vLmUWhX6gmM4meRncetD4gfbmDnq4w2reaJdBAuEPinHrrCsLeDFziyCm2jr9XxpvoVTgHJ14PxJxXHiWk1FUG8` (Finalized) |
+| Deployed in slot | 499914078 |
+| ELF size | 289,784 bytes; SHA-256 `327396c81f0fb1ac716b4ec331adc840136fad4b707feb642e1cad285efef23c` — on-chain programdata bytes byte-match the local artifact |
+| EI_OSABI | 0 (ELFOSABI_NONE), no SHF_GNU_RETAIN, entrypoint 0x3e988 |
+
+A wrong-address deployment (`gkPwvy…`, caused by the CLI defaulting the
+program address to the adjacent `target/deploy/stockstream-keypair.json`
+when `--program-id` is absent) was closed and its rent reclaimed before the
+correct deploy. Note for future deploys: the program address is selected by
+`--program-id <keypair-path>`, not `--keypair`.
+
+**InitializeMarket smoke test (live Devnet, serialized):**
+`4kikHeKbDjfVfovccmWQyCojwfSHXMiGxQSwCKYK93nTesjPTEps1J3x6Cv81wAZmDwhTKKq7gizGK5seHRcQtod`
+— market `87byMntCzNSwYxfP83DyFJmQ8tUbKK1dGbsCXWKBvGuo` created
+(222,752 bytes, rent 1.1322304 SOL) and initialized; read-back: owner =
+program ID, discriminator `STKMRK01`, version 2, `initialized = 1`,
+authority = the deploy authority. Devnet balance after deploy + smoke:
+~9.38 SOL (deploy 1.4926 + market rent 1.1322 + fees).
