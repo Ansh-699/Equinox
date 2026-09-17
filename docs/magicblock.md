@@ -379,3 +379,33 @@ Source pages: `docs.magicblock.gg/pages/ephemeral-rollups-ers/introduction/runti
 and `.../fees-and-commit-economics.md` (which lists the two source
 repositories to re-check for production: `delegation-program` at commit
 `6898ef4b...` and `magicblock-validator` at commit `cec4cf57...`).
+
+## Complete cluster economics (measured from the ACTUAL implementation, 2026-09-17)
+
+`scripts/magicblock-economics.py` computes these from the real cluster
+implementation (market 222,752 B + 12,288 B scratch + 256 B session per
+active trader) and the delegation program's own pinned constants
+(`dlp_api` 3.1.0: `COMMIT_FEE_LAMPORTS = 100_000`, `SESSION_FEE_LAMPORTS =
+300_000`) plus the documented live-fee model (commits 1-25 free with a
+delegated fee payer; every commit from the 26th costs 100,000 lamports per
+committed account; the undelegation deposit charge caps at the deposit
+held).
+
+| Traders | Delegated accounts | One-time refundable deposit rent | Live commit fees (full day, auto-commits at 30s) | 24h runway | 7d runway |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 3 | 0.0099 SOL | 0.8565 SOL/day | 0.8565 | 5.9955 |
+| 2 (lifecycle run) | 5 | 0.0166 SOL | 1.4275 SOL/day | 1.4275 | 9.9925 |
+| 10 | 21 | 0.0696 SOL | 5.9955 SOL/day | 5.9955 | 41.9685 |
+| 50 | 101 | 0.3346 SOL | 28.8355 SOL/day | 28.8355 | 201.8485 |
+| 128 | 257 | 0.8514 SOL | 73.3735 SOL/day | 73.3735 | 513.6145 |
+
+**Operational implication (honest):** with `commit_frequency_ms = 30_000`
+(a delegation argument, not a knob) each delegated account auto-commits
+2,880 times/day. Without a delegated fee payer the 10-commit ceiling stops
+the ER after ~5 minutes; with one, long-lived 24/7 operation at 50 traders
+costs ~29 SOL/day in live fees. That is impractical for always-on
+multi-trader operation at the current cadence and must be reduced by a
+program change (longer commit interval / explicit-commit-only policy)
+BEFORE mass delegation — the bounded devnet lifecycle below therefore runs
+bounded sessions (delegated, a handful of trades, commit, undelegate), not
+a 24h always-on market, and the fee-payer top-up path stays future work.
