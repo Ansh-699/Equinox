@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { AccountRole, getBase58Decoder, getBase58Encoder, getBase64EncodedWireTransaction, getTransactionDecoder, type Transaction } from "@solana/kit";
 import { DeterministicTestSigner } from "./signer";
 import {
+  COMPUTE_BUDGET_PROGRAM_ID,
   OPCODE,
   authorizeTradingSessionInstruction,
   base64ToBytes,
@@ -20,6 +21,8 @@ import {
   recordBadDebtInstruction,
   replaceOrderInstruction,
   sessionKeeperBuilder,
+  setComputeUnitLimitInstruction,
+  setComputeUnitPriceInstruction,
   signAndSerializeTransaction,
   transitionMarketInstruction,
   updateFundingInstruction,
@@ -197,3 +200,50 @@ describe("keeper transaction builders", () => {
     }
   });
 });
+
+describe("compute budget", () => {
+  it("encodes SetComputeUnitLimit and SetComputeUnitPrice against the ComputeBudget native program with the exact discriminant + LE layout", () => {
+    const limit = setComputeUnitLimitInstruction(60_000);
+    expect(limit.programAddress).toBe(COMPUTE_BUDGET_PROGRAM_ID);
+    expect(limit.accounts).toEqual([]);
+    expect(Array.from(limit.data!)).toEqual([2, 0x60, 0xea, 0x00, 0x00]); // 60_000 = 0x0000ea60, LE
+
+    const price = setComputeUnitPriceInstruction(1_000n);
+    expect(price.programAddress).toBe(COMPUTE_BUDGET_PROGRAM_ID);
+    expect(Array.from(price.data!.slice(0, 1))).toEqual([3]);
+    expect(Array.from(price.data!.slice(1))).toEqual([0xe8, 0x03, 0, 0, 0, 0, 0, 0]); // 1000 = 0x3e8, LE u64
+  });
+
+  it("every signed transaction includes a compute-budget instruction by default, addressed to the ComputeBudget program", async () => {
+    const signer = new DeterministicTestSigner("compute-budget-default");
+    const base64 = await signAndSerializeTransaction({
+      instructions: [reconcileVaultInstruction(PROGRAM, [meta(MARKET, AccountRole.WRITABLE)])],
+      signer,
+      recentBlockhash: BLOCKHASH,
+    });
+    const messageBytes = base64ToBytes(base64).slice(65); // skip the 1-byte shortvec count + 64-byte signature
+    const computeBudgetProgramBytes = Uint8Array.from(getBase58Encoder().encode(COMPUTE_BUDGET_PROGRAM_ID));
+    expect(containsSubarray(messageBytes, computeBudgetProgramBytes)).toBe(true);
+  });
+
+  it("computeUnitLimit: null omits the compute-budget instruction entirely", async () => {
+    const signer = new DeterministicTestSigner("compute-budget-omitted");
+    const base64 = await signAndSerializeTransaction({
+      instructions: [reconcileVaultInstruction(PROGRAM, [meta(MARKET, AccountRole.WRITABLE)])],
+      signer,
+      recentBlockhash: BLOCKHASH,
+      computeUnitLimit: null,
+    });
+    const messageBytes = base64ToBytes(base64).slice(65);
+    const computeBudgetProgramBytes = Uint8Array.from(getBase58Encoder().encode(COMPUTE_BUDGET_PROGRAM_ID));
+    expect(containsSubarray(messageBytes, computeBudgetProgramBytes)).toBe(false);
+  });
+});
+
+function containsSubarray(haystack: Uint8Array, needle: Uint8Array): boolean {
+  outer: for (let i = 0; i <= haystack.length - needle.length; i += 1) {
+    for (let j = 0; j < needle.length; j += 1) if (haystack[i + j] !== needle[j]) continue outer;
+    return true;
+  }
+  return false;
+}
