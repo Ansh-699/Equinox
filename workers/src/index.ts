@@ -160,7 +160,16 @@ export async function runIngestionTick(env: Env, fetcher: typeof fetch = fetch):
       try { transaction = await l1.transaction(entry.signature); } catch { continue; }
       const events = decodeCustodyEvents(transaction as Parameters<typeof decodeCustodyEvents>[0], 'l1', Date.now());
       for (const event of events) {
-        await indexer.ingest(market.marketPda, event);
+        // A failed resnapshot (the authoritative-account fetch used to
+        // repair a sequence gap) throws out of `ingest`. That failure must
+        // not take down the rest of this tick -- other markets, and even
+        // this market's other transactions, still deserve their own
+        // attempt. The gap itself is untouched in D1 either way (`append`
+        // never partially applies), so the next scheduled tick retries the
+        // same resnapshot from the same cursor; skipping this one event
+        // rather than aborting the whole tick cannot cause a later event to
+        // be misapplied on top of an unresolved gap.
+        try { await indexer.ingest(market.marketPda, event); } catch { continue; }
         eventsIngested += 1;
         // Best-effort private-projection push: never lets a decode/publish
         // failure for one event block ingesting the rest of the batch, and
