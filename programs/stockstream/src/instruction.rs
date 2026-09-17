@@ -15,6 +15,7 @@ pub const DEPOSIT_COLLATERAL: u8 = 10;
 pub const WITHDRAW_COLLATERAL: u8 = 11;
 pub const CONSUME_ORACLE_UPDATE: u8 = 12;
 pub const DELEGATE_MARKET: u8 = 13;
+pub const DELEGATE_CLUSTER_MEMBER: u8 = 41;
 pub const COMMIT_MARKET: u8 = 14;
 pub const COMMIT_AND_UNDELEGATE: u8 = 15;
 /// Reserved: the real external-undelegate callback uses the delegation
@@ -147,6 +148,12 @@ pub enum StockStreamInstruction {
     },
     ConsumeOracleUpdate,
     DelegateMarket {
+        validator: [u8; 32],
+    },
+    /// Delegates ONE hot-cluster member (a settlement-scratch or
+    /// `TradingSession` PDA) to the market's validator. See
+    /// `magicblock::delegate_cluster_member`.
+    DelegateClusterMember {
         validator: [u8; 32],
     },
     CommitMarket {
@@ -356,6 +363,11 @@ impl StockStreamInstruction {
                 Ok(Self::ConsumeOracleUpdate)
             }
             Some(DELEGATE_MARKET) if data.len() == 33 => Ok(Self::DelegateMarket {
+                validator: data[1..33]
+                    .try_into()
+                    .map_err(|_| ProgramError::InvalidInstructionData)?,
+            }),
+            Some(DELEGATE_CLUSTER_MEMBER) if data.len() == 33 => Ok(Self::DelegateClusterMember {
                 validator: data[1..33]
                     .try_into()
                     .map_err(|_| ProgramError::InvalidInstructionData)?,
