@@ -363,3 +363,33 @@ fn newly_wired_session_liquidation_and_magicblock_discriminators_encode_correctl
         );
     }
 }
+
+#[test]
+fn self_trade_prevented_golden_vector_matches_the_documented_payload() {
+    // Kind 210 (`docs/events.md`, band 200-210). Emitted only when
+    // `CancelProvide`/`DecrementTake` actually acted on an instruction.
+    let bytes = encode_event(
+        EventKind::SelfTradePrevented,
+        &MARKET,
+        77,
+        1_700_000_042,
+        &payload_seat_amount(4, 2, 0),
+    );
+    assert_eq!(bytes.len(), EVENT_SIZE);
+    assert_eq!(EventKind::SelfTradePrevented as u16, 210);
+    assert_eq!(u16::from_le_bytes([bytes[0], bytes[1]]), 210);
+    assert_eq!(bytes[2], EVENT_ABI_VERSION);
+    assert_eq!(bytes[3], 0);
+    assert_eq!(u64::from_le_bytes(bytes[4..12].try_into().unwrap()), 77);
+    assert_eq!(&bytes[12..44], &MARKET);
+    assert_eq!(
+        u64::from_le_bytes(bytes[44..52].try_into().unwrap()),
+        1_700_000_042
+    );
+    // `payload_seat_amount`: seat [52..54], amount [54..62], resulting
+    // balance [62..70]; the remaining 30 payload bytes stay zero.
+    assert_eq!(u16::from_le_bytes(bytes[52..54].try_into().unwrap()), 4);
+    assert_eq!(u64::from_le_bytes(bytes[54..62].try_into().unwrap()), 2);
+    assert_eq!(u64::from_le_bytes(bytes[62..70].try_into().unwrap()), 0);
+    assert!(bytes[70..].iter().all(|byte| *byte == 0));
+}

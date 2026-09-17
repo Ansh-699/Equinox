@@ -1360,3 +1360,152 @@ fn derive_trading_session_golden_vector_for_cross_language_parity() {
     let pda = derive_trading_session(&owner, &market, seat_index, &signer, &ID);
     eprintln!("GOLDEN_TRADING_SESSION_PDA={:?}", pda.to_bytes());
 }
+
+#[test]
+fn aborted_self_trade_consumes_no_session_nonce_and_preserves_the_market() {
+    let f = fixture();
+    let signer = Address::new_from_array([25; 32]);
+    let session = authorize_session(
+        &f,
+        signer,
+        SESSION_ACTION_PLACE,
+        1_000_000,
+        2_000_000,
+        1_000_000,
+        10,
+        1000,
+    );
+    let signer_account = account(signer, Address::default(), 0, true, false);
+    let mut place_accounts = [
+        f.market.view.clone(),
+        signer_account.view.clone(),
+        f.scratch.view.clone(),
+        session.view.clone(),
+    ];
+    process_instruction(
+        &ID,
+        &mut place_accounts,
+        &order_data(1, SEAT_INDEX, 4, 100, 0, 1, 1),
+    )
+    .unwrap();
+    let market_snapshot = unsafe { f.market.view.borrow_unchecked() }.to_vec();
+    let session_snapshot = unsafe { session.view.borrow_unchecked() }.to_vec();
+    let mut cross_accounts = [
+        f.market.view.clone(),
+        signer_account.view.clone(),
+        f.scratch.view.clone(),
+        session.view.clone(),
+    ];
+    match process_instruction(
+        &ID,
+        &mut cross_accounts,
+        &order_data(0, SEAT_INDEX, 4, 110, 0, 2, 2),
+    ) {
+        Err(ProgramError::Custom(0x6019)) => {}
+        other => panic!("expected SelfTradeAborted, got {other:?}"),
+    }
+    assert_eq!(
+        unsafe { f.market.view.borrow_unchecked() },
+        market_snapshot.as_slice()
+    );
+    assert_eq!(
+        unsafe { session.view.borrow_unchecked() },
+        session_snapshot.as_slice()
+    );
+}
+
+#[test]
+fn replace_that_would_self_cross_preserves_the_old_order_and_the_session() {
+    let f = fixture();
+    let signer = Address::new_from_array([26; 32]);
+    let session = authorize_session(
+        &f,
+        signer,
+        SESSION_ACTION_PLACE | SESSION_ACTION_REPLACE,
+        1_000_000,
+        2_000_000,
+        1_000_000,
+        10,
+        1000,
+    );
+    let signer_account = account(signer, Address::default(), 0, true, false);
+    let mut first_accounts = [
+        f.market.view.clone(),
+        signer_account.view.clone(),
+        f.scratch.view.clone(),
+        session.view.clone(),
+    ];
+    process_instruction(
+        &ID,
+        &mut first_accounts,
+        &order_data(1, SEAT_INDEX, 2, 100, 0, 1, 1),
+    )
+    .unwrap();
+    let old_key = stockstream::book::OrderInput {
+        side: stockstream::book::Side::Ask,
+        tree: stockstream::book::TreeKind::Fixed,
+        owner: SEAT_INDEX as u32,
+        price_or_offset: 100,
+        sequence: 1,
+        quantity: 2,
+        expires_at: 0,
+        peg_limit: 0,
+        client_order_id: 1,
+        time_in_force: stockstream::book::TimeInForce::GoodTilCancelled,
+        post_only: false,
+        self_trade_behavior: stockstream::book::SelfTradeBehavior::AbortTransaction,
+    }
+    .leaf()
+    .unwrap()
+    .key;
+    let mut second_accounts = [
+        f.market.view.clone(),
+        signer_account.view.clone(),
+        f.scratch.view.clone(),
+        session.view.clone(),
+    ];
+    process_instruction(
+        &ID,
+        &mut second_accounts,
+        &order_data(1, SEAT_INDEX, 2, 100, 0, 2, 2),
+    )
+    .unwrap();
+    let session_snapshot = unsafe { session.view.borrow_unchecked() }.to_vec();
+    let new_order = order_data(0, SEAT_INDEX, 2, 110, 0, 3, 3);
+    let mut replace_accounts = [
+        f.market.view.clone(),
+        signer_account.view.clone(),
+        f.scratch.view.clone(),
+        session.view.clone(),
+    ];
+    match process_instruction(
+        &ID,
+        &mut replace_accounts,
+        &replace_data(old_key, &new_order),
+    ) {
+        Err(ProgramError::Custom(0x6019)) => {}
+        other => panic!("expected SelfTradeAborted, got {other:?}"),
+    }
+    // The cancelled order's removal is deliberately NOT asserted as reverted
+    // here: this host harness has no Solana runtime rollback, and
+    // `replace_order`'s own doc comment states its atomicity "comes entirely
+    // from Solana's own instruction semantics". What is verifiable at host
+    // level is that no replacement order rested and that the session was
+    // never charged; the runtime-rollback half stays runtime-unverified.
+    let data = unsafe { f.market.view.borrow_unchecked() };
+    let ask = unsafe {
+        &*(data.as_ptr().add(stockstream::state::ASK_ARENA_OFFSET)
+            as *const stockstream::book::Arena)
+    };
+    assert_eq!(ask.leaf_counts[0], 1, "the second own order survives");
+    let bid = unsafe {
+        &*(data.as_ptr().add(stockstream::state::BID_ARENA_OFFSET)
+            as *const stockstream::book::Arena)
+    };
+    assert_eq!(bid.leaf_counts[0], 0, "no replacement order may rest");
+    assert_eq!(
+        unsafe { session.view.borrow_unchecked() },
+        session_snapshot.as_slice(),
+        "an aborted replacement consumes no session nonce or notional"
+    );
+}
