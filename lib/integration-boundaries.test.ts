@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { deposit, deriveVault, deriveVaultAuthority, SPL_TOKEN_PROGRAM, tokenTransferMeta, withdraw } from "./custody";
 import { OracleTracker, requirePythServerConfig } from "./oracle";
-import { COMMIT_INTERVAL_MS, encodeCommit, rejectMixedWritableDomains, validateCallback, validateHotCluster } from "./magicblock";
+import { DELEGATION_COMMIT_FREQUENCY_MS, encodeCommit, rejectMixedWritableDomains, validateCallback, validateHotCluster } from "./magicblock";
 import { authorize } from "./trading-session";
 import { requireClientOrderId } from "./execution-boundary";
 
@@ -34,7 +34,7 @@ describe("oracle and lifecycle boundaries", () => {
     validateHotCluster([{ address: "arena", domain: "er", writable: true }]);
     expect(() => rejectMixedWritableDomains([{ address: "a", domain: "er", writable: true }, { address: "b", domain: "l1", writable: true }])).toThrow();
     expect(new DataView(encodeCommit(4n).buffer).getBigUint64(2, true)).toBe(4n);
-    expect(COMMIT_INTERVAL_MS).toBe(30_000);
+    expect(DELEGATION_COMMIT_FREQUENCY_MS).toBe(30_000);
     expect(validateCallback(Uint8Array.from([196, 28, 41, 206, 48, 37, 51, 167]))).toBe(true);
   });
   it("enforces scoped session limits and nonce", () => {

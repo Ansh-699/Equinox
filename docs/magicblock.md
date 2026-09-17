@@ -1,11 +1,47 @@
 # MagicBlock
 
-Only the market account is delegated: StockStream's entire hot state (arenas,
-seats, funding, event ring) lives in one PDA (`state::MARKET_ACCOUNT_SIZE`),
-so the "hot cluster" is that single account. Vaults, deposits, withdrawals,
-the exchange/instrument registry and durable authorities remain L1-only. The
-configured commit interval is 30,000 ms, enforced as a protocol constant (not
-caller-supplied) in `magicblock::COMMIT_INTERVAL_MS`.
+Only the market account is delegated today: StockStream's hot state (arenas,
+seats, funding, event ring) lives in one PDA (`state::MARKET_ACCOUNT_SIZE`).
+Vaults, deposits, withdrawals, the exchange/instrument registry and durable
+authorities remain L1-only. The delegation-time automatic commit frequency is
+30,000 ms, encoded into the `Delegate` instruction's `commit_frequency_ms`
+field (program constant `magicblock::COMMIT_INTERVAL_MS` in
+`programs/stockstream/src/magicblock.rs`) — see § Commit policy for why this
+is a delegation argument, not a keeper knob.
+
+**Settlement scratch and the hot cluster (Priority 10 exit requirement).**
+The production matcher writes per-seat settlement scratch PDAs
+(`["settlement", market, seat_index_le]`, `docs/settlement-scratch.md`) as
+writable accounts inside `PlaceOrder`. On the ER, **every writable account in
+a transaction must live in the same execution domain**: an ER transaction
+cannot write the delegated market account and an L1-resident, non-delegated
+scratch PDA together (mixed writable domains are already rejected client-side
+by `lib/magicblock.ts::rejectMixedWritableDomains`). Active scratch PDAs must
+therefore be delegated together with the market as one hot cluster:
+
+```
+Delegated hot cluster:
+- Market account (arenas, seats, funding, event ring, delegation lifecycle)
+- Active traders' settlement scratch PDAs (must be Empty at delegation)
+- Delegated fee payer (+ the ER validator's magic_fee_vault)
+```
+
+The program already enforces the lifecycle gate that makes this safe:
+`magicblock::require_scratch_accounts_empty` accepts scratch PDAs as trailing
+accounts on `DelegateMarket`, `CommitMarket`, and `CommitAndUndelegate` and
+requires every one to be `Empty` — no in-flight settlement plan may cross a
+delegation boundary. Scratch PDAs are not committed to L1 by the market
+commit path (they are working memory and must be `Empty` at every successful
+boundary, `docs/settlement-scratch.md`); they ride undelegation back to L1 as
+Empty program-owned accounts. **Exit test (Priority 10):** delegate market +
+scratch (+ fee payer) → submit a crossing order through the production
+settlement path → scratch goes Empty→Planning→Ready→Empty inside the one
+instruction → commit the market → undelegate → verify no mixed
+writable-account routing occurred and the scratch account is Empty (or
+closed, per policy) after restore. The alternative — ER-native ephemeral
+accounts for scratch — is unproven for this program's PDA validation,
+lifecycle, capacity, and atomic-rollback requirements and is not the
+selected path.
 
 ## Real CPI implementation
 
@@ -60,30 +96,48 @@ Real, shipped dependencies of the `stockstream` crate:
 
 Both are pulled with `default-features = false`: only their `consts`/`pda`/`args` modules are used (pure data, no heap allocation); their `AccountInfo`-based CPI helpers are never linked (see "Real CPI implementation" above for why).
 
-Additionally consulted, but **not a dependency and not copied into this repository**: the `magicblock-labs/delegation-program` GitHub repository's `src/processor/fast/{delegate,undelegate}.rs` source, read during implementation to ground the account order, signer/writable flags and the external-undelegate callback's account/data contract in the actual on-chain processor rather than guessing. That repository is licensed **Business Source License 1.1** (converts to MIT on 2027-12-01), a source-available but not OSI-open license restricting production use of *that* codebase specifically. StockStream contains no code copied or derived from it — only independently-written Pinocchio 0.11.2 code that implements the same wire protocol, using facts (account order, discriminator values, PDA seeds) that are also independently confirmed by the MIT-licensed `dlp_api`/`magic-program-api` crates above and by the `ephemeral-rollups-sdk` (`=0.17.0`, MIT) client SDK. Reading a BSL-licensed program's source to interoperate with its public instruction interface, without incorporating its code, does not implicate the BSL's use restrictions.
+Additionally consulted, but **not a dependency and not copied into this repository**: the `magicblock-labs/delegation-program` GitHub repository's `src/processor/fast/{delegate,undelegate}.rs` source, read during implementation to ground the account order, signer/writable flags and the external-undelegate callback's account/data contract in the actual on-chain processor rather than guessing. That repository is licensed **Business Source License 1.1** (converts to MIT on 2027-12-01), a source-available but not OSI-open license restricting production use of *that* codebase specifically. StockStream contains no code copied or derived from it — only independently-written Pinocchio 0.11.2 code that implements the same wire protocol, using facts (account order, discriminator values, PDA seeds) that are also independently confirmed by the MIT-licensed `dlp_api`/`magic-program-api` crates above and by the `ephemeral-rollups-sdk` (`=0.17.0`, MIT) client SDK. Reading a BSL-licensed program's source to interoperate with its public
+instruction interface is a technical provenance question that was reviewed
+deliberately: StockStream does not copy or link the BSL-licensed processor
+implementation. Its interoperable instruction encoding is independently
+implemented using the published MIT-licensed API crates (`dlp_api`,
+`magic-program-api`) and verified against observable protocol behavior.
+This is a technical provenance statement, **not legal advice**; an
+independent license review is required before any production claim.
 
 `@magicblock-labs/ephemeral-rollups-kit` (MIT, an `npm` dependency) is referenced by `lib/magicblock-client.ts`, which is dead code not reachable from any production path -- see "Known scope limits" below.
 
 ## Known scope limits
 
-- `lib/magicblock-client.ts` builds top-level delegation-program instructions
-  directly via the official TS SDK, which cannot actually execute (a PDA
-  cannot sign a top-level client transaction; delegation requires a CPI from
-  the owning program, which is what `magicblock::delegate_market` does).
-  Nothing imports it outside its own test file
-  (`lib/magicblock-client.test.ts`); it is not wired into any route,
-  component, or worker. The real, invocable client path is
-  `clients/stockstream/src/index.ts::delegateMarket` /
-  `commitMarket` / `commitAndUndelegate`.
+- `lib/magicblock-client.ts` (deleted 2026-09-17) built top-level
+delegation-program instructions directly via the official TS SDK, which
+cannot actually execute (a PDA cannot sign a top-level client transaction;
+delegation requires a CPI from the owning program, which is what
+`magicblock::delegate_market` does). It was reachable only from its own
+test file, was never wired into any route, component, or worker, and was
+removed rather than retained as documented dead code because
+architecturally-impossible transaction builders invite future misuse. The
+real, invocable client path is
+`clients/stockstream/src/index.ts::delegateMarket` /
+`commitMarket` / `commitAndUndelegate`.
 - Per-seat settlement scratch PDAs are validated `Empty` before delegating,
   committing, or undelegating, but are not themselves delegated in this
   pass (single-account delegation only). Extending this to loop the same
   CPI over each scratch PDA is straightforward if a real ER integration
   test needs per-seat ER-side scratch.
 - The authorized keeper/authority for `CommitMarket` and
-  `CommitAndUndelegate` is currently the market's own `market_authority`;
-  a dedicated keeper-authority field is deferred to the scheduled-keeper
-  work (see `docs/keepers.md`).
+  `CommitAndUndelegate` is currently `header.market_authority` only — the
+  Worker's role-bound signer registry (`workers/src/signer.ts`) is backend
+  plumbing and does **not** confer any on-chain authority. This remains a
+  real production authority gap: to operate with role separation the
+  program needs a dedicated on-chain keeper-authority field (per market or
+  exchange-wide) with an explicit instruction allowlist — commit but not
+  undelegate, fund the fee payer, never update risk configuration — and the
+  commit/undelegate handlers must check it instead of (or in addition to)
+  `market_authority`. Until that lands, live ER operation must delegate
+  this responsibility to the market authority key itself, which conflicts
+  with the Worker signer model. See `docs/stockstream-roadmap.md` (Priority
+  10 / 14d).
 - `pinocchio::cpi::invoke_signed` is a no-op off the `solana`/`bpf` target,
   so a host `cargo test` run cannot observe the delegation/Magic programs
   actually executing. What is verified off-chain: every account/PDA/
@@ -127,3 +181,143 @@ Also see `docs/transports.md` for the MagicBlock commit keeper and
 `classifyWritableAccountDomain`'s L1/ER write routing (which fixed a real
 bug this session: it checked for `DelegationStatus::Undelegating` at the
 wrong numeric value, `4` instead of `2`).
+
+## Verified ER runtime limits and commit economics (2026-09-17)
+
+Verified against `docs.magicblock.gg` on 2026-09-17 (fee page states its
+values were checked against MagicBlock source on 2026-08-20). The market
+account (222,752 bytes) is far below the documented 10 MiB ER account-size
+cap; the real risks are compute consumption while mutating the account,
+account-borrow discipline, L1 delegation-transaction size, commit cost, and
+whether the full account clones, commits, and restores byte-for-byte (the
+Phase 1 verification test).
+
+| Limit | Solana base layer | Ephemeral Rollup |
+| --- | --- | --- |
+| Compute units per instruction (default) | 200,000 CU | 200,000 CU |
+| Compute units per transaction (max, `SetComputeUnitLimit`) | 1,400,000 CU | 1,400,000 CU |
+| Serialized transaction size | 1,232 bytes | **64 KiB** |
+| Account size (max) | 10 MiB | 10 MiB |
+| Slot time | ~400 ms | ~10 ms |
+
+The 64 KiB ER limit applies only to transactions whose writable accounts are
+delegated; delegation/undelegation transactions route to L1 and remain
+subject to the 1,232-byte limit. Slot times are explicitly not guaranteed
+and must not be hardcoded into any protocol assumption -- measured latencies
+(HUD stages) are the only claimable numbers.
+
+### Fee model (two systems that can both charge)
+
+1. **Solana delegation deposit** (funded at `delegate_market`, settled at
+   undelegation, refundable for the unused portion): session charge
+   `300,000` lamports, plus `100,000` lamports for each commit after the
+   first. If the deposit is smaller than the calculated charge, MagicBlock
+   takes the whole deposit and creates no debt -- so the deposit must be
+   sized for the planned session length at the planned cadence.
+2. **Live commit fees (fee-payer path).** Without a delegated fee payer,
+   commits 1-10 are accepted and commit 11 fails with custom error
+   `0xA0000000` (a final commit-and-undelegate still succeeds so the market
+   is never trapped). With a delegated fee payer + the ER validator's
+   `magic_fee_vault`, commits 1-25 carry no live fee and every commit from
+   commit 26 onward costs `100,000` lamports per committed account,
+   taken immediately from the fee payer. A commit charged live may
+   additionally be counted in the deposit settlement at undelegation: the
+   docs state an app "may pay both."
+
+At StockStream's default 30,000 ms cadence: 120 commits/hour, 2,880/day,
+~0.288 SOL/day/market in live fees from commit 26 onward, plus a
+comparable deposit-side charge at undelegation -- roughly 0.57 SOL/day/market
+for a full day at 30s cadence. This makes a universal fixed 30s policy
+economically questionable for production.
+
+### Commit policy
+
+**Correction (2026-09-17):** an earlier version of this section claimed
+low-activity markets could "commit every 2–5 minutes through Worker policy
+without a program change." That was wrong and has been removed. The
+30,000 ms value is encoded into the `Delegate` instruction's
+`commit_frequency_ms` field (`encode_delegate_instruction_data`, offset
+8..12; golden-vector tested against `dlp_api::args::DelegateArgs` in
+`tests/magicblock.rs`), so the **delegation program auto-commits every
+delegated market every 30 seconds** for as long as it stays delegated. The
+Worker commit keeper's interval (`MIN_COMMIT_TICK_MS` in
+`workers/src/keeper-jobs.ts`) is only the keeper's own scheduling minimum —
+it cannot slow, accelerate, or skip the delegation program's automatic
+commits. Client-side the same value is named
+`DELEGATION_COMMIT_FREQUENCY_MS` (`lib/magicblock.ts`) to make this
+explicit.
+
+Consequences:
+
+- **Every delegated market commits every 30 s and pays the full cost model
+  below, until the program changes.** There is no low-activity cadence
+  today.
+- **Per-market commit policy is a program change**, required before any
+  long-lived delegation, not after the demo: new `DelegateArgs` fields or a
+  policy PDA plus matching `MarketStateHeader` fields in the free
+  `reserved_upgrade` bytes (`155..185`, `docs/program-layout.md`):
+  `commit_policy_version`, `periodic_commit_interval_ms`,
+  `max_uncommitted_events`, `max_uncommitted_open_interest_delta`,
+  `immediate_commit_flags` — version-gated under `MARKET_VERSION`
+  discipline (no size change).
+- Until then, the only cost levers are session length (delegate only for
+  trading windows, then `commit_and_undelegate`) and the immediate
+  commit-and-undelegate on planned boundaries (withdrawal request,
+  corporate-action freeze).
+
+### Exact fee estimator (dated configuration, not protocol constants)
+
+With the delegation fee payer attached (live path), per delegated account:
+
+```
+deposit_charge = session_charge
+              + max(commit_count - 1, 0) × deposit_commit_charge
+
+live_charge    = max(commit_count - 25, 0) × live_commit_charge_per_account
+
+estimated_total = deposit_charge + live_charge
+                + callbacks + base_actions
+```
+
+Current dated values: `session_charge = 300_000` lamports,
+`deposit_commit_charge = 100_000` lamports,
+`live_commit_charge_per_account = 100_000` lamports,
+`callback_charge = 5_000` lamports per callback,
+`base_action_price = ceil(compute_units × 50_000 / 1_000_000)` lamports.
+
+For 2,880 commits (one account, 30 s cadence, 24 h): deposit side
+`0.0003 + 2,879 × 0.0001 = 0.2882 SOL`; live side `2,855 × 0.0001 =
+0.2855 SOL`; **≈ 0.5737 SOL/day/market**. The commit keeper must treat
+these as configuration and re-derive totals from the live fee source
+rather than hardcoding them.
+
+### Fee-payer runway state (keeper-exposed)
+
+The commit keeper should compute and expose per delegated market:
+`commit_count`, `deposit_remaining`, `fee_payer_balance`,
+`estimated_commits_remaining`, `estimated_session_hours_remaining`,
+`last_commit_cost`, `rolling_daily_cost` — alerting and scheduling
+planned undelegation **before** either the fee payer or the deposit is
+exhausted. `InsufficientFunds` on a scheduled commit fails the whole
+bundle; an undersized deposit is silently absorbed at undelegation (no
+debt, but the refund disappears). These values belong in the
+`tx_attempts`/keeper-health surfaces (`GET /v1/health/keepers`).
+
+### Other verified charges relevant to the demo
+
+- Base Action (post-commit L1 instruction): `price = ceil(compute_units *
+  50_000 / 1_000_000)` lamports from the delegated fee payer (a 200,000 CU
+  action costs 10,000 lamports); a callback costs an additional 5,000
+  lamports.
+- Fee-payer top-up via `lamportsDelegatedTransferIx` currently carries a
+  `300,000`-lamport setup charge (distinct from, but currently equal to, the
+  delegation session charge).
+- Ephemeral Accounts (ER-only, never commit to L1) reserve refundable
+  storage of `(data_bytes + 60) * 32` lamports.
+- Normal ER transactions are `0` in the current release; Solana transaction
+  fees are separate.
+
+Source pages: `docs.magicblock.gg/pages/ephemeral-rollups-ers/introduction/runtime-limits.md`
+and `.../fees-and-commit-economics.md` (which lists the two source
+repositories to re-check for production: `delegation-program` at commit
+`6898ef4b...` and `magicblock-validator` at commit `cec4cf57...`).
