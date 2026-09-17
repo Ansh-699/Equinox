@@ -173,6 +173,15 @@ function marketHeaderFixture(version: number): Uint8Array {
   const view = new DataView(data.buffer);
   data.set(new TextEncoder().encode("STKMRK01"), 0);
   view.setUint16(8, version, true);
+  view.setUint8(11, 1); // mode
+  data.fill(0x07, 76, 108); // emergency_authority
+  view.setUint16(194, 750, true); // maintenance_margin_bps
+  view.setUint16(198, 5, true); // maker_fee_bps
+  view.setUint16(200, 15, true); // taker_fee_bps
+  view.setBigInt64(238, 12n, true); // current_open_interest (positive fits in the low 8 bytes with correct zero sign-extension)
+  view.setBigUint64(262, 99n, true); // global_event_sequence
+  view.setBigInt64(270, 5_000n, true); // funding_accumulator low bytes
+  view.setBigUint64(286, 1_700_000_100n, true); // last_funding_timestamp
   view.setUint32(311, 512, true);
   view.setUint32(315, 91152, true);
   view.setUint32(319, 181792, true);
@@ -192,6 +201,15 @@ test("decodeMarketState golden vector: custody-ledger byte offsets match the Rus
   // Priority-4 custody ledger fields added at MARKET_VERSION 2.
   const state = decodeMarketState(marketHeaderFixture(2));
   expect(state.version).toBe(2);
+  expect(state.mode).toBe(1);
+  expect(state.emergencyAuthority.toBytes()).toEqual(new Uint8Array(32).fill(0x07));
+  expect(state.maintenanceMarginBps).toBe(750);
+  expect(state.makerFeeBps).toBe(5);
+  expect(state.takerFeeBps).toBe(15);
+  expect(state.currentOpenInterest).toBe(12n);
+  expect(state.globalEventSequence).toBe(99n);
+  expect(state.fundingAccumulator).toBe(5_000n);
+  expect(state.lastFundingTimestamp).toBe(1_700_000_100n);
   expect(state.protocolFeeBalance).toBe(111n);
   expect(state.insuranceFundBalance).toBe(222n);
   expect(state.recognizedBadDebt).toBe(333n);
