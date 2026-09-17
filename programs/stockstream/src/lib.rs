@@ -33,13 +33,13 @@ pub const ID: Address = Address::new_from_array([
     41, 46, 239, 86, 185, 49, 154, 84, 255,
 ]);
 
-// Keep the Phase 2 bounded arena and matcher implementations in the SBF
-// artifact. Instruction wiring to a market account is intentionally deferred
-// until the account initialization lifecycle is implemented in Phase 3.
-#[cfg(feature = "bpf-entrypoint")]
-#[used]
-static STOCKSTREAM_ARENA_VALIDATOR: fn(&book::Arena) -> Result<(), book::BookError> =
-    book::Arena::validate;
+// The Phase 2 `#[used] static STOCKSTREAM_ARENA_VALIDATOR` that used to live
+// here is gone: `handlers::place_order_core` now calls `Arena::validate`
+// directly on both arenas, so the arena/matcher code is reachable from the
+// entrypoint and needs no retention anchor. Removing it also drops the
+// `SHF_GNU_RETAIN` section flag LLVM emits for `#[used]` statics, which was
+// making lld tag the whole ELF `ELFOSABI_GNU` -- a header the SBF loader
+// rejects (`solana-sbpf`'s `ElfError::WrongAbi`).
 
 pub fn process_instruction(
     program_id: &Address,
