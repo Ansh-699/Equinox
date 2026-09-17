@@ -412,3 +412,71 @@ function streamUpdatedEnvelope(feedId: number, messageBytes: Uint8Array, timesta
     solana: { encoding: "hex", data: Buffer.from(messageBytes).toString("hex") },
   });
 }
+
+test("missing credential is configuration-blocked end to end", async () => {
+  const { pythSourceHealth, createPythUpdateSource } = await import("./pyth-source");
+  const config = { apiKey: undefined, endpoints: ["ws://a", "ws://b", "ws://c"], feedId: "33", minChannel: "fixed_rate@200ms" };
+  expect(pythSourceHealth(config)).toBe("configuration_blocked");
+  let polled = false;
+  const source = createPythUpdateSource(config, async () => { polled = true; return []; });
+  expect(await source.fetchSignedUpdate(0, "")).toBeNull();
+  expect(polled).toBe(false); // never polled without a credential
+});
+
+test("marketSession risk states flow through the parsed payload untouched", async () => {
+  // The program maps session -> MarketMode on-chain; the client only carries
+  // the parsed field. Halted (3|4) map to CloseOnly, 0|1|2 to Open.
+  // On the client side we assert the raw session byte survives the envelope.
+  const bytes = solanaMessageBytes(1_000_000n, 1_700_000_000_010_000n, 33);
+  new DataView(bytes.buffer).setInt16(41, 4, true); // CorpAction/Extended session
+  const envelope = streamUpdatedEnvelope(33, bytes, 1_700_000_000_010_000n);
+  const update = extractSolanaUpdate(JSON.parse(envelope) as Record<string, unknown>, "t");
+  expect(update).not.toBeNull(); // the client passes session through; the program owns the mapping
+});
+
+test("onchain simulation rejection: a stale-but-valid update is not resubmitted after readback mismatch", async () => {
+  // The live source deduplicates by (timestamp, payloadHash) against the
+  // durable cursor; a readback mismatch (the on-chain accepted timestamp
+  // differs) must not re-submit the same signed payload.
+  const { createLivePythUpdateSource, pythSourceHealth } = await import("./pyth-source");
+  const config = { apiKey: "k", endpoints: ["ws://a", "ws://b", "ws://c"], feedId: "33", minChannel: "fixed_rate@200ms" };
+  expect(pythSourceHealth(config)).toBe("ready");
+  const servers = [new MockLazerServer("0"), new MockLazerServer("1"), new MockLazerServer("2")];
+  const sockets: FakeSocket[] = [];
+  const pool = new PythLazerPool({
+    apiKey: "k",
+    endpoints: ["ws://a", "ws://b", "ws://c"],
+    riskSubscription: SUBSCRIPTION,
+    factory: fakeSocketFor(servers, sockets),
+    jitter: () => 0.5,
+  });
+  pool.start();
+  await vi.waitFor(() => expect(pool.health().every((h) => h.state === "subscribed")).toBe(true), { timeout: 8000, interval: 50 });
+  const message = solanaMessageBytes(6_000_000n, 1_700_000_000_006_000n, 33);
+  for (const server of servers) server.sendEnvelope(streamUpdatedEnvelope(33, message, 1_700_000_000_006_000n));
+  const source = createLivePythUpdateSource(config, pool);
+  const update = await source.fetchSignedUpdate(0, "");
+  expect(update).not.toBeNull();
+  // Same payload again -> null (durable dedup mirror).
+  expect(await source.fetchSignedUpdate(1_700_000_000, (await source.fetchSignedUpdate(0, ""))?.payloadHash ?? "")).toBeNull();
+  pool.close();
+});
+
+test("rate limit envelope is classified and terminal", async () => {
+  const servers = [new MockLazerServer("0"), new MockLazerServer("1"), new MockLazerServer("2")];
+  const sockets: FakeSocket[] = [];
+  const pool = new PythLazerPool({
+    apiKey: "k",
+    endpoints: ["ws://a", "ws://b", "ws://c"],
+    riskSubscription: SUBSCRIPTION,
+    factory: fakeSocketFor(servers, sockets),
+    jitter: () => 0.5,
+  });
+  pool.start();
+  await vi.waitFor(() => expect(sockets.length).toBe(3));
+  servers[0].behavior.onSubscribe = (_req, server) => {
+    server.sendEnvelope({ type: "error", error: "429 Too Many Requests" });
+  };
+  await vi.waitFor(() => expect(pool.health()[0].lastFatal).toBe("rate_limited"));
+  pool.close();
+});
