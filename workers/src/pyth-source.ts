@@ -1,18 +1,15 @@
 import type { PythUpdateSource } from "./keeper-jobs";
 
 /**
- * Concrete Pyth Pro client boundary (Priority 8, Section 5).
+ * Real Pyth Pro client boundary (Priority 12).
  *
- * The credential-independent part -- multi-endpoint dedup, timestamp-
- * regression rejection, and conflicting-payload quarantine (docs/pyth-ops.md
- * §5c) -- is real, pure, and tested here. The live `wss://pyth-lazer-*`
- * subscription itself (the `@pythnetwork/pyth-lazer-sdk` connection,
- * `PYTH_PRO_API_KEY`-authenticated) is deliberately NOT implemented: it
- * cannot be exercised, tested, or verified without a live credential this
- * session was told not to request, and stubbing it out to "look wired"
- * while never having run against the real service would be worse than
- * being explicit about the boundary. `pythSourceHealth` below is what the
- * scheduler checks instead of crashing or fabricating an update.
+ * The live `wss://pyth-lazer-{0,1,2}` subscriptions are implemented in
+ * `pyth-lazer-client.ts` (three redundant authenticated connections,
+ * activity heartbeat, bounded reconnect/resubscribe, schema validation,
+ * secret-free metrics) and exercised end to end against in-memory mock
+ * servers there. This module keeps the pure agreement/dedup/quarantine core
+ * (`docs/pyth-ops.md` §5c) and composes the live pool into the
+ * `PythUpdateSource` the keeper tick consumes.
  */
 
 export interface PythSignedUpdate {
@@ -72,12 +69,11 @@ export function reconcileEndpointUpdates(
 }
 
 /**
- * Builds a `PythUpdateSource` (the interface `runPythKeeperTick` already
- * consumes) around a caller-supplied poll function -- in production this
- * would poll the live Lazer subscriptions' latest-observed-update buffers;
- * in tests it is a fixture. Returns `null` (never throws, never fabricates)
- * whenever the client is `configuration_blocked` or the poll produces
- * nothing acceptable.
+ * Builds a `PythUpdateSource` around a caller-supplied poll function --
+ * in production this polls the live Lazer pool's latest-observed-update
+ * buffers (`createLivePythUpdateSource` below); in tests it is a fixture.
+ * Returns `null` (never throws, never fabricates) whenever the client is
+ * `configuration_blocked` or the poll produces nothing acceptable.
  */
 export function createPythUpdateSource(
   config: PythProClientConfig,
@@ -90,6 +86,39 @@ export function createPythUpdateSource(
       const { accepted } = reconcileEndpointUpdates(updates, previousTimestamp);
       if (!accepted) return null;
       return { message: accepted.message, timestamp: accepted.timestamp, payloadHash: accepted.payloadHash, feedId: accepted.feedId };
+    },
+  };
+}
+
+/**
+ * The production `PythUpdateSource`: polls the live three-endpoint
+ * Lazer pool and applies the same agreement rules (dedup, regression
+ * rejection, conflict quarantine) to whatever the endpoints observed.
+ * `redundancyHealthy()` gates submission: with two or more endpoints down
+ * the source stops feeding the risk path (one endpoint may be down during
+ * deployments; two down means the documented redundancy floor is broken).
+ */
+export function createLivePythUpdateSource(
+  config: PythProClientConfig,
+  pool: import("./pyth-lazer-client").PythLazerPool,
+): PythUpdateSource {
+  return {
+    async fetchSignedUpdate(previousTimestamp, previousPayloadHash) {
+      if (pythSourceHealth(config) !== "ready") return null;
+      if (!pool.redundancyHealthy()) return null;
+      const updates = await pool.fetchSignedUpdates();
+      const { accepted } = reconcileEndpointUpdates(updates, previousTimestamp);
+      if (!accepted) return null;
+      // Same signed update submitted twice is forbidden (docs/pyth-ops.md
+      // §5c): the durable `(timestamp, payload hash)` dedup stays
+      // authoritative, this is the in-memory mirror of it.
+      if (accepted.payloadHash === previousPayloadHash) return null;
+      return {
+        message: accepted.message,
+        timestamp: accepted.timestamp,
+        payloadHash: accepted.payloadHash,
+        feedId: accepted.feedId,
+      };
     },
   };
 }
