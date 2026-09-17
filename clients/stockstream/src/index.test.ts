@@ -2,7 +2,7 @@ import { PublicKey } from "@solana/web3.js";
 import { expect, test } from "vitest";
 import { STOCKSTREAM_PROGRAM_ID } from "./constants";
 import { MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID } from "./index";
-import { authorizeTradingSession, cancelOrder, commitMarket, createPerpMarket, decodeFillPayload, decodeInstruction, decodeMarketState, decodeSeatAmountPayload, decodeStockStreamEvent, delegateMarket, deriveTradingSession, EVENT_SIZE, initializeExchange, initializeMarket, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateStockInstrument, withdrawInsuranceFunds, withdrawProtocolFees } from "./index";
+import { authorizeTradingSession, cancelOrder, commitMarket, createPerpMarket, decodeFillPayload, decodeInstruction, decodeMarketState, decodeSeatAmountPayload, decodeStockStreamEvent, delegateMarket, deriveTradingSession, EVENT_SIZE, initializeExchange, initializeMarket, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateExchangeConfig, updateStockInstrument, withdrawInsuranceFunds, withdrawProtocolFees, EXCHANGE_CONFIG_FIELD } from "./index";
 import { STOCKSTREAM_ACCOUNT_SIZE } from "./constants";
 
 const market = PublicKey.unique();
@@ -99,6 +99,32 @@ test("registry constructors preserve market-scoped account order", () => {
   const update = updateStockInstrument({ exchange, instrument, authority }, id, 77, 1, -6);
   expect(Array.from(update.data.slice(33))).toEqual([77, 0, 0, 0, 1, 250, 255, 255, 255]);
   expect(() => updateStockInstrument({ exchange, instrument, authority }, id, 0, 1, -6)).toThrow(/non-zero/);
+});
+
+test("updateExchangeConfig derives the field mask from provided keys and writes every field at its exact offset", () => {
+  const exchange = PublicKey.unique();
+  const keeperAuthority = PublicKey.unique();
+  const ix = updateExchangeConfig(
+    { exchange, authority },
+    { makerFeeBps: 10, takerFeeBps: 20, keeperAuthority },
+    5n,
+  );
+  expect(decodeInstruction(ix.data).name).toBe("UpdateExchangeConfig");
+  expect(ix.data.length).toBe(196);
+  expect(ix.keys).toEqual([
+    { pubkey: exchange, isSigner: false, isWritable: true },
+    { pubkey: authority, isSigner: true, isWritable: false },
+  ]);
+  const view = new DataView(ix.data.buffer, ix.data.byteOffset, ix.data.byteLength);
+  const fieldMask = view.getUint32(1, true);
+  expect(fieldMask).toBe(EXCHANGE_CONFIG_FIELD.makerFeeBps | EXCHANGE_CONFIG_FIELD.takerFeeBps | EXCHANGE_CONFIG_FIELD.keeperAuthority);
+  expect(view.getUint16(101, true)).toBe(10); // makerFeeBps
+  expect(view.getUint16(103, true)).toBe(20); // takerFeeBps
+  expect(Array.from(ix.data.slice(69, 101))).toEqual(Array.from(keeperAuthority.toBytes())); // keeperAuthority
+  expect(view.getBigUint64(188, true)).toBe(5n); // expectedConfigSequence
+  // Every field not in the mask must be present but zeroed.
+  expect(Array.from(ix.data.slice(5, 37))).toEqual(new Array(32).fill(0)); // pauseAuthority
+  expect(view.getUint8(187)).toBe(0); // protocolStatus
 });
 
 test("custody fee/insurance/reconciliation constructors use canonical discriminators and account order", () => {

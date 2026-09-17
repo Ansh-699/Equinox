@@ -16,7 +16,7 @@ fn instrument_and_perp_market_addresses_are_market_scoped() {
         derive_perp_market(&ID, &apple_instrument),
         derive_perp_market(&ID, &tesla_instrument)
     );
-    assert_eq!(EXCHANGE_SIZE, 128);
+    assert_eq!(EXCHANGE_SIZE, 256);
     assert_eq!(INSTRUMENT_SIZE, 128);
 }
 

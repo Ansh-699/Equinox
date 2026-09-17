@@ -164,3 +164,43 @@ fn typescript_golden_instruction_vectors_decode_in_rust() {
         })
     ));
 }
+
+/// A `TypeScript -> Rust` golden vector for `UpdateExchangeConfig`, encoded
+/// exactly as `clients/stockstream/src/index.ts::updateExchangeConfig`
+/// would (see its matching TS test,
+/// "updateExchangeConfig derives the field mask from provided keys and
+/// writes every field at its exact offset" in
+/// `clients/stockstream/src/index.test.ts`): only `makerFeeBps`,
+/// `takerFeeBps`, and `keeperAuthority` are set.
+#[test]
+fn typescript_update_exchange_config_vector_decodes_in_rust() {
+    use stockstream::instruction::exchange_config_field as field;
+    let mut data = vec![0u8; 196];
+    data[0] = stockstream::instruction::UPDATE_EXCHANGE_CONFIG;
+    let field_mask = field::MAKER_FEE_BPS | field::TAKER_FEE_BPS | field::KEEPER_AUTHORITY;
+    data[1..5].copy_from_slice(&field_mask.to_le_bytes());
+    let keeper_authority = [42u8; 32];
+    data[69..101].copy_from_slice(&keeper_authority);
+    data[101..103].copy_from_slice(&10u16.to_le_bytes());
+    data[103..105].copy_from_slice(&20u16.to_le_bytes());
+    data[188..196].copy_from_slice(&5u64.to_le_bytes());
+    match StockStreamInstruction::decode(&data) {
+        Ok(StockStreamInstruction::UpdateExchangeConfig {
+            field_mask: decoded_mask,
+            keeper_authority: decoded_keeper,
+            maker_fee_bps,
+            taker_fee_bps,
+            pause_authority,
+            expected_config_sequence,
+            ..
+        }) => {
+            assert_eq!(decoded_mask, field_mask);
+            assert_eq!(decoded_keeper, keeper_authority);
+            assert_eq!(maker_fee_bps, 10);
+            assert_eq!(taker_fee_bps, 20);
+            assert_eq!(pause_authority, [0u8; 32]); // present on the wire, zeroed, unmasked
+            assert_eq!(expected_config_sequence, 5);
+        }
+        other => panic!("expected UpdateExchangeConfig, got {}", other.is_ok()),
+    }
+}

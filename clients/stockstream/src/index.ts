@@ -251,6 +251,94 @@ export function reconcileVault(accounts: ReconcileAccounts): TransactionInstruct
   ]);
 }
 
+/** Mirrors `programs/stockstream/src/instruction.rs::exchange_config_field`
+ * exactly -- one bit per `UpdateExchangeConfig` field. */
+export const EXCHANGE_CONFIG_FIELD = {
+  pauseAuthority: 1 << 0,
+  emergencyAuthority: 1 << 1,
+  keeperAuthority: 1 << 2,
+  makerFeeBps: 1 << 3,
+  takerFeeBps: 1 << 4,
+  liquidationFeeBps: 1 << 5,
+  defaultInitialMarginBps: 1 << 6,
+  defaultMaintenanceMarginBps: 1 << 7,
+  defaultMaximumLeverage: 1 << 8,
+  collateralMint: 1 << 9,
+  oracleProgram: 1 << 10,
+  insuranceTargetBalance: 1 << 11,
+  protocolStatus: 1 << 12,
+} as const;
+
+export interface UpdateExchangeConfigFields {
+  pauseAuthority?: AddressInput;
+  emergencyAuthority?: AddressInput;
+  keeperAuthority?: AddressInput;
+  makerFeeBps?: number;
+  takerFeeBps?: number;
+  liquidationFeeBps?: number;
+  defaultInitialMarginBps?: number;
+  defaultMaintenanceMarginBps?: number;
+  defaultMaximumLeverage?: number;
+  collateralMint?: AddressInput;
+  oracleProgram?: AddressInput;
+  insuranceTargetBalance?: bigint | number;
+  protocolStatus?: number;
+}
+
+/**
+ * Only the fields present as keys of `fields` are applied on-chain (the
+ * field mask is derived from which keys are set, not their value) --
+ * every other field is still present on the wire, zeroed, exactly
+ * matching `programs/stockstream/src/instruction.rs`'s fixed 196-byte
+ * `UpdateExchangeConfig` layout. `expectedConfigSequence` must equal the
+ * exchange account's current `config_sequence` (read it from the account
+ * first) or the instruction is rejected as a stale concurrent update.
+ */
+export function updateExchangeConfig(
+  accounts: RegistryAccounts,
+  fields: UpdateExchangeConfigFields,
+  expectedConfigSequence: bigint | number,
+): TransactionInstruction {
+  let fieldMask = 0;
+  const data = new Uint8Array(196);
+  data[0] = STOCKSTREAM_INSTRUCTION.updateExchangeConfig;
+  const writePubkeyField = (offset: number, bit: number, value: AddressInput | undefined) => {
+    if (value === undefined) return;
+    fieldMask |= bit;
+    data.set(publicKey(value).toBytes(), offset);
+  };
+  const writeU16Field = (offset: number, bit: number, value: number | undefined) => {
+    if (value === undefined) return;
+    fieldMask |= bit;
+    writeUnsigned(data, offset, checkedUnsigned(value, 16, "value"), 2);
+  };
+  writePubkeyField(5, EXCHANGE_CONFIG_FIELD.pauseAuthority, fields.pauseAuthority);
+  writePubkeyField(37, EXCHANGE_CONFIG_FIELD.emergencyAuthority, fields.emergencyAuthority);
+  writePubkeyField(69, EXCHANGE_CONFIG_FIELD.keeperAuthority, fields.keeperAuthority);
+  writeU16Field(101, EXCHANGE_CONFIG_FIELD.makerFeeBps, fields.makerFeeBps);
+  writeU16Field(103, EXCHANGE_CONFIG_FIELD.takerFeeBps, fields.takerFeeBps);
+  writeU16Field(105, EXCHANGE_CONFIG_FIELD.liquidationFeeBps, fields.liquidationFeeBps);
+  writeU16Field(107, EXCHANGE_CONFIG_FIELD.defaultInitialMarginBps, fields.defaultInitialMarginBps);
+  writeU16Field(109, EXCHANGE_CONFIG_FIELD.defaultMaintenanceMarginBps, fields.defaultMaintenanceMarginBps);
+  if (fields.defaultMaximumLeverage !== undefined) {
+    fieldMask |= EXCHANGE_CONFIG_FIELD.defaultMaximumLeverage;
+    writeUnsigned(data, 111, checkedUnsigned(fields.defaultMaximumLeverage, 32, "defaultMaximumLeverage"), 4);
+  }
+  writePubkeyField(115, EXCHANGE_CONFIG_FIELD.collateralMint, fields.collateralMint);
+  writePubkeyField(147, EXCHANGE_CONFIG_FIELD.oracleProgram, fields.oracleProgram);
+  if (fields.insuranceTargetBalance !== undefined) {
+    fieldMask |= EXCHANGE_CONFIG_FIELD.insuranceTargetBalance;
+    writeUnsigned(data, 179, checkedUnsigned(fields.insuranceTargetBalance, 64, "insuranceTargetBalance"), 8);
+  }
+  if (fields.protocolStatus !== undefined) {
+    fieldMask |= EXCHANGE_CONFIG_FIELD.protocolStatus;
+    data[187] = fields.protocolStatus;
+  }
+  writeUnsigned(data, 1, BigInt(fieldMask), 4);
+  writeUnsigned(data, 188, checkedUnsigned(expectedConfigSequence, 64, "expectedConfigSequence"), 8);
+  return instruction(data, [accountMeta(accounts.exchange, false, true), accountMeta(accounts.authority, true, false)]);
+}
+
 // ---------------------------------------------------------------------
 // Priority 7: the complete, versioned, binary StockStream event ABI
 // (`programs/stockstream/src/events.rs`). Every event is one real
@@ -583,7 +671,7 @@ export function transitionMarket(accounts: InstructionAccounts, mode: "pause" | 
 
 export function decodeInstruction(data: Uint8Array): InstructionFixture {
   if (data.length === 0) throw new RangeError("Empty instruction");
-  const names: Record<number, string> = { 0: "InitializeMarket", 1: "CreateTraderSeat", 2: "CloseTraderSeat", 3: "PlaceOrder", 4: "CancelOrder", 5: "CancelAll", 6: "UpdateFunding", 7: "Liquidate", 8: "InitializeSettlementScratch", 9: "InitializeVault", 10: "DepositCollateral", 11: "WithdrawCollateral", 12: "ConsumeOracleUpdate", 13: "DelegateMarket", 14: "CommitMarket", 15: "CommitAndUndelegate", 16: "UndelegationCallback", 17: "AuthorizeTradingSession", 18: "RevokeTradingSession", 19: "InitializeExchange", 20: "RegisterStockInstrument", 21: "CreatePerpMarket", 22: "UpdateStockInstrument", 23: "SuspendStockInstrument", 24: "UpdateMarketRisk", 25: "PauseMarket", 26: "ResumeMarket", 27: "SetCloseOnly", 28: "EnterCorporateAction", 29: "ResolveCorporateAction", 30: "CloseMarket", 31: "UpdateTradingSessionLimits", 32: "CloseTradingSession", 33: "ReplaceOrder", 34: "TransferToInsuranceFund", 35: "WithdrawProtocolFees", 36: "WithdrawInsuranceFunds", 37: "RecordBadDebt", 38: "ResolveBadDebt", 39: "ReconcileVault" };
+  const names: Record<number, string> = { 0: "InitializeMarket", 1: "CreateTraderSeat", 2: "CloseTraderSeat", 3: "PlaceOrder", 4: "CancelOrder", 5: "CancelAll", 6: "UpdateFunding", 7: "Liquidate", 8: "InitializeSettlementScratch", 9: "InitializeVault", 10: "DepositCollateral", 11: "WithdrawCollateral", 12: "ConsumeOracleUpdate", 13: "DelegateMarket", 14: "CommitMarket", 15: "CommitAndUndelegate", 16: "UndelegationCallback", 17: "AuthorizeTradingSession", 18: "RevokeTradingSession", 19: "InitializeExchange", 20: "RegisterStockInstrument", 21: "CreatePerpMarket", 22: "UpdateStockInstrument", 23: "SuspendStockInstrument", 24: "UpdateMarketRisk", 25: "PauseMarket", 26: "ResumeMarket", 27: "SetCloseOnly", 28: "EnterCorporateAction", 29: "ResolveCorporateAction", 30: "CloseMarket", 31: "UpdateTradingSessionLimits", 32: "CloseTradingSession", 33: "ReplaceOrder", 34: "TransferToInsuranceFund", 35: "WithdrawProtocolFees", 36: "WithdrawInsuranceFunds", 37: "RecordBadDebt", 38: "ResolveBadDebt", 39: "ReconcileVault", 40: "UpdateExchangeConfig" };
   const name = names[data[0]];
   if (!name) throw new RangeError("Unknown instruction");
   return { name, data: data.slice() };
