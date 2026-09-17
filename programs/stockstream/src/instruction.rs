@@ -46,6 +46,35 @@ pub const WITHDRAW_INSURANCE_FUNDS: u8 = 36;
 pub const RECORD_BAD_DEBT: u8 = 37;
 pub const RESOLVE_BAD_DEBT: u8 = 38;
 pub const RECONCILE_VAULT: u8 = 39;
+pub const UPDATE_EXCHANGE_CONFIG: u8 = 40;
+
+/// One bit per `UpdateExchangeConfig` field. A field is applied only when
+/// its bit is set in the instruction's `field_mask`; every other field in
+/// the fixed-layout payload is present on the wire (so the encoding is
+/// never ambiguous-length) but ignored. `authority` (the exchange's
+/// listing identity) and `instrument_count` (a derived counter) have no
+/// bit at all -- they are not updatable through this instruction by
+/// construction, not merely by convention.
+pub mod exchange_config_field {
+    pub const PAUSE_AUTHORITY: u32 = 1 << 0;
+    pub const EMERGENCY_AUTHORITY: u32 = 1 << 1;
+    pub const KEEPER_AUTHORITY: u32 = 1 << 2;
+    pub const MAKER_FEE_BPS: u32 = 1 << 3;
+    pub const TAKER_FEE_BPS: u32 = 1 << 4;
+    pub const LIQUIDATION_FEE_BPS: u32 = 1 << 5;
+    pub const DEFAULT_INITIAL_MARGIN_BPS: u32 = 1 << 6;
+    pub const DEFAULT_MAINTENANCE_MARGIN_BPS: u32 = 1 << 7;
+    pub const DEFAULT_MAXIMUM_LEVERAGE: u32 = 1 << 8;
+    pub const COLLATERAL_MINT: u32 = 1 << 9;
+    pub const ORACLE_PROGRAM: u32 = 1 << 10;
+    pub const INSURANCE_TARGET_BALANCE: u32 = 1 << 11;
+    pub const PROTOCOL_STATUS: u32 = 1 << 12;
+    /// Bits beyond this are reserved for future fields; a caller setting
+    /// one today is almost certainly a bug (a client built against a
+    /// newer field than this program version understands), so `decode`
+    /// rejects it outright rather than silently ignoring it.
+    pub const ALL_KNOWN: u32 = (1 << 13) - 1;
+}
 
 #[derive(Clone, Copy)]
 pub struct PlaceOrderData {
@@ -225,6 +254,27 @@ pub enum StockStreamInstruction {
     /// seat's `available_collateral` plus the fee/insurance ledgers minus
     /// recognized bad debt, and records the result.
     ReconcileVault,
+    UpdateExchangeConfig {
+        field_mask: u32,
+        pause_authority: [u8; 32],
+        emergency_authority: [u8; 32],
+        keeper_authority: [u8; 32],
+        maker_fee_bps: u16,
+        taker_fee_bps: u16,
+        liquidation_fee_bps: u16,
+        default_initial_margin_bps: u16,
+        default_maintenance_margin_bps: u16,
+        default_maximum_leverage: u32,
+        collateral_mint: [u8; 32],
+        oracle_program: [u8; 32],
+        insurance_target_balance: u64,
+        protocol_status: u8,
+        /// Rejected unless it equals the exchange account's current
+        /// `config_sequence` -- a stale read-modify-write race against a
+        /// concurrent update is rejected rather than silently
+        /// overwriting it.
+        expected_config_sequence: u64,
+    },
 }
 
 fn read_u16(data: &[u8], start: usize) -> Option<u16> {
@@ -447,6 +497,47 @@ impl StockStreamInstruction {
                 amount: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
             }),
             Some(RECONCILE_VAULT) if data.len() == 1 => Ok(Self::ReconcileVault),
+            Some(UPDATE_EXCHANGE_CONFIG) if data.len() == 196 => {
+                let field_mask = read_u32(data, 1).ok_or(ProgramError::InvalidInstructionData)?;
+                if field_mask & !exchange_config_field::ALL_KNOWN != 0 {
+                    return Err(ProgramError::InvalidInstructionData);
+                }
+                Ok(Self::UpdateExchangeConfig {
+                    field_mask,
+                    pause_authority: data[5..37]
+                        .try_into()
+                        .map_err(|_| ProgramError::InvalidInstructionData)?,
+                    emergency_authority: data[37..69]
+                        .try_into()
+                        .map_err(|_| ProgramError::InvalidInstructionData)?,
+                    keeper_authority: data[69..101]
+                        .try_into()
+                        .map_err(|_| ProgramError::InvalidInstructionData)?,
+                    maker_fee_bps: read_u16(data, 101)
+                        .ok_or(ProgramError::InvalidInstructionData)?,
+                    taker_fee_bps: read_u16(data, 103)
+                        .ok_or(ProgramError::InvalidInstructionData)?,
+                    liquidation_fee_bps: read_u16(data, 105)
+                        .ok_or(ProgramError::InvalidInstructionData)?,
+                    default_initial_margin_bps: read_u16(data, 107)
+                        .ok_or(ProgramError::InvalidInstructionData)?,
+                    default_maintenance_margin_bps: read_u16(data, 109)
+                        .ok_or(ProgramError::InvalidInstructionData)?,
+                    default_maximum_leverage: read_u32(data, 111)
+                        .ok_or(ProgramError::InvalidInstructionData)?,
+                    collateral_mint: data[115..147]
+                        .try_into()
+                        .map_err(|_| ProgramError::InvalidInstructionData)?,
+                    oracle_program: data[147..179]
+                        .try_into()
+                        .map_err(|_| ProgramError::InvalidInstructionData)?,
+                    insurance_target_balance: read_u64(data, 179)
+                        .ok_or(ProgramError::InvalidInstructionData)?,
+                    protocol_status: data[187],
+                    expected_config_sequence: read_u64(data, 188)
+                        .ok_or(ProgramError::InvalidInstructionData)?,
+                })
+            }
             _ => Err(ProgramError::InvalidInstructionData),
         }
     }

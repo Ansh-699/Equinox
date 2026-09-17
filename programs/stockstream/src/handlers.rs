@@ -513,6 +513,43 @@ pub fn dispatch(
             resolve_bad_debt(program_id, accounts, amount)
         }
         StockStreamInstruction::ReconcileVault => reconcile_vault(program_id, accounts),
+        StockStreamInstruction::UpdateExchangeConfig {
+            field_mask,
+            pause_authority,
+            emergency_authority,
+            keeper_authority,
+            maker_fee_bps,
+            taker_fee_bps,
+            liquidation_fee_bps,
+            default_initial_margin_bps,
+            default_maintenance_margin_bps,
+            default_maximum_leverage,
+            collateral_mint,
+            oracle_program,
+            insurance_target_balance,
+            protocol_status,
+            expected_config_sequence,
+        } => crate::registry::update_exchange_config(
+            program_id,
+            accounts,
+            crate::registry::UpdateExchangeConfigInput {
+                field_mask,
+                pause_authority,
+                emergency_authority,
+                keeper_authority,
+                maker_fee_bps,
+                taker_fee_bps,
+                liquidation_fee_bps,
+                default_initial_margin_bps,
+                default_maintenance_margin_bps,
+                default_maximum_leverage,
+                collateral_mint,
+                oracle_program,
+                insurance_target_balance,
+                protocol_status,
+                expected_config_sequence,
+            },
+        ),
     }
 }
 

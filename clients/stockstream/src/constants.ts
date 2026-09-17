@@ -41,6 +41,7 @@ export const STOCKSTREAM_INSTRUCTION = {
   recordBadDebt: 37,
   resolveBadDebt: 38,
   reconcileVault: 39,
+  updateExchangeConfig: 40,
 } as const;
 
 export const STOCKSTREAM_ACCOUNT_SIZE = 222_752;

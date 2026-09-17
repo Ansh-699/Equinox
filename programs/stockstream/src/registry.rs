@@ -4,8 +4,11 @@ use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
 
 use crate::{
     error::StockStreamError,
-    events::{emit_event, payload_empty, payload_registry, EventKind},
+    events::{
+        emit_event, payload_empty, payload_registry, payload_seat_amount, EventKind, NO_SEAT,
+    },
     handlers,
+    instruction::exchange_config_field as field,
 };
 
 /// Registry-level events (Exchange/StockInstrument/PerpMarketCreated) have
@@ -22,9 +25,27 @@ const REGISTRY_EVENT_SEQUENCE: u64 = 0;
 pub const EXCHANGE_DISCRIMINATOR: [u8; 8] = *b"STKEXC01";
 pub const INSTRUMENT_DISCRIMINATOR: [u8; 8] = *b"STKINS01";
 pub const INSTRUMENT_SIZE: usize = 128;
-pub const EXCHANGE_SIZE: usize = 128;
+/// Bumped from 1: `ExchangeConfig` grew from a bare identity record
+/// (authority + instrument count) to hold the governance-mutable fields
+/// `UpdateExchangeConfig` operates on (authorities, default fee/risk
+/// parameters, collateral/oracle policy, insurance target, protocol
+/// status, a config sequence). StockStream has never been deployed, so
+/// this is a clean layout change, not a migration.
+pub const EXCHANGE_CONFIG_VERSION: u16 = 2;
+pub const EXCHANGE_SIZE: usize = 256;
 pub const INSTRUMENT_SEED: &[u8] = b"instrument";
 pub const PERP_MARKET_SEED: &[u8] = b"perp-market";
+
+/// Hard governance safety rails for `UpdateExchangeConfig` -- not
+/// business requirements copied from elsewhere (no exchange-level fee/risk
+/// bound existed anywhere in this codebase before), but conservative,
+/// explicit caps a malicious or fat-fingered exchange authority cannot
+/// exceed even with full signing authority. `BPS_DENOMINATOR` (10_000)
+/// is the existing basis-point convention this program already uses
+/// (`risk.rs`).
+pub const MAX_FEE_BPS: u16 = 1_000; // 10%
+pub const MAX_MARGIN_BPS: u16 = 10_000; // 100%
+pub const MAX_DEFAULT_LEVERAGE: u32 = 125;
 
 #[repr(C, packed(1))]
 #[derive(Clone, Copy)]
@@ -32,11 +53,66 @@ pub struct ExchangeConfig {
     pub discriminator: [u8; 8],
     pub version: u16,
     pub initialized: u8,
+    /// Listing/registration authority -- the exchange's immutable
+    /// identity. `UpdateExchangeConfig` never changes this; rotating it
+    /// would need a distinct, explicitly-named instruction (e.g. a
+    /// two-step authority transfer), not a field-mask update, so that a
+    /// governance mistake can't silently hand away exchange control.
     pub authority: [u8; 32],
     pub instrument_count: u32,
-    pub reserved: [u8; 81],
+    pub pause_authority: [u8; 32],
+    pub emergency_authority: [u8; 32],
+    pub keeper_authority: [u8; 32],
+    pub maker_fee_bps: u16,
+    pub taker_fee_bps: u16,
+    pub liquidation_fee_bps: u16,
+    pub default_initial_margin_bps: u16,
+    pub default_maintenance_margin_bps: u16,
+    pub default_maximum_leverage: u32,
+    /// The single collateral mint new markets are expected to use.
+    /// Deliberately minimal (one mint, not a whitelist): every other
+    /// custody path in this program already assumes one collateral mint
+    /// per market (`MarketStateHeader.collateral_mint`); this is that
+    /// same policy expressed once at the exchange level as the default/
+    /// enforced choice, not a new multi-asset design.
+    pub collateral_mint: [u8; 32],
+    /// The single oracle program markets are expected to verify updates
+    /// against (e.g. the Pyth Lazer Solana contract's program id).
+    pub oracle_program: [u8; 32],
+    pub insurance_target_balance: u64,
+    pub protocol_status: u8,
+    /// Increments on every successful `UpdateExchangeConfig`. Lets a
+    /// caller submit `expected_config_sequence` to detect and reject a
+    /// stale read-modify-write race against a concurrent update, the same
+    /// optimistic-concurrency role `session_generation` plays for trading
+    /// sessions.
+    pub config_sequence: u64,
+    pub reserved: [u8; 18],
 }
 const _: [(); EXCHANGE_SIZE] = [(); size_of::<ExchangeConfig>()];
+
+/// `ProtocolStatus` for `ExchangeConfig.protocol_status`. Exchange-wide,
+/// distinct from any single market's own `MarketMode`: `Halted` is a
+/// stronger, exchange-level circuit breaker a keeper/UI can check before
+/// acting on *any* market, independent of each market's individual mode.
+#[repr(u8)]
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum ProtocolStatus {
+    Active = 0,
+    Paused = 1,
+    Halted = 2,
+}
+
+impl ProtocolStatus {
+    pub fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Active),
+            1 => Some(Self::Paused),
+            2 => Some(Self::Halted),
+            _ => None,
+        }
+    }
+}
 
 #[repr(C, packed(1))]
 #[derive(Clone, Copy)]
@@ -100,7 +176,7 @@ fn validate_registry_accounts(program_id: &Address, accounts: &[AccountView]) ->
     let exchange = accounts[0].try_borrow()?;
     if exchange.len() != EXCHANGE_SIZE
         || exchange[..8] != EXCHANGE_DISCRIMINATOR
-        || exchange[8..10] != 1u16.to_le_bytes()
+        || exchange[8..10] != EXCHANGE_CONFIG_VERSION.to_le_bytes()
         || exchange[10] != 1
         || exchange[11..43] != accounts[2].address().to_bytes()
     {
@@ -123,9 +199,17 @@ pub fn initialize_exchange(program_id: &Address, accounts: &mut [AccountView]) -
     }
     data.fill(0);
     data[0..8].copy_from_slice(&EXCHANGE_DISCRIMINATOR);
-    data[8..10].copy_from_slice(&1u16.to_le_bytes());
+    data[8..10].copy_from_slice(&EXCHANGE_CONFIG_VERSION.to_le_bytes());
     data[10] = 1;
     data[11..43].copy_from_slice(&authority);
+    // Every governance-mutable field starts at a safe, explicit default:
+    // no pause/emergency/keeper authority (all-zero, so any instruction
+    // gated on one of them must be explicitly configured via
+    // `UpdateExchangeConfig` before it can be used), zero fees, and
+    // `ProtocolStatus::Active`. `data.fill(0)` above already zeroed
+    // authorities/fees/mints/insurance target; only `protocol_status`
+    // needs an explicit non-zero-coincidence value, and `Active == 0`
+    // already matches that zeroed state.
     emit_event(
         EventKind::ExchangeInitialized,
         &accounts[0].address().to_bytes(),
@@ -302,6 +386,220 @@ pub fn create_perp_market(
         REGISTRY_EVENT_SEQUENCE,
         handlers::event_timestamp(),
         &payload_registry(&id),
+    );
+    Ok(())
+}
+
+/// Byte offsets within `ExchangeConfig`'s raw account data (packed(1), so
+/// tightly packed with no alignment gaps -- matches the struct's own field
+/// order exactly). Kept as named offsets rather than pointer-casting to
+/// the struct, consistent with every other function in this file.
+mod exchange_offset {
+    pub const PAUSE_AUTHORITY: usize = 47;
+    pub const EMERGENCY_AUTHORITY: usize = 79;
+    pub const KEEPER_AUTHORITY: usize = 111;
+    pub const MAKER_FEE_BPS: usize = 143;
+    pub const TAKER_FEE_BPS: usize = 145;
+    pub const LIQUIDATION_FEE_BPS: usize = 147;
+    pub const DEFAULT_INITIAL_MARGIN_BPS: usize = 149;
+    pub const DEFAULT_MAINTENANCE_MARGIN_BPS: usize = 151;
+    pub const DEFAULT_MAXIMUM_LEVERAGE: usize = 153;
+    pub const COLLATERAL_MINT: usize = 157;
+    pub const ORACLE_PROGRAM: usize = 189;
+    pub const INSURANCE_TARGET_BALANCE: usize = 221;
+    pub const PROTOCOL_STATUS: usize = 229;
+    pub const CONFIG_SEQUENCE: usize = 230;
+}
+
+pub struct UpdateExchangeConfigInput {
+    pub field_mask: u32,
+    pub pause_authority: [u8; 32],
+    pub emergency_authority: [u8; 32],
+    pub keeper_authority: [u8; 32],
+    pub maker_fee_bps: u16,
+    pub taker_fee_bps: u16,
+    pub liquidation_fee_bps: u16,
+    pub default_initial_margin_bps: u16,
+    pub default_maintenance_margin_bps: u16,
+    pub default_maximum_leverage: u32,
+    pub collateral_mint: [u8; 32],
+    pub oracle_program: [u8; 32],
+    pub insurance_target_balance: u64,
+    pub protocol_status: u8,
+    pub expected_config_sequence: u64,
+}
+
+/// Accounts: `[exchange (writable), authority (signer)]`. Applies only
+/// the fields named in `input.field_mask`; every other field in `input`
+/// is present on the wire (fixed-length, unambiguous decode) but ignored.
+/// Never touches `authority` (the exchange's listing identity) or
+/// `instrument_count` (derived) -- there is no field-mask bit for either.
+pub fn update_exchange_config(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    input: UpdateExchangeConfigInput,
+) -> ProgramResult {
+    if accounts.len() < 2 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    if !accounts[1].is_signer() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    if input.field_mask & !crate::instruction::exchange_config_field::ALL_KNOWN != 0 {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let authority = accounts[1].address().to_bytes();
+    let exchange_key = accounts[0].address().to_bytes();
+    let data = account_data(&mut accounts[0], program_id, EXCHANGE_SIZE)?;
+    if data[0..8] != EXCHANGE_DISCRIMINATOR
+        || data[8..10] != EXCHANGE_CONFIG_VERSION.to_le_bytes()
+        || data[10] == 0
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    // Require the current exchange authority: the same immutable listing
+    // authority `initialize_exchange` set, never a pause/emergency/keeper
+    // authority (those are themselves only settable *by* this check).
+    if data[11..43] != authority {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let current_sequence = u64::from_le_bytes(
+        data[exchange_offset::CONFIG_SEQUENCE..exchange_offset::CONFIG_SEQUENCE + 8]
+            .try_into()
+            .unwrap(),
+    );
+    if input.expected_config_sequence != current_sequence {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    // Reject a no-op update outright: a field mask of zero changes
+    // nothing and would otherwise silently succeed while only bumping
+    // the sequence, which is not useful and likely a caller bug.
+    if input.field_mask == 0 {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    if input.field_mask & field::MAKER_FEE_BPS != 0 && input.maker_fee_bps > MAX_FEE_BPS
+        || input.field_mask & field::TAKER_FEE_BPS != 0 && input.taker_fee_bps > MAX_FEE_BPS
+        || input.field_mask & field::LIQUIDATION_FEE_BPS != 0
+            && input.liquidation_fee_bps > MAX_FEE_BPS
+    {
+        return Err(custom(StockStreamError::RiskViolation));
+    }
+    let initial_margin = if input.field_mask & field::DEFAULT_INITIAL_MARGIN_BPS != 0 {
+        input.default_initial_margin_bps
+    } else {
+        u16::from_le_bytes(
+            data[exchange_offset::DEFAULT_INITIAL_MARGIN_BPS
+                ..exchange_offset::DEFAULT_INITIAL_MARGIN_BPS + 2]
+                .try_into()
+                .unwrap(),
+        )
+    };
+    let maintenance_margin = if input.field_mask & field::DEFAULT_MAINTENANCE_MARGIN_BPS != 0 {
+        input.default_maintenance_margin_bps
+    } else {
+        u16::from_le_bytes(
+            data[exchange_offset::DEFAULT_MAINTENANCE_MARGIN_BPS
+                ..exchange_offset::DEFAULT_MAINTENANCE_MARGIN_BPS + 2]
+                .try_into()
+                .unwrap(),
+        )
+    };
+    if input.field_mask
+        & (field::DEFAULT_INITIAL_MARGIN_BPS | field::DEFAULT_MAINTENANCE_MARGIN_BPS)
+        != 0
+        && (initial_margin == 0
+            || maintenance_margin == 0
+            || initial_margin > MAX_MARGIN_BPS
+            || maintenance_margin > initial_margin)
+    {
+        return Err(custom(StockStreamError::RiskViolation));
+    }
+    if input.field_mask & field::DEFAULT_MAXIMUM_LEVERAGE != 0
+        && (input.default_maximum_leverage == 0
+            || input.default_maximum_leverage > MAX_DEFAULT_LEVERAGE)
+    {
+        return Err(custom(StockStreamError::RiskViolation));
+    }
+    if input.field_mask & field::PAUSE_AUTHORITY != 0 && input.pause_authority == [0u8; 32]
+        || input.field_mask & field::EMERGENCY_AUTHORITY != 0
+            && input.emergency_authority == [0u8; 32]
+        || input.field_mask & field::KEEPER_AUTHORITY != 0 && input.keeper_authority == [0u8; 32]
+        || input.field_mask & field::COLLATERAL_MINT != 0 && input.collateral_mint == [0u8; 32]
+        || input.field_mask & field::ORACLE_PROGRAM != 0 && input.oracle_program == [0u8; 32]
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    if input.field_mask & field::PROTOCOL_STATUS != 0
+        && ProtocolStatus::from_u8(input.protocol_status).is_none()
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    if input.field_mask & field::PAUSE_AUTHORITY != 0 {
+        data[exchange_offset::PAUSE_AUTHORITY..exchange_offset::PAUSE_AUTHORITY + 32]
+            .copy_from_slice(&input.pause_authority);
+    }
+    if input.field_mask & field::EMERGENCY_AUTHORITY != 0 {
+        data[exchange_offset::EMERGENCY_AUTHORITY..exchange_offset::EMERGENCY_AUTHORITY + 32]
+            .copy_from_slice(&input.emergency_authority);
+    }
+    if input.field_mask & field::KEEPER_AUTHORITY != 0 {
+        data[exchange_offset::KEEPER_AUTHORITY..exchange_offset::KEEPER_AUTHORITY + 32]
+            .copy_from_slice(&input.keeper_authority);
+    }
+    if input.field_mask & field::MAKER_FEE_BPS != 0 {
+        data[exchange_offset::MAKER_FEE_BPS..exchange_offset::MAKER_FEE_BPS + 2]
+            .copy_from_slice(&input.maker_fee_bps.to_le_bytes());
+    }
+    if input.field_mask & field::TAKER_FEE_BPS != 0 {
+        data[exchange_offset::TAKER_FEE_BPS..exchange_offset::TAKER_FEE_BPS + 2]
+            .copy_from_slice(&input.taker_fee_bps.to_le_bytes());
+    }
+    if input.field_mask & field::LIQUIDATION_FEE_BPS != 0 {
+        data[exchange_offset::LIQUIDATION_FEE_BPS..exchange_offset::LIQUIDATION_FEE_BPS + 2]
+            .copy_from_slice(&input.liquidation_fee_bps.to_le_bytes());
+    }
+    if input.field_mask & field::DEFAULT_INITIAL_MARGIN_BPS != 0 {
+        data[exchange_offset::DEFAULT_INITIAL_MARGIN_BPS
+            ..exchange_offset::DEFAULT_INITIAL_MARGIN_BPS + 2]
+            .copy_from_slice(&input.default_initial_margin_bps.to_le_bytes());
+    }
+    if input.field_mask & field::DEFAULT_MAINTENANCE_MARGIN_BPS != 0 {
+        data[exchange_offset::DEFAULT_MAINTENANCE_MARGIN_BPS
+            ..exchange_offset::DEFAULT_MAINTENANCE_MARGIN_BPS + 2]
+            .copy_from_slice(&input.default_maintenance_margin_bps.to_le_bytes());
+    }
+    if input.field_mask & field::DEFAULT_MAXIMUM_LEVERAGE != 0 {
+        data[exchange_offset::DEFAULT_MAXIMUM_LEVERAGE
+            ..exchange_offset::DEFAULT_MAXIMUM_LEVERAGE + 4]
+            .copy_from_slice(&input.default_maximum_leverage.to_le_bytes());
+    }
+    if input.field_mask & field::COLLATERAL_MINT != 0 {
+        data[exchange_offset::COLLATERAL_MINT..exchange_offset::COLLATERAL_MINT + 32]
+            .copy_from_slice(&input.collateral_mint);
+    }
+    if input.field_mask & field::ORACLE_PROGRAM != 0 {
+        data[exchange_offset::ORACLE_PROGRAM..exchange_offset::ORACLE_PROGRAM + 32]
+            .copy_from_slice(&input.oracle_program);
+    }
+    if input.field_mask & field::INSURANCE_TARGET_BALANCE != 0 {
+        data[exchange_offset::INSURANCE_TARGET_BALANCE
+            ..exchange_offset::INSURANCE_TARGET_BALANCE + 8]
+            .copy_from_slice(&input.insurance_target_balance.to_le_bytes());
+    }
+    if input.field_mask & field::PROTOCOL_STATUS != 0 {
+        data[exchange_offset::PROTOCOL_STATUS] = input.protocol_status;
+    }
+    let new_sequence = current_sequence
+        .checked_add(1)
+        .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
+    data[exchange_offset::CONFIG_SEQUENCE..exchange_offset::CONFIG_SEQUENCE + 8]
+        .copy_from_slice(&new_sequence.to_le_bytes());
+    emit_event(
+        EventKind::ExchangeConfigUpdated,
+        &exchange_key,
+        REGISTRY_EVENT_SEQUENCE,
+        handlers::event_timestamp(),
+        &payload_seat_amount(NO_SEAT, input.field_mask as u64, new_sequence),
     );
     Ok(())
 }
