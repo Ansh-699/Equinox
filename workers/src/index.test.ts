@@ -1,6 +1,6 @@
 import { SELF, applyD1Migrations, env } from 'cloudflare:test';
 import { beforeAll, expect, it, vi } from 'vitest';
-import { runIngestionTick } from './index';
+import { fetchExecutionStatus, runIngestionTick } from './index';
 import { eventLogLine } from './test-event-fixtures';
 
 const bindings = env as Env & { TEST_MIGRATIONS: Parameters<typeof applyD1Migrations>[1] };
@@ -81,6 +81,37 @@ it('runIngestionTick polls a registered market, decodes a real custody log, and 
 it('runIngestionTick is a no-op when no RPC endpoint is configured, rather than throwing', async () => {
   const result = await runIngestionTick({ ...bindings, SOLANA_RPC_URL: undefined } as unknown as Env);
   expect(result).toEqual({ marketsPolled: 0, eventsIngested: 0 });
+});
+
+it('fetchExecutionStatus reconciles from real transports, persists, and publishes to the Durable Object', async () => {
+  const market = {
+    symbol: 'EXEC-PERP', instrumentId: 'instrument-exec', marketIndex: 900,
+    marketPda: 'exec-market', vaultPda: 'exec-vault', status: 'active',
+    oracleFeedId: 'unverified-fixture', sessionPolicy: 'regular',
+  };
+  expect((await SELF.fetch(request('/v1/ingest/market', market))).status).toBe(202);
+
+  const marketBytes = new Uint8Array(500);
+  marketBytes[329] = 1; // DelegationStatus::Delegated
+  let binary = ''; for (const b of marketBytes) binary += String.fromCharCode(b);
+  const accountResponse = Response.json({ jsonrpc: '2.0', id: 1, result: { context: { slot: 10 }, value: { data: [btoa(binary), 'base64'], owner: 'prog', lamports: 1 } } });
+  const fetcher = vi.fn(async () => accountResponse.clone()) as unknown as typeof fetch;
+
+  const stream = env.MARKET_STREAM!.getByName('EXEC-PERP');
+  const result = await fetchExecutionStatus({ ...bindings, SOLANA_RPC_URL: 'https://l1.fixture.test' } as unknown as Env, 'EXEC-PERP', stream, fetcher);
+  expect(result).not.toBe('not_found');
+  expect(result).not.toBeUndefined();
+  expect((result as { status: string }).status).toBe('er_active');
+  expect((result as { withdrawalDisplaySafe: boolean }).withdrawalDisplaySafe).toBe(false);
+
+  const persisted = await bindings.DB!.prepare('SELECT status FROM execution_status WHERE market_pda=?').bind('exec-market').first<{ status: string }>();
+  expect(persisted?.status).toBe('er_active');
+});
+
+it('fetchExecutionStatus reports undefined without an RPC endpoint configured, and not_found for an unregistered market', async () => {
+  expect(await fetchExecutionStatus({ ...bindings, SOLANA_RPC_URL: undefined } as unknown as Env, 'EXEC-PERP', env.MARKET_STREAM!.getByName('x'))).toBeUndefined();
+  const fetcher = vi.fn() as unknown as typeof fetch;
+  expect(await fetchExecutionStatus({ ...bindings, SOLANA_RPC_URL: 'https://l1.fixture.test' } as unknown as Env, 'NOPE-PERP', env.MARKET_STREAM!.getByName('x'), fetcher)).toBe('not_found');
 });
 
 it('reports keeper health (leases and due dead letters), and requires authorization', async () => {

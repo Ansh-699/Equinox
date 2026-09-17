@@ -162,3 +162,191 @@ export function isWithdrawalDisplaySafe(state: ExecutionState): boolean {
 export function isL1Committed(state: ExecutionState): boolean {
   return state.status === "l1_only" || state.status === "commit_finalized" || state.status === "restored";
 }
+
+// ---------------------------------------------------------------------
+// Wiring this pure state machine to real on-chain reads
+// (`chain-transports.ts`) and durable state
+// (`repositories.ts::ExecutionStatusRepository`).
+// ---------------------------------------------------------------------
+
+/** Byte offsets within a StockStream market account's raw data, verified
+ * against `programs/stockstream/src/state.rs` via `core::mem::offset_of!`
+ * (`reserved_upgrade` starts at 327; each `RESERVED_*` constant there is
+ * relative to it). Mirrors `chain-transports.ts`'s own
+ * `DELEGATION_STATUS_OFFSET` for the one field both modules need. */
+const FIELD_OFFSETS = {
+  globalEventSequence: 262,
+  delegationStatus: 329,
+  expectedCommitSequence: 330,
+  lastCommittedSequence: 338,
+  delegationSequence: 428,
+  pendingUndelegation: 448,
+} as const;
+
+export interface DelegationFields {
+  delegationStatus: number;
+  delegationSequence: number;
+  expectedCommitSequence: number;
+  lastCommittedSequence: number;
+  pendingUndelegation: boolean;
+  globalEventSequence: number;
+}
+
+/** Pure decode of the raw account bytes -- no RPC, no trust decision beyond
+ * "these are the bytes at these offsets" (the same boundary
+ * `chain-transports.ts` draws for `classifyWritableAccountDomain`). */
+export function decodeDelegationFields(bytes: Uint8Array): DelegationFields {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return {
+    delegationStatus: bytes[FIELD_OFFSETS.delegationStatus],
+    delegationSequence: Number(view.getBigUint64(FIELD_OFFSETS.delegationSequence, true)),
+    expectedCommitSequence: Number(view.getBigUint64(FIELD_OFFSETS.expectedCommitSequence, true)),
+    lastCommittedSequence: Number(view.getBigUint64(FIELD_OFFSETS.lastCommittedSequence, true)),
+    pendingUndelegation: bytes[FIELD_OFFSETS.pendingUndelegation] !== 0,
+    globalEventSequence: Number(view.getBigUint64(FIELD_OFFSETS.globalEventSequence, true)),
+  };
+}
+
+/**
+ * Drives the pure state machine above from authoritative decoded L1 fields
+ * (always) and, when the market is currently ER-delegated, the ER's own
+ * observed `globalEventSequence` (`erGlobalEventSequence`, `null` when not
+ * applicable/not fetched). Never marks an ER-accepted trade as L1
+ * committed: `l1.lastCommittedSequence` is the *only* signal this function
+ * treats as commit progress, and it comes from the L1 account, never the
+ * ER one.
+ *
+ * On a cold start (`state.status === "l1_only"`, this indexer's own
+ * baseline for "never tracked this market's delegation history") and the
+ * account is already mid-lifecycle, this snaps directly to the
+ * corresponding status with sequences seeded from the L1 fields rather
+ * than replaying every intermediate pure transition -- there is no prior
+ * observed sequence to validate monotonicity against yet, so the strict
+ * transition functions' "did this actually advance" checks do not apply.
+ */
+export function reconcileFromL1(state: ExecutionState, l1: DelegationFields, erGlobalEventSequence: number | null, isFirstObservation = false): ExecutionState {
+  if (isFirstObservation && l1.delegationStatus !== 0) {
+    return bootstrapFromL1(l1, erGlobalEventSequence);
+  }
+  switch (l1.delegationStatus) {
+    case 0: // NotDelegated
+      return state.status === "l1_only" ? state : { status: "l1_only", sequences: state.sequences };
+    case 1: { // Delegated
+      let next = state.status === "l1_only" || state.status === "restored" ? beginDelegation(state) : state;
+      if (next.status === "delegating") next = observeErActive(next);
+      if (next.status === "reconciliation_error") return next;
+      if (erGlobalEventSequence !== null && erGlobalEventSequence > next.sequences.erEventSequence) {
+        next = acceptErTrade(next, erGlobalEventSequence);
+        if (next.status === "reconciliation_error") return next;
+      }
+      return reconcileCommitProgress(next, l1);
+    }
+    case 2: { // Undelegating
+      if (state.status === "commit_finalized") return beginUndelegation(state, l1.delegationSequence);
+      if (state.status === "undelegating" || state.status === "restoration_pending") return state;
+      return errorState(state, `observed Undelegating on-chain from unexpected indexer status ${state.status}`);
+    }
+    case 3: { // Restored
+      let next = state.status === "undelegating" ? beginRestoration(state) : state;
+      if (next.status === "restoration_pending") next = completeRestoration(next, l1.delegationSequence || next.sequences.restorationSequence + 1);
+      return next;
+    }
+    default:
+      return errorState(state, `unrecognized on-chain delegation status ${l1.delegationStatus}`);
+  }
+}
+
+function reconcileCommitProgress(state: ExecutionState, l1: DelegationFields): ExecutionState {
+  if (l1.lastCommittedSequence <= state.sequences.l1FinalizedCommitSequence) return state;
+  let next = state;
+  if (l1.lastCommittedSequence > next.sequences.requestedCommitSequence) next = scheduleCommit(next, l1.lastCommittedSequence);
+  if (next.status === "reconciliation_error") return next;
+  next = observeCommitOnL1(next, l1.lastCommittedSequence);
+  if (next.status === "reconciliation_error") return next;
+  return finalizeCommit(next, l1.lastCommittedSequence);
+}
+
+function bootstrapFromL1(l1: DelegationFields, erGlobalEventSequence: number | null): ExecutionState {
+  const erSequence = erGlobalEventSequence ?? 0;
+  const sequences: ExecutionSequences = {
+    erEventSequence: erSequence,
+    erMarketStateSequence: erSequence,
+    requestedCommitSequence: l1.expectedCommitSequence > 0 ? l1.expectedCommitSequence - 1 : 0,
+    l1ObservedCommitSequence: l1.lastCommittedSequence,
+    l1FinalizedCommitSequence: l1.lastCommittedSequence,
+    undelegationSequence: l1.pendingUndelegation || l1.delegationStatus === 2 ? l1.delegationSequence : 0,
+    restorationSequence: l1.delegationStatus === 3 ? l1.delegationSequence : 0,
+  };
+  // Seeding `erEventSequence` from the live ER read (rather than always 0)
+  // is what makes a cold-start bootstrap idempotent against the very next
+  // normal reconciliation tick over the same, unchanged on-chain state --
+  // otherwise that next tick would see `erGlobalEventSequence >
+  // sequences.erEventSequence` and spuriously walk the state machine to
+  // "er_accepted" purely as an artifact of the bootstrap having under-seeded it.
+  const status: MarketExecutionStatus =
+    l1.delegationStatus === 1 ? (erSequence > 0 ? "er_accepted" : "er_active") : l1.delegationStatus === 2 ? "undelegating" : "restored";
+  return { status, sequences };
+}
+
+/** Minimal surface this orchestration needs from the L1/ER transports --
+ * matches `SolanaL1Transport`/`MagicRouterTransport`'s real `account()`
+ * method shape without importing the transport classes themselves (this
+ * module stays usable from a plain unit test with a hand-written fake). */
+export interface AccountReader {
+  account(address: string): Promise<{ value: { data: [string, string] | null } | null }>;
+}
+
+function decodeBase64(data: string): Uint8Array {
+  const binary = atob(data);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+export interface ReconciliationResult {
+  state: ExecutionState;
+  changed: boolean;
+}
+
+/**
+ * Full reconciliation for one market: reads the L1 account (authoritative
+ * for delegation status and commit progress), reads the ER account too
+ * when the L1 status indicates the market is currently ER-delegated
+ * (`Delegated` or `Undelegating` -- reading it otherwise would just hit a
+ * closed/foreign account), decodes both, and drives `reconcileFromL1`
+ * from the persisted prior state (or a first-observation bootstrap when
+ * none exists yet). Persists the result and reports whether it actually
+ * changed, so a caller knows whether to publish it anywhere.
+ */
+export async function reconcileMarketExecutionStatus(
+  marketPda: string,
+  l1: AccountReader,
+  er: AccountReader,
+  repository: { get(marketPda: string): Promise<{ status: string; sequences: unknown; error: string | null } | null>; set(marketPda: string, status: string, sequences: unknown, error: string | null, now: number): Promise<void> },
+  now: number,
+): Promise<ReconciliationResult> {
+  const persisted = await repository.get(marketPda);
+  const state: ExecutionState = persisted
+    ? { status: persisted.status as MarketExecutionStatus, sequences: persisted.sequences as ExecutionSequences, error: persisted.error ?? undefined }
+    : INITIAL_EXECUTION_STATE;
+
+  const l1Account = await l1.account(marketPda);
+  if (!l1Account.value?.data) {
+    // The market account doesn't exist on L1 at all (not yet created,
+    // or -- mid-ER-delegation -- genuinely closed there). Neither case is
+    // this function's to resolve; report unchanged rather than guessing.
+    return { state, changed: false };
+  }
+  const l1Fields = decodeDelegationFields(decodeBase64(l1Account.value.data[0]));
+
+  let erGlobalEventSequence: number | null = null;
+  if (l1Fields.delegationStatus === 1 || l1Fields.delegationStatus === 2) {
+    const erAccount = await er.account(marketPda);
+    if (erAccount.value?.data) erGlobalEventSequence = decodeDelegationFields(decodeBase64(erAccount.value.data[0])).globalEventSequence;
+  }
+
+  const next = reconcileFromL1(state, l1Fields, erGlobalEventSequence, persisted === null);
+  const changed = persisted === null || next.status !== state.status || JSON.stringify(next.sequences) !== JSON.stringify(state.sequences);
+  if (changed) await repository.set(marketPda, next.status, next.sequences, next.error ?? null, now);
+  return { state: next, changed };
+}

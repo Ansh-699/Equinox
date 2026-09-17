@@ -53,6 +53,14 @@ export class MarketStream extends DurableObject<Env> {
       try { socket.send(bytes); } catch { socket.close(1011, 'Delivery failed'); }
     }
   }
+  /** Priority 8, Section 5: broadcasts an ER/L1 execution-status change
+   * (`execution-status.ts::reconcileMarketExecutionStatus`) to every
+   * connected socket. This is public information -- a market's own
+   * delegation lifecycle, not a per-trader detail -- so it goes out
+   * through `broadcast`, never `publishPrivate`. */
+  publishExecutionStatus(status: string, withdrawalDisplaySafe: boolean): void {
+    this.broadcast({ type: 'execution_status', status, withdrawalDisplaySafe });
+  }
   publish(event: MarketEvent): 'applied' | 'duplicate' | 'gap' {
     if (!event.domain || !Number.isSafeInteger(event.sequence) || event.sequence! <= 0 || !event.id)
       throw new Error('Invalid sequenced event');

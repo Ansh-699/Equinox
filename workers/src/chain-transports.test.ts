@@ -208,7 +208,7 @@ describe("classifyWritableAccountDomain", () => {
   });
 
   it("routes an Undelegating market's writes to the ER (still ER-authoritative until the callback lands)", () => {
-    expect(classifyWritableAccountDomain(marketBytes(4))).toBe("er");
+    expect(classifyWritableAccountDomain(marketBytes(2))).toBe("er");
   });
 
   it("routes a NotDelegated or Restored market's writes to L1", () => {

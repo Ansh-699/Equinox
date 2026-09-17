@@ -1,11 +1,12 @@
 import { MarketStream } from "./market-stream";
 import type { MarketDefinition, MarketEvent, MarketEventKind } from "./types";
-import { DeadLetterRepository, IndexerRepository, ProtocolRepository, type IndexedWrite } from './repositories';
+import { DeadLetterRepository, ExecutionStatusRepository, IndexerRepository, ProtocolRepository, type IndexedWrite } from './repositories';
 import { keeperLeaseKey, runDurableKeeper } from './keepers';
 import { SolanaL1Transport, MagicBlockErTransport } from './chain-transports';
 import { decodeCustodyEvents } from './event-decoder';
 import { AccountSnapshotFetcher } from './ingestion-pipeline';
 import { MarketIndexer } from './indexer-service';
+import { isWithdrawalDisplaySafe, reconcileMarketExecutionStatus } from './execution-status';
 
 export { MarketStream };
 
@@ -163,6 +164,40 @@ export async function runIngestionTick(env: Env, fetcher: typeof fetch = fetch):
   return { marketsPolled: markets.results.length, eventsIngested };
 }
 
+/** Backs `GET /v1/markets/:symbol/execution-status`. Extracted as its own
+ * function (rather than inlined in the route handler) so tests can inject
+ * a fake `fetcher` the same way `runIngestionTick` already does --
+ * `SELF.fetch` integration tests cannot otherwise intercept this route's
+ * outbound RPC calls to a real Solana/MagicBlock endpoint. Returns
+ * `undefined` when no RPC endpoint is configured, `"not_found"` when the
+ * market doesn't exist, or the real status payload otherwise. */
+export async function fetchExecutionStatus(
+  env: Env,
+  symbol: string,
+  stream: DurableObjectStub<MarketStream>,
+  fetcher: typeof fetch = fetch,
+): Promise<undefined | "not_found" | { status: string; sequences: unknown; error: string | null; withdrawalDisplaySafe: boolean }> {
+  if (!env.SOLANA_RPC_URL || !env.DB) return undefined;
+  const db = env.DB;
+  const market = await db.prepare("SELECT market_pda AS marketPda FROM markets WHERE symbol = ?").bind(symbol).first<{ marketPda: string }>();
+  if (!market) return "not_found";
+  const l1 = new SolanaL1Transport(env.SOLANA_RPC_URL, fetcher);
+  const er = new MagicBlockErTransport(env.MAGICBLOCK_RPC_URL ?? env.SOLANA_RPC_URL, fetcher);
+  const result = await reconcileMarketExecutionStatus(market.marketPda, l1, er, new ExecutionStatusRepository(db), Date.now());
+  if (result.changed) {
+    // Best-effort publish: the durable D1 record above is already the
+    // source of truth regardless of whether this broadcast reaches any
+    // currently-connected socket.
+    await stream.publishExecutionStatus(result.state.status, isWithdrawalDisplaySafe(result.state)).catch(() => {});
+  }
+  return {
+    status: result.state.status,
+    sequences: result.state.sequences,
+    error: result.state.error ?? null,
+    withdrawalDisplaySafe: isWithdrawalDisplaySafe(result.state),
+  };
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -241,6 +276,12 @@ export default {
       const stream = bindings(env).MARKET_STREAM.getByName(symbol);
       if (request.method === "GET" && action === "stream") return stream.fetch(request);
       if (request.method === "GET" && action === "snapshot") return stream.fetch(new Request("https://internal.invalid/snapshot"));
+      if (request.method === "GET" && action === "execution-status") {
+        const outcome = await fetchExecutionStatus(env, symbol, stream);
+        if (!outcome) return json({ error: "rpc_not_configured" }, 503);
+        if (outcome === "not_found") return json({ error: "market_not_found" }, 404);
+        return json(outcome);
+      }
     }
 
     return json({ error: "not_found" }, 404);

@@ -287,6 +287,31 @@ export class CommitRecordRepository {
   }
 }
 
+/** Durable per-market persistence for `execution-status.ts`'s reconciled
+ * `ExecutionState` -- without this, a Worker restart would lose track of
+ * everything it had already reconciled and re-derive from `l1_only`, which
+ * would reject a real observed transition as a regression instead of
+ * accepting it. */
+export class ExecutionStatusRepository {
+  constructor(private readonly db: D1Database) {}
+
+  async get(marketPda: string): Promise<{ status: string; sequences: unknown; error: string | null } | null> {
+    const row = await this.db
+      .prepare('SELECT status,sequences_json AS sequencesJson,error FROM execution_status WHERE market_pda=?')
+      .bind(marketPda)
+      .first<{ status: string; sequencesJson: string; error: string | null }>();
+    return row ? { status: row.status, sequences: JSON.parse(row.sequencesJson), error: row.error } : null;
+  }
+
+  async set(marketPda: string, status: string, sequences: unknown, error: string | null, now: number): Promise<void> {
+    await this.db
+      .prepare(`INSERT INTO execution_status(market_pda,status,sequences_json,error,updated_at) VALUES(?,?,?,?,?)
+        ON CONFLICT(market_pda) DO UPDATE SET status=excluded.status,sequences_json=excluded.sequences_json,error=excluded.error,updated_at=excluded.updated_at`)
+      .bind(marketPda, status, JSON.stringify(sequences), error, now)
+      .run();
+  }
+}
+
 /** Durable continuation cursor for a bounded, resumable sweep (the
  * expiry/invalid-order cleanup keeper's own requirement: "persist a
  * continuation cursor; resume after restart" rather than always

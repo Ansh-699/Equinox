@@ -245,7 +245,11 @@ export class SolanaL1Transport extends TransactionTransport {
 const DELEGATION_STATUS_OFFSET = 329;
 /** Mirrors `state::DelegationStatus` -- delegated states route writes to
  * the ER; everything else routes to L1. */
-const DELEGATED_STATUS_VALUES = new Set([1, 4]); // Delegated, Undelegating (still ER-authoritative until the callback lands)
+// Mirrors `state::DelegationStatus`: NotDelegated=0, Delegated=1,
+// Undelegating=2, Restored=3. Delegated and Undelegating both still route
+// to the ER (Undelegating is still ER-authoritative until the delegation
+// program's external-undelegate callback lands).
+const DELEGATED_STATUS_VALUES = new Set([1, 2]);
 
 export type WritableAccountDomain = 'l1' | 'er';
 
