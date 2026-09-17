@@ -266,3 +266,30 @@ correct deploy. Note for future deploys: the program address is selected by
 program ID, discriminator `STKMRK01`, version 2, `initialized = 1`,
 authority = the deploy authority. Devnet balance after deploy + smoke:
 ~9.38 SOL (deploy 1.4926 + market rent 1.1322 + fees).
+
+## Read-only deployment verification (2026-09-18, no fees)
+
+`scripts/verify-deployment.mjs` (read-only, no transaction) verifies the
+deployed program state and extracts the live ELF by its section-header
+table:
+
+| Item | Value |
+| --- | --- |
+| Program ID | `H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET`, executable ✓, BPF-loader owner ✓ |
+| ProgramData | `GCLwk9aFz8cz4etHv4cibqSwaKBa2ubQUgPRhRiHqTP2`, owner ✓, upgrade authority = deploy authority ✓ |
+| Deployed ELF (real length via section headers) | 295,528 bytes, SHA-256 `23b6922be4bf034bc45bd3b0741a965f4ae43b12f42aefceedd45fd26965bdee` |
+| Current local artifact | 295,592 bytes, SHA-256 `eb7e4a9115414e416e569fbf4c6924585ab8718b5ff342074b9f549dd5c537ad` |
+| Byte equality | **NO — a funded upgrade is pending** |
+
+The deployed ELF is the opcode-42/43 build made **before** the
+allocate-first reorder in `create_market_account`/`create_instrument_account`
+(commit `22a4c54`'s reorder) — i.e. opcodes 42/43 and the mark-price funding
+guard are live, but the fix that reorders allocate-before-fund (required
+because the System Program rejects `allocate` on an account holding
+lamports) is not yet deployed. The first devnet-lifecycle `setup` stage
+therefore fails today with system error `0x1` and must wait for this
+funded upgrade. `solana program show` reports `Data Length 300024` — the
+loader's allocation size (the deploy CLI's own padding), not the ELF
+length; the ELF length comes from the ELF's own section-header table.
+
+**No upgrade was sent while the wallet is unfunded** (0.2029 SOL).
