@@ -200,18 +200,21 @@ export async function buildSessionSignedTransaction(input: {
   return { base64: getBase64EncodedWireTransaction(signed as never) };
 }
 
-/** Submits a session-signed transaction to the Worker relayer. */
+/** Submits a session-signed transaction to the Worker relayer through this
+ * app's own same-origin proxy (app/api/relay/session). The browser never
+ * holds the relayer's bearer credential: the proxy authenticates the
+ * caller via the existing app session cookie + CSRF token instead. */
 export async function submitToRelayer(input: {
-  relayerEndpoint: string;
-  authToken: string;
+  csrfToken: string;
   transactionBase64: string;
   expectedProgramAddress: string;
   sessionSignerAddress: string;
   domain: "l1" | "er";
 }): Promise<{ signature: string } | { error: string }> {
-  const response = await fetch(`${input.relayerEndpoint}/v1/relay/session`, {
+  const response = await fetch("/api/relay/session", {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${input.authToken}` },
+    credentials: "include",
+    headers: { "content-type": "application/json", "x-stockstream-csrf": input.csrfToken },
     body: JSON.stringify({
       transactionBase64: input.transactionBase64,
       expectedProgramAddress: input.expectedProgramAddress,
