@@ -6,6 +6,7 @@ import { buildSessionSignedTransaction, isSessionUsable, submitToRelayer, toKitI
 import { actionAllowed } from "@/lib/browser-session";
 import { readCsrfToken } from "@/lib/csrf";
 import { blocked, classifyRelayResponse, type SessionActionResult } from "@/lib/session-relay-status";
+import { recordSignature } from "@/lib/last-signature";
 import type { SolanaRpcTransport } from "@/lib/rpc-transport";
 import type { AppAuth } from "@/components/app-providers";
 
@@ -79,7 +80,9 @@ export function useSessionOrder(
       });
       // HTTP acceptance alone is never success: classifyRelayResponse only
       // reports `reason: null` when the body actually carried a signature.
-      onResult(classifyRelayResponse(response));
+      const classified = classifyRelayResponse(response);
+      if (classified.signature) recordSignature(label, classified.signature, "l1");
+      onResult(classified);
     } catch (err) {
       onResult(blocked("transaction_rejected", err instanceof Error ? err.message : String(err)));
     } finally {

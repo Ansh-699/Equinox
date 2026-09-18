@@ -1,11 +1,31 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { authorizeTradingSession, revokeTradingSession } from "@/clients/stockstream/src";
-import { createSession, destroySession, type SessionStatus } from "@/lib/session-trading";
+import { createSession, destroySession, hasSessionKey, lookupSession, type SessionStatus } from "@/lib/session-trading";
+import type { TradingSessionView } from "@/clients/stockstream/src";
 import type { TransactionPreview } from "@/lib/execution-boundary";
 import { RpcFailure } from "@/lib/rpc-transport";
+import { recordSignature } from "@/lib/last-signature";
 import type { StockStreamProtocol } from "@/features/wallet/use-stockstream-protocol";
+
+function toSessionStatus(sessionPda: string, sessionSignerAddress: string, ownerWallet: string, marketPda: string, seatIndex: number, readback: TradingSessionView): SessionStatus {
+  return {
+    sessionPda,
+    sessionSignerAddress,
+    ownerWallet,
+    marketPda,
+    seatIndex,
+    actions: readback.actions,
+    expiresAt: Number(readback.expiresAt),
+    maxOrderNotional: readback.maxOrderNotional.toString(),
+    maxCumulativeNotional: readback.maxCumulativeNotional.toString(),
+    maximumExposure: readback.maxExposure.toString(),
+    maximumOpenOrders: readback.maxOpenOrders,
+    nextExpectedNonce: readback.nextExpectedNonce,
+    revoked: readback.revoked,
+  };
+}
 
 export interface SessionConfigInput {
   expiresInMinutes: number;
@@ -60,7 +80,8 @@ export function useTradingSession(protocol: StockStreamProtocol | null, ownerWal
         expiresAt,
         { seatIndex, actions: config.actions, maxOrderNotional: config.maxOrderNotional, maxCumulativeNotional: config.maxCumulativeNotional, maximumExposure: config.maximumExposure, maximumOpenOrders: config.maximumOpenOrders },
       );
-      await protocol.service.executeL1(previewFor(instruction, "AuthorizeTradingSession"), [instruction]);
+      const submitted = await protocol.service.executeL1(previewFor(instruction, "AuthorizeTradingSession"), [instruction]);
+      recordSignature("AuthorizeTradingSession", submitted.signature, "l1");
 
       // Never enable session trading on the strength of a submitted/confirmed
       // signature alone: read the PDA back and verify every field a stale or
@@ -75,21 +96,7 @@ export function useTradingSession(protocol: StockStreamProtocol | null, ownerWal
       ) {
         throw new Error("Session authorized on-chain but readback did not match the requested session -- trading stays disabled.");
       }
-      setStatus({
-        sessionPda: created.sessionPda,
-        sessionSignerAddress: created.sessionSignerAddress,
-        ownerWallet,
-        marketPda,
-        seatIndex,
-        actions: readback.actions,
-        expiresAt: Number(readback.expiresAt),
-        maxOrderNotional: readback.maxOrderNotional.toString(),
-        maxCumulativeNotional: readback.maxCumulativeNotional.toString(),
-        maximumExposure: readback.maxExposure.toString(),
-        maximumOpenOrders: readback.maxOpenOrders,
-        nextExpectedNonce: readback.nextExpectedNonce,
-        revoked: readback.revoked,
-      });
+      setStatus(toSessionStatus(created.sessionPda, created.sessionSignerAddress, ownerWallet, marketPda, seatIndex, readback));
     } catch (err) {
       setError(describeError(err, "AuthorizeTradingSession"));
     } finally {
@@ -97,13 +104,38 @@ export function useTradingSession(protocol: StockStreamProtocol | null, ownerWal
     }
   }, [protocol, ownerWallet, marketPda, seatIndex]);
 
+  // Rehydrates status from the on-chain session PDA on mount (e.g. after
+  // navigating from Trade to Settings, or a page refresh) whenever a
+  // browser-local session key for this owner/market/seat still exists in
+  // memory. Without this, every page other than the one that called
+  // authorize() would show "no session" for an already-authorized one.
+  // Never rehydrates if the local key is gone: without it there is
+  // nothing that can sign further trades regardless of on-chain state.
+  useEffect(() => {
+    if (!protocol || !ownerWallet || !marketPda || status) return;
+    const existing = lookupSession(ownerWallet, marketPda, seatIndex);
+    if (!existing || !hasSessionKey(existing.sessionSignerAddress)) return;
+    let cancelled = false;
+    protocol.rpc.tradingSession(existing.sessionPda).then((readback) => {
+      if (cancelled || !readback) return;
+      if (
+        readback.sessionSigner.toBase58() !== existing.sessionSignerAddress ||
+        readback.owner.toBase58() !== ownerWallet ||
+        readback.market.toBase58() !== marketPda
+      ) return;
+      setStatus(toSessionStatus(existing.sessionPda, existing.sessionSignerAddress, ownerWallet, marketPda, seatIndex, readback));
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [protocol, ownerWallet, marketPda, seatIndex, status]);
+
   const revoke = useCallback(async () => {
     if (!protocol || !ownerWallet || !marketPda || !status) { setError("No active session to revoke."); return; }
     setPending(true);
     setError(null);
     try {
       const instruction = revokeTradingSession({ market: marketPda, authority: ownerWallet, session: status.sessionPda, sessionSigner: status.sessionSignerAddress }, seatIndex);
-      await protocol.service.executeL1(previewFor(instruction, "RevokeTradingSession"), [instruction]);
+      const submitted = await protocol.service.executeL1(previewFor(instruction, "RevokeTradingSession"), [instruction]);
+      recordSignature("RevokeTradingSession", submitted.signature, "l1");
       // Clear the in-memory key immediately -- do not wait on a subsequent
       // readback poll; a revoked key must stop being usable right away.
       destroySession(status.sessionSignerAddress);

@@ -45,6 +45,16 @@ export class SolanaRpcTransport implements L1Transport {
     const value = object(object(await this.request('getLatestBlockhash',[{commitment:'confirmed'}])).value);
     return {blockhash:key(value.blockhash),lastValidBlockHeight:count(value.lastValidBlockHeight)};
   }
+  /** Diagnostics-only: the current slot this RPC endpoint sees. Not used
+   * by any transaction-lifecycle logic. */
+  async currentSlot(): Promise<number> {
+    return count(await this.request('getSlot',[{commitment:'confirmed'}]));
+  }
+  /** Native SOL balance in lamports, for portfolio display only. */
+  async solBalance(address: string): Promise<bigint> {
+    const result = object(await this.request('getBalance',[key(address),{commitment:'confirmed'}]));
+    return BigInt(count(result.value));
+  }
   async simulate(bytes: Uint8Array): Promise<{units:number}> {
     const value = object(object(await this.request('simulateTransaction',[
       Buffer.from(bytes).toString('base64'), {encoding:'base64',sigVerify:false,replaceRecentBlockhash:false,commitment:'confirmed'}])).value);

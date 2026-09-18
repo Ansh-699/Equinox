@@ -6,12 +6,11 @@ import { TopBar } from "@/components/layout/top-bar";
 import { ExecutionStatusBanner, ProtocolStatusStrip } from "@/components/layout/status-strip";
 import { useAppAuth } from "@/components/app-providers";
 import { isSessionUsable } from "@/lib/session-trading";
-import { createTraderSeat, depositCollateral, initializeSettlementScratch, initializeVault, previewPlaceOrder } from "@/clients/stockstream/src";
+import { createTraderSeat, initializeSettlementScratch, initializeVault, previewPlaceOrder } from "@/clients/stockstream/src";
 import { marketForSymbol } from "@/lib/markets";
-import { RpcFailure } from "@/lib/rpc-transport";
-import { deriveCollateralTokenAccount } from "@/lib/token-accounts";
-import type { TransactionPreview } from "@/lib/execution-boundary";
 import { useWithdraw, evaluateWithdrawGate } from "@/features/collateral/use-withdraw";
+import { useDeposit } from "@/features/collateral/use-deposit";
+import { resolveCustodyAccounts } from "@/features/collateral/custody-accounts";
 import { useStockStreamProtocol } from "@/features/wallet/use-stockstream-protocol";
 import { useTradingSession } from "@/features/sessions/use-trading-session";
 import { useSessionOrder } from "@/features/sessions/use-session-order";
@@ -58,6 +57,7 @@ export function TradingTerminal() {
   const position = usePosition(protocol?.rpc ?? null, marketAddress, 0);
   const marketClock = useMarketClock(protocol?.rpc ?? null, marketAddress);
   const withdraw = useWithdraw(protocol);
+  const deposit = useDeposit(protocol);
   const withdrawGate = evaluateWithdrawGate(executionStatus, position.reconciliationStatus);
   const quantityNumber = Number(quantity) || 0;
   const bestBid = book.bids[0] ? decimal(book.bids[0].price, 1_000_000) : Number.NaN;
@@ -105,42 +105,6 @@ export function TradingTerminal() {
     } catch (error) { setNotice(error instanceof Error ? error.message : "Could not construct lifecycle action"); }
   }
 
-  function resolveCustodyAccounts() {
-    if (!auth.walletAddress || !marketAddress) return null;
-    const mint = process.env.NEXT_PUBLIC_STOCKSTREAM_COLLATERAL_MINT;
-    const tokenProgram = process.env.NEXT_PUBLIC_STOCKSTREAM_TOKEN_PROGRAM;
-    const vault = process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT ?? marketConfig.vaultPda;
-    const vaultAuthority = process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT_AUTHORITY;
-    if (!mint || !tokenProgram || !vault || !vaultAuthority) return null;
-    // sourceOrDestination is a real SPL token account the CPI transfers
-    // into/out of -- the trader's Associated Token Account, never their
-    // wallet pubkey directly (a wallet address is not a token account).
-    const sourceOrDestination = deriveCollateralTokenAccount(auth.walletAddress, mint, tokenProgram);
-    return { market: marketAddress, authority: auth.walletAddress, seat: auth.walletAddress, seatIndex: 0, sourceOrDestination, mint, tokenProgram, vault, vaultAuthority };
-  }
-
-  async function submitDeposit() {
-    const accounts = resolveCustodyAccounts();
-    if (!accounts) { setNotice("Configure the market, collateral mint/vault addresses and sign in before depositing."); return; }
-    if (!protocol) { setNotice("Deposit blocked: connect a wallet capable of signing on Devnet."); return; }
-    const amount = BigInt(quantityNumber || 1);
-    const instruction = depositCollateral(accounts, amount);
-    const preview: TransactionPreview = {
-      instruction: "DepositCollateral",
-      programId: instruction.programId.toBase58(),
-      accounts: instruction.keys.map((meta) => ({ address: meta.pubkey.toBase58(), signer: meta.isSigner, writable: meta.isWritable })),
-      status: "constructed",
-    };
-    setNotice(`Simulating DepositCollateral for ${amount} base units…`);
-    try {
-      const result = await protocol.service.executeL1(preview, [instruction]);
-      const vaultBalance = await protocol.rpc.tokenBalance(accounts.vault).catch(() => null);
-      setNotice(`DepositCollateral ${result.confirmation} — signature ${result.signature.slice(0, 8)}…${result.signature.slice(-8)}.${vaultBalance !== null ? ` Vault balance (readback): ${vaultBalance} base units.` : ""}`);
-    } catch (error) {
-      setNotice(error instanceof RpcFailure ? `DepositCollateral failed at ${error.method} (${error.code}).` : error instanceof Error ? error.message : "Deposit failed");
-    }
-  }
-
   function constructVault() {
     if (!auth.walletAddress || !marketAddress) { setNotice("Configure the market address and sign in before initializing custody."); return; }
     const mint = process.env.NEXT_PUBLIC_STOCKSTREAM_COLLATERAL_MINT;
@@ -184,7 +148,7 @@ export function TradingTerminal() {
 
   return (
     <main className="shell">
-      <TopBar tab={tab} onTabChange={setTab} auth={auth} />
+      <TopBar active={tab} onTabChange={setTab} auth={auth} />
       <ExecutionStatusBanner display={executionStatus} canTrade={canTrade} />
       <ProtocolStatusStrip marketSymbol={marketSymbol} onMarketSymbolChange={setMarketSymbol} authenticated={auth.authenticated} />
 
@@ -214,9 +178,13 @@ export function TradingTerminal() {
           />
           <LifecyclePanel
             onSeatAndScratch={runLifecycle}
-            onDeposit={() => void submitDeposit()}
+            onDeposit={() => {
+              const accounts = resolveCustodyAccounts(auth.walletAddress, marketAddress, marketConfig);
+              if (!accounts) { setNotice("Configure the market, collateral mint/vault addresses and sign in before depositing."); return; }
+              void deposit.submitDeposit(accounts, BigInt(quantityNumber || 1));
+            }}
             onWithdraw={() => {
-              const accounts = resolveCustodyAccounts();
+              const accounts = resolveCustodyAccounts(auth.walletAddress, marketAddress, marketConfig);
               if (!accounts) { setNotice("Configure the market, collateral mint/vault addresses and sign in before withdrawing."); return; }
               void withdraw.submitWithdraw(accounts, BigInt(quantityNumber || 1), withdrawGate, position.seat);
             }}
@@ -249,7 +217,7 @@ export function TradingTerminal() {
           <PositionsPanel seat={position.seat} error={position.error} />
           <div className="notice">
             <CircleAlert size={16} />
-            <span>{withdraw.notice ?? notice}</span>
+            <span>{withdraw.notice ?? deposit.notice ?? notice}</span>
             {sessionActionReason ? <span className="negative"> [{sessionActionReason}]</span> : null}
             {!withdrawGate.allowed ? <span className="muted"> · Withdrawals disabled: {withdrawGate.reason}</span> : null}
           </div>
