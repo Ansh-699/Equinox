@@ -152,5 +152,17 @@ export function useTradingSession(protocol: StockStreamProtocol | null, ownerWal
     setStatus(null);
   }, [status]);
 
-  return { status, pending, error, authorize, revoke, clearLocal };
+  // The program's nonce check is strict equality (session.rs::
+  // validate_session_policy / handlers.rs::authorize_trading_actor:
+  // `action_nonce != trading_session.next_expected_nonce` ->
+  // SessionNonceReplay), so every consumed action MUST advance this by
+  // exactly one locally, or the very next session-signed action would be
+  // rejected on-chain as a replay. Only called after the relayer reports
+  // an actual signature -- see lib/browser-session.ts::nextNonce's own
+  // "never advance on a rejected action" contract.
+  const advanceNonce = useCallback(() => {
+    setStatus((current) => (current ? { ...current, nextExpectedNonce: current.nextExpectedNonce + 1n } : current));
+  }, []);
+
+  return { status, pending, error, authorize, revoke, clearLocal, advanceNonce };
 }

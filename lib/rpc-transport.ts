@@ -1,4 +1,5 @@
 import { PublicKey } from '@solana/web3.js';
+import { Buffer } from 'buffer';
 import { decodeMarketState, decodeTradingSession, type TradingSessionView } from '../clients/stockstream/src';
 import { STOCKSTREAM_PROGRAM_ID } from '../clients/stockstream/src/constants';
 import type { L1Transport, RouterBoundary } from './execution-boundary';
@@ -22,7 +23,13 @@ function count(value: unknown): number {
 
 export class SolanaRpcTransport implements L1Transport {
   private id = 0;
-  constructor(private readonly endpoint: string, private readonly fetcher: Fetch = fetch,
+  // Real browsers brand fetch as a Window/WorkerGlobalScope method: a bare
+  // `fetch` reference called as `this.fetcher(...)` (this = the transport
+  // instance, not window) throws "Illegal invocation". Node's fetch has no
+  // such branding check, so vitest never caught this -- only a real
+  // browser (Playwright) does. Binding here fixes every call site without
+  // requiring every constructor caller to remember to do it themselves.
+  constructor(private readonly endpoint: string, private readonly fetcher: Fetch = fetch.bind(globalThis),
     private readonly wait: (ms: number) => Promise<void> = ms => new Promise(resolve => setTimeout(resolve, ms)),
     private readonly attempts = 30) {
     const url = new URL(endpoint);

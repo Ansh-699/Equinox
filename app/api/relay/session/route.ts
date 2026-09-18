@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { SESSION_COOKIE, verifyPrivyAccessToken } from "@/lib/auth/session";
 import { routeSessionDatabase, readPersistentSession } from "@/lib/auth/route-session-store";
+import { E2E_TEST_TOKEN, isE2eTestModeServer, verifyE2eTestToken } from "@/lib/auth/e2e-test-mode";
 
 /**
  * Same-origin proxy for the Worker's session-key relayer
@@ -68,10 +69,14 @@ export async function POST(request: Request) {
   }
 
   let verified: Awaited<ReturnType<typeof verifyPrivyAccessToken>>;
-  try {
-    verified = await verifyPrivyAccessToken(body.privyAccessToken);
-  } catch {
-    return NextResponse.json({ error: "authentication_required", detail: "Privy access token could not be verified" }, { status: 401 });
+  if (isE2eTestModeServer() && body.privyAccessToken === E2E_TEST_TOKEN) {
+    verified = verifyE2eTestToken(body.ownerWallet);
+  } else {
+    try {
+      verified = await verifyPrivyAccessToken(body.privyAccessToken);
+    } catch {
+      return NextResponse.json({ error: "authentication_required", detail: "Privy access token could not be verified" }, { status: 401 });
+    }
   }
   if (verified.user_id !== session.privyUserId || !verified.wallets?.includes(body.ownerWallet)) {
     return NextResponse.json({ error: "authentication_required", detail: "Privy token does not match the requesting wallet" }, { status: 401 });

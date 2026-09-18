@@ -10,3 +10,6 @@ target/
 workers/.dev.vars
 workers/.wrangler/
 test-ledger/
+test-results/
+playwright-report/
+blob-report/

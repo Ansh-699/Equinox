@@ -5,6 +5,7 @@ import { cleanupExpiredSessions, lookupSession, persistSession, revokeSession, t
 type BoundD1 = SessionDatabase;
 const globalKey = "__STOCKSTREAM_D1__";
 const developmentRows = new Map<string, ApplicationSession>();
+const developmentRateLimits = new Map<string, { count: number; expiresAt: number }>();
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 
 function developmentDatabase(): SessionDatabase {
@@ -15,6 +16,24 @@ function developmentDatabase(): SessionDatabase {
           if (sql.startsWith("SELECT")) {
             const row = developmentRows.get(String(values[0]));
             return (row && row.revokedAt === null && row.expiresAt > Number(values[1]) ? row : null) as T | null;
+          }
+          // Mirrors lib/auth/d1-rate-limit.ts::allowSessionExchange's exact
+          // SQL semantics (10 requests / 60s per key) without a real D1
+          // binding. Without this branch, that INSERT ... RETURNING query
+          // always fell through to `return null` below, which
+          // allowSessionExchange reads as "always rate limited" -- login
+          // (and anything else gated by it) was permanently broken under
+          // plain `next dev` with no D1 bound.
+          if (sql.includes("rate_limits")) {
+            const [key, now, expiresAt] = values as [string, number, number];
+            const existing = developmentRateLimits.get(key);
+            if (!existing || existing.expiresAt <= now) {
+              developmentRateLimits.set(key, { count: 1, expiresAt });
+              return { count: 1 } as T;
+            }
+            if (existing.count >= 10) return null;
+            existing.count += 1;
+            return { count: existing.count } as T;
           }
           return null;
         },
