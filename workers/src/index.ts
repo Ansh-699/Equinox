@@ -10,7 +10,7 @@ import { isWithdrawalDisplaySafe, reconcileMarketExecutionStatus } from './execu
 import { PrivateSessionRepository, publishSeatProjection, seatsAffectedByEvent } from './private-sessions';
 import { classifyKeeperConfiguration, startKeeperRuntime } from './keeper-config';
 import { resolveKeeperSigning } from './keeper-signer';
-import { verifyPrivyToken, verifySessionChain } from './relay-auth';
+import { verifyPrivyToken, verifySessionFromBytes, type PrivyVerifier } from './relay-auth';
 import { LocalKeypairSigner } from './signer';
 import { relaySessionTransaction, validateSessionTransaction } from './session-relayer';
 import { ProtocolKeeperOrchestrator, type OrchestratorRunSummary } from './keeper-orchestrator';
@@ -370,26 +370,33 @@ export default {
         return json({ error: "invalid_request" }, 400);
       }
       // 1-6: verify Privy identity (authoritative, fail-closed)
-      const privyResult = await verifyPrivyToken(privyToken, env.PRIVY_APP_ID, env.PRIVY_APP_SECRET, body.ownerWallet);
+      // Lazy Privy verification: @privy-io/node is loaded dynamically inside
+      // the verifier, keeping it out of the main Worker bundle.
+      const privyResult = await verifyPrivyToken(privyToken, env.PRIVY_APP_ID!, body.ownerWallet, {
+        verify: async (token: string) => {
+          const { PrivyClient } = await import("@privy-io/node");
+          const client = new PrivyClient({ appId: env.PRIVY_APP_ID!, appSecret: env.PRIVY_APP_SECRET! });
+          return client.utils().auth().verifyAccessToken(token);
+        },
+      });
       if ("error" in privyResult) return json({ error: privyResult.error }, 401);
-      // Steps 7-16: authoritative session/seat/nonce/expiry verification
-      if (!env.SOLANA_RPC_URL) return json({ error: "rpc_unconfigured" }, 503);
       // Steps 7-16: authoritative session/seat/nonce/expiry verification via RPC
-      const marketData = await (await fetch(env.SOLANA_RPC_URL!, {
+      const rpcResponse = await fetch(env.SOLANA_RPC_URL!, {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getAccountInfo", params: [body.expectedMarket, { encoding: "base64" }] }),
-      }).catch(() => null))?.json().catch(() => null) as { result?: { value?: { data?: [string, string] } } } | null;
+      }).catch(() => null);
+      if (!rpcResponse) return json({ error: "rpc_unavailable" }, 502);
+      const marketData = await rpcResponse.json().catch(() => null) as { result?: { value?: { data?: [string, string] } } } | null;
       const marketDataValue = marketData?.result?.value;
       if (!marketDataValue) return json({ error: "market_not_found" }, 404);
       const marketBytes = Uint8Array.from(atob(marketDataValue.data![0]), (c) => c.charCodeAt(0));
-      if (marketBytes.length !== 222_752 || marketBytes[10] !== 1 || marketBytes[11] !== 1 || marketBytes[294] !== 1) {
-        return json({ error: "market_state_invalid" }, 403);
-      }
-      // Verify the seat is owned by the authenticated wallet
-      const seatBase = 181_792; // TRADER_SEAT_OFFSET
-      const { getBase58Decoder } = await import('@solana/kit');
-      const seatOwner = getBase58Decoder().decode(marketBytes.subarray(seatBase, seatBase + 32));
-      if (seatOwner !== body.ownerWallet) return json({ error: "seat_owner_mismatch" }, 403);
+      const chainCheck = verifySessionFromBytes({
+        marketBytes, ownerWallet: body.ownerWallet!,
+        sessionSignerAddress: body.sessionSignerAddress!, seatIndex: 0,
+        marketPda: body.expectedMarket!, programId: body.expectedProgramAddress!,
+        expectedNonce: body.expectedNonce ?? 1,
+      });
+      if (!chainCheck.ok) return json({ error: chainCheck.reason }, 403);
       // Rate limits: per-IP, per-wallet, per-market
       const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
       if (!await new ProtocolRepository(bindings(env).DB).allow(`relay:${ip}`, 30, 60_000, Date.now()))
