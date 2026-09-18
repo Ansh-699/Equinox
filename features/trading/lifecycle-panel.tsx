@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { BadgeDollarSign, Coins, LockKeyhole } from "lucide-react";
 import { Step } from "./primitives";
 
@@ -7,13 +8,20 @@ export function LifecyclePanel({
   onWithdraw,
   onInitializeVault,
   onCancelAll,
+  onCancelOrder,
+  onReplaceOrder,
 }: {
   onSeatAndScratch: () => void;
   onDeposit: () => void;
   onWithdraw: () => void;
   onInitializeVault: () => void;
   onCancelAll: () => void;
+  onCancelOrder: (orderKey: bigint) => void;
+  onReplaceOrder: (orderKey: bigint) => void;
 }) {
+  const [orderKey, setOrderKey] = useState("");
+  const parsedOrderKey = (() => { try { return orderKey ? BigInt(orderKey) : null; } catch { return null; } })();
+
   return (
     <>
       <section className="lifecycle-panel">
@@ -33,6 +41,12 @@ export function LifecyclePanel({
           <button onClick={onInitializeVault}>Construct vault</button>
           <button onClick={onCancelAll}>Cancel all (session)</button>
         </div>
+        <label>Order key (u128, from a fill/order event)<input value={orderKey} onChange={(event) => setOrderKey(event.target.value)} inputMode="numeric" placeholder="0" /></label>
+        <div className="lifecycle-actions">
+          <button disabled={parsedOrderKey === null} onClick={() => parsedOrderKey !== null && onCancelOrder(parsedOrderKey)}>Cancel order</button>
+          <button disabled={parsedOrderKey === null} onClick={() => parsedOrderKey !== null && onReplaceOrder(parsedOrderKey)}>Replace with ticket</button>
+        </div>
+        <p className="form-note">Replace uses the current order-ticket side/size/price/type. There is no open-orders list yet -- it needs the canonical order-book layout manifest (order keys/prices/owners live in the book arenas).</p>
       </section>
 
       <section className="sponsor-panel">

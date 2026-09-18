@@ -61,7 +61,7 @@ test("login + wallet + ONE session authorization prompt", async () => {
       sessionPda: created.sessionPda,
       sessionSignerAddress: created.sessionSignerAddress,
       policy: policy(),
-      expiresAtMs: Date.now() + 3_600_000,
+      expiresAt: Math.floor(Date.now() / 1000) + 3_600,
       recentBlockhash: RECENT_BLOCKHASH,
     },
     { signTransaction: (b) => spy(b as Uint8Array) },
@@ -92,7 +92,7 @@ test("ten session-key actions: exactly ONE main-wallet prompt, exact nonce progr
       sessionPda: created.sessionPda,
       sessionSignerAddress: created.sessionSignerAddress,
       policy: policy(),
-      expiresAtMs: Date.now() + 3_600_000,
+      expiresAt: Math.floor(Date.now() / 1000) + 3_600,
       recentBlockhash: RECENT_BLOCKHASH,
     },
     boundary,
@@ -107,7 +107,7 @@ test("ten session-key actions: exactly ONE main-wallet prompt, exact nonce progr
     marketPda: MARKET,
     seatIndex: 0,
     actions: 0b11111,
-    expiresAt: Date.now() + 3_600_000,
+    expiresAt: Math.floor(Date.now() / 1000) + 3_600,
     maxOrderNotional: "100000",
     maxCumulativeNotional: "500000",
     maximumExposure: "100000",
@@ -147,7 +147,7 @@ test("session cannot deposit/withdraw; limits and expiry gate trading", () => {
     marketPda: MARKET,
     seatIndex: 0,
     actions: SESSION_ACTION.all,
-    expiresAt: Date.now() + 3_600_000,
+    expiresAt: Math.floor(Date.now() / 1000) + 3_600,
     maxOrderNotional: "100",
     maxCumulativeNotional: "100",
     maximumExposure: "100",
@@ -156,7 +156,7 @@ test("session cannot deposit/withdraw; limits and expiry gate trading", () => {
     revoked: false,
   };
   expect(isSessionUsable(base)).toBe(true);
-  expect(isSessionUsable({ ...base, expiresAt: Date.now() - 1 })).toBe(false); // expiry rejection
+  expect(isSessionUsable({ ...base, expiresAt: Math.floor(Date.now() / 1000) - 1 })).toBe(false); // expiry rejection
   expect(isSessionUsable({ ...base, revoked: true })).toBe(false); // revocation blocks trading
   destroySession("no-op");
 });

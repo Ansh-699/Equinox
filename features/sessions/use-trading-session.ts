@@ -45,10 +45,19 @@ export function useTradingSession(protocol: StockStreamProtocol | null, ownerWal
     setError(null);
     try {
       const created = await createSession(ownerWallet, marketPda, seatIndex);
-      const expiresAtMs = Date.now() + config.expiresInMinutes * 60_000;
+      // The program compares expires_at against the MARKET's own clock
+      // (header.last_verified_oracle_timestamp), not wall-clock -- see
+      // handlers.rs::authorize_trading_session. Anchor to that, not
+      // Date.now(), so "N minutes" means the same thing on-chain as it
+      // does here even when the oracle is stale relative to wall-clock.
+      const market = await protocol.rpc.market(marketPda);
+      if (!market.state.oracleValid) {
+        throw new Error("The market's oracle has never been verified -- session expiry has no valid clock reference yet.");
+      }
+      const expiresAt = Number(market.state.lastVerifiedOracleTimestamp) + config.expiresInMinutes * 60;
       const instruction = authorizeTradingSession(
         { market: marketPda, authority: ownerWallet, payer: ownerWallet, sessionSigner: created.sessionSignerAddress },
-        expiresAtMs,
+        expiresAt,
         { seatIndex, actions: config.actions, maxOrderNotional: config.maxOrderNotional, maxCumulativeNotional: config.maxCumulativeNotional, maximumExposure: config.maximumExposure, maximumOpenOrders: config.maximumOpenOrders },
       );
       await protocol.service.executeL1(previewFor(instruction, "AuthorizeTradingSession"), [instruction]);
