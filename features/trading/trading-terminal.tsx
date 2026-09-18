@@ -28,6 +28,9 @@ import { OrderBookPanel, type BookLevel } from "./order-book";
 import { OrderTicket } from "./order-ticket";
 import { LifecyclePanel } from "./lifecycle-panel";
 import { LaunchLab } from "@/features/launch/launch-lab";
+import { useOpenOrders } from "@/features/orders/use-open-orders";
+import { OpenOrdersPanel } from "@/features/orders/open-orders-panel";
+import { unimplementedOpenOrdersAdapter } from "@/lib/open-orders";
 
 const marketApiUrl = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_API_URL;
 
@@ -69,6 +72,7 @@ export function TradingTerminal() {
   const sessionOrder = useSessionOrder(protocol?.rpc ?? null, session.status, auth, handleSessionResult, session.advanceNonce, executionStatus);
   const canTrade = session.status !== null && isSessionUsable(session.status);
   const position = usePosition(protocol?.rpc ?? null, marketAddress, 0);
+  const openOrders = useOpenOrders(unimplementedOpenOrdersAdapter, marketAddress, 0);
   const marketClock = useMarketClock(protocol?.rpc ?? null, marketAddress);
   const oracleSafety = deriveOracleSafety({
     oracleValid: marketClock?.oracleValid ?? null,
@@ -149,6 +153,25 @@ export function TradingTerminal() {
     setNotice(`Constructed InitializeVault with ${ix.keys.length} accounts. Token CPI runtime remains unavailable in this environment.`);
   }
 
+  // Shared by LifecyclePanel's manual order-key form and OpenOrdersPanel's
+  // per-row Replace button: both replace using the CURRENT order-ticket
+  // side/size/price/type, matching handlers.rs::replace_order semantics
+  // (replace is place-with-a-cancel, not a partial edit).
+  function replaceWithCurrentTicket(orderKey: bigint) {
+    const settlementScratch = process.env.NEXT_PUBLIC_STOCKSTREAM_SETTLEMENT_SCRATCH_ADDRESS ?? marketConfig.scratchPda(0);
+    void sessionOrder.replaceSessionOrder(orderKey, {
+      settlementScratch,
+      side: side === "long" ? "bid" : "ask",
+      tree: (orderType === "oracle-pegged" ? "oracle-pegged" : "fixed") as OrderTree,
+      postOnly: orderType === "post-only",
+      immediateOrCancel: orderType === "ioc",
+      reduceOnly,
+      quantity: BigInt(quantityNumber),
+      priceOrOffset: BigInt(limitPrice || 0),
+      clientOrderId: BigInt(Date.now()),
+    });
+  }
+
   function submitOrder() {
     const settlementScratch = process.env.NEXT_PUBLIC_STOCKSTREAM_SETTLEMENT_SCRATCH_ADDRESS ?? marketConfig.scratchPda(0);
     if (canTrade) {
@@ -225,20 +248,14 @@ export function TradingTerminal() {
             onInitializeVault={constructVault}
             onCancelAll={() => void sessionOrder.cancelAllSessionOrders(4)}
             onCancelOrder={(orderKey) => void sessionOrder.cancelSessionOrder(orderKey)}
-            onReplaceOrder={(orderKey) => {
-              const settlementScratch = process.env.NEXT_PUBLIC_STOCKSTREAM_SETTLEMENT_SCRATCH_ADDRESS ?? marketConfig.scratchPda(0);
-              void sessionOrder.replaceSessionOrder(orderKey, {
-                settlementScratch,
-                side: side === "long" ? "bid" : "ask",
-                tree: (orderType === "oracle-pegged" ? "oracle-pegged" : "fixed") as OrderTree,
-                postOnly: orderType === "post-only",
-                immediateOrCancel: orderType === "ioc",
-                reduceOnly,
-                quantity: BigInt(quantityNumber),
-                priceOrOffset: BigInt(limitPrice || 0),
-                clientOrderId: BigInt(Date.now()),
-              });
-            }}
+            onReplaceOrder={replaceWithCurrentTicket}
+          />
+          <OpenOrdersPanel
+            state={openOrders}
+            pending={sessionOrder.pending}
+            onCancel={(orderKey) => void sessionOrder.cancelSessionOrder(orderKey)}
+            onReplace={replaceWithCurrentTicket}
+            onCancelAll={() => void sessionOrder.cancelAllSessionOrders(4)}
           />
           <SessionPolicyPanel
             status={session.status}
