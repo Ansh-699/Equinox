@@ -301,31 +301,16 @@ pub fn create_vault_account(program_id: &Address, accounts: &mut [AccountView]) 
     ];
     let vault_signer = pinocchio::cpi::Signer::from(&vault_seeds);
 
-    // 1. Fund to the SPL token account rent-exempt minimum.
-    let rent = Rent::get()?;
-    let needed = rent.try_minimum_balance(crate::handlers::TOKEN_ACCOUNT_LEN)?;
-    let deficit = needed.saturating_sub(accounts[1].lamports());
-    if deficit > 0 {
-        pinocchio_system::instructions::Transfer {
-            from: &accounts[2],
-            to: &accounts[1],
-            lamports: deficit,
-        }
-        .invoke()?;
+    // SystemProgram::createAccount sets space, owner, and lamports in one
+    // atomic instruction, signed by the vault PDA's own seeds.
+    pinocchio_system::instructions::CreateAccount {
+        from: &accounts[2],
+        to: &accounts[1],
+        lamports: Rent::get()?.try_minimum_balance(crate::handlers::TOKEN_ACCOUNT_LEN)?,
+        space: crate::handlers::TOKEN_ACCOUNT_LEN as u64,
+        owner: &crate::handlers::TOKEN_PROGRAM_ID,
     }
-
-    // 2. Allocate 165 bytes via CPI signed by the vault PDA seeds.
-    {
-        let mut vault_view = accounts[1].clone();
-        pinocchio_system::instructions::Allocate {
-            account: &vault_view,
-            space: crate::handlers::TOKEN_ACCOUNT_LEN as u64,
-        }
-        .invoke_signed(core::slice::from_ref(&vault_signer))?;
-
-        // 3. Assign to Tokenkeg so SPL initializeAccount3 can verify ownership.
-        unsafe { vault_view.assign(&crate::handlers::TOKEN_PROGRAM_ID) };
-    }
+    .invoke_signed(core::slice::from_ref(&vault_signer))?;
 
     // 4. SPL initializeAccount3 (opcode 18): no vault signature required.
     let vault_authority_address = crate::handlers::derive_vault_authority(&market_key, program_id);
