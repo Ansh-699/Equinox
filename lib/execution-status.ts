@@ -47,6 +47,11 @@ export interface ExecutionDisplayState {
   degraded: boolean;
   lastErSequence: number;
   lastCommittedL1Sequence: number;
+  /** Which domain a session-signed order instruction must be routed to
+   * right now, or null to refuse routing entirely (spec item 3: fail
+   * closed, never invent a state not in MarketExecutionStatus). See
+   * orderRoutingDomain() for the full state->domain mapping and why. */
+  orderRoutingDomain: "l1" | "er" | null;
   /** The indexer's OWN authoritative display gate (workers/src/execution
    * -status.ts::isWithdrawalDisplaySafe / WITHDRAWAL_SAFE_STATUSES),
    * threaded through verbatim rather than re-derived here: it is not the
@@ -69,6 +74,36 @@ const ER_LIFECYCLE_STATUSES: ReadonlySet<MarketExecutionStatus> = new Set([
   "undelegating",
 ]);
 
+// workers/src/execution-status.ts::reconcileFromL1 case 1 ("Delegated")
+// covers er_active/er_accepted/commit_scheduled/commit_observed_on_l1/
+// commit_finalized -- commit progress never by itself undelegates the
+// account, so all five are genuinely ER-owned right now and an ER-domain
+// order transaction is valid against them. "delegating" is the transient
+// first-observed instant before that's confirmed, and "undelegating"/
+// "restoration_pending" are the account actively changing owners --
+// routing an order transaction to EITHER domain during any of those three
+// could target an account that's no longer valid there. l1_only/restored
+// are genuinely un-delegated (delegationStatus 0), so L1 is correct.
+const ER_ORDER_ROUTABLE_STATUSES: ReadonlySet<MarketExecutionStatus> = new Set([
+  "er_active",
+  "er_accepted",
+  "commit_scheduled",
+  "commit_observed_on_l1",
+  "commit_finalized",
+]);
+const L1_ORDER_ROUTABLE_STATUSES: ReadonlySet<MarketExecutionStatus> = new Set(["l1_only", "restored"]);
+
+/** Fail-closed order-routing domain for the CURRENT status only -- every
+ * value comes from the already-authoritative 11-state enum, never a
+ * guessed or additional state. Returns null (refuse to route) for every
+ * transitional or error status: delegating, undelegating,
+ * restoration_pending, reconciliation_error. */
+export function orderRoutingDomain(status: MarketExecutionStatus): "l1" | "er" | null {
+  if (L1_ORDER_ROUTABLE_STATUSES.has(status)) return "l1";
+  if (ER_ORDER_ROUTABLE_STATUSES.has(status)) return "er";
+  return null;
+}
+
 /** Pure mapping from the indexer's execution-status enum to the display
  * flags the UI needs -- kept separate from fetching so it's trivially
  * unit-testable against every enum value without a network mock. */
@@ -84,6 +119,7 @@ export function deriveExecutionDisplay(response: ExecutionStatusResponse): Execu
     lastErSequence: response.sequences.erEventSequence,
     lastCommittedL1Sequence: response.sequences.l1FinalizedCommitSequence,
     withdrawalSafe: response.withdrawalDisplaySafe,
+    orderRoutingDomain: orderRoutingDomain(response.status),
   };
 }
 

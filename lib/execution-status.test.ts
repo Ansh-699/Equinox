@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveExecutionDisplay, fetchExecutionStatus, type ExecutionStatusResponse } from "./execution-status";
+import { deriveExecutionDisplay, fetchExecutionStatus, orderRoutingDomain, type ExecutionStatusResponse, type MarketExecutionStatus } from "./execution-status";
 
 const sequences = {
   erEventSequence: 12,
@@ -58,6 +58,36 @@ describe("deriveExecutionDisplay", () => {
     expect(deriveExecutionDisplay(response("restored")).withdrawalSafe).toBe(true);
     expect(deriveExecutionDisplay(response("er_active")).withdrawalSafe).toBe(false);
     expect(deriveExecutionDisplay(response("undelegating")).withdrawalSafe).toBe(false);
+  });
+});
+
+describe("orderRoutingDomain", () => {
+  // Table-driven over the exact, already-authoritative 11-state enum --
+  // nothing here is a guessed or invented status.
+  const expected: Record<MarketExecutionStatus, "l1" | "er" | null> = {
+    l1_only: "l1",
+    restored: "l1",
+    er_active: "er",
+    er_accepted: "er",
+    commit_scheduled: "er",
+    commit_observed_on_l1: "er",
+    commit_finalized: "er",
+    delegating: null,
+    undelegating: null,
+    restoration_pending: null,
+    reconciliation_error: null,
+  };
+
+  for (const [status, domain] of Object.entries(expected) as [MarketExecutionStatus, "l1" | "er" | null][]) {
+    it(`${status} -> ${domain ?? "blocked (fail closed)"}`, () => {
+      expect(orderRoutingDomain(status)).toBe(domain);
+    });
+  }
+
+  it("deriveExecutionDisplay threads orderRoutingDomain through for every status", () => {
+    for (const [status, domain] of Object.entries(expected) as [MarketExecutionStatus, "l1" | "er" | null][]) {
+      expect(deriveExecutionDisplay(response(status)).orderRoutingDomain).toBe(domain);
+    }
   });
 });
 

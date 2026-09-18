@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 
 const RELAYER_CONTROL_URL = `http://127.0.0.1:${process.env.MOCK_RELAYER_PORT ?? 4182}/control`;
+const MARKET_API_CONTROL_URL = `http://127.0.0.1:${process.env.MOCK_MARKET_API_PORT ?? 4183}/control`;
 
 async function setRelayerMode(mode: string, resetNonce = false) {
   await fetch(RELAYER_CONTROL_URL, { method: "POST", body: JSON.stringify({ mode, resetNonce }) });
@@ -13,6 +14,11 @@ async function promptCount(page: Page): Promise<number> {
 async function login(page: Page) {
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.locator(".wallet-button").first()).toContainText("...", { timeout: 10_000 });
+  // The wallet address resolves before the app session (auth.authenticated)
+  // finishes its own async POST /api/auth/session -- authorizeSession()
+  // needs the LATTER, or it can race a still-null `protocol` on a cold
+  // (not-yet-warmed) dev server and silently no-op.
+  await expect(page.getByRole("region", { name: "StockStream status" }).getByText("authenticated", { exact: true })).toBeVisible({ timeout: 10_000 });
 }
 
 async function authorizeSession(page: Page) {
@@ -22,6 +28,12 @@ async function authorizeSession(page: Page) {
 
 test.beforeEach(async () => {
   await setRelayerMode("success", true);
+  // The mock market API server's execution status persists across every
+  // spec file for the lifetime of this webServer process (see
+  // er-routing.spec.ts) -- reset it here too so a status left over from
+  // another file never leaks into these session-signed order flows, all
+  // of which assume the default not-delegated (l1_only) market.
+  await fetch(MARKET_API_CONTROL_URL, { method: "POST", body: JSON.stringify({ status: "l1_only" }) });
 });
 
 test("opens on Devnet with a visible risk indicator", async ({ page }) => {
