@@ -15,6 +15,8 @@ import { useTradingSession } from "@/features/sessions/use-trading-session";
 import { useSessionOrder } from "@/features/sessions/use-session-order";
 import { SessionPolicyPanel } from "@/features/sessions/session-policy-panel";
 import { useExecutionStatus } from "@/features/magicblock/use-execution-status";
+import { usePosition } from "@/features/positions/use-position";
+import { PositionsPanel } from "@/features/positions/positions-panel";
 import { decimal } from "./format";
 import { MarketPanel } from "./market-panel";
 import { OrderBookPanel, type BookLevel } from "./order-book";
@@ -43,6 +45,7 @@ export function TradingTerminal() {
   const sessionOrder = useSessionOrder(protocol?.rpc ?? null, session.status, setNotice);
   const canTrade = session.status !== null && isSessionUsable(session.status);
   const executionStatus = useExecutionStatus(marketApiUrl, marketSymbol);
+  const position = usePosition(protocol?.rpc ?? null, marketAddress, 0);
   const quantityNumber = Number(quantity) || 0;
   const bestBid = book.bids[0] ? decimal(book.bids[0].price, 1_000_000) : Number.NaN;
   const bestAsk = book.asks[0] ? decimal(book.asks[0].price, 1_000_000) : Number.NaN;
@@ -197,6 +200,7 @@ export function TradingTerminal() {
             onAuthorize={(config) => void session.authorize(config)}
             onRevoke={() => void session.revoke()}
           />
+          <PositionsPanel seat={position.seat} error={position.error} />
           <div className="notice"><CircleAlert size={16} /><span>{notice}</span></div>
         </div>
       ) : (
