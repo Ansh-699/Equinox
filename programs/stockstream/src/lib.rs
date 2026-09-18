@@ -29,7 +29,10 @@ use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
 
 use crate::instruction::StockStreamInstruction;
 
-pub const ID: Address = Address::new_from_array([238, 93, 151, 107, 197, 15, 150, 255, 50, 108, 58, 155, 4, 9, 32, 48, 102, 97, 106, 199, 17, 221, 77, 89, 193, 85, 47, 160, 102, 163, 179, 240]);
+pub const ID: Address = Address::new_from_array([
+    238, 93, 151, 107, 197, 15, 150, 255, 50, 108, 58, 155, 4, 9, 32, 48, 102, 97, 106, 199, 17,
+    221, 77, 89, 193, 85, 47, 160, 102, 163, 179, 240,
+]);
 
 // The Phase 2 `#[used] static STOCKSTREAM_ARENA_VALIDATOR` that used to live
 // here is gone: `handlers::place_order_core` now calls `Arena::validate`
