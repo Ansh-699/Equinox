@@ -1,17 +1,21 @@
 // Minimal stand-in for the Worker's GET /v1/markets/:symbol/execution-status
-// (workers/src/execution-status.ts) -- just enough for
-// lib/execution-status.ts's useExecutionStatus to resolve to a real,
-// withdrawal-safe status in tests, rather than staying permanently null
-// (which the withdraw gate correctly treats as "unavailable").
+// AND GET/WS /v1/markets/:symbol/stream (workers/src/execution-status.ts,
+// market-stream.ts) -- just enough for lib/execution-status.ts's
+// useExecutionStatus and features/activity/use-market-events.ts's
+// WebSocket consumer to see real, controllable data in tests, rather than
+// staying permanently null/empty.
 import http from "node:http";
+import { WebSocketServer } from "ws";
 
 const PORT = Number(process.env.MOCK_MARKET_API_PORT ?? 4183);
 
-// A test steers the returned execution status via POST /control before
-// triggering the app action that will poll this server -- same pattern as
-// mock-relayer-server.mjs's mode switch.
+// A test steers the returned execution status, or pushes a synthetic
+// market event to every connected stream socket, via POST /control --
+// same pattern as mock-relayer-server.mjs's mode switch.
 let status = "l1_only";
+let streamDown = false; // simulates the WS endpoint being unreachable, for reconnect-exhaustion tests
 const WITHDRAWAL_SAFE = new Set(["l1_only", "commit_finalized", "restored"]);
+const streamSockets = new Set();
 
 const server = http.createServer((req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -20,9 +24,17 @@ const server = http.createServer((req, res) => {
     req.on("data", (chunk) => { body += chunk; });
     req.on("end", () => {
       const command = JSON.parse(body);
-      status = command.status ?? "l1_only";
+      if (command.status) status = command.status;
+      if (typeof command.streamDown === "boolean") {
+        streamDown = command.streamDown;
+        if (streamDown) for (const socket of streamSockets) socket.close();
+      }
+      if (command.pushEvent) {
+        const payload = JSON.stringify(command.pushEvent);
+        for (const socket of streamSockets) socket.send(payload);
+      }
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ ok: true, status }));
+      res.end(JSON.stringify({ ok: true, status, streamDown, connectedSockets: streamSockets.size }));
     });
     return;
   }
@@ -51,6 +63,19 @@ const server = http.createServer((req, res) => {
   }
   res.writeHead(404);
   res.end();
+});
+
+// Real WS upgrade for /v1/markets/:symbol/stream -- a browser-side consumer
+// (useMarketEvents, trading-terminal.tsx) connects once per page and stays
+// connected; a test pushes events into it via POST /control's `pushEvent`.
+const wss = new WebSocketServer({ noServer: true });
+wss.on("connection", (socket) => {
+  streamSockets.add(socket);
+  socket.on("close", () => streamSockets.delete(socket));
+});
+server.on("upgrade", (req, socket, head) => {
+  if (streamDown || !/\/v1\/markets\/[^/]+\/stream$/.test(req.url ?? "")) { socket.destroy(); return; }
+  wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws));
 });
 
 server.listen(PORT, () => {
