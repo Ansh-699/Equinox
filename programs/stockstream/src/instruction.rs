@@ -23,6 +23,7 @@ pub const DELEGATE_CLUSTER_MEMBER: u8 = 41;
 /// creation pattern).
 pub const CREATE_MARKET_ACCOUNT: u8 = 42;
 pub const CREATE_INSTRUMENT_ACCOUNT: u8 = 43;
+pub const CREATE_VAULT_ACCOUNT: u8 = 44;
 pub const COMMIT_MARKET: u8 = 14;
 pub const COMMIT_AND_UNDELEGATE: u8 = 15;
 /// Reserved: the real external-undelegate callback uses the delegation
@@ -171,6 +172,9 @@ pub enum StockStreamInstruction {
     CreateInstrumentAccount {
         instrument_id: [u8; 32],
     },
+    /// CPI-creates the vault SPL token account and configures the header.
+    /// See `registry::create_vault_account`.
+    CreateVaultAccount,
     CommitMarket {
         sequence: u64,
     },
@@ -388,6 +392,7 @@ impl StockStreamInstruction {
                     .map_err(|_| ProgramError::InvalidInstructionData)?,
             }),
             Some(CREATE_MARKET_ACCOUNT) if data.len() == 1 => Ok(Self::CreateMarketAccount),
+            Some(CREATE_VAULT_ACCOUNT) if data.len() == 1 => Ok(Self::CreateVaultAccount),
             Some(CREATE_INSTRUMENT_ACCOUNT) if data.len() == 33 => {
                 Ok(Self::CreateInstrumentAccount {
                     instrument_id: data[1..33]

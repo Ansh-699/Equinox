@@ -224,6 +224,147 @@ pub fn create_instrument_account(
 /// 1. `[WRITE]`          the market PDA being built
 /// 2. `[WRITE, SIGNER]`  payer (funds the rent-exempt minimum)
 /// 3. `[]`               the system program
+/// Opcode 44: creates the vault SPL token account (165 bytes) at the
+/// vault PDA address, owned by the vault-authority PDA, then configures the
+/// market header. This is the last piece of client-side custody setup that
+/// cannot be done without a program-side CPI.
+///
+/// The System Program's `allocate` requires the target account's signature,
+/// which a PDA can only provide via `invoke_signed` — so this instruction
+/// performs fund + allocate + SPL initializeAccount3 in one atomic
+/// instruction, all CPIs signed by the vault PDA's own seeds.
+///
+/// Accounts:
+/// 0. `[WRITE]`          the market PDA (validated + header configured)
+/// 1. `[WRITE]`          the vault PDA to create (must not exist)
+/// 2. `[WRITE, SIGNER]`  payer (funds the rent-exempt minimum)
+/// 3. `[]`               the mint (SPL Token)
+/// 4. `[]`               the SPL Token program (Tokenkeg)
+/// 5. `[]`               the system program
+///
+/// Data: `[tag(1)]` (no arguments beyond the market).
+/// Opcode 44: creates the vault SPL token account (165 bytes) at the
+/// vault PDA address, owned by the vault-authority PDA, then configures the
+/// market header.
+///
+/// Accounts:
+/// 0. `[WRITE]`          the market PDA (validated + header configured)
+/// 1. `[WRITE]`          the vault PDA to create (must not exist)
+/// 2. `[WRITE, SIGNER]`  payer (funds the rent-exempt minimum)
+/// 3. `[]`               the mint (SPL Token)
+/// 4. `[]`               the SPL Token program (Tokenkeg)
+/// 5. `[]`               the system program
+///
+/// Data: `[tag(1)]`.
+pub fn create_vault_account(program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
+    use pinocchio::sysvars::{rent::Rent, Sysvar};
+
+    if accounts.len() != 7 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    if !accounts[0].is_writable()
+        || !accounts[1].is_writable()
+        || !accounts[2].is_signer()
+        || !accounts[2].is_writable()
+    {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    if *accounts[6].address() != pinocchio_system::ID {
+        return Err(ProgramError::InvalidAccountOwner);
+    }
+    if accounts[1].data_len() != 0 {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let market_key = *accounts[0].address();
+    let vault_key = *accounts[1].address();
+    let (expected_vault, vault_bump) =
+        Address::find_program_address(&[b"vault", market_key.as_ref()], program_id);
+    if expected_vault != vault_key {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    {
+        let market_bytes = unsafe { accounts[0].borrow_unchecked() };
+        let header = crate::handlers::initialized_header(&market_bytes)?;
+        if header.reserved_upgrade[1] != 0 {
+            return Err(custom(StockStreamError::InvalidInstruction));
+        }
+        if accounts[2].address().to_bytes() != header.market_authority {
+            return Err(ProgramError::MissingRequiredSignature);
+        }
+    }
+
+    let bump_slice = [vault_bump];
+    let vault_seeds = [
+        pinocchio::cpi::Seed::from(b"vault"),
+        pinocchio::cpi::Seed::from(market_key.as_ref()),
+        pinocchio::cpi::Seed::from(&bump_slice),
+    ];
+    let vault_signer = pinocchio::cpi::Signer::from(&vault_seeds);
+
+    // 1. Fund to the SPL token account rent-exempt minimum.
+    let rent = Rent::get()?;
+    let needed = rent.try_minimum_balance(crate::handlers::TOKEN_ACCOUNT_LEN)?;
+    let deficit = needed.saturating_sub(accounts[1].lamports());
+    if deficit > 0 {
+        pinocchio_system::instructions::Transfer {
+            from: &accounts[2],
+            to: &accounts[1],
+            lamports: deficit,
+        }
+        .invoke()?;
+    }
+
+    // 2. Allocate 165 bytes via CPI signed by the vault PDA seeds.
+    {
+        let mut vault_view = accounts[1].clone();
+        pinocchio_system::instructions::Allocate {
+            account: &vault_view,
+            space: crate::handlers::TOKEN_ACCOUNT_LEN as u64,
+        }
+        .invoke_signed(core::slice::from_ref(&vault_signer))?;
+
+        // 3. Assign to Tokenkeg so SPL initializeAccount3 can verify ownership.
+        unsafe { vault_view.assign(&crate::handlers::TOKEN_PROGRAM_ID) };
+    }
+
+    // 4. SPL initializeAccount3 (opcode 18): no vault signature required.
+    let vault_authority_address = crate::handlers::derive_vault_authority(&market_key, program_id);
+    let mint_address = *accounts[3].address();
+    let init_data = [18u8];
+    let init_accounts = [
+        pinocchio::instruction::InstructionAccount::writable(&vault_key),
+        pinocchio::instruction::InstructionAccount::readonly(&mint_address),
+        pinocchio::instruction::InstructionAccount::readonly(&vault_authority_address),
+    ];
+    let init_ix = pinocchio::instruction::InstructionView {
+        program_id: &crate::handlers::TOKEN_PROGRAM_ID,
+        accounts: &init_accounts,
+        data: &init_data,
+    };
+    {
+        let mut vault_view = accounts[1].clone();
+        let mut mint_view = accounts[3].clone();
+        let mut authority_view = accounts[5].clone();
+        pinocchio::cpi::invoke_signed(
+            &init_ix,
+            &[&vault_view, &mint_view, &authority_view],
+            core::slice::from_ref(&vault_signer),
+        )?;
+    }
+
+    // 5. Configure the market header.
+    {
+        let (market_split, rest) = accounts.split_at_mut(1);
+        crate::handlers::configure_vault_header(
+            program_id,
+            &mut market_split[0],
+            &rest[2],
+            &rest[1].address().to_bytes(),
+            &rest[2].address().to_bytes(),
+        )
+    }
+}
+
 pub fn create_market_account(program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
     use crate::state::MARKET_ACCOUNT_SIZE;
     use pinocchio::sysvars::{rent::Rent, Sysvar};
