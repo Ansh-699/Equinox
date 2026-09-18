@@ -2,19 +2,34 @@ import { test, expect } from "@playwright/test";
 
 const MARKET_API_CONTROL_URL = `http://127.0.0.1:${process.env.MOCK_MARKET_API_PORT ?? 4183}/control`;
 
-async function control(body: Record<string, unknown>): Promise<{ connectedSockets: number }> {
+async function control(body: Record<string, unknown>): Promise<{ connectedSockets: number; lastConnectionId: number }> {
   const response = await fetch(MARKET_API_CONTROL_URL, { method: "POST", body: JSON.stringify(body) });
   return response.json();
 }
 
-async function waitForStreamConnected(): Promise<void> {
+// Waits for a NEW connection specifically (lastConnectionId advancing past
+// a captured baseline), not merely "connectedSockets >= 1": a stale page
+// reconnecting (its own backoff racing this test's setup) can satisfy a
+// bare count before this test's actual page connects, which silently
+// pushes the event into the wrong socket.
+async function waitForStreamConnected(afterConnectionId: number): Promise<void> {
   for (let i = 0; i < 50; i += 1) {
-    const { connectedSockets } = await control({});
-    if (connectedSockets >= 1) return;
+    const { lastConnectionId } = await control({});
+    if (lastConnectionId > afterConnectionId) return;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error("Mock market API server never saw a WebSocket connection");
+  throw new Error("Mock market API server never saw a new WebSocket connection");
 }
+
+let connectionBaseline = 0;
+test.beforeEach(async () => {
+  // status: l1_only undoes any execution-status left dirty by another spec
+  // file sharing this same mock server process (e.g. er-routing.spec.ts).
+  // resetSockets: true force-closes any lingering socket from a previous
+  // test's page before this test's own baseline is captured.
+  const result = await control({ status: "l1_only", resetSockets: true });
+  connectionBaseline = result.lastConnectionId;
+});
 
 // The mock RPC server's fixture market account (tests/browser/mock-rpc-
 // server.mjs marketBytes()) sets oracleValid=true but
@@ -40,7 +55,7 @@ for (const [eventKind, expectedLabel] of [
 ] as const) {
   test(`a live "${eventKind}" event flips the oracle safety banner to "${expectedLabel}"`, async ({ page }) => {
     await page.goto("/");
-    await waitForStreamConnected();
+    await waitForStreamConnected(connectionBaseline);
     await control({ pushEvent: { id: eventKind, kind: "health", sequence: 1, domain: "l1", observedAt: Date.now(), payload: { kind: eventKind } } });
     await expect(page.locator(".status-strip[aria-live='polite']")).toContainText(expectedLabel, { timeout: 10_000 });
   });
