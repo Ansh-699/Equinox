@@ -16,6 +16,13 @@ let status = "l1_only";
 let streamDown = false; // simulates the WS endpoint being unreachable, for reconnect-exhaustion tests
 const WITHDRAWAL_SAFE = new Set(["l1_only", "commit_finalized", "restored"]);
 const streamSockets = new Set();
+// A monotonic id, not a socket COUNT: a stale page reconnecting (its own
+// backoff, or a race with resetSockets) can satisfy "count >= 1" before
+// the test's actual new page connects, silently pushing an event into the
+// wrong socket. Waiting for this id to advance past a captured baseline
+// means "a new connection happened after I asked", which a count can't
+// distinguish.
+let lastConnectionId = 0;
 
 const server = http.createServer((req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -25,16 +32,31 @@ const server = http.createServer((req, res) => {
     req.on("end", () => {
       const command = JSON.parse(body);
       if (command.status) status = command.status;
+      if (command.resetSockets) {
+        // Force-closes every currently connected stream socket, so a test
+        // that's about to navigate to a fresh page and wait for exactly
+        // one new connection can't be satisfied by a stale one left over
+        // from a previous test's page.
+        for (const socket of streamSockets) socket.close();
+        streamSockets.clear();
+      }
       if (typeof command.streamDown === "boolean") {
         streamDown = command.streamDown;
         if (streamDown) for (const socket of streamSockets) socket.close();
       }
       if (command.pushEvent) {
         const payload = JSON.stringify(command.pushEvent);
-        for (const socket of streamSockets) socket.send(payload);
+        // A stale socket from a just-closed page (its "close" event hasn't
+        // fired here yet) throwing mid-iteration must never stop delivery
+        // to sockets that come after it in the Set's insertion order --
+        // each send is independent.
+        for (const socket of streamSockets) {
+          if (socket.readyState !== socket.OPEN) { streamSockets.delete(socket); continue; }
+          try { socket.send(payload); } catch { streamSockets.delete(socket); }
+        }
       }
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ ok: true, status, streamDown, connectedSockets: streamSockets.size }));
+      res.end(JSON.stringify({ ok: true, status, streamDown, connectedSockets: streamSockets.size, lastConnectionId }));
     });
     return;
   }
@@ -71,6 +93,7 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({ noServer: true });
 wss.on("connection", (socket) => {
   streamSockets.add(socket);
+  lastConnectionId += 1;
   socket.on("close", () => streamSockets.delete(socket));
 });
 server.on("upgrade", (req, socket, head) => {
