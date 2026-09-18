@@ -6,10 +6,12 @@ import { TopBar } from "@/components/layout/top-bar";
 import { ExecutionStatusBanner, ProtocolStatusStrip } from "@/components/layout/status-strip";
 import { useAppAuth } from "@/components/app-providers";
 import { isSessionUsable } from "@/lib/session-trading";
-import { createTraderSeat, depositCollateral, initializeSettlementScratch, initializeVault, previewPlaceOrder, withdrawCollateral } from "@/clients/stockstream/src";
+import { createTraderSeat, depositCollateral, initializeSettlementScratch, initializeVault, previewPlaceOrder } from "@/clients/stockstream/src";
 import { marketForSymbol } from "@/lib/markets";
 import { RpcFailure } from "@/lib/rpc-transport";
+import { deriveCollateralTokenAccount } from "@/lib/token-accounts";
 import type { TransactionPreview } from "@/lib/execution-boundary";
+import { useWithdraw, evaluateWithdrawGate } from "@/features/collateral/use-withdraw";
 import { useStockStreamProtocol } from "@/features/wallet/use-stockstream-protocol";
 import { useTradingSession } from "@/features/sessions/use-trading-session";
 import { useSessionOrder } from "@/features/sessions/use-session-order";
@@ -55,6 +57,8 @@ export function TradingTerminal() {
   const executionStatus = useExecutionStatus(marketApiUrl, marketSymbol);
   const position = usePosition(protocol?.rpc ?? null, marketAddress, 0);
   const marketClock = useMarketClock(protocol?.rpc ?? null, marketAddress);
+  const withdraw = useWithdraw(protocol);
+  const withdrawGate = evaluateWithdrawGate(executionStatus, position.reconciliationStatus);
   const quantityNumber = Number(quantity) || 0;
   const bestBid = book.bids[0] ? decimal(book.bids[0].price, 1_000_000) : Number.NaN;
   const bestAsk = book.asks[0] ? decimal(book.asks[0].price, 1_000_000) : Number.NaN;
@@ -108,14 +112,11 @@ export function TradingTerminal() {
     const vault = process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT ?? marketConfig.vaultPda;
     const vaultAuthority = process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT_AUTHORITY;
     if (!mint || !tokenProgram || !vault || !vaultAuthority) return null;
-    return { market: marketAddress, authority: auth.walletAddress, seat: auth.walletAddress, seatIndex: 0, sourceOrDestination: auth.walletAddress, mint, tokenProgram, vault, vaultAuthority };
-  }
-
-  function constructWithdrawPreview() {
-    const accounts = resolveCustodyAccounts();
-    if (!accounts) { setNotice("Configure the market, collateral mint/vault addresses and sign in before constructing a withdrawal."); return; }
-    const ix = withdrawCollateral(accounts, BigInt(quantityNumber || 1));
-    setNotice(`Constructed WithdrawCollateral with ${ix.keys.length} accounts. Runtime submission is disabled until margin-health and buffer checks are implemented.`);
+    // sourceOrDestination is a real SPL token account the CPI transfers
+    // into/out of -- the trader's Associated Token Account, never their
+    // wallet pubkey directly (a wallet address is not a token account).
+    const sourceOrDestination = deriveCollateralTokenAccount(auth.walletAddress, mint, tokenProgram);
+    return { market: marketAddress, authority: auth.walletAddress, seat: auth.walletAddress, seatIndex: 0, sourceOrDestination, mint, tokenProgram, vault, vaultAuthority };
   }
 
   async function submitDeposit() {
@@ -214,7 +215,12 @@ export function TradingTerminal() {
           <LifecyclePanel
             onSeatAndScratch={runLifecycle}
             onDeposit={() => void submitDeposit()}
-            onWithdraw={constructWithdrawPreview}
+            onWithdraw={() => {
+              const accounts = resolveCustodyAccounts();
+              if (!accounts) { setNotice("Configure the market, collateral mint/vault addresses and sign in before withdrawing."); return; }
+              void withdraw.submitWithdraw(accounts, BigInt(quantityNumber || 1), withdrawGate, position.seat);
+            }}
+            withdrawDisabled={!withdrawGate.allowed || withdraw.pending}
             onInitializeVault={constructVault}
             onCancelAll={() => void sessionOrder.cancelAllSessionOrders(4)}
             onCancelOrder={(orderKey) => void sessionOrder.cancelSessionOrder(orderKey)}
@@ -243,8 +249,9 @@ export function TradingTerminal() {
           <PositionsPanel seat={position.seat} error={position.error} />
           <div className="notice">
             <CircleAlert size={16} />
-            <span>{notice}</span>
+            <span>{withdraw.notice ?? notice}</span>
             {sessionActionReason ? <span className="negative"> [{sessionActionReason}]</span> : null}
+            {!withdrawGate.allowed ? <span className="muted"> · Withdrawals disabled: {withdrawGate.reason}</span> : null}
           </div>
         </div>
       ) : (

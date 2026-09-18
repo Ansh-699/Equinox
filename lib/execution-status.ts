@@ -47,6 +47,16 @@ export interface ExecutionDisplayState {
   degraded: boolean;
   lastErSequence: number;
   lastCommittedL1Sequence: number;
+  /** The indexer's OWN authoritative display gate (workers/src/execution
+   * -status.ts::isWithdrawalDisplaySafe / WITHDRAWAL_SAFE_STATUSES),
+   * threaded through verbatim rather than re-derived here: it is not the
+   * same predicate as `!marketDelegated` (commit_finalized is withdrawal-
+   * safe even while still ER-delegated, because the market's L1 state is
+   * fully caught up at that point) and re-deriving it independently would
+   * risk silently drifting from the backend's own definition. The
+   * on-chain program's own l1_withdrawals_allowed() remains the real
+   * security boundary either way -- this is display-only. */
+  withdrawalSafe: boolean;
 }
 
 const ER_LIFECYCLE_STATUSES: ReadonlySet<MarketExecutionStatus> = new Set([
@@ -73,6 +83,7 @@ export function deriveExecutionDisplay(response: ExecutionStatusResponse): Execu
     degraded: response.status === "reconciliation_error",
     lastErSequence: response.sequences.erEventSequence,
     lastCommittedL1Sequence: response.sequences.l1FinalizedCommitSequence,
+    withdrawalSafe: response.withdrawalDisplaySafe,
   };
 }
 

@@ -6,6 +6,7 @@ export function LifecyclePanel({
   onSeatAndScratch,
   onDeposit,
   onWithdraw,
+  withdrawDisabled,
   onInitializeVault,
   onCancelAll,
   onCancelOrder,
@@ -14,6 +15,7 @@ export function LifecyclePanel({
   onSeatAndScratch: () => void;
   onDeposit: () => void;
   onWithdraw: () => void;
+  withdrawDisabled: boolean;
   onInitializeVault: () => void;
   onCancelAll: () => void;
   onCancelOrder: (orderKey: bigint) => void;
@@ -34,8 +36,8 @@ export function LifecyclePanel({
         </div>
         <button className="lifecycle-action" onClick={onSeatAndScratch}><LockKeyhole size={17} /> Construct seat + scratch</button>
         <div className="lifecycle-actions">
-          <button onClick={onDeposit}>Construct deposit</button>
-          <button onClick={onWithdraw}>Construct withdrawal</button>
+          <button onClick={onDeposit}>Deposit</button>
+          <button onClick={onWithdraw} disabled={withdrawDisabled} title={withdrawDisabled ? "Withdrawals disabled by market lifecycle state" : undefined}>Withdraw</button>
         </div>
         <div className="lifecycle-actions">
           <button onClick={onInitializeVault}>Construct vault</button>
