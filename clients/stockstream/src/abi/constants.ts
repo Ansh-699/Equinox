@@ -67,3 +67,5 @@ export const SPL_INIT_ACCOUNT3 = 18;
 /** SPL Token `mintTo` opcode */
 export const SPL_MINT_TO = 7;
 export const SPL_TRANSFER = 3;
+
+export const TRADING_SESSION_SEED = "trading_session";
