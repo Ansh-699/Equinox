@@ -315,11 +315,15 @@ pub fn create_vault_account(program_id: &Address, accounts: &mut [AccountView]) 
     // 4. SPL initializeAccount3 (opcode 18): no vault signature required.
     let vault_authority_address = crate::handlers::derive_vault_authority(&market_key, program_id);
     let mint_address = *accounts[3].address();
-    let init_data = [18u8];
+    // SPL initializeAccount3: the owner is in the INSTRUCTION DATA (not a
+    // separate account). The SPL Token account list is [account(w), mint(ro)]
+    // with the owner embedded in the data as 32 bytes after the opcode.
+    let mut init_data = [0u8; 33];
+    init_data[0] = 18; // InitializeAccount3 opcode
+    init_data[1..33].copy_from_slice(vault_authority_address.as_ref());
     let init_accounts = [
         pinocchio::instruction::InstructionAccount::writable(&vault_key),
         pinocchio::instruction::InstructionAccount::readonly(&mint_address),
-        pinocchio::instruction::InstructionAccount::readonly(&vault_authority_address),
     ];
     let init_ix = pinocchio::instruction::InstructionView {
         program_id: &crate::handlers::TOKEN_PROGRAM_ID,
@@ -329,10 +333,9 @@ pub fn create_vault_account(program_id: &Address, accounts: &mut [AccountView]) 
     {
         let mut vault_view = accounts[1].clone();
         let mut mint_view = accounts[3].clone();
-        let mut authority_view = accounts[5].clone();
         pinocchio::cpi::invoke_signed(
             &init_ix,
-            &[&vault_view, &mint_view, &authority_view],
+            &[&vault_view, &mint_view],
             core::slice::from_ref(&vault_signer),
         )?;
     }
