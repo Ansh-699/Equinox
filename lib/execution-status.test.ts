@@ -11,8 +11,14 @@ const sequences = {
   restorationSequence: 0,
 };
 
+// Mirrors workers/src/execution-status.ts's WITHDRAWAL_SAFE_STATUSES exactly
+// (l1_only, commit_finalized, restored) -- the fixture must match the real
+// backend set, not a simplified guess, since this is exactly the field
+// deriveExecutionDisplay is supposed to thread through untouched.
+const WITHDRAWAL_SAFE = new Set(["l1_only", "commit_finalized", "restored"]);
+
 function response(status: ExecutionStatusResponse["status"]): ExecutionStatusResponse {
-  return { status, sequences, error: status === "reconciliation_error" ? "boom" : null, withdrawalDisplaySafe: status === "l1_only" };
+  return { status, sequences, error: status === "reconciliation_error" ? "boom" : null, withdrawalDisplaySafe: WITHDRAWAL_SAFE.has(status) };
 }
 
 describe("deriveExecutionDisplay", () => {
@@ -44,6 +50,14 @@ describe("deriveExecutionDisplay", () => {
     const display = deriveExecutionDisplay(response("er_accepted"));
     expect(display.lastErSequence).toBe(12);
     expect(display.lastCommittedL1Sequence).toBe(2);
+  });
+  it("threads withdrawalSafe from the backend verbatim -- commit_finalized is safe even though still marketDelegated=true", () => {
+    const commitFinalized = deriveExecutionDisplay(response("commit_finalized"));
+    expect(commitFinalized.withdrawalSafe).toBe(true);
+    expect(commitFinalized.marketDelegated).toBe(true); // the two are NOT the same predicate
+    expect(deriveExecutionDisplay(response("restored")).withdrawalSafe).toBe(true);
+    expect(deriveExecutionDisplay(response("er_active")).withdrawalSafe).toBe(false);
+    expect(deriveExecutionDisplay(response("undelegating")).withdrawalSafe).toBe(false);
   });
 });
 
