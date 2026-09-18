@@ -18,7 +18,9 @@ export type SessionBlockReason =
   | "relayer_unconfigured"
   | "relayer_unavailable"
   | "fee_payer_unavailable"
-  | "transaction_rejected";
+  | "transaction_rejected"
+  | "execution_status_unavailable"
+  | "er_transition_blocked";
 
 export interface SessionActionResult {
   reason: SessionBlockReason | null;
@@ -36,6 +38,8 @@ const REASON_LABEL: Record<SessionBlockReason, string> = {
   relayer_unavailable: "Relayer unavailable",
   fee_payer_unavailable: "Fee payer unavailable",
   transaction_rejected: "Transaction rejected",
+  execution_status_unavailable: "MagicBlock execution status unavailable",
+  er_transition_blocked: "Market is mid-transition between L1 and the ER",
 };
 
 export function ok(message: string): SessionActionResult {

@@ -9,6 +9,7 @@ import { blocked, classifyRelayResponse, type SessionActionResult } from "@/lib/
 import { recordSignature } from "@/lib/last-signature";
 import type { SolanaRpcTransport } from "@/lib/rpc-transport";
 import type { AppAuth } from "@/components/app-providers";
+import type { ExecutionDisplayState } from "@/lib/execution-status";
 
 const RELAYER_ADDRESS = process.env.NEXT_PUBLIC_STOCKSTREAM_RELAYER_ADDRESS;
 
@@ -23,35 +24,60 @@ function requiredActionBits(action: SessionAction, reduceOnly: boolean): readonl
   return [action];
 }
 
+export type SessionActionGate =
+  | { allowed: true; domain: "l1" | "er" }
+  | { allowed: false; result: SessionActionResult };
+
+/** Pure, unit-testable prefix of relay(): every reason a session-signed
+ * action must be refused before a transaction is even built, in the order
+ * they're checked. Kept separate from the relay/submit side effects so
+ * every combination is directly testable without mocking RPC/relayer
+ * network calls. */
+export function evaluateSessionActionGate(
+  session: SessionStatus | null,
+  actions: readonly SessionAction[],
+  executionStatus: ExecutionDisplayState | null,
+): SessionActionGate {
+  if (!session) return { allowed: false, result: blocked("session_invalid", "No authorized session") };
+  if (session.revoked) return { allowed: false, result: blocked("session_revoked") };
+  if (!isSessionUsable(session)) return { allowed: false, result: blocked("session_expired") };
+  for (const action of actions) {
+    if (!actionAllowed(session.actions, action)) return { allowed: false, result: blocked("session_invalid", `Session is not authorized for ${action}`) };
+  }
+  if (!executionStatus) return { allowed: false, result: blocked("execution_status_unavailable", "MagicBlock execution-status endpoint has not returned a status") };
+  const domain = executionStatus.orderRoutingDomain;
+  if (!domain) return { allowed: false, result: blocked("er_transition_blocked", "The market is currently transitioning between L1 and the ER -- try again once it settles") };
+  return { allowed: true, domain };
+}
+
 /** Session-signed order actions relayed through app/api/relay/session.
  * Every path re-checks session usability and the specific action bit(s)
  * client-side (the on-chain program is still the real authority) before
  * ever asking the session key to sign anything, and every result is
  * classified into the explicit UI states in lib/session-relay-status.ts --
- * never a bare "it worked"/"it didn't" string. ER routing is deliberately
- * not implemented here yet: sending an order to a market that isn't
- * delegated would be an incompatible-domain transaction the spec requires
- * us to refuse, and delegation-status checking doesn't exist in this
- * codebase yet either. */
+ * never a bare "it worked"/"it didn't" string. Every action is also gated
+ * on the authoritative MagicBlock execution status
+ * (lib/execution-status.ts's orderRoutingDomain): a market mid-transition
+ * between L1 and the ER, or whose status can't be read at all, refuses to
+ * route rather than guessing which domain currently owns the account. */
 export function useSessionOrder(
   rpc: SolanaRpcTransport | null,
   session: SessionStatus | null,
   auth: Pick<AppAuth, "walletAddress" | "getAccessToken">,
   onResult: (result: SessionActionResult) => void,
   advanceNonce: () => void,
+  executionStatus: ExecutionDisplayState | null,
 ) {
   const [pending, setPending] = useState(false);
 
   const relay = useCallback(async (instruction: ReturnType<typeof placeOrder>, actions: readonly SessionAction[], label: string) => {
-    if (!session) return onResult(blocked("session_invalid", "No authorized session"));
-    if (session.revoked) return onResult(blocked("session_revoked"));
-    if (!isSessionUsable(session)) return onResult(blocked("session_expired"));
-    for (const action of actions) {
-      if (!actionAllowed(session.actions, action)) return onResult(blocked("session_invalid", `Session is not authorized for ${action}`));
-    }
+    const gate = evaluateSessionActionGate(session, actions, executionStatus);
+    if (!gate.allowed) return onResult(gate.result);
+    const { domain } = gate;
     if (!RELAYER_ADDRESS) return onResult(blocked("relayer_unconfigured", "NEXT_PUBLIC_STOCKSTREAM_RELAYER_ADDRESS is unset"));
     if (!rpc) return onResult(blocked("relayer_unavailable", "No RPC transport for a fresh blockhash"));
     if (!auth.walletAddress) return onResult(blocked("authentication_required", "No active wallet"));
+    if (!session) return onResult(blocked("session_invalid", "No authorized session")); // narrows for TS; gate.allowed already guarantees this
     const privyAccessToken = await auth.getAccessToken();
     if (!privyAccessToken) return onResult(blocked("authentication_required", "No Privy access token"));
     const csrfToken = readCsrfToken();
@@ -77,13 +103,13 @@ export function useSessionOrder(
         expectedNonce: session.nextExpectedNonce,
         sessionSignerAddress: session.sessionSignerAddress,
         clientRequestId: crypto.randomUUID(),
-        domain: "l1",
+        domain,
       });
       // HTTP acceptance alone is never success: classifyRelayResponse only
       // reports `reason: null` when the body actually carried a signature.
       const classified = classifyRelayResponse(response);
       if (classified.signature) {
-        recordSignature(label, classified.signature, "l1");
+        recordSignature(label, classified.signature, domain);
         // Must advance on success ONLY: the program's nonce check is exact
         // equality, so an un-advanced nonce would make the very next
         // session-signed action replay this one's nonce and be rejected.
@@ -95,7 +121,7 @@ export function useSessionOrder(
     } finally {
       setPending(false);
     }
-  }, [session, rpc, auth, onResult, advanceNonce]);
+  }, [session, rpc, auth, onResult, advanceNonce, executionStatus]);
 
   const placeSessionOrder = useCallback((params: Omit<PlaceOrderParams, "authority" | "session" | "actionNonce" | "market" | "seatIndex">) => {
     if (!session) { onResult(blocked("session_invalid")); return Promise.resolve(); }
