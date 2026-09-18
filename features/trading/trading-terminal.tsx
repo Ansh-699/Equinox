@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { CircleAlert } from "lucide-react";
 import { TopBar } from "@/components/layout/top-bar";
-import { TradingDisabledBanner, ProtocolStatusStrip } from "@/components/layout/status-strip";
+import { ExecutionStatusBanner, ProtocolStatusStrip } from "@/components/layout/status-strip";
 import { useAppAuth } from "@/components/app-providers";
 import { isSessionUsable } from "@/lib/session-trading";
 import { createTraderSeat, depositCollateral, initializeSettlementScratch, initializeVault, previewPlaceOrder, withdrawCollateral } from "@/clients/stockstream/src";
@@ -14,6 +14,7 @@ import { useStockStreamProtocol } from "@/features/wallet/use-stockstream-protoc
 import { useTradingSession } from "@/features/sessions/use-trading-session";
 import { useSessionOrder } from "@/features/sessions/use-session-order";
 import { SessionPolicyPanel } from "@/features/sessions/session-policy-panel";
+import { useExecutionStatus } from "@/features/magicblock/use-execution-status";
 import { decimal } from "./format";
 import { MarketPanel } from "./market-panel";
 import { OrderBookPanel, type BookLevel } from "./order-book";
@@ -41,6 +42,7 @@ export function TradingTerminal() {
   const session = useTradingSession(protocol, auth.walletAddress, marketAddress, 0);
   const sessionOrder = useSessionOrder(protocol?.rpc ?? null, session.status, setNotice);
   const canTrade = session.status !== null && isSessionUsable(session.status);
+  const executionStatus = useExecutionStatus(marketApiUrl, marketSymbol);
   const quantityNumber = Number(quantity) || 0;
   const bestBid = book.bids[0] ? decimal(book.bids[0].price, 1_000_000) : Number.NaN;
   const bestAsk = book.asks[0] ? decimal(book.asks[0].price, 1_000_000) : Number.NaN;
@@ -160,7 +162,7 @@ export function TradingTerminal() {
   return (
     <main className="shell">
       <TopBar tab={tab} onTabChange={setTab} auth={auth} />
-      <TradingDisabledBanner />
+      <ExecutionStatusBanner display={executionStatus} canTrade={canTrade} />
       <ProtocolStatusStrip marketSymbol={marketSymbol} onMarketSymbolChange={setMarketSymbol} authenticated={auth.authenticated} />
 
       {tab === "trade" ? (
