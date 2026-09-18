@@ -3,6 +3,7 @@ import type { MarketDefinition, MarketEvent, MarketEventKind } from "./types";
 import { DeadLetterRepository, ExecutionStatusRepository, IndexerRepository, ProtocolRepository, type IndexedWrite } from './repositories';
 import { keeperLeaseKey, runDurableKeeper } from './keepers';
 import { SolanaL1Transport, MagicBlockErTransport } from './chain-transports';
+import { Connection } from '@solana/web3.js';
 import { decodeCustodyEvents } from './event-decoder';
 import { AccountSnapshotFetcher } from './ingestion-pipeline';
 import { MarketIndexer } from './indexer-service';
@@ -10,7 +11,9 @@ import { isWithdrawalDisplaySafe, reconcileMarketExecutionStatus } from './execu
 import { PrivateSessionRepository, publishSeatProjection, seatsAffectedByEvent } from './private-sessions';
 import { classifyKeeperConfiguration, startKeeperRuntime } from './keeper-config';
 import { resolveKeeperSigning } from './keeper-signer';
-import { relaySessionTransaction } from './session-relayer';
+import { verifyPrivyToken, verifySessionChain } from './relay-auth';
+import { LocalKeypairSigner } from './signer';
+import { relaySessionTransaction, validateSessionTransaction } from './session-relayer';
 import { ProtocolKeeperOrchestrator, type OrchestratorRunSummary } from './keeper-orchestrator';
 
 export { MarketStream };
@@ -349,19 +352,51 @@ export default {
     // and submits through the domain the client picked. Never forwards a
     // transaction that failed validation.
     if (request.method === "POST" && url.pathname === "/v1/relay/session") {
-      if (!isAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
-      if (!await new ProtocolRepository(bindings(env).DB).allow('relay', 200, 60_000, Date.now()))
-        return json({ error: 'rate_limited' }, 429);
+      // Authoritative per-user Privy auth (replaces shared INGESTION_TOKEN).
+      const authHeader = request.headers.get("authorization");
+      if (!authHeader?.startsWith("Bearer ")) return json({ error: "unauthorized" }, 401);
+      const privyToken = authHeader.slice(7);
+      if (!env.PRIVY_APP_ID || !env.PRIVY_APP_SECRET) return json({ error: "privy_unconfigured" }, 503);
       const body = await request.json().catch(() => null) as {
         transactionBase64?: string;
         expectedProgramAddress?: string;
         sessionSignerAddress?: string;
+        ownerWallet?: string;
+        expectedMarket?: string;
+        expectedNonce?: number;
         domain?: string;
+        clientRequestId?: string;
       } | null;
-      if (!body?.transactionBase64 || !body.expectedProgramAddress || !body.sessionSignerAddress) {
+      if (!body?.transactionBase64 || !body.expectedProgramAddress || !body.sessionSignerAddress || !body.ownerWallet || !body.expectedMarket) {
         return json({ error: "invalid_request" }, 400);
       }
-      const relayerSigner = (globalThis as { __stockstreamRelayerSigner?: import('./signer').Signer }).__stockstreamRelayerSigner;
+      // 1-6: verify Privy identity (authoritative, fail-closed)
+      const privyResult = await verifyPrivyToken(privyToken, env.PRIVY_APP_ID, env.PRIVY_APP_SECRET, body.ownerWallet);
+      if ("error" in privyResult) return json({ error: privyResult.error }, 401);
+      // Steps 7-16: authoritative session/seat/nonce/expiry verification
+      if (!env.SOLANA_RPC_URL) return json({ error: "rpc_unconfigured" }, 503);
+      const conn = new Connection(env.SOLANA_RPC_URL);
+      const chainCheck = await verifySessionChain(
+        conn, body.expectedMarket!, body.ownerWallet!, body.sessionSignerAddress!, 0,
+      );
+      if (!chainCheck.ok) return json({ error: chainCheck.reason }, 403);
+      // Steps 11-17: verify transaction constraints
+      const txValidation = validateSessionTransaction(
+        { transactionBase64: body.transactionBase64, expectedProgramAddress: body.expectedProgramAddress, sessionSignerAddress: body.sessionSignerAddress },
+        env.RELAYER_KEYPAIR_JSON ? "relayer" : "",
+      );
+      if (!txValidation.ok) return json({ error: txValidation.reason }, 403);
+      // Rate limits: per-IP, per-wallet, per-market
+      const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
+      if (!await new ProtocolRepository(bindings(env).DB).allow(`relay:${ip}`, 30, 60_000, Date.now()))
+        return json({ error: 'rate_limited' }, 429);
+      if (!await new ProtocolRepository(bindings(env).DB).allow(`relay:${body.ownerWallet}`, 60, 60_000, Date.now()))
+        return json({ error: 'rate_limited' }, 429);
+      if (!await new ProtocolRepository(bindings(env).DB).allow(`relay:${body.sessionSignerAddress}`, 30, 60_000, Date.now()))
+        return json({ error: 'rate_limited' }, 429);
+      const relayerSigner = env.RELAYER_KEYPAIR_JSON
+        ? new LocalKeypairSigner("relayer:fee-payer", env.RELAYER_KEYPAIR_JSON)
+        : null;
       if (!relayerSigner) return json({ error: "relayer_signer_unconfigured" }, 503);
       const transport = body.domain === "er"
         ? new MagicBlockErTransport(env.MAGIC_ROUTER_URL ?? env.MAGICBLOCK_RPC_URL ?? env.SOLANA_RPC_URL!, fetch)
@@ -378,6 +413,7 @@ export default {
       if ("error" in outcome) return json({ error: outcome.error }, 400);
       return json({ accepted: true, signature: outcome.signature }, 202);
     }
+
 
     if (parts[0] === "v1" && parts[1] === "markets" && parts.length === 4) {
       const symbol = parts[2].toUpperCase();
