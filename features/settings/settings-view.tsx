@@ -25,7 +25,7 @@ export function SettingsView() {
   return (
     <main className="shell">
       <TopBar active="settings" auth={auth} />
-      <div className="settings-grid">
+      <div id="main-content" tabIndex={-1} className="settings-grid">
         <section className="session-panel">
           <div className="panel-title"><h2>Active wallet</h2><span>{auth.authenticated ? "connected" : auth.walletAddress ? "wallet selected" : "not connected"}</span></div>
           {auth.walletAddress ? (

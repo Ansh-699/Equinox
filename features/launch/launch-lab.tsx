@@ -3,7 +3,7 @@ import { Metric } from "@/features/trading/primitives";
 
 export function LaunchLab({ onLaunch }: { onLaunch: () => void }) {
   return (
-    <div className="launch-layout">
+    <div id="main-content" tabIndex={-1} className="launch-layout">
       <section className="launch-hero">
         <div>
           <p className="muted">Issuer controls / separate from perps</p>

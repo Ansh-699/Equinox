@@ -186,7 +186,7 @@ export function TradingTerminal() {
       <ProtocolStatusStrip marketSymbol={marketSymbol} onMarketSymbolChange={setMarketSymbol} authenticated={auth.authenticated} />
 
       {tab === "trade" ? (
-        <div className="terminal-grid">
+        <div id="main-content" tabIndex={-1} className="terminal-grid">
           <MarketPanel marketSymbol={marketSymbol} marketFeedStatus={marketFeedStatus} markPrice={markPrice} bestBid={bestBid} bestAsk={bestAsk} />
           <OrderBookPanel book={book} markPrice={markPrice} bestBid={bestBid} bestAsk={bestAsk} />
           <OrderTicket

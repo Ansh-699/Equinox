@@ -18,7 +18,7 @@ export function ActivityView() {
   return (
     <main className="shell">
       <TopBar active="activity" auth={auth} />
-      <div className="activity-grid">
+      <div id="main-content" tabIndex={-1} className="activity-grid">
         <section className="session-panel">
           <div className="panel-title"><h2>This session</h2><span>local, not persisted</span></div>
           {lastSignature ? (

@@ -43,6 +43,7 @@
     }
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@playwright/test": "^1.63.0",
     "@types/bn.js": "5.2.0",
     "@types/node": "24.10.1",
