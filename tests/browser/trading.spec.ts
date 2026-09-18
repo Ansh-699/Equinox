@@ -164,6 +164,20 @@ test("relayer fee-payer unconfigured surfaces fee_payer_unavailable distinctly",
   await expect(page.locator(".notice")).toContainText("fee_payer_unavailable", { timeout: 10_000 });
 });
 
+test("a dropped app session surfaces authentication_required, not a silent failure or a raw 401", async ({ page, context }) => {
+  await page.goto("/");
+  await login(page);
+  await authorizeSession(page);
+  // Drop only the httpOnly app-session cookie (never accessible to page JS)
+  // -- the CSRF cookie stays, so the request genuinely reaches the relay
+  // proxy and is rejected there (app/api/relay/session/route.ts's own
+  // readPersistentSession check), rather than short-circuiting client-side.
+  await context.clearCookies({ name: "stockstream_session" });
+  await page.getByRole("button", { name: "Place order" }).click();
+  await expect(page.locator(".notice")).toContainText("Authentication required", { timeout: 10_000 });
+  await expect(page.locator(".notice")).toContainText("No application session");
+});
+
 test("no server secret names appear anywhere in the rendered page or its scripts", async ({ page }) => {
   await page.goto("/");
   await login(page);

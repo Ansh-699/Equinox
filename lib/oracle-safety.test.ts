@@ -11,6 +11,11 @@ describe("deriveOracleSafety", () => {
     expect(deriveOracleSafety(input({ oracleValid: null }))).toBe("unknown");
   });
 
+  it("a hard-override lifecycle event applies even before the account has ever been read", () => {
+    expect(deriveOracleSafety(input({ oracleValid: null, latestLifecycleEventKind: "MarketPaused" }))).toBe("halted");
+    expect(deriveOracleSafety(input({ oracleValid: null, latestLifecycleEventKind: "CorporateActionEntered" }))).toBe("corp_action");
+  });
+
   it("is 'fresh' when oracleValid and within the staleness threshold", () => {
     expect(deriveOracleSafety(input())).toBe("fresh");
   });

@@ -72,9 +72,13 @@ export interface OracleSafetyInput {
 }
 
 export function deriveOracleSafety(input: OracleSafetyInput): OracleSafetyState {
-  if (input.oracleValid === null) return "unknown"; // no account read at all -- never guess a state
+  // A hard-override event is itself definitive, verified information (a
+  // decoded, real discriminator name) -- it applies even before the
+  // account has ever been read, since it's not a guess about the account's
+  // state, it's a direct report of a market-lifecycle transition.
   const override = input.latestLifecycleEventKind ? HARD_OVERRIDE[input.latestLifecycleEventKind] : undefined;
   if (override) return override;
+  if (input.oracleValid === null) return "unknown"; // no account read at all -- never guess a state
   if (!input.oracleValid) return "stale"; // explicitly flagged invalid on-chain, not merely "unknown"
   if (input.lastVerifiedOracleTimestamp === null) return "unknown";
   const threshold = input.stalenessThresholdSeconds ?? DEFAULT_STALENESS_THRESHOLD_SECONDS;

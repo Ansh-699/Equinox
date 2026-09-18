@@ -48,12 +48,42 @@ test("orders route through the ER while the market is genuinely ER-delegated", a
   await expect(page.locator(".notice")).toContainText("Relayed", { timeout: 10_000 });
 });
 
-test("orders continue routing through the ER across commit progress -- commit_finalized is still ER-owned", async ({ page }) => {
+for (const status of ["er_accepted", "commit_scheduled", "commit_observed_on_l1", "commit_finalized"]) {
+  test(`orders continue routing through the ER across commit progress -- "${status}" is still ER-owned`, async ({ page }) => {
+    await page.goto("/");
+    await login(page);
+    await authorizeSession(page);
+    await setExecutionStatus(status);
+    await waitForExecutionStatusPolled(page);
+
+    await page.getByRole("button", { name: "Place order" }).click();
+    await expect(page.locator(".notice")).toContainText("Relayed", { timeout: 10_000 });
+  });
+}
+
+test("orders route through L1 while l1_only (the default, not-delegated state)", async ({ page }) => {
   await page.goto("/");
   await login(page);
   await authorizeSession(page);
-  await setExecutionStatus("commit_finalized");
+  // beforeEach already sets l1_only -- no transition to wait on.
+
+  await page.getByRole("button", { name: "Place order" }).click();
+  await expect(page.locator(".notice")).toContainText("Relayed", { timeout: 10_000 });
+});
+
+test("orders route through L1 once the market is restored -- same domain as l1_only, reached via a real ER round trip", async ({ page }) => {
+  await page.goto("/");
+  await login(page);
+  await authorizeSession(page);
+  await setExecutionStatus("er_active");
   await waitForExecutionStatusPolled(page);
+
+  await setExecutionStatus("restored");
+  // "restored" and "l1_only" both render as "not delegated" in the banner
+  // (restored has no distinct label -- see describeExecutionStatus), so
+  // there's no text change to wait on here; wait past one poll interval
+  // instead (features/magicblock/use-execution-status.ts polls every 5s).
+  await page.waitForTimeout(5_500);
 
   await page.getByRole("button", { name: "Place order" }).click();
   await expect(page.locator(".notice")).toContainText("Relayed", { timeout: 10_000 });

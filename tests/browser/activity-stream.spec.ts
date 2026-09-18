@@ -1,16 +1,58 @@
 import { test, expect } from "@playwright/test";
 
-// The mock market API server (tests/browser/mock-market-api-server.mjs)
-// serves the snapshot REST endpoint but does not implement a WebSocket
-// upgrade for /v1/markets/:symbol/stream -- exercising the real per-domain
-// sequence-gap machinery end to end would need a real WS mock, which is out
-// of scope here. What IS worth verifying in a real browser is the other
-// half of the "reconnect detection and recovery" behavior (item 4): when
-// the stream is genuinely unreachable, the UI settles on an honest
-// "unavailable" status rather than retrying forever or silently pretending
-// to be live. lib/sequence-recovery.test.ts covers the gap/duplicate/
-// out-of-order classification itself in full.
+const MARKET_API_CONTROL_URL = `http://127.0.0.1:${process.env.MOCK_MARKET_API_PORT ?? 4183}/control`;
+
+async function control(body: Record<string, unknown>): Promise<{ connectedSockets: number }> {
+  const response = await fetch(MARKET_API_CONTROL_URL, { method: "POST", body: JSON.stringify(body) });
+  return response.json();
+}
+
+// A pushEvent sent before the page's WebSocket has actually connected is
+// silently dropped (there is no socket to broadcast to yet) -- wait for
+// the mock server to report a live connection first.
+async function waitForStreamConnected(): Promise<void> {
+  for (let i = 0; i < 50; i += 1) {
+    const { connectedSockets } = await control({});
+    if (connectedSockets >= 1) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error("Mock market API server never saw a WebSocket connection");
+}
+
+test.beforeEach(async () => {
+  await control({ status: "l1_only", streamDown: false });
+});
+
 test("market event stream gives up and reports unavailable after repeated reconnect failures, rather than retrying forever", async ({ page }) => {
+  await control({ streamDown: true });
   await page.goto("/activity");
   await expect(page.locator(".panel-title", { hasText: "Recent market events" }).locator("span")).toHaveText("unavailable", { timeout: 20_000 });
+});
+
+test("a sequence gap is detected, reported honestly, and triggers a resync -- never silently dropped or fabricated", async ({ page }) => {
+  await page.goto("/activity");
+  await waitForStreamConnected();
+
+  // First event establishes the baseline cursor at sequence 1 and is what
+  // actually flips the stream status to "live" (a snapshot alone never does).
+  await control({ pushEvent: { id: "e1", kind: "fill", sequence: 1, domain: "l1", observedAt: Date.now() } });
+  await expect(page.locator(".panel-title", { hasText: "Recent market events" }).locator("span")).toHaveText("live", { timeout: 10_000 });
+
+  // Skips straight to 5 -- a real 3-event gap (2, 3, 4 never arrived).
+  await control({ pushEvent: { id: "e2", kind: "fill", sequence: 5, domain: "l1", observedAt: Date.now() } });
+
+  await expect(page.getByText(/sequence gap.*detected/)).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("missed events")).toBeVisible();
+});
+
+test("a duplicate/replayed event is dropped, not shown twice or treated as a gap", async ({ page }) => {
+  await page.goto("/activity");
+  await waitForStreamConnected();
+
+  await control({ pushEvent: { id: "d1", kind: "fill", sequence: 10, domain: "l1", observedAt: Date.now() } });
+  await expect(page.locator(".activity-table tbody tr")).toHaveCount(1, { timeout: 10_000 });
+  await control({ pushEvent: { id: "d1-again", kind: "fill", sequence: 10, domain: "l1", observedAt: Date.now() } });
+
+  await expect(page.getByText(/duplicate\/out-of-order event/)).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator(".activity-table tbody tr")).toHaveCount(1);
 });
