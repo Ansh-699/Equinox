@@ -13,7 +13,7 @@ export function ActivityView() {
   const marketSymbol = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_SYMBOL ?? "AAPL-PERP";
   const executionStatus = useExecutionStatus(marketApiUrl, marketSymbol);
   const lastSignature = useLastSignature();
-  const { events, status } = useMarketEvents(marketApiUrl, marketSymbol);
+  const { events, status, gapCount, duplicateCount, lastGapAt } = useMarketEvents(marketApiUrl, marketSymbol);
 
   return (
     <main className="shell">
@@ -49,6 +49,16 @@ export function ActivityView() {
 
         <section className="session-panel" style={{ gridColumn: "1 / -1" }}>
           <div className="panel-title"><h2>Recent market events</h2><span>{status}</span></div>
+          {gapCount > 0 ? (
+            <p className="form-note negative">
+              {gapCount} sequence gap{gapCount === 1 ? "" : "s"} detected on this connection
+              {lastGapAt ? ` (most recent ${new Date(lastGapAt).toLocaleTimeString()})` : ""} -- missed events
+              were never fabricated; a fresh snapshot was fetched to resynchronize instead.
+              {duplicateCount > 0 ? ` ${duplicateCount} duplicate/out-of-order event(s) were also dropped.` : ""}
+            </p>
+          ) : duplicateCount > 0 ? (
+            <p className="form-note">{duplicateCount} duplicate/out-of-order event(s) dropped.</p>
+          ) : null}
           {events.length === 0 ? (
             <p className="form-note">No events observed yet.</p>
           ) : (
