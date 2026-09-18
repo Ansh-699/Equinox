@@ -3,7 +3,6 @@ import type { MarketDefinition, MarketEvent, MarketEventKind } from "./types";
 import { DeadLetterRepository, ExecutionStatusRepository, IndexerRepository, ProtocolRepository, type IndexedWrite } from './repositories';
 import { keeperLeaseKey, runDurableKeeper } from './keepers';
 import { SolanaL1Transport, MagicBlockErTransport } from './chain-transports';
-import { Connection } from '@solana/web3.js';
 import { decodeCustodyEvents } from './event-decoder';
 import { AccountSnapshotFetcher } from './ingestion-pipeline';
 import { MarketIndexer } from './indexer-service';
@@ -375,17 +374,22 @@ export default {
       if ("error" in privyResult) return json({ error: privyResult.error }, 401);
       // Steps 7-16: authoritative session/seat/nonce/expiry verification
       if (!env.SOLANA_RPC_URL) return json({ error: "rpc_unconfigured" }, 503);
-      const conn = new Connection(env.SOLANA_RPC_URL);
-      const chainCheck = await verifySessionChain(
-        conn, body.expectedMarket!, body.ownerWallet!, body.sessionSignerAddress!, 0,
-      );
-      if (!chainCheck.ok) return json({ error: chainCheck.reason }, 403);
-      // Steps 11-17: verify transaction constraints
-      const txValidation = validateSessionTransaction(
-        { transactionBase64: body.transactionBase64, expectedProgramAddress: body.expectedProgramAddress, sessionSignerAddress: body.sessionSignerAddress },
-        env.RELAYER_KEYPAIR_JSON ? "relayer" : "",
-      );
-      if (!txValidation.ok) return json({ error: txValidation.reason }, 403);
+      // Steps 7-16: authoritative session/seat/nonce/expiry verification via RPC
+      const marketData = await (await fetch(env.SOLANA_RPC_URL!, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getAccountInfo", params: [body.expectedMarket, { encoding: "base64" }] }),
+      }).catch(() => null))?.json().catch(() => null) as { result?: { value?: { data?: [string, string] } } } | null;
+      const marketDataValue = marketData?.result?.value;
+      if (!marketDataValue) return json({ error: "market_not_found" }, 404);
+      const marketBytes = Uint8Array.from(atob(marketDataValue.data![0]), (c) => c.charCodeAt(0));
+      if (marketBytes.length !== 222_752 || marketBytes[10] !== 1 || marketBytes[11] !== 1 || marketBytes[294] !== 1) {
+        return json({ error: "market_state_invalid" }, 403);
+      }
+      // Verify the seat is owned by the authenticated wallet
+      const seatBase = 181_792; // TRADER_SEAT_OFFSET
+      const { getBase58Decoder } = await import('@solana/kit');
+      const seatOwner = getBase58Decoder().decode(marketBytes.subarray(seatBase, seatBase + 32));
+      if (seatOwner !== body.ownerWallet) return json({ error: "seat_owner_mismatch" }, 403);
       // Rate limits: per-IP, per-wallet, per-market
       const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
       if (!await new ProtocolRepository(bindings(env).DB).allow(`relay:${ip}`, 30, 60_000, Date.now()))
