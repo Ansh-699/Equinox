@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { TopBar } from "@/components/layout/top-bar";
 import { useAppAuth } from "@/components/app-providers";
+import { WalletSelector } from "@/features/wallet/wallet-selector";
 import { useStockStreamProtocol } from "@/features/wallet/use-stockstream-protocol";
 import { useTradingSession } from "@/features/sessions/use-trading-session";
 import { useExecutionStatus } from "@/features/magicblock/use-execution-status";
@@ -26,26 +27,17 @@ export function SettingsView() {
       <TopBar active="settings" auth={auth} />
       <div className="settings-grid">
         <section className="session-panel">
-          <div className="panel-title"><h2>Active wallet</h2><span>{auth.authenticated ? "connected" : "not connected"}</span></div>
-          {auth.authenticated && auth.walletAddress ? (
+          <div className="panel-title"><h2>Active wallet</h2><span>{auth.authenticated ? "connected" : auth.walletAddress ? "wallet selected" : "not connected"}</span></div>
+          {auth.walletAddress ? (
             <dl className="session-detail">
               <dt>Address</dt><dd>{auth.walletAddress}</dd>
               <dt>Wallet type</dt><dd>{auth.walletClientType ?? "unknown"}</dd>
               <dt>Discovered wallets</dt><dd>{auth.wallets.length}</dd>
             </dl>
           ) : (
-            <p className="form-note">Sign in with Privy to see wallet details.</p>
+            <p className="form-note">{auth.wallets.length > 0 ? "Choose a wallet below before trading." : "Sign in with Privy to see wallet details."}</p>
           )}
-          {auth.wallets.length > 1 ? (
-            <ul className="wallet-list">
-              {auth.wallets.map((wallet) => (
-                <li key={wallet.address}>
-                  {wallet.address === auth.walletAddress ? <strong>{wallet.address}</strong> : wallet.address} <span className="muted">({wallet.walletClientType}{wallet.address === auth.walletAddress ? ", active" : ""})</span>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          <p className="form-note">Wallet switching UI is not implemented yet -- trading always uses the first discovered wallet.</p>
+          <WalletSelector />
         </section>
 
         <section className="session-panel">

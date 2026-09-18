@@ -5,26 +5,28 @@
  * in CI"). Active ONLY when NEXT_PUBLIC_E2E_TEST_MODE=1, which must never
  * be set in a real deployment -- it exists purely so Playwright can drive
  * the entire app (login, deposit, session authorize, session-signed
- * trading, withdraw) without a live Privy backend or a real wallet
- * extension. It never imports or calls any @privy-io/react-auth hook: the
- * real crash this was built to also fix (Privy's Solana hooks throwing
- * outside a PrivyProvider) is exactly the failure mode a half-mocked
- * Privy would still risk.
+ * trading, withdraw, wallet selection) without a live Privy backend or a
+ * real wallet extension. It never imports or calls any @privy-io/react-auth
+ * hook: the real crash this was built to also fix (Privy's Solana hooks
+ * throwing outside a PrivyProvider) is exactly the failure mode a
+ * half-mocked Privy would still risk.
  *
- * The "main wallet" here is a real Ed25519 Solana keypair generated
- * client-side (crypto, not Privy) and held only in this module's memory,
- * signing real transaction bytes with @solana/web3.js -- structurally the
- * same thing a real wallet does, just without the Privy UI/network round
- * trip. window.__stockstreamE2E exposes the wallet address and a
- * main-wallet-prompt counter so tests can assert "exactly one signature
- * request" without reading application internals.
+ * "Wallets" here are real Ed25519 Solana keypairs generated client-side
+ * (crypto, not Privy) and held only in this module's memory, signing real
+ * transaction bytes with @solana/web3.js -- structurally the same thing a
+ * real wallet does, just without the Privy UI/network round trip. The
+ * wallet COUNT is controlled by the `?e2eWallets=N` query param (default
+ * 1) so a test can exercise the single-wallet auto-select path and the
+ * multiple-wallet explicit-choice path without restarting the server.
+ * window.__stockstreamE2E exposes wallet addresses and a
+ * per-address signature counter so tests can assert things like "exactly
+ * one main-wallet prompt" or "never signed with the wrong wallet" without
+ * reading application internals.
  */
 
-import { useEffect, useMemo, useState, type Context } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Keypair, VersionedTransaction } from "@solana/web3.js";
-import { WalletSignerProvider, type ActiveWalletSigner } from "@/components/wallet-signer-context";
-import type { AppAuth } from "@/components/app-providers";
-import { readCsrfToken } from "@/lib/csrf";
+import { PrivyIdentityContext, type PrivyIdentity, type DiscoveredWallet } from "@/components/privy-identity-context";
 
 export function isE2eTestMode(): boolean {
   return process.env.NEXT_PUBLIC_E2E_TEST_MODE === "1";
@@ -32,62 +34,69 @@ export function isE2eTestMode(): boolean {
 
 declare global {
   interface Window {
-    __stockstreamE2E?: { walletAddress: string; promptCount: number };
+    __stockstreamE2E?: {
+      walletAddresses: string[];
+      /** @deprecated kept for older tests; equals walletAddresses[0]. */
+      walletAddress: string;
+      promptCount: number;
+      promptsByAddress: Record<string, number>;
+    };
   }
 }
 
-const testWallet = isE2eTestMode() ? Keypair.generate() : null;
+function walletCountFromLocation(): number {
+  if (typeof window === "undefined") return 1;
+  const raw = new URLSearchParams(window.location.search).get("e2eWallets");
+  const parsed = raw ? Number.parseInt(raw, 10) : 1;
+  return Number.isInteger(parsed) && parsed > 0 && parsed <= 5 ? parsed : 1;
+}
 
-export function TestAuthProvider({
-  children,
-  AuthContext,
-  disabledAuth,
-}: {
-  children: React.ReactNode;
-  AuthContext: Context<AppAuth>;
-  disabledAuth: AppAuth;
-}) {
+// Deterministic per-index seeds (not random) -- a full page reload
+// re-evaluates this module, and a persisted wallet-selection test needs the
+// SAME address to still be there after reload, exactly like a real wallet
+// extension that doesn't regenerate keys on every page load.
+function testKeypair(index: number): Keypair {
+  const seed = new Uint8Array(32);
+  seed[0] = index + 1;
+  return Keypair.fromSeed(seed);
+}
+
+const testWallets = isE2eTestMode() ? Array.from({ length: walletCountFromLocation() }, (_, index) => testKeypair(index)) : [];
+
+export function TestAuthProvider({ children }: { children: React.ReactNode }) {
   const [authenticated, setAuthenticated] = useState(false);
-  const [sessionReady, setSessionReady] = useState(false);
-  const walletAddress = testWallet?.publicKey.toBase58() ?? null;
+  // Real Privy only discovers wallets once the user is authenticated -- if
+  // this stayed populated pre-login, AppAuth.wallets.length > 0 would look
+  // identical to "authenticated but hasn't picked a wallet yet", which is
+  // exactly the state the TopBar's "Choose wallet" affordance keys off of.
+  const wallets = useMemo<readonly DiscoveredWallet[]>(
+    () => (authenticated ? testWallets.map((wallet, index) => ({ address: wallet.publicKey.toBase58(), walletClientType: index === 0 ? "e2e-test-embedded" : "e2e-test-external" })) : []),
+    [authenticated],
+  );
 
   useEffect(() => {
-    if (walletAddress && !window.__stockstreamE2E) window.__stockstreamE2E = { walletAddress, promptCount: 0 };
-  }, [walletAddress]);
+    if (!wallets.length) return;
+    const addresses = wallets.map((wallet) => wallet.address);
+    window.__stockstreamE2E = { walletAddresses: addresses, walletAddress: addresses[0], promptCount: 0, promptsByAddress: Object.fromEntries(addresses.map((address) => [address, 0])) };
+  }, [wallets]);
 
-  const auth = useMemo<AppAuth>(() => ({
-    ...disabledAuth,
+  const identity = useMemo<PrivyIdentity>(() => ({
     ready: true,
-    authenticated: authenticated && sessionReady,
-    walletAddress,
-    walletClientType: "e2e-test",
-    wallets: walletAddress ? [{ address: walletAddress, walletClientType: "e2e-test" }] : [],
+    privyAuthenticated: authenticated,
+    userId: authenticated ? "e2e-test-user" : null,
+    wallets,
     authError: null,
-    login: () => {
-      setAuthenticated(true);
-      if (!walletAddress) return;
-      void fetch("/api/auth/session", {
-        method: "POST",
-        credentials: "include",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ accessToken: "e2e-test-token", walletAddress }),
-      }).then((response) => setSessionReady(response.ok)).catch(() => setSessionReady(false));
-    },
-    logout: async () => {
-      const csrf = readCsrfToken();
-      await fetch("/api/auth/logout", { method: "POST", credentials: "include", headers: csrf ? { "x-stockstream-csrf": csrf } : {} });
-      setAuthenticated(false);
-      setSessionReady(false);
-    },
+    login: () => setAuthenticated(true),
+    logout: async () => setAuthenticated(false),
     getAccessToken: async () => "e2e-test-token",
-  }), [authenticated, sessionReady, walletAddress, disabledAuth]);
-
-  const walletSigner = useMemo<ActiveWalletSigner>(() => ({
-    address: walletAddress,
-    signTransaction: async (bytes: Uint8Array) => {
-      if (!testWallet) throw new Error("E2E test wallet not initialized");
-      if (typeof window !== "undefined" && window.__stockstreamE2E) window.__stockstreamE2E.promptCount += 1;
-      // `bytes` here is a FULL serialized transaction (empty signature
+    signWith: async (address, bytes) => {
+      const wallet = testWallets.find((candidate) => candidate.publicKey.toBase58() === address);
+      if (!wallet) throw new Error(`E2E test wallet ${address} not found`);
+      if (window.__stockstreamE2E) {
+        window.__stockstreamE2E.promptCount += 1;
+        window.__stockstreamE2E.promptsByAddress[address] = (window.__stockstreamE2E.promptsByAddress[address] ?? 0) + 1;
+      }
+      // `bytes` is a FULL serialized transaction (empty signature
       // placeholders already allocated) -- lib/solana-transaction.ts's
       // encodeTransaction() produces exactly this shape to match Privy's
       // real signTransaction API, which PrivyWalletSigner passes through
@@ -95,14 +104,10 @@ export function TestAuthProvider({
       // different shape used by the separate kit-based session-signing
       // path) silently decodes the wrong bytes and signs garbage.
       const transaction = VersionedTransaction.deserialize(bytes);
-      transaction.sign([testWallet]);
+      transaction.sign([wallet]);
       return transaction.serialize();
     },
-  }), [walletAddress]);
+  }), [authenticated, wallets]);
 
-  return (
-    <AuthContext.Provider value={auth}>
-      <WalletSignerProvider value={walletSigner}>{children}</WalletSignerProvider>
-    </AuthContext.Provider>
-  );
+  return <PrivyIdentityContext.Provider value={identity}>{children}</PrivyIdentityContext.Provider>;
 }
