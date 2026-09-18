@@ -38,13 +38,17 @@ export function TopBar({
       </nav>
       <div className="topbar-meta">
         <span className="network"><i /> Devnet</span>
-        {auth.authenticated ? (
+        {auth.walletAddress ? (
           <>
-            <button className="wallet-button" onClick={() => void navigator.clipboard.writeText(auth.walletAddress ?? "")} title="Copy wallet address">
+            <button className="wallet-button" onClick={() => void navigator.clipboard.writeText(auth.walletAddress ?? "")} title={`Copy wallet address (${auth.walletClientType ?? "unknown type"})`}>
               <WalletCards size={16} /> {auth.walletAddress?.slice(0, 4)}...{auth.walletAddress?.slice(-4)}
             </button>
             <button className="wallet-button" onClick={() => void auth.logout()}>Log out</button>
           </>
+        ) : auth.wallets.length > 0 ? (
+          <Link href="/settings" className="wallet-button">
+            <WalletCards size={16} /> Choose wallet ({auth.wallets.length})
+          </Link>
         ) : (
           <button className="wallet-button" onClick={auth.login}><WalletCards size={16} /> Sign in</button>
         )}

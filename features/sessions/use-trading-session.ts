@@ -55,9 +55,26 @@ function describeError(error: unknown, fallback: string): string {
  * authoritative on-chain readback before trading is ever enabled) and
  * revoke (which also destroys the in-memory session key immediately). */
 export function useTradingSession(protocol: StockStreamProtocol | null, ownerWallet: string | null, marketPda: string | null, seatIndex = 0) {
-  const [status, setStatus] = useState<SessionStatus | null>(null);
+  const [rawStatus, setStatus] = useState<SessionStatus | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // A session belongs to whichever wallet authorized it -- switching the
+  // active wallet must disable it immediately, not just until the next
+  // render. This is a pure derivation (never shows a stale owner's
+  // session for the new owner), not state kept in sync via an effect:
+  // there is no render where the wrong owner's session is visible.
+  const status = rawStatus && rawStatus.ownerWallet === ownerWallet ? rawStatus : null;
+
+  // Actually destroying the in-memory key is a real side effect (clearing
+  // a module-level Map), not a React state update, so it belongs in an
+  // effect regardless -- "switching wallets clears the browser-local
+  // session key" needs to actually happen, not just stop being displayed.
+  // destroySession is idempotent, so re-running this while the mismatch
+  // persists across renders is harmless.
+  useEffect(() => {
+    if (rawStatus && rawStatus.ownerWallet !== ownerWallet) destroySession(rawStatus.sessionSignerAddress);
+  }, [ownerWallet, rawStatus]);
 
   const authorize = useCallback(async (config: SessionConfigInput) => {
     if (!protocol || !ownerWallet || !marketPda) { setError("Sign in and select a market before authorizing a session."); return; }

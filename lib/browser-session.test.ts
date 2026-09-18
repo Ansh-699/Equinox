@@ -14,7 +14,9 @@ import {
 
 test("session key generates a valid Solana address and stays memory-only", async () => {
   const key = await generateSessionKey();
-  expect(key.address).toHaveLength(44);
+  // Base58-encoded 32-byte Ed25519 public keys are 32-44 chars depending on
+  // leading zero bytes -- a fixed toHaveLength(44) is flaky, not a real check.
+  expect(key.address).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
   expect(key.keyId).toMatch(/^session:/);
   expect(hasSessionKey(key.address)).toBe(true);
   expect(JSON.stringify(key)).not.toMatch(/privateKey|seed/);
