@@ -33,12 +33,12 @@ export class StockStreamProtocolService {
   buildDeposit(accounts: CustodyAccounts, amount: bigint): TransactionInstruction { return depositCollateral(accounts, amount); }
   buildWithdraw(accounts: CustodyAccounts, amount: bigint): TransactionInstruction { return withdrawCollateral(accounts, amount); }
 
-  async executeL1(preview: TransactionPreview, instructions: readonly TransactionInstruction[]): Promise<unknown> {
+  async executeL1(preview: TransactionPreview, instructions: readonly TransactionInstruction[]): Promise<{ preview: TransactionPreview; signature: string; confirmation: "confirmed" | "finalized" }> {
     const bytes = await this.transport.encode(instructions);
     return executeL1(preview, this.transport.wallet, this.transport.l1, bytes);
   }
 
-  async executeEr(preview: TransactionPreview, instructions: readonly TransactionInstruction[], writableAccounts: readonly string[]): Promise<unknown> {
+  async executeEr(preview: TransactionPreview, instructions: readonly TransactionInstruction[], writableAccounts: readonly string[]): Promise<{ preview: TransactionPreview; sequence: bigint }> {
     const blockhash = await this.transport.er.getAccountAwareBlockhash(writableAccounts);
     const bytes = await this.transport.encode(instructions, blockhash);
     const signed = await this.transport.wallet.signTransaction(bytes);

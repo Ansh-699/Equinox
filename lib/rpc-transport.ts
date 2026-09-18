@@ -83,6 +83,11 @@ export class SolanaRpcTransport implements L1Transport {
     if (!state.initialized) throw new RpcFailure('getAccountInfo','uninitialized_market');
     return { state, bytes, eventSequence:bytes.readBigUInt64LE(262), commitSequence:bytes.readBigUInt64LE(330), restoredSequence:bytes.readBigUInt64LE(338) };
   }
+  async tokenBalance(tokenAccount: string, commitment: 'confirmed'|'finalized' = 'confirmed'): Promise<bigint> {
+    const value = object(object(await this.request('getTokenAccountBalance',[key(tokenAccount),{commitment}])).value);
+    if (typeof value.amount !== 'string' || !/^\d+$/.test(value.amount)) throw new RpcFailure('getTokenAccountBalance','invalid_amount');
+    return BigInt(value.amount);
+  }
   async confirmCommit(market: string, expected: bigint): Promise<{status:'l1_committed';sequence:bigint}> {
     if (expected <= 0n) throw new Error('Invalid commit sequence');
     for (let attempt=0; attempt<this.attempts; attempt++) {

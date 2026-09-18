@@ -11,6 +11,9 @@ import {
 } from "@/lib/session-trading";
 import { cancelAll, createTraderSeat, depositCollateral, initializeSettlementScratch, initializeVault, previewPlaceOrder, withdrawCollateral } from "@/clients/stockstream/src";
 import { marketForSymbol } from "@/lib/markets";
+import { RpcFailure } from "@/lib/rpc-transport";
+import type { TransactionPreview } from "@/lib/execution-boundary";
+import { useStockStreamProtocol } from "@/features/wallet/use-stockstream-protocol";
 import { decimal } from "./format";
 import { MarketPanel } from "./market-panel";
 import { OrderBookPanel, type BookLevel } from "./order-book";
@@ -34,6 +37,7 @@ export function TradingTerminal() {
   const [marketFeedStatus, setMarketFeedStatus] = useState<"connecting" | "live" | "unavailable">(marketApiUrl ? "connecting" : "unavailable");
   const marketConfig = marketForSymbol(marketSymbol);
   const marketAddress = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_ADDRESS ?? marketConfig.marketPda;
+  const protocol = useStockStreamProtocol(auth.authenticated ? marketAddress : null);
   const canTrade = false;
   const quantityNumber = Number(quantity) || 0;
   const bestBid = book.bids[0] ? decimal(book.bids[0].price, 1_000_000) : Number.NaN;
@@ -81,16 +85,43 @@ export function TradingTerminal() {
     } catch (error) { setNotice(error instanceof Error ? error.message : "Could not construct lifecycle action"); }
   }
 
-  function constructCollateralAction(withdraw: boolean) {
-    if (!auth.walletAddress || !marketAddress) { setNotice("Configure the market address and sign in before constructing custody actions."); return; }
+  function resolveCustodyAccounts() {
+    if (!auth.walletAddress || !marketAddress) return null;
     const mint = process.env.NEXT_PUBLIC_STOCKSTREAM_COLLATERAL_MINT;
     const tokenProgram = process.env.NEXT_PUBLIC_STOCKSTREAM_TOKEN_PROGRAM;
     const vault = process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT ?? marketConfig.vaultPda;
     const vaultAuthority = process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT_AUTHORITY;
-    if (!mint || !tokenProgram || !vault || !vaultAuthority) { setNotice("Custody action blocked: collateral mint, token program and vault addresses are not configured."); return; }
-    const custodyAccounts = { market: marketAddress, authority: auth.walletAddress, seat: auth.walletAddress, seatIndex: 0, sourceOrDestination: auth.walletAddress, mint, tokenProgram, vault, vaultAuthority };
-    const ix = withdraw ? withdrawCollateral(custodyAccounts, BigInt(quantityNumber || 1)) : depositCollateral(custodyAccounts, BigInt(quantityNumber || 1));
-    setNotice(`Constructed ${withdraw ? "WithdrawCollateral" : "DepositCollateral"} with ${ix.keys.length} accounts. Runtime submission is disabled until the custody transport is configured.`);
+    if (!mint || !tokenProgram || !vault || !vaultAuthority) return null;
+    return { market: marketAddress, authority: auth.walletAddress, seat: auth.walletAddress, seatIndex: 0, sourceOrDestination: auth.walletAddress, mint, tokenProgram, vault, vaultAuthority };
+  }
+
+  function constructWithdrawPreview() {
+    const accounts = resolveCustodyAccounts();
+    if (!accounts) { setNotice("Configure the market, collateral mint/vault addresses and sign in before constructing a withdrawal."); return; }
+    const ix = withdrawCollateral(accounts, BigInt(quantityNumber || 1));
+    setNotice(`Constructed WithdrawCollateral with ${ix.keys.length} accounts. Runtime submission is disabled until margin-health and buffer checks are implemented.`);
+  }
+
+  async function submitDeposit() {
+    const accounts = resolveCustodyAccounts();
+    if (!accounts) { setNotice("Configure the market, collateral mint/vault addresses and sign in before depositing."); return; }
+    if (!protocol) { setNotice("Deposit blocked: connect a wallet capable of signing on Devnet."); return; }
+    const amount = BigInt(quantityNumber || 1);
+    const instruction = depositCollateral(accounts, amount);
+    const preview: TransactionPreview = {
+      instruction: "DepositCollateral",
+      programId: instruction.programId.toBase58(),
+      accounts: instruction.keys.map((meta) => ({ address: meta.pubkey.toBase58(), signer: meta.isSigner, writable: meta.isWritable })),
+      status: "constructed",
+    };
+    setNotice(`Simulating DepositCollateral for ${amount} base units…`);
+    try {
+      const result = await protocol.service.executeL1(preview, [instruction]);
+      const vaultBalance = await protocol.rpc.tokenBalance(accounts.vault).catch(() => null);
+      setNotice(`DepositCollateral ${result.confirmation} — signature ${result.signature.slice(0, 8)}…${result.signature.slice(-8)}.${vaultBalance !== null ? ` Vault balance (readback): ${vaultBalance} base units.` : ""}`);
+    } catch (error) {
+      setNotice(error instanceof RpcFailure ? `DepositCollateral failed at ${error.method} (${error.code}).` : error instanceof Error ? error.message : "Deposit failed");
+    }
   }
 
   function constructSessionAction(revoke = false) {
@@ -164,8 +195,8 @@ export function TradingTerminal() {
           />
           <LifecyclePanel
             onSeatAndScratch={runLifecycle}
-            onDeposit={() => constructCollateralAction(false)}
-            onWithdraw={() => constructCollateralAction(true)}
+            onDeposit={() => void submitDeposit()}
+            onWithdraw={constructWithdrawPreview}
             onInitializeVault={constructVault}
             onAuthorizeSession={() => constructSessionAction()}
             onRevokeSession={() => constructSessionAction(true)}
