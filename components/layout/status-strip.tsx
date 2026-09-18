@@ -1,15 +1,26 @@
-import { Clock3, Radio, ShieldCheck, TriangleAlert } from "lucide-react";
+import { Clock3, Radio, ShieldAlert, ShieldCheck, TriangleAlert } from "lucide-react";
 import { PERP_MARKETS } from "@/lib/markets";
 import type { ExecutionDisplayState } from "@/lib/execution-status";
+import type { OracleSafetyState } from "@/lib/oracle-safety";
+
+const ORACLE_SAFETY_LABEL: Record<OracleSafetyState, string> = {
+  fresh: "fresh",
+  stale: "stale",
+  closed: "closed",
+  halted: "halted",
+  corp_action: "corporate action",
+  unknown: "unavailable",
+};
 
 /** MagicBlock/session status is real, polled data (features/magicblock/
  * use-execution-status.ts) once a market API URL is configured; it shows
  * "unavailable" rather than fabricating a status when it isn't. Oracle
- * status stays a placeholder: the "oracle" market-event payload is a raw,
- * undecoded byte blob (see workers/src/event-decoder.ts) and this frontend
- * does not have a verified byte layout for it to decode safely -- showing
- * a made-up price/staleness read would be worse than showing nothing. */
-export function ExecutionStatusBanner({ display, canTrade }: { display: ExecutionDisplayState | null; canTrade: boolean }) {
+ * status (lib/oracle-safety.ts) is built ONLY from the already-verified
+ * account header fields (oracleValid/lastVerifiedOracleTimestamp) and
+ * fully-decoded market-event KIND NAMES -- the event's own 48-byte
+ * category-specific payload body stays undecoded, since there is no
+ * verified byte layout for it. */
+export function ExecutionStatusBanner({ display, canTrade, oracleSafety }: { display: ExecutionDisplayState | null; canTrade: boolean; oracleSafety: OracleSafetyState }) {
   const magicBlockLabel = !display
     ? "unavailable"
     : display.degraded
@@ -21,12 +32,13 @@ export function ExecutionStatusBanner({ display, canTrade }: { display: Executio
     : display.marketDelegated
     ? `ER active (seq ${display.lastErSequence})`
     : "not delegated";
+  const oracleSafe = oracleSafety === "fresh";
 
   return (
     <section className="status-strip" aria-live="polite">
       <div><Radio size={15} /> <strong>{canTrade ? "Session trading enabled" : "Trading disabled"}</strong><span>{canTrade ? "Session-signed orders" : "Authenticated previews only"}</span></div>
       <div>{display?.degraded ? <TriangleAlert size={15} /> : <Clock3 size={15} />} MagicBlock <span>{magicBlockLabel}</span></div>
-      <div><ShieldCheck size={15} /> Oracle <span>not connected</span></div>
+      <div>{oracleSafe ? <ShieldCheck size={15} /> : <ShieldAlert size={15} />} Oracle <span>{ORACLE_SAFETY_LABEL[oracleSafety]}</span></div>
     </section>
   );
 }

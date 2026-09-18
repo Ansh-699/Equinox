@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CircleAlert } from "lucide-react";
 import { TopBar } from "@/components/layout/top-bar";
 import { ExecutionStatusBanner, ProtocolStatusStrip } from "@/components/layout/status-strip";
@@ -21,6 +21,7 @@ import { useExecutionStatus } from "@/features/magicblock/use-execution-status";
 import { usePosition } from "@/features/positions/use-position";
 import { PositionsPanel } from "@/features/positions/positions-panel";
 import { useMarketClock } from "@/features/oracle/use-market-clock";
+import { deriveOracleSafety, ORACLE_LIFECYCLE_EVENT_KINDS } from "@/lib/oracle-safety";
 import { decimal } from "./format";
 import { MarketPanel } from "./market-panel";
 import { OrderBookPanel, type BookLevel } from "./order-book";
@@ -30,7 +31,7 @@ import { LaunchLab } from "@/features/launch/launch-lab";
 
 const marketApiUrl = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_API_URL;
 
-interface MarketEvent { kind: string; payload: { bids?: BookLevel[]; asks?: BookLevel[] }; }
+interface MarketEvent { kind: string; sequence?: number; payload: { bids?: BookLevel[]; asks?: BookLevel[]; kind?: string } }
 
 export function TradingTerminal() {
   const auth = useAppAuth();
@@ -46,6 +47,19 @@ export function TradingTerminal() {
   const [marketSymbol, setMarketSymbol] = useState(process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_SYMBOL ?? "AAPL-PERP");
   const [book, setBook] = useState<{ bids: BookLevel[]; asks: BookLevel[] }>({ bids: [], asks: [] });
   const [marketFeedStatus, setMarketFeedStatus] = useState<"connecting" | "live" | "unavailable">(marketApiUrl ? "connecting" : "unavailable");
+  const [latestLifecycleEventKind, setLatestLifecycleEventKind] = useState<string | null>(null);
+  const lifecycleEventRef = useRef<{ sequence: number; kind: string } | null>(null);
+  const [nowUnixSeconds, setNowUnixSeconds] = useState(0);
+  useEffect(() => {
+    // Date.now() must never be called during render (react-hooks/purity) --
+    // this is the only source of "now" for the oracle-safety staleness
+    // check below, ticking often enough that a market going stale is
+    // reflected within a few seconds of crossing the threshold.
+    const tick = () => setNowUnixSeconds(Math.floor(Date.now() / 1000));
+    tick();
+    const interval = setInterval(tick, 5_000);
+    return () => clearInterval(interval);
+  }, []);
   const marketConfig = marketForSymbol(marketSymbol);
   const marketAddress = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_ADDRESS ?? marketConfig.marketPda;
   const protocol = useStockStreamProtocol(auth.authenticated ? marketAddress : null);
@@ -56,6 +70,12 @@ export function TradingTerminal() {
   const canTrade = session.status !== null && isSessionUsable(session.status);
   const position = usePosition(protocol?.rpc ?? null, marketAddress, 0);
   const marketClock = useMarketClock(protocol?.rpc ?? null, marketAddress);
+  const oracleSafety = deriveOracleSafety({
+    oracleValid: marketClock?.oracleValid ?? null,
+    lastVerifiedOracleTimestamp: marketClock?.lastVerifiedOracleTimestamp ?? null,
+    nowUnixSeconds,
+    latestLifecycleEventKind,
+  });
   const withdraw = useWithdraw(protocol);
   const deposit = useDeposit(protocol);
   const withdrawGate = evaluateWithdrawGate(executionStatus, position.reconciliationStatus);
@@ -73,9 +93,22 @@ export function TradingTerminal() {
     let stopped = false;
     const applyEvents = (events: MarketEvent[]) => {
       const latestBook = [...events].reverse().find((event) => event.kind === "book");
-      if (!latestBook) return;
-      setBook({ bids: latestBook.payload.bids ?? [], asks: latestBook.payload.asks ?? [] });
-      setMarketFeedStatus("live");
+      if (latestBook) {
+        setBook({ bids: latestBook.payload.bids ?? [], asks: latestBook.payload.asks ?? [] });
+        setMarketFeedStatus("live");
+      }
+      // Tracks the most recent oracle/market-lifecycle event kind (a fully
+      // decoded, verified discriminator name -- see lib/oracle-safety.ts)
+      // for the oracle safety banner. Never gated on a "book" event being
+      // present in this same batch -- these are independent event kinds.
+      for (const event of events) {
+        const kind = event.payload.kind;
+        if (!kind || typeof event.sequence !== "number" || !ORACLE_LIFECYCLE_EVENT_KINDS.has(kind)) continue;
+        if (!lifecycleEventRef.current || event.sequence > lifecycleEventRef.current.sequence) {
+          lifecycleEventRef.current = { sequence: event.sequence, kind };
+          setLatestLifecycleEventKind(kind);
+        }
+      }
     };
 
     void fetch(`${marketApiUrl}/v1/markets/${marketSymbol}/snapshot`)
@@ -149,7 +182,7 @@ export function TradingTerminal() {
   return (
     <main className="shell">
       <TopBar active={tab} onTabChange={setTab} auth={auth} />
-      <ExecutionStatusBanner display={executionStatus} canTrade={canTrade} />
+      <ExecutionStatusBanner display={executionStatus} canTrade={canTrade} oracleSafety={oracleSafety} />
       <ProtocolStatusStrip marketSymbol={marketSymbol} onMarketSymbolChange={setMarketSymbol} authenticated={auth.authenticated} />
 
       {tab === "trade" ? (

@@ -10,6 +10,12 @@ export interface RawMarketEvent {
   domain?: "l1" | "er";
   slot?: number;
   observedAt: number;
+  /** Only the fully-decoded, verified event KIND NAME (the discriminator,
+   * per workers/src/event-decoder.ts's EVENT_KIND_NAMES) is typed here --
+   * see lib/oracle-safety.ts. The category-specific 48-byte payload body
+   * this wraps (`payload.payload` on the wire) stays untouched: there is
+   * no verified layout for it. */
+  payload?: { kind?: string };
 }
 
 const MAX_EVENTS = 100;
