@@ -1,0 +1,70 @@
+import { defineConfig, devices } from "@playwright/test";
+
+const MOCK_RPC_PORT = 4181;
+const MOCK_RELAYER_PORT = 4182;
+const MOCK_MARKET_API_PORT = 4183;
+const MOCK_RELAYER_TOKEN = "mock-relayer-token";
+const APP_PORT = 4173;
+
+export default defineConfig({
+  testDir: "./tests/browser",
+  timeout: 30_000,
+  fullyParallel: false,
+  workers: 1,
+  retries: 0,
+  reporter: [["list"]],
+  use: {
+    baseURL: `http://127.0.0.1:${APP_PORT}`,
+    trace: "retain-on-failure",
+  },
+  webServer: [
+    {
+      command: `node tests/browser/mock-rpc-server.mjs`,
+      port: MOCK_RPC_PORT,
+      reuseExistingServer: false,
+      env: { MOCK_RPC_PORT: String(MOCK_RPC_PORT) },
+    },
+    {
+      command: `node tests/browser/mock-relayer-server.mjs`,
+      port: MOCK_RELAYER_PORT,
+      reuseExistingServer: false,
+      env: { MOCK_RELAYER_PORT: String(MOCK_RELAYER_PORT), MOCK_RELAYER_TOKEN },
+    },
+    {
+      command: `node tests/browser/mock-market-api-server.mjs`,
+      port: MOCK_MARKET_API_PORT,
+      reuseExistingServer: false,
+      env: { MOCK_MARKET_API_PORT: String(MOCK_MARKET_API_PORT) },
+    },
+    {
+      // next build currently crashes (Turbopack native binary, pre-existing
+      // and unrelated to this branch -- reproduces on main too); next dev
+      // does not hit the same path, so the E2E server runs in dev mode.
+      command: "npm run dev:e2e",
+      url: `http://127.0.0.1:${APP_PORT}`,
+      reuseExistingServer: false,
+      timeout: 60_000,
+      env: {
+        NEXT_PUBLIC_E2E_TEST_MODE: "1",
+        NEXT_PUBLIC_SOLANA_RPC_URL: `http://127.0.0.1:${MOCK_RPC_PORT}`,
+        NEXT_PUBLIC_STOCKSTREAM_MARKET_API_URL: `http://127.0.0.1:${MOCK_MARKET_API_PORT}`,
+        // Distinct from the program ID and from each other -- web3.js
+        // rejects a message where the same address is both "invoked" (the
+        // program) and "writable" (an account), which a shared placeholder
+        // address here would trigger for real.
+        NEXT_PUBLIC_STOCKSTREAM_MARKET_ADDRESS: "62xct4vApqbZ8kRmdEb81ySog5twe6nfHJXph3Zap5Ps",
+        NEXT_PUBLIC_STOCKSTREAM_SETTLEMENT_SCRATCH_ADDRESS: "nKPxDByskqZr33kj4tnQTMHms8ms6h5pKXuQRBVY1rU",
+        NEXT_PUBLIC_STOCKSTREAM_COLLATERAL_MINT: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        NEXT_PUBLIC_STOCKSTREAM_TOKEN_PROGRAM: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        NEXT_PUBLIC_STOCKSTREAM_VAULT: "2c1xQXN8stTMFgNg1SXg11xPNUJTFgnGrvTwrvpH77hm",
+        NEXT_PUBLIC_STOCKSTREAM_VAULT_AUTHORITY: "GjBKKDieg7J8H73Yg9Zd2xwVD7htRqppmhAWwDcV4esK",
+        NEXT_PUBLIC_STOCKSTREAM_RELAYER_ADDRESS: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
+        STOCKSTREAM_RELAYER_URL: `http://127.0.0.1:${MOCK_RELAYER_PORT}`,
+        STOCKSTREAM_RELAYER_TOKEN: MOCK_RELAYER_TOKEN,
+      },
+    },
+  ],
+  projects: [
+    { name: "chromium", use: { ...devices["Desktop Chrome"], channel: "chrome" } },
+  ],
+});

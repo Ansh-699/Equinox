@@ -8,11 +8,13 @@
   },
   "scripts": {
     "dev": "next dev",
+    "dev:e2e": "next dev -p 4173",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:browser": "playwright test"
   },
   "dependencies": {
     "@magicblock-labs/ephemeral-rollups-kit": "0.17.0",
@@ -41,6 +43,7 @@
     }
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/bn.js": "5.2.0",
     "@types/node": "24.10.1",
     "@types/react": "19.2.7",

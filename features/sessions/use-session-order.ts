@@ -38,6 +38,7 @@ export function useSessionOrder(
   session: SessionStatus | null,
   auth: Pick<AppAuth, "walletAddress" | "getAccessToken">,
   onResult: (result: SessionActionResult) => void,
+  advanceNonce: () => void,
 ) {
   const [pending, setPending] = useState(false);
 
@@ -81,14 +82,20 @@ export function useSessionOrder(
       // HTTP acceptance alone is never success: classifyRelayResponse only
       // reports `reason: null` when the body actually carried a signature.
       const classified = classifyRelayResponse(response);
-      if (classified.signature) recordSignature(label, classified.signature, "l1");
+      if (classified.signature) {
+        recordSignature(label, classified.signature, "l1");
+        // Must advance on success ONLY: the program's nonce check is exact
+        // equality, so an un-advanced nonce would make the very next
+        // session-signed action replay this one's nonce and be rejected.
+        advanceNonce();
+      }
       onResult(classified);
     } catch (err) {
       onResult(blocked("transaction_rejected", err instanceof Error ? err.message : String(err)));
     } finally {
       setPending(false);
     }
-  }, [session, rpc, auth, onResult]);
+  }, [session, rpc, auth, onResult, advanceNonce]);
 
   const placeSessionOrder = useCallback((params: Omit<PlaceOrderParams, "authority" | "session" | "actionNonce" | "market" | "seatIndex">) => {
     if (!session) { onResult(blocked("session_invalid")); return Promise.resolve(); }

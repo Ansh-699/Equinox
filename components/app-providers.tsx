@@ -3,8 +3,11 @@
 import "@/lib/browser-polyfills";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { PrivyProvider, useLogin, useLogout, usePrivy, useWallets } from "@privy-io/react-auth";
-import { toSolanaWalletConnectors } from "@privy-io/react-auth/solana";
+import { toSolanaWalletConnectors, useSignTransaction, useWallets as useSolanaWallets } from "@privy-io/react-auth/solana";
 import { readCsrfToken } from "@/lib/csrf";
+import { PrivyWalletSigner } from "@/lib/privy-signing";
+import { WalletSignerProvider, type ActiveWalletSigner } from "@/components/wallet-signer-context";
+import { TestAuthProvider, isE2eTestMode } from "@/components/test-auth-provider";
 
 export interface DiscoveredWallet {
   address: string;
@@ -42,6 +45,15 @@ export function useAppAuth() { return useContext(AuthContext); }
 export function AppProviders({ children }: { children: React.ReactNode }) {
   const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
 
+  // Test-mode replaces Privy entirely -- it must never call any
+  // @privy-io/react-auth hook, real or otherwise, so browser tests never
+  // depend on a live Privy backend. See components/test-auth-provider.tsx.
+  if (isE2eTestMode()) return <TestAuthProvider AuthContext={AuthContext} disabledAuth={disabledAuth}>{children}</TestAuthProvider>;
+
+  // No PrivyProvider is mounted on this branch, so nothing downstream may
+  // call an @privy-io/react-auth/solana hook (they throw without a
+  // provider ancestor) -- WalletSignerContext's own default ("no signer
+  // available") is correct here without an explicit provider.
   if (!appId) return <AuthContext.Provider value={disabledAuth}>{children}</AuthContext.Provider>;
 
   return (
@@ -64,6 +76,14 @@ function PrivySession({ children }: { children: React.ReactNode }) {
   const { login } = useLogin();
   const { logout: privyLogout } = useLogout();
   const { wallets } = useWallets();
+  // The Solana-specific wallet/signing views (@privy-io/react-auth/solana)
+  // are only ever called from here, inside a component guaranteed to have
+  // a real PrivyProvider ancestor -- never from
+  // features/wallet/use-stockstream-protocol.ts directly, which used to
+  // crash the entire trading terminal whenever NEXT_PUBLIC_PRIVY_APP_ID
+  // was unset (these hooks throw outside a PrivyProvider).
+  const { signTransaction: signSolanaTransaction } = useSignTransaction();
+  const { wallets: solanaWallets } = useSolanaWallets();
   const [sessionReady, setSessionReady] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const walletAddress = wallets[0]?.address ?? null;
@@ -92,5 +112,17 @@ function PrivySession({ children }: { children: React.ReactNode }) {
     logout: async () => { const csrf = readCsrfToken(); await fetch("/api/auth/logout", { method: "POST", credentials: "include", headers: csrf ? { "x-stockstream-csrf": csrf } : {} }); await privyLogout(); setSessionReady(false); },
     getAccessToken: async () => { try { return await getAccessToken(); } catch { return null; } },
   }), [authenticated, authError, getAccessToken, login, privyLogout, ready, sessionReady, user?.id, walletAddress, wallets]);
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+
+  const activeSolanaWallet = solanaWallets[0];
+  const walletSigner = useMemo<ActiveWalletSigner>(() => {
+    if (!activeSolanaWallet) return { address: null, signTransaction: async () => { throw new Error("No Solana wallet connected"); } };
+    const signer = new PrivyWalletSigner(signSolanaTransaction, activeSolanaWallet, "solana:devnet");
+    return { address: activeSolanaWallet.address, signTransaction: (bytes) => signer.signTransaction(bytes) };
+  }, [activeSolanaWallet, signSolanaTransaction]);
+
+  return (
+    <AuthContext.Provider value={value}>
+      <WalletSignerProvider value={walletSigner}>{children}</WalletSignerProvider>
+    </AuthContext.Provider>
+  );
 }

@@ -51,7 +51,7 @@ export function TradingTerminal() {
   const protocol = useStockStreamProtocol(auth.authenticated ? marketAddress : null);
   const session = useTradingSession(protocol, auth.walletAddress, marketAddress, 0);
   const handleSessionResult = (result: SessionActionResult) => { setNotice(result.detail ? `${result.message}: ${result.detail}` : result.message); setSessionActionReason(result.reason); };
-  const sessionOrder = useSessionOrder(protocol?.rpc ?? null, session.status, auth, handleSessionResult);
+  const sessionOrder = useSessionOrder(protocol?.rpc ?? null, session.status, auth, handleSessionResult, session.advanceNonce);
   const canTrade = session.status !== null && isSessionUsable(session.status);
   const executionStatus = useExecutionStatus(marketApiUrl, marketSymbol);
   const position = usePosition(protocol?.rpc ?? null, marketAddress, 0);
