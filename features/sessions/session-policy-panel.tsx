@@ -38,7 +38,7 @@ export function SessionPolicyPanel({
         <div className="panel-title"><h2>Trading session</h2><span>{status.revoked ? "revoked" : "authorized"}</span></div>
         <dl className="session-detail">
           <dt>Session key</dt><dd>{status.sessionSignerAddress.slice(0, 6)}…{status.sessionSignerAddress.slice(-6)}</dd>
-          <dt>Expires</dt><dd>{new Date(status.expiresAt).toLocaleString()}</dd>
+          <dt>Expires</dt><dd>{new Date(status.expiresAt * 1000).toLocaleString()} <span className="muted">(market clock)</span></dd>
           <dt>Max order notional</dt><dd>{status.maxOrderNotional}</dd>
           <dt>Max cumulative notional</dt><dd>{status.maxCumulativeNotional}</dd>
           <dt>Max open orders</dt><dd>{status.maximumOpenOrders}</dd>

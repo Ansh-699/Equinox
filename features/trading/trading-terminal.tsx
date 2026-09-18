@@ -14,9 +14,12 @@ import { useStockStreamProtocol } from "@/features/wallet/use-stockstream-protoc
 import { useTradingSession } from "@/features/sessions/use-trading-session";
 import { useSessionOrder } from "@/features/sessions/use-session-order";
 import { SessionPolicyPanel } from "@/features/sessions/session-policy-panel";
+import type { SessionActionResult } from "@/lib/session-relay-status";
+import type { OrderTree } from "@/clients/stockstream/src";
 import { useExecutionStatus } from "@/features/magicblock/use-execution-status";
 import { usePosition } from "@/features/positions/use-position";
 import { PositionsPanel } from "@/features/positions/positions-panel";
+import { useMarketClock } from "@/features/oracle/use-market-clock";
 import { decimal } from "./format";
 import { MarketPanel } from "./market-panel";
 import { OrderBookPanel, type BookLevel } from "./order-book";
@@ -34,7 +37,11 @@ export function TradingTerminal() {
   const [tab, setTab] = useState<"trade" | "launch">("trade");
   const [quantity, setQuantity] = useState("12");
   const [limitPrice, setLimitPrice] = useState("");
+  const [orderType, setOrderType] = useState<"limit" | "post-only" | "ioc" | "oracle-pegged">("limit");
+  const [reduceOnly, setReduceOnly] = useState(false);
+  const [expiresInMinutes, setExpiresInMinutes] = useState("");
   const [notice, setNotice] = useState("Live submission requires verified Pyth pricing, USDC custody and MagicBlock delegation.");
+  const [sessionActionReason, setSessionActionReason] = useState<SessionActionResult["reason"]>(null);
   const [marketSymbol, setMarketSymbol] = useState(process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_SYMBOL ?? "AAPL-PERP");
   const [book, setBook] = useState<{ bids: BookLevel[]; asks: BookLevel[] }>({ bids: [], asks: [] });
   const [marketFeedStatus, setMarketFeedStatus] = useState<"connecting" | "live" | "unavailable">(marketApiUrl ? "connecting" : "unavailable");
@@ -42,10 +49,12 @@ export function TradingTerminal() {
   const marketAddress = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_ADDRESS ?? marketConfig.marketPda;
   const protocol = useStockStreamProtocol(auth.authenticated ? marketAddress : null);
   const session = useTradingSession(protocol, auth.walletAddress, marketAddress, 0);
-  const sessionOrder = useSessionOrder(protocol?.rpc ?? null, session.status, setNotice);
+  const handleSessionResult = (result: SessionActionResult) => { setNotice(result.detail ? `${result.message}: ${result.detail}` : result.message); setSessionActionReason(result.reason); };
+  const sessionOrder = useSessionOrder(protocol?.rpc ?? null, session.status, auth, handleSessionResult);
   const canTrade = session.status !== null && isSessionUsable(session.status);
   const executionStatus = useExecutionStatus(marketApiUrl, marketSymbol);
   const position = usePosition(protocol?.rpc ?? null, marketAddress, 0);
+  const marketClock = useMarketClock(protocol?.rpc ?? null, marketAddress);
   const quantityNumber = Number(quantity) || 0;
   const bestBid = book.bids[0] ? decimal(book.bids[0].price, 1_000_000) : Number.NaN;
   const bestAsk = book.asks[0] ? decimal(book.asks[0].price, 1_000_000) : Number.NaN;
@@ -145,11 +154,21 @@ export function TradingTerminal() {
   function submitOrder() {
     const settlementScratch = process.env.NEXT_PUBLIC_STOCKSTREAM_SETTLEMENT_SCRATCH_ADDRESS ?? marketConfig.scratchPda(0);
     if (canTrade) {
+      const minutes = Number(expiresInMinutes) || 0;
+      if (minutes > 0 && !marketClock?.oracleValid) { setNotice("Cannot set an order expiration: the market's oracle clock is unavailable."); return; }
       void sessionOrder.placeSessionOrder({
         settlementScratch,
         side: side === "long" ? "bid" : "ask",
+        tree: (orderType === "oracle-pegged" ? "oracle-pegged" : "fixed") as OrderTree,
+        postOnly: orderType === "post-only",
+        immediateOrCancel: orderType === "ioc",
+        reduceOnly,
         quantity: BigInt(quantityNumber),
         priceOrOffset: BigInt(limitPrice || 0),
+        // Unix seconds, anchored to the market's own oracle-verified clock
+        // (handlers.rs::place_order_core reads header.last_verified_oracle_
+        // timestamp as "now" for expiry, not Clock::get() or wall-clock).
+        expiresAt: minutes > 0 && marketClock ? marketClock.lastVerifiedOracleTimestamp + BigInt(minutes * 60) : undefined,
         clientOrderId: BigInt(Date.now()),
       });
       return;
@@ -179,6 +198,12 @@ export function TradingTerminal() {
             onQuantityChange={setQuantity}
             limitPrice={limitPrice}
             onLimitPriceChange={setLimitPrice}
+            orderType={orderType}
+            onOrderTypeChange={setOrderType}
+            reduceOnly={reduceOnly}
+            onReduceOnlyChange={setReduceOnly}
+            expiresInMinutes={expiresInMinutes}
+            onExpiresInMinutesChange={setExpiresInMinutes}
             markPrice={markPrice}
             notional={notional}
             authenticated={auth.authenticated}
@@ -192,6 +217,21 @@ export function TradingTerminal() {
             onWithdraw={constructWithdrawPreview}
             onInitializeVault={constructVault}
             onCancelAll={() => void sessionOrder.cancelAllSessionOrders(4)}
+            onCancelOrder={(orderKey) => void sessionOrder.cancelSessionOrder(orderKey)}
+            onReplaceOrder={(orderKey) => {
+              const settlementScratch = process.env.NEXT_PUBLIC_STOCKSTREAM_SETTLEMENT_SCRATCH_ADDRESS ?? marketConfig.scratchPda(0);
+              void sessionOrder.replaceSessionOrder(orderKey, {
+                settlementScratch,
+                side: side === "long" ? "bid" : "ask",
+                tree: (orderType === "oracle-pegged" ? "oracle-pegged" : "fixed") as OrderTree,
+                postOnly: orderType === "post-only",
+                immediateOrCancel: orderType === "ioc",
+                reduceOnly,
+                quantity: BigInt(quantityNumber),
+                priceOrOffset: BigInt(limitPrice || 0),
+                clientOrderId: BigInt(Date.now()),
+              });
+            }}
           />
           <SessionPolicyPanel
             status={session.status}
@@ -201,7 +241,11 @@ export function TradingTerminal() {
             onRevoke={() => void session.revoke()}
           />
           <PositionsPanel seat={position.seat} error={position.error} />
-          <div className="notice"><CircleAlert size={16} /><span>{notice}</span></div>
+          <div className="notice">
+            <CircleAlert size={16} />
+            <span>{notice}</span>
+            {sessionActionReason ? <span className="negative"> [{sessionActionReason}]</span> : null}
+          </div>
         </div>
       ) : (
         <LaunchLab onLaunch={() => setNotice("DBC execution is not enabled until an issuer wallet and configured Meteora pool parameters are available. No launch was created.")} />

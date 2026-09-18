@@ -14,9 +14,14 @@ export interface AppAuth {
   authError: string | null;
   login: () => void;
   logout: () => Promise<void>;
+  /** A fresh, short-lived Privy access token for this request -- callers
+   * (e.g. the session relayer) must fetch one per request rather than
+   * caching it: it is the per-request user-authentication proof, not a
+   * substitute for the backend's own authoritative validation. */
+  getAccessToken: () => Promise<string | null>;
 }
 
-const disabledAuth: AppAuth = { ready: true, authenticated: false, userId: null, walletAddress: null, authError: "Privy is not configured", login: () => undefined, logout: async () => undefined };
+const disabledAuth: AppAuth = { ready: true, authenticated: false, userId: null, walletAddress: null, authError: "Privy is not configured", login: () => undefined, logout: async () => undefined, getAccessToken: async () => null };
 const AuthContext = createContext<AppAuth>(disabledAuth);
 
 export function useAppAuth() { return useContext(AuthContext); }
@@ -62,6 +67,15 @@ function PrivySession({ children }: { children: React.ReactNode }) {
     return () => { cancelled = true; };
   }, [authenticated, getAccessToken, ready, walletAddress]);
 
-  const value = useMemo<AppAuth>(() => ({ ready: ready && sessionReady, authenticated: authenticated && sessionReady && !!walletAddress, userId: user?.id ?? null, walletAddress, authError, login, logout: async () => { const csrf = readCsrfToken(); await fetch("/api/auth/logout", { method: "POST", credentials: "include", headers: csrf ? { "x-stockstream-csrf": csrf } : {} }); await privyLogout(); setSessionReady(false); } }), [authenticated, authError, login, privyLogout, ready, sessionReady, user?.id, walletAddress]);
+  const value = useMemo<AppAuth>(() => ({
+    ready: ready && sessionReady,
+    authenticated: authenticated && sessionReady && !!walletAddress,
+    userId: user?.id ?? null,
+    walletAddress,
+    authError,
+    login,
+    logout: async () => { const csrf = readCsrfToken(); await fetch("/api/auth/logout", { method: "POST", credentials: "include", headers: csrf ? { "x-stockstream-csrf": csrf } : {} }); await privyLogout(); setSessionReady(false); },
+    getAccessToken: async () => { try { return await getAccessToken(); } catch { return null; } },
+  }), [authenticated, authError, getAccessToken, login, privyLogout, ready, sessionReady, user?.id, walletAddress]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

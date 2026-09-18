@@ -132,7 +132,13 @@ export async function authorizeSessionTransaction(
     sessionPda: string;
     sessionSignerAddress: string;
     policy: SessionPolicy;
-    expiresAtMs: number;
+    /** Unix SECONDS, matching `TradingSession.expires_at` on-chain -- the
+     * program compares it against the market's last verified oracle
+     * timestamp, not wall-clock milliseconds. See
+     * lib/browser-session.ts::SessionStatus.expiresAt for the full
+     * explanation; getting this wrong makes a session valid ~1000x
+     * longer than intended. */
+    expiresAt: number;
     recentBlockhash: string;
   },
   mainWallet: WalletBoundary,
@@ -144,7 +150,7 @@ export async function authorizeSessionTransaction(
       payer: input.ownerWallet,
       sessionSigner: input.sessionSignerAddress,
     },
-    input.expiresAtMs,
+    input.expiresAt,
     {
       seatIndex: input.policy.seatIndex,
       actions: input.policy.actions,
@@ -200,36 +206,56 @@ export async function buildSessionSignedTransaction(input: {
   return { base64: getBase64EncodedWireTransaction(signed as never) };
 }
 
-/** Submits a session-signed transaction to the Worker relayer through this
- * app's own same-origin proxy (app/api/relay/session). The browser never
- * holds the relayer's bearer credential: the proxy authenticates the
- * caller via the existing app session cookie + CSRF token instead. */
-export async function submitToRelayer(input: {
+export interface SubmitToRelayerInput {
   csrfToken: string;
+  /** A FRESH Privy access token (fetch one per call -- see AppAuth.getAccessToken).
+   * The browser never holds the relayer's own bearer credential; this is
+   * what actually authenticates the user to app/api/relay/session. */
+  privyAccessToken: string;
+  ownerWallet: string;
   transactionBase64: string;
   expectedProgramAddress: string;
+  expectedMarket: string;
+  expectedNonce: bigint;
   sessionSignerAddress: string;
+  /** Client-generated idempotency key (crypto.randomUUID()) -- forwarded
+   * so a retried submission can be deduplicated once the Worker supports
+   * it (main-agent workstream item 1); this app does not dedupe it itself. */
+  clientRequestId: string;
   domain: "l1" | "er";
-}): Promise<{ signature: string } | { error: string }> {
+}
+
+export interface RelayResponse {
+  status: number;
+  body: { signature?: string; error?: string; detail?: string } | null;
+}
+
+/** Submits a session-signed transaction to the Worker relayer through this
+ * app's own same-origin proxy (app/api/relay/session), which independently
+ * verifies a fresh Privy access token on every call -- see that route's
+ * own doc comment. Returns the raw status/body for the caller to classify
+ * with lib/session-relay-status.ts rather than collapsing every non-2xx
+ * outcome into one generic error string. */
+export async function submitToRelayer(input: SubmitToRelayerInput): Promise<RelayResponse> {
   const response = await fetch("/api/relay/session", {
     method: "POST",
     credentials: "include",
     headers: { "content-type": "application/json", "x-stockstream-csrf": input.csrfToken },
     body: JSON.stringify({
+      privyAccessToken: input.privyAccessToken,
+      ownerWallet: input.ownerWallet,
       transactionBase64: input.transactionBase64,
       expectedProgramAddress: input.expectedProgramAddress,
+      expectedMarket: input.expectedMarket,
+      expectedNonce: input.expectedNonce.toString(),
       sessionSignerAddress: input.sessionSignerAddress,
+      clientRequestId: input.clientRequestId,
       domain: input.domain,
     }),
-  });
-  if (response.status === 400) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    return { error: body?.error ?? "relayer_rejected" };
-  }
-  if (!response.ok) return { error: `relayer_status_${response.status}` };
-  const body = (await response.json().catch(() => null)) as { signature?: string } | null;
-  if (!body?.signature) return { error: "relayer_response_invalid" };
-  return { signature: body.signature };
+  }).catch(() => null);
+  if (!response) return { status: 0, body: null };
+  const body = (await response.json().catch(() => null)) as RelayResponse["body"];
+  return { status: response.status, body };
 }
 
 /** Destroys the in-memory session key (logout, revocation, expiry). */

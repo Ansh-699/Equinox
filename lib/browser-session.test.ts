@@ -48,7 +48,7 @@ test("session usability: expiry and revocation gate; actions gate", () => {
     marketPda: "Market1111111111111111111111111111111111111",
     seatIndex: 0,
     actions: 0b1011,
-    expiresAt: Date.now() + 3_600_000,
+    expiresAt: Math.floor(Date.now() / 1000) + 3_600,
     maxOrderNotional: "1000",
     maxCumulativeNotional: "10000",
     maximumExposure: "1000",
@@ -58,7 +58,7 @@ test("session usability: expiry and revocation gate; actions gate", () => {
   };
   expect(isSessionUsable(base)).toBe(true);
   expect(isSessionUsable({ ...base, revoked: true })).toBe(false);
-  expect(isSessionUsable({ ...base, expiresAt: Date.now() - 1 })).toBe(false);
+  expect(isSessionUsable({ ...base, expiresAt: Math.floor(Date.now() / 1000) - 1 })).toBe(false);
   expect(isSessionUsable({ ...base, actions: 0 })).toBe(false);
 });
 

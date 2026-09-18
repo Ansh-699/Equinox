@@ -63,7 +63,7 @@ test("authorization transaction carries exactly ONE main-wallet signature and no
         maximumExposure: 1_000_000n,
         maximumOpenOrders: 32,
       },
-      expiresAtMs: Date.now() + 3_600_000,
+      expiresAt: Math.floor(Date.now() / 1000) + 3_600,
       recentBlockhash: RECENT_BLOCKHASH,
     },
     mainWalletBoundary(wallet),

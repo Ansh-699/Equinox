@@ -125,6 +125,13 @@ export interface SessionStatus {
   marketPda: string;
   seatIndex: number;
   actions: number;
+  /** Unix SECONDS, matching `TradingSession.expires_at` on-chain
+   * (programs/stockstream/src::session.rs). The program compares this
+   * against `header.last_verified_oracle_timestamp` -- the market's own
+   * clock, anchored to the oracle, not `Clock::get()` and not
+   * milliseconds (see handlers.rs::authorize_trading_session /
+   * authorize_trading_actor). A millisecond value here would make a
+   * session appear valid roughly 1000x longer than intended. */
   expiresAt: number;
   maxOrderNotional: string;
   maxCumulativeNotional: string;
@@ -136,8 +143,13 @@ export interface SessionStatus {
   revoked: boolean;
 }
 
-export function isSessionUsable(status: SessionStatus, now = Date.now()): boolean {
-  return !status.revoked && Number(status.expiresAt) > now && status.actions !== 0;
+/** `nowUnixSeconds` is a client-side estimate (wall-clock) for display
+ * purposes only -- the program's real "now" is the market's last verified
+ * oracle timestamp, which this client does not always have fresh. This
+ * function never gates an actual submission's validity; the on-chain
+ * program does that regardless of what this returns. */
+export function isSessionUsable(status: SessionStatus, nowUnixSeconds = Math.floor(Date.now() / 1000)): boolean {
+  return !status.revoked && Number(status.expiresAt) > nowUnixSeconds && status.actions !== 0;
 }
 
 export function actionAllowed(actions: number, action: keyof typeof SESSION_ACTION): boolean {
