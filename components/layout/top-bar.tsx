@@ -1,10 +1,19 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useRef } from "react";
 import { WalletCards } from "lucide-react";
 import type { AppAuth } from "@/components/app-providers";
 
 export type ActiveSection = "trade" | "launch" | "portfolio" | "activity" | "settings" | "diagnostics";
+
+type AuthDisplayBranch = "signed_in" | "choose_wallet" | "signed_out";
+
+function branchFor(auth: AppAuth): AuthDisplayBranch {
+  if (auth.walletAddress) return "signed_in";
+  if (auth.wallets.length > 0) return "choose_wallet";
+  return "signed_out";
+}
 
 export function TopBar({
   active,
@@ -17,8 +26,25 @@ export function TopBar({
   onTabChange?: (tab: "trade" | "launch") => void;
   auth: AppAuth;
 }) {
+  // The topbar's Sign in / Choose wallet / wallet-address+Log out controls
+  // are mutually exclusive -- activating one always unmounts it and mounts
+  // a different element in its place. Left alone, a keyboard user's focus
+  // silently falls back to <body> the instant that happens (found via
+  // tests/browser/keyboard-only.spec.ts), stranding them with no visible
+  // focus indicator anywhere on the page. Move focus to whichever one of
+  // these three replaces the one they were just on.
+  const primaryActionRef = useRef<HTMLElement | null>(null);
+  const setPrimaryActionRef = (el: HTMLElement | null) => { primaryActionRef.current = el; };
+  const branch = branchFor(auth);
+  const previousBranchRef = useRef(branch);
+  useEffect(() => {
+    if (previousBranchRef.current !== branch) primaryActionRef.current?.focus();
+    previousBranchRef.current = branch;
+  }, [branch]);
+
   return (
     <header className="topbar">
+      <a href="#main-content" className="skip-link">Skip to main content</a>
       <div className="brand"><span className="brand-mark">S</span><span>StockStream</span></div>
       <nav aria-label="Primary navigation">
         {onTabChange ? (
@@ -40,17 +66,17 @@ export function TopBar({
         <span className="network"><i /> Devnet</span>
         {auth.walletAddress ? (
           <>
-            <button className="wallet-button" onClick={() => void navigator.clipboard.writeText(auth.walletAddress ?? "")} title={`Copy wallet address (${auth.walletClientType ?? "unknown type"})`}>
+            <button ref={setPrimaryActionRef} className="wallet-button" onClick={() => void navigator.clipboard.writeText(auth.walletAddress ?? "")} title={`Copy wallet address (${auth.walletClientType ?? "unknown type"})`}>
               <WalletCards size={16} /> {auth.walletAddress?.slice(0, 4)}...{auth.walletAddress?.slice(-4)}
             </button>
             <button className="wallet-button" onClick={() => void auth.logout()}>Log out</button>
           </>
         ) : auth.wallets.length > 0 ? (
-          <Link href="/settings" className="wallet-button">
+          <Link ref={setPrimaryActionRef} href="/settings" className="wallet-button">
             <WalletCards size={16} /> Choose wallet ({auth.wallets.length})
           </Link>
         ) : (
-          <button className="wallet-button" onClick={auth.login}><WalletCards size={16} /> Sign in</button>
+          <button ref={setPrimaryActionRef} className="wallet-button" onClick={auth.login}><WalletCards size={16} /> Sign in</button>
         )}
       </div>
     </header>

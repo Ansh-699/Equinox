@@ -45,7 +45,7 @@ export function PortfolioView() {
   return (
     <main className="shell">
       <TopBar active="portfolio" auth={auth} />
-      <div className="portfolio-grid">
+      <div id="main-content" tabIndex={-1} className="portfolio-grid">
         <section className="session-panel">
           <div className="panel-title"><h2>Wallet balances</h2><span>Devnet</span></div>
           <dl className="session-detail">

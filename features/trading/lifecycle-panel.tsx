@@ -54,7 +54,7 @@ export function LifecyclePanel({
       <section className="sponsor-panel">
         <div className="sponsor-icon"><Coins size={19} /></div>
         <div><h2>Commit sponsorship</h2><p>24 sponsored commits remain. The fee-vault top-up path uses a fresh 32-byte salt and is submitted to L1.</p></div>
-        <button title="Top up delegated fee payer"><BadgeDollarSign size={18} /></button>
+        <button title="Top up delegated fee payer" aria-label="Top up delegated fee payer"><BadgeDollarSign size={18} /></button>
       </section>
     </>
   );
