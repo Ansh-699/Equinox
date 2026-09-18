@@ -6,16 +6,12 @@ export function LifecyclePanel({
   onDeposit,
   onWithdraw,
   onInitializeVault,
-  onAuthorizeSession,
-  onRevokeSession,
   onCancelAll,
 }: {
   onSeatAndScratch: () => void;
   onDeposit: () => void;
   onWithdraw: () => void;
   onInitializeVault: () => void;
-  onAuthorizeSession: () => void;
-  onRevokeSession: () => void;
   onCancelAll: () => void;
 }) {
   return (
@@ -35,9 +31,7 @@ export function LifecyclePanel({
         </div>
         <div className="lifecycle-actions">
           <button onClick={onInitializeVault}>Construct vault</button>
-          <button onClick={onAuthorizeSession}>Authorize session</button>
-          <button onClick={onRevokeSession}>Revoke session</button>
-          <button onClick={onCancelAll}>Cancel all</button>
+          <button onClick={onCancelAll}>Cancel all (session)</button>
         </div>
       </section>
 

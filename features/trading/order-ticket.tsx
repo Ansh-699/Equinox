@@ -12,6 +12,7 @@ export function OrderTicket({
   markPrice,
   notional,
   authenticated,
+  canTrade,
   marketConfig,
   onSubmit,
 }: {
@@ -24,6 +25,7 @@ export function OrderTicket({
   markPrice: number;
   notional: number;
   authenticated: boolean;
+  canTrade: boolean;
   marketConfig: PerpMarketConfig;
   onSubmit: () => void;
 }) {
@@ -42,8 +44,8 @@ export function OrderTicket({
         <span>Initial margin</span><strong>{Number.isFinite(notional) ? formatUsd(notional * 0.2) : "--"}</strong>
         <span>Est. liquidation</span><strong>Calculated on-chain</strong>
       </div>
-      <button className={side === "short" ? "submit short-submit" : "submit long-submit"} onClick={onSubmit}>{authenticated ? "Preview order" : "Sign in to preview"}</button>
-      <p className="form-note">Session scope: {marketConfig.symbol}. Withdrawals and collateral transfers are excluded.</p>
+      <button className={side === "short" ? "submit short-submit" : "submit long-submit"} onClick={onSubmit}>{canTrade ? "Place order" : authenticated ? "Preview order" : "Sign in to preview"}</button>
+      <p className="form-note">{canTrade ? `Session-signed: ${marketConfig.symbol}.` : `Session scope: ${marketConfig.symbol}.`} Withdrawals and collateral transfers are excluded.</p>
     </aside>
   );
 }

@@ -5,15 +5,15 @@ import { CircleAlert } from "lucide-react";
 import { TopBar } from "@/components/layout/top-bar";
 import { TradingDisabledBanner, ProtocolStatusStrip } from "@/components/layout/status-strip";
 import { useAppAuth } from "@/components/app-providers";
-import {
-  createSession,
-  lookupSession,
-} from "@/lib/session-trading";
-import { cancelAll, createTraderSeat, depositCollateral, initializeSettlementScratch, initializeVault, previewPlaceOrder, withdrawCollateral } from "@/clients/stockstream/src";
+import { isSessionUsable } from "@/lib/session-trading";
+import { createTraderSeat, depositCollateral, initializeSettlementScratch, initializeVault, previewPlaceOrder, withdrawCollateral } from "@/clients/stockstream/src";
 import { marketForSymbol } from "@/lib/markets";
 import { RpcFailure } from "@/lib/rpc-transport";
 import type { TransactionPreview } from "@/lib/execution-boundary";
 import { useStockStreamProtocol } from "@/features/wallet/use-stockstream-protocol";
+import { useTradingSession } from "@/features/sessions/use-trading-session";
+import { useSessionOrder } from "@/features/sessions/use-session-order";
+import { SessionPolicyPanel } from "@/features/sessions/session-policy-panel";
 import { decimal } from "./format";
 import { MarketPanel } from "./market-panel";
 import { OrderBookPanel, type BookLevel } from "./order-book";
@@ -38,7 +38,9 @@ export function TradingTerminal() {
   const marketConfig = marketForSymbol(marketSymbol);
   const marketAddress = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_ADDRESS ?? marketConfig.marketPda;
   const protocol = useStockStreamProtocol(auth.authenticated ? marketAddress : null);
-  const canTrade = false;
+  const session = useTradingSession(protocol, auth.walletAddress, marketAddress, 0);
+  const sessionOrder = useSessionOrder(protocol?.rpc ?? null, session.status, setNotice);
+  const canTrade = session.status !== null && isSessionUsable(session.status);
   const quantityNumber = Number(quantity) || 0;
   const bestBid = book.bids[0] ? decimal(book.bids[0].price, 1_000_000) : Number.NaN;
   const bestAsk = book.asks[0] ? decimal(book.asks[0].price, 1_000_000) : Number.NaN;
@@ -124,27 +126,6 @@ export function TradingTerminal() {
     }
   }
 
-  function constructSessionAction(revoke = false) {
-    void revoke;
-    if (!auth.walletAddress || !marketAddress) { setNotice("Configure the market address and sign in before constructing session actions."); return; }
-    // Session keys are generated and held in the browser only
-    // (lib/browser-session.ts). One main-wallet signature authorizes
-    // trading; trades are then signed by the session key alone.
-    void createSession(auth.walletAddress, marketAddress, 0).then((created) => {
-      const info = lookupSession(auth.walletAddress!, marketAddress, 0);
-      const signerAddress = created.sessionSignerAddress;
-      setNotice(created.reused
-        ? `Reused browser session key (${(info?.sessionSignerAddress ?? created.sessionSignerAddress).slice(0, 6)}…) for PDA ${created.sessionPda}. One main-wallet approval will authorize it on-chain.`
-        : `New browser session key created (memory only, key ${(info?.sessionSignerAddress ?? created.sessionSignerAddress).slice(0, 6)}…). PDA ${created.sessionPda}. One main-wallet approval will authorize it.`);
-    }).catch((error: unknown) => setNotice(error instanceof Error ? error.message : "Session key creation failed"));
-  }
-
-  function constructCancelAll() {
-    if (!auth.walletAddress || !marketAddress) { setNotice("Configure the market address and sign in before constructing cancellation actions."); return; }
-    const ix = cancelAll({ market: marketAddress, authority: auth.walletAddress }, 0, 4);
-    setNotice(`Constructed CancelAll with ${ix.keys.length} accounts. No transaction was submitted.`);
-  }
-
   function constructVault() {
     if (!auth.walletAddress || !marketAddress) { setNotice("Configure the market address and sign in before initializing custody."); return; }
     const mint = process.env.NEXT_PUBLIC_STOCKSTREAM_COLLATERAL_MINT;
@@ -157,17 +138,23 @@ export function TradingTerminal() {
   }
 
   function submitOrder() {
-    if (!canTrade) {
-      if (!auth.authenticated) { setNotice("Sign in with Privy to construct a safe PlaceOrder preview. No transaction was created."); return; }
-      const settlementScratch = process.env.NEXT_PUBLIC_STOCKSTREAM_SETTLEMENT_SCRATCH_ADDRESS ?? marketConfig.scratchPda(0);
-      if (!marketAddress || !auth.walletAddress || !settlementScratch) { setNotice("Preview unavailable: configure market and settlement scratch addresses. No transaction was created."); return; }
-      try {
-        const preview = previewPlaceOrder({ market: marketAddress, authority: auth.walletAddress, settlementScratch, seatIndex: 0, side: side === "long" ? "bid" : "ask", quantity: BigInt(quantityNumber), priceOrOffset: BigInt(limitPrice || 0), clientOrderId: 0n });
-        setNotice(`Unsigned ${preview.instruction} preview: ${preview.accounts.length} accounts, ${preview.signers.length} signer, margin ${preview.estimatedInternalMargin}. Live submission requires verified Pyth pricing, USDC custody and MagicBlock delegation.`);
-      } catch (error) { setNotice(error instanceof Error ? error.message : "Could not construct order preview"); }
+    const settlementScratch = process.env.NEXT_PUBLIC_STOCKSTREAM_SETTLEMENT_SCRATCH_ADDRESS ?? marketConfig.scratchPda(0);
+    if (canTrade) {
+      void sessionOrder.placeSessionOrder({
+        settlementScratch,
+        side: side === "long" ? "bid" : "ask",
+        quantity: BigInt(quantityNumber),
+        priceOrOffset: BigInt(limitPrice || 0),
+        clientOrderId: BigInt(Date.now()),
+      });
       return;
     }
-    setNotice(`${side === "short" ? "Short" : "Long"} order requires the deployed StockStream program client. No transaction was sent.`);
+    if (!auth.authenticated) { setNotice("Sign in with Privy to construct a safe PlaceOrder preview. No transaction was created."); return; }
+    if (!marketAddress || !auth.walletAddress || !settlementScratch) { setNotice("Preview unavailable: configure market and settlement scratch addresses. No transaction was created."); return; }
+    try {
+      const preview = previewPlaceOrder({ market: marketAddress, authority: auth.walletAddress, settlementScratch, seatIndex: 0, side: side === "long" ? "bid" : "ask", quantity: BigInt(quantityNumber), priceOrOffset: BigInt(limitPrice || 0), clientOrderId: 0n });
+      setNotice(`Unsigned ${preview.instruction} preview: ${preview.accounts.length} accounts, ${preview.signers.length} signer, margin ${preview.estimatedInternalMargin}. Authorize a trading session to submit for real.`);
+    } catch (error) { setNotice(error instanceof Error ? error.message : "Could not construct order preview"); }
   }
 
   return (
@@ -190,6 +177,7 @@ export function TradingTerminal() {
             markPrice={markPrice}
             notional={notional}
             authenticated={auth.authenticated}
+            canTrade={canTrade}
             marketConfig={marketConfig}
             onSubmit={submitOrder}
           />
@@ -198,9 +186,14 @@ export function TradingTerminal() {
             onDeposit={() => void submitDeposit()}
             onWithdraw={constructWithdrawPreview}
             onInitializeVault={constructVault}
-            onAuthorizeSession={() => constructSessionAction()}
-            onRevokeSession={() => constructSessionAction(true)}
-            onCancelAll={constructCancelAll}
+            onCancelAll={() => void sessionOrder.cancelAllSessionOrders(4)}
+          />
+          <SessionPolicyPanel
+            status={session.status}
+            pending={session.pending}
+            error={session.error}
+            onAuthorize={(config) => void session.authorize(config)}
+            onRevoke={() => void session.revoke()}
           />
           <div className="notice"><CircleAlert size={16} /><span>{notice}</span></div>
         </div>

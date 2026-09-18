@@ -1,8 +1,30 @@
 import { describe, expect, it } from 'vitest';
+import { PublicKey } from '@solana/web3.js';
 import { MagicRouterTransport, RpcFailure, SolanaRpcTransport } from './rpc-transport';
-import { STOCKSTREAM_ACCOUNT_SIZE, STOCKSTREAM_PROGRAM_ID } from '../clients/stockstream/src/constants';
+import { STOCKSTREAM_ACCOUNT_SIZE, STOCKSTREAM_PROGRAM_ID, STOCKSTREAM_TRADING_SESSION_SIZE } from '../clients/stockstream/src/constants';
 
 const marketAddress = 'H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET';
+function sessionBytes({ revoked = false } = {}) {
+  const bytes = Buffer.alloc(STOCKSTREAM_TRADING_SESSION_SIZE);
+  bytes.write('STKSES02'); bytes.writeUInt16LE(1, 8); bytes[10] = 1; bytes[11] = revoked ? 1 : 0;
+  PublicKey.default.toBuffer().copy(bytes, 12); // owner
+  PublicKey.default.toBuffer().copy(bytes, 44); // sessionSigner
+  new PublicKey(STOCKSTREAM_PROGRAM_ID).toBuffer().copy(bytes, 76); // targetProgram
+  new PublicKey(marketAddress).toBuffer().copy(bytes, 108); // market
+  bytes.writeUInt16LE(0, 140); // traderSeatIndex
+  bytes.writeBigUInt64LE(1n, 142); // createdAt
+  bytes.writeBigUInt64LE(9_999_999_999n, 150); // expiresAt
+  bytes[158] = 0b1111; // actions
+  bytes.writeBigUInt64LE(1_000_000n, 159); // maxOrderNotional
+  bytes.writeBigUInt64LE(10_000_000n, 167); // maxCumulativeNotional
+  bytes.writeBigUInt64LE(0n, 175); // consumedCumulativeNotional
+  bytes.writeBigUInt64LE(1_000_000n, 183); // maxExposure (low 8 bytes of i128 LE)
+  bytes.writeUInt16LE(32, 199); // maxOpenOrders
+  bytes.writeBigUInt64LE(0n, 201); // nextExpectedNonce
+  bytes.writeBigUInt64LE(0n, 209); // lastActionTimestamp
+  bytes.writeUInt32LE(1, 217); // sessionGeneration
+  return bytes;
+}
 const signature = '2'.repeat(64);
 function response(id: number, result: unknown) { return new Response(JSON.stringify({jsonrpc:'2.0',id,result}), {headers:{'content-type':'application/json'}}); }
 function marketBytes(commit = 4n, event = 7n) {
@@ -72,5 +94,24 @@ describe('production RPC transports', () => {
       const body=JSON.parse(String(init?.body)); return response(body.id,{value:{amount:'not-a-number'}});
     });
     await expect(rpc.tokenBalance(marketAddress)).rejects.toBeInstanceOf(RpcFailure);
+  });
+  it('reads back an authorized trading session for readback-gated enablement', async () => {
+    const rpc=new SolanaRpcTransport('https://rpc.test',async(_input,init)=>{
+      const body=JSON.parse(String(init?.body));
+      return response(body.id,{value:{owner:STOCKSTREAM_PROGRAM_ID,executable:false,data:[sessionBytes().toString('base64'),'base64']}});
+    });
+    const session = await rpc.tradingSession('91Wxz2Nn4yvtjHEoYrDSMfyZYG86twVEMnCBwCZFFZE');
+    expect(session?.initialized).toBe(true);
+    expect(session?.revoked).toBe(false);
+    expect(session?.market.toBase58()).toBe(marketAddress);
+    expect(session?.actions).toBe(0b1111);
+  });
+  it('returns null for a not-yet-authorized session PDA', async () => {
+    const rpc=new SolanaRpcTransport('https://rpc.test',async(_input,init)=>response(JSON.parse(String(init?.body)).id,{value:null}));
+    expect(await rpc.tradingSession('91Wxz2Nn4yvtjHEoYrDSMfyZYG86twVEMnCBwCZFFZE')).toBeNull();
+  });
+  it('rejects a session account not owned by the StockStream program', async () => {
+    const rpc=new SolanaRpcTransport('https://rpc.test',async(_input,init)=>response(JSON.parse(String(init?.body)).id,{value:{owner:PublicKey.default.toBase58(),executable:false,data:[sessionBytes().toString('base64'),'base64']}}));
+    await expect(rpc.tradingSession('91Wxz2Nn4yvtjHEoYrDSMfyZYG86twVEMnCBwCZFFZE')).rejects.toBeInstanceOf(RpcFailure);
   });
 });

@@ -1,5 +1,5 @@
 import { PublicKey } from '@solana/web3.js';
-import { decodeMarketState } from '../clients/stockstream/src';
+import { decodeMarketState, decodeTradingSession, type TradingSessionView } from '../clients/stockstream/src';
 import { STOCKSTREAM_PROGRAM_ID } from '../clients/stockstream/src/constants';
 import type { L1Transport, RouterBoundary } from './execution-boundary';
 
@@ -82,6 +82,18 @@ export class SolanaRpcTransport implements L1Transport {
     const state = decodeMarketState(bytes);
     if (!state.initialized) throw new RpcFailure('getAccountInfo','uninitialized_market');
     return { state, bytes, eventSequence:bytes.readBigUInt64LE(262), commitSequence:bytes.readBigUInt64LE(330), restoredSequence:bytes.readBigUInt64LE(338) };
+  }
+  /** Reads back an AuthorizeTradingSession/RevokeTradingSession result.
+   * Returns null if the PDA has never been created (not yet authorized),
+   * and throws if an account exists but is not a StockStream-owned
+   * TradingSession -- the caller must never treat that as "not authorized". */
+  async tradingSession(address: string, commitment: 'confirmed'|'finalized' = 'confirmed'): Promise<TradingSessionView | null> {
+    const response = object(await this.request('getAccountInfo',[key(address),{encoding:'base64',commitment}]));
+    if (response.value === null) return null;
+    const value = object(response.value);
+    if (value.owner !== STOCKSTREAM_PROGRAM_ID || value.executable !== false || !Array.isArray(value.data) || value.data[1] !== 'base64' || typeof value.data[0] !== 'string')
+      throw new RpcFailure('getAccountInfo','invalid_session_owner_or_data');
+    return decodeTradingSession(Buffer.from(value.data[0], 'base64'));
   }
   async tokenBalance(tokenAccount: string, commitment: 'confirmed'|'finalized' = 'confirmed'): Promise<bigint> {
     const value = object(object(await this.request('getTokenAccountBalance',[key(tokenAccount),{commitment}])).value);
