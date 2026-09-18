@@ -1,5 +1,6 @@
 "use client";
 
+import "@/lib/browser-polyfills";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { PrivyProvider, useLogin, useLogout, usePrivy, useWallets } from "@privy-io/react-auth";
 import { toSolanaWalletConnectors } from "@privy-io/react-auth/solana";

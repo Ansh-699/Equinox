@@ -59,4 +59,18 @@ describe('production RPC transports', () => {
     const rpc=new SolanaRpcTransport('https://router.test',async(_input,init)=>response(JSON.parse(String(init?.body)).id,{isDelegated:false}));
     await expect(new MagicRouterTransport(rpc,marketAddress).getAccountAwareBlockhash([marketAddress])).rejects.toThrow('undelegated');
   });
+  it('reads back a token account balance for vault/custody readback', async () => {
+    const rpc=new SolanaRpcTransport('https://rpc.test',async(_input,init)=>{
+      const body=JSON.parse(String(init?.body));
+      if(body.method==='getTokenAccountBalance') return response(body.id,{value:{amount:'5000000',decimals:6,uiAmount:5,uiAmountString:'5'}});
+      throw new Error(body.method);
+    });
+    expect(await rpc.tokenBalance(marketAddress)).toBe(5_000_000n);
+  });
+  it('rejects a malformed token balance response', async () => {
+    const rpc=new SolanaRpcTransport('https://rpc.test',async(_input,init)=>{
+      const body=JSON.parse(String(init?.body)); return response(body.id,{value:{amount:'not-a-number'}});
+    });
+    await expect(rpc.tokenBalance(marketAddress)).rejects.toBeInstanceOf(RpcFailure);
+  });
 });
