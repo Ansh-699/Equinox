@@ -123,6 +123,22 @@ export function deriveExecutionDisplay(response: ExecutionStatusResponse): Execu
   };
 }
 
+/** Single rendering boundary for the MagicBlock/execution-status label --
+ * used by both components/layout/status-strip.tsx's ExecutionStatusBanner
+ * and features/activity/activity-view.tsx's "ER / L1 commit status" panel,
+ * so the two pages never independently drift into describing the same
+ * underlying state two different (and possibly inconsistent) ways. Never
+ * fabricates a label when `display` is null -- "unavailable" is honest,
+ * not a guess. */
+export function describeExecutionStatus(display: ExecutionDisplayState | null): string {
+  if (!display) return "unavailable";
+  if (display.degraded) return "reconciliation error";
+  if (display.restorationPending) return "restoring";
+  if (display.commitPending) return "commit pending";
+  if (display.marketDelegated) return `ER active (seq ${display.lastErSequence})`;
+  return "not delegated";
+}
+
 /** Returns null on any non-2xx or network failure -- the caller shows a
  * "status unavailable" state rather than a stale or fabricated one. */
 export async function fetchExecutionStatus(

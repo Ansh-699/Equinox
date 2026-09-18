@@ -16,6 +16,19 @@
 
 export type OracleSafetyState = "fresh" | "stale" | "closed" | "halted" | "corp_action" | "unknown";
 
+/** Single rendering boundary for the oracle-safety label -- shared by
+ * every consumer (currently ExecutionStatusBanner) so a future one never
+ * independently reinvents this mapping. "unknown" always renders as
+ * "unavailable": never a guessed label. */
+export const ORACLE_SAFETY_LABEL: Record<OracleSafetyState, string> = {
+  fresh: "fresh",
+  stale: "stale",
+  closed: "closed",
+  halted: "halted",
+  corp_action: "corporate action",
+  unknown: "unavailable",
+};
+
 /** The only market-event kinds this module looks at -- every one is a
  * fully-decoded, verified discriminator name (events.rs / EVENT_KIND_NAMES),
  * never a raw payload read. */
