@@ -54,6 +54,14 @@ test("market panel renders the configured market", async ({ page }) => {
   await expect(page.locator(".market-panel h1")).toContainText("AAPL-PERP");
 });
 
+test("open orders panel honestly reports unavailable -- no mock orders are ever shown", async ({ page }) => {
+  await page.goto("/");
+  const panel = page.locator(".open-orders-panel");
+  await expect(panel.locator("h2")).toHaveText("Open orders");
+  await expect(panel).toContainText("canonical order-book layout manifest", { timeout: 10_000 });
+  await expect(panel.locator("table")).toHaveCount(0);
+});
+
 test("deposit collateral: real sign -> submit -> confirm -> vault readback, one main-wallet prompt", async ({ page }) => {
   await page.goto("/");
   await login(page);
