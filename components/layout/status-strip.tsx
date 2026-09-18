@@ -1,16 +1,7 @@
 import { Clock3, Radio, ShieldAlert, ShieldCheck, TriangleAlert } from "lucide-react";
 import { PERP_MARKETS } from "@/lib/markets";
-import type { ExecutionDisplayState } from "@/lib/execution-status";
-import type { OracleSafetyState } from "@/lib/oracle-safety";
-
-const ORACLE_SAFETY_LABEL: Record<OracleSafetyState, string> = {
-  fresh: "fresh",
-  stale: "stale",
-  closed: "closed",
-  halted: "halted",
-  corp_action: "corporate action",
-  unknown: "unavailable",
-};
+import { describeExecutionStatus, type ExecutionDisplayState } from "@/lib/execution-status";
+import { ORACLE_SAFETY_LABEL, type OracleSafetyState } from "@/lib/oracle-safety";
 
 /** MagicBlock/session status is real, polled data (features/magicblock/
  * use-execution-status.ts) once a market API URL is configured; it shows
@@ -21,17 +12,7 @@ const ORACLE_SAFETY_LABEL: Record<OracleSafetyState, string> = {
  * category-specific payload body stays undecoded, since there is no
  * verified byte layout for it. */
 export function ExecutionStatusBanner({ display, canTrade, oracleSafety }: { display: ExecutionDisplayState | null; canTrade: boolean; oracleSafety: OracleSafetyState }) {
-  const magicBlockLabel = !display
-    ? "unavailable"
-    : display.degraded
-    ? "reconciliation error"
-    : display.restorationPending
-    ? "restoring"
-    : display.commitPending
-    ? "commit pending"
-    : display.marketDelegated
-    ? `ER active (seq ${display.lastErSequence})`
-    : "not delegated";
+  const magicBlockLabel = describeExecutionStatus(display);
   const oracleSafe = oracleSafety === "fresh";
 
   return (
