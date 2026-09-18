@@ -6,11 +6,24 @@ import { PrivyProvider, useLogin, useLogout, usePrivy, useWallets } from "@privy
 import { toSolanaWalletConnectors } from "@privy-io/react-auth/solana";
 import { readCsrfToken } from "@/lib/csrf";
 
+export interface DiscoveredWallet {
+  address: string;
+  walletClientType: string;
+}
+
 export interface AppAuth {
   ready: boolean;
   authenticated: boolean;
   userId: string | null;
   walletAddress: string | null;
+  /** e.g. "privy" (embedded) vs "phantom"/"metamask"/etc (external). Null
+   * until a wallet is connected. */
+  walletClientType: string | null;
+  /** Every wallet Privy has discovered for this user, not just the active
+   * one -- Settings/diagnostics surfaces need this even though trading
+   * still only ever signs with wallets[0] (full wallet-switching UI is a
+   * further increment). */
+  wallets: readonly DiscoveredWallet[];
   authError: string | null;
   login: () => void;
   logout: () => Promise<void>;
@@ -21,7 +34,7 @@ export interface AppAuth {
   getAccessToken: () => Promise<string | null>;
 }
 
-const disabledAuth: AppAuth = { ready: true, authenticated: false, userId: null, walletAddress: null, authError: "Privy is not configured", login: () => undefined, logout: async () => undefined, getAccessToken: async () => null };
+const disabledAuth: AppAuth = { ready: true, authenticated: false, userId: null, walletAddress: null, walletClientType: null, wallets: [], authError: "Privy is not configured", login: () => undefined, logout: async () => undefined, getAccessToken: async () => null };
 const AuthContext = createContext<AppAuth>(disabledAuth);
 
 export function useAppAuth() { return useContext(AuthContext); }
@@ -72,10 +85,12 @@ function PrivySession({ children }: { children: React.ReactNode }) {
     authenticated: authenticated && sessionReady && !!walletAddress,
     userId: user?.id ?? null,
     walletAddress,
+    walletClientType: wallets[0]?.walletClientType ?? null,
+    wallets: wallets.map((wallet) => ({ address: wallet.address, walletClientType: wallet.walletClientType })),
     authError,
     login,
     logout: async () => { const csrf = readCsrfToken(); await fetch("/api/auth/logout", { method: "POST", credentials: "include", headers: csrf ? { "x-stockstream-csrf": csrf } : {} }); await privyLogout(); setSessionReady(false); },
     getAccessToken: async () => { try { return await getAccessToken(); } catch { return null; } },
-  }), [authenticated, authError, getAccessToken, login, privyLogout, ready, sessionReady, user?.id, walletAddress]);
+  }), [authenticated, authError, getAccessToken, login, privyLogout, ready, sessionReady, user?.id, walletAddress, wallets]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

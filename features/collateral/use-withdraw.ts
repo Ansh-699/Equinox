@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import { withdrawCollateral, type CustodyAccounts } from "@/clients/stockstream/src";
 import type { TransactionPreview } from "@/lib/execution-boundary";
 import { RpcFailure } from "@/lib/rpc-transport";
+import { recordSignature } from "@/lib/last-signature";
 import type { StockStreamProtocol } from "@/features/wallet/use-stockstream-protocol";
 import type { ExecutionDisplayState } from "@/lib/execution-status";
 import { decodeTraderSeat, type TraderSeatView } from "@/lib/positions";
@@ -62,6 +63,7 @@ export function useWithdraw(protocol: StockStreamProtocol | null) {
     setNotice(`Simulating WithdrawCollateral for ${amount} base units…`);
     try {
       const result = await protocol.service.executeL1(preview, [instruction]);
+      recordSignature("WithdrawCollateral", result.signature, "l1");
       const [vaultBalance, destinationBalance, market] = await Promise.all([
         protocol.rpc.tokenBalance(String(accounts.vault)).catch(() => null),
         protocol.rpc.tokenBalance(String(accounts.sourceOrDestination)).catch(() => null),

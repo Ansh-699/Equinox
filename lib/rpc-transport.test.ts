@@ -114,4 +114,12 @@ describe('production RPC transports', () => {
     const rpc=new SolanaRpcTransport('https://rpc.test',async(_input,init)=>response(JSON.parse(String(init?.body)).id,{value:{owner:PublicKey.default.toBase58(),executable:false,data:[sessionBytes().toString('base64'),'base64']}}));
     await expect(rpc.tradingSession('91Wxz2Nn4yvtjHEoYrDSMfyZYG86twVEMnCBwCZFFZE')).rejects.toBeInstanceOf(RpcFailure);
   });
+  it('reads back the current slot for diagnostics', async () => {
+    const rpc=new SolanaRpcTransport('https://rpc.test',async(_input,init)=>response(JSON.parse(String(init?.body)).id,123_456));
+    expect(await rpc.currentSlot()).toBe(123_456);
+  });
+  it('reads back a SOL balance in lamports for portfolio display', async () => {
+    const rpc=new SolanaRpcTransport('https://rpc.test',async(_input,init)=>response(JSON.parse(String(init?.body)).id,{context:{slot:1},value:2_000_000_000}));
+    expect(await rpc.solBalance(marketAddress)).toBe(2_000_000_000n);
+  });
 });
