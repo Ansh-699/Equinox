@@ -30,6 +30,9 @@ pub const CREATE_SCRATCH_ACCOUNT: u8 = 45;
 pub const CREATE_V3_ACCOUNT: u8 = 46;
 /// Governance-authorized activation for a structurally created V3 core.
 pub const INITIALIZE_V3_MARKET: u8 = 47;
+/// Delegates one V3 core/page/shard to the core's selected ER validator.
+/// Data: `[48, kind:u8, index:u8, validator:Pubkey]`.
+pub const DELEGATE_V3_ACCOUNT: u8 = 48;
 pub const COMMIT_MARKET: u8 = 14;
 pub const COMMIT_AND_UNDELEGATE: u8 = 15;
 /// Reserved: the real external-undelegate callback uses the delegation
@@ -195,6 +198,11 @@ pub enum StockStreamInstruction {
     /// Binds a V3 core to the exchange listing authority. Structural account
     /// creation is permissionless; activation is not.
     InitializeV3Market,
+    DelegateV3Account {
+        kind: u8,
+        index: u8,
+        validator: [u8; 32],
+    },
     CommitMarket {
         sequence: u64,
     },
@@ -428,6 +436,20 @@ impl StockStreamInstruction {
                 })
             }
             Some(INITIALIZE_V3_MARKET) if data.len() == 1 => Ok(Self::InitializeV3Market),
+            Some(DELEGATE_V3_ACCOUNT)
+                if data.len() == 35
+                    && crate::v3::V3AccountKind::from_u8(data[1])
+                        .filter(|kind| data[2] <= kind.max_index())
+                        .is_some() =>
+            {
+                Ok(Self::DelegateV3Account {
+                    kind: data[1],
+                    index: data[2],
+                    validator: data[3..35]
+                        .try_into()
+                        .map_err(|_| ProgramError::InvalidInstructionData)?,
+                })
+            }
             Some(CREATE_INSTRUMENT_ACCOUNT) if data.len() == 33 => {
                 Ok(Self::CreateInstrumentAccount {
                     instrument_id: data[1..33]

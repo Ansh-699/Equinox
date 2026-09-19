@@ -63,6 +63,7 @@ export interface PerpMarketAccounts { instrument: AddressInput; market: AddressI
 export interface V3CreationAccounts { parent: AddressInput; target: AddressInput; payer: AddressInput; }
 export type V3AccountKind = "core" | "book-page" | "seat-shard" | "event-shard";
 export interface V3InitializationAccounts { exchange: AddressInput; instrument: AddressInput; core: AddressInput; authority: AddressInput; }
+export interface V3DelegationAccounts extends V3CreationAccounts { authority: AddressInput; }
 
 function publicKey(value: AddressInput): PublicKey {
   if (value instanceof PublicKey) return value;
@@ -749,6 +750,35 @@ export function initializeV3Market(accounts: V3InitializationAccounts): Transact
     accountMeta(accounts.core, false, true), accountMeta(accounts.authority, true, false),
   ]);
 }
+/**
+ * Delegates one V3 account through the real Delegation Program. Delegate the
+ * activated core first; then delegate pages/shards using that core as parent.
+ * Book pages may need repeated calls while their individual delegate buffer
+ * grows, exactly as the on-chain instruction documents.
+ */
+export function delegateV3Account(accounts: V3DelegationAccounts, kind: V3AccountKind, validator: AddressInput, index = 0): TransactionInstruction {
+  const parent = publicKey(accounts.parent);
+  const target = publicKey(accounts.target);
+  const validatorKey = publicKey(validator);
+  const kindAndIndex: Record<V3AccountKind, [number, number]> = {
+    core: [0, 0], "book-page": [1, index], "seat-shard": [2, index], "event-shard": [3, index],
+  };
+  const [kindByte, flattenedIndex] = kindAndIndex[kind];
+  if (!Number.isInteger(flattenedIndex) || flattenedIndex < 0 || flattenedIndex > (kindByte === 1 ? 7 : kindByte === 0 ? 0 : 3)) throw new RangeError("invalid V3 account index");
+  const expected = kindByte === 0 ? deriveMarketCoreV3(parent)
+    : kindByte === 1 ? deriveBookPageV3(parent, Math.floor(flattenedIndex / 4), flattenedIndex % 4)
+      : kindByte === 2 ? deriveSeatShardV3(parent, flattenedIndex) : deriveEventShardV3(parent, flattenedIndex);
+  if (!target.equals(expected)) throw new RangeError("target is not the derived V3 account PDA");
+  const [buffer] = PublicKey.findProgramAddressSync([Buffer.from("buffer"), target.toBuffer()], STOCKSTREAM_PROGRAM_KEY);
+  const [record] = PublicKey.findProgramAddressSync([Buffer.from("delegation"), target.toBuffer()], MAGICBLOCK_DELEGATION_PROGRAM_ID);
+  const [metadata] = PublicKey.findProgramAddressSync([Buffer.from("delegation-metadata"), target.toBuffer()], MAGICBLOCK_DELEGATION_PROGRAM_ID);
+  const data = new Uint8Array(35); data[0] = STOCKSTREAM_INSTRUCTION.delegateV3Account; data[1] = kindByte; data[2] = flattenedIndex; data.set(validatorKey.toBytes(), 3);
+  return instruction(data, [
+    accountMeta(parent, false, false), accountMeta(target, false, true), accountMeta(accounts.authority, true, false), accountMeta(accounts.payer, true, true),
+    accountMeta(buffer, false, true), accountMeta(record, false, true), accountMeta(metadata, false, true),
+    accountMeta(MAGICBLOCK_DELEGATION_PROGRAM_ID, false, false), accountMeta(SystemProgram.programId, false, false), accountMeta(STOCKSTREAM_PROGRAM_KEY, false, false),
+  ]);
+}
 export function updateStockInstrument(accounts: InstrumentAccounts, instrumentId: Uint8Array, pythFeedId: number, oracleChannel: number, priceExponent: number): TransactionInstruction { if (!Number.isInteger(pythFeedId) || pythFeedId <= 0 || pythFeedId > 0xffff_ffff) throw new RangeError("pythFeedId must be a non-zero u32"); if (!Number.isInteger(oracleChannel) || oracleChannel < 1 || oracleChannel > 4) throw new RangeError("oracleChannel must be between 1 and 4"); const data = new Uint8Array(42); const view = new DataView(data.buffer); data[0] = STOCKSTREAM_INSTRUCTION.updateStockInstrument; data.set(instrumentId, 1); view.setUint32(33, pythFeedId, true); data[37] = oracleChannel; view.setInt32(38, priceExponent, true); return instruction(data, [accountMeta(accounts.exchange, false, false), accountMeta(accounts.instrument, false, true), accountMeta(accounts.authority, true, false)]); }
 export function suspendStockInstrument(accounts: InstrumentAccounts, instrumentId: Uint8Array): TransactionInstruction { return identifierInstruction(STOCKSTREAM_INSTRUCTION.suspendStockInstrument, instrumentId, [accountMeta(accounts.exchange, false, false), accountMeta(accounts.instrument, false, true), accountMeta(accounts.authority, true, false)]); }
 export function updateMarketRisk(accounts: InstructionAccounts, initial: number, maintenance: number, leverage: number): TransactionInstruction { const data = new Uint8Array(9); data[0] = STOCKSTREAM_INSTRUCTION.updateMarketRisk; const view = new DataView(data.buffer); view.setUint16(1, initial, true); view.setUint16(3, maintenance, true); view.setUint32(5, leverage, true); return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]); }
@@ -756,7 +786,7 @@ export function transitionMarket(accounts: InstructionAccounts, mode: "pause" | 
 
 export function decodeInstruction(data: Uint8Array): InstructionFixture {
   if (data.length === 0) throw new RangeError("Empty instruction");
-  const names: Record<number, string> = { 0: "InitializeMarket", 1: "CreateTraderSeat", 2: "CloseTraderSeat", 3: "PlaceOrder", 4: "CancelOrder", 5: "CancelAll", 6: "UpdateFunding", 7: "Liquidate", 8: "InitializeSettlementScratch", 9: "InitializeVault", 10: "DepositCollateral", 11: "WithdrawCollateral", 12: "ConsumeOracleUpdate", 13: "DelegateMarket", 14: "CommitMarket", 15: "CommitAndUndelegate", 16: "UndelegationCallback", 17: "AuthorizeTradingSession", 18: "RevokeTradingSession", 19: "InitializeExchange", 20: "RegisterStockInstrument", 21: "CreatePerpMarket", 22: "UpdateStockInstrument", 23: "SuspendStockInstrument", 24: "UpdateMarketRisk", 25: "PauseMarket", 26: "ResumeMarket", 27: "SetCloseOnly", 28: "EnterCorporateAction", 29: "ResolveCorporateAction", 30: "CloseMarket", 31: "UpdateTradingSessionLimits", 32: "CloseTradingSession", 33: "ReplaceOrder", 34: "TransferToInsuranceFund", 35: "WithdrawProtocolFees", 36: "WithdrawInsuranceFunds", 37: "RecordBadDebt", 38: "ResolveBadDebt", 39: "ReconcileVault", 40: "UpdateExchangeConfig", 41: "DelegateClusterMember", 42: "CreateMarketAccount", 43: "CreateInstrumentAccount", 44: "CreateVaultAccount", 45: "CreateScratchAccount", 46: "CreateV3Account", 47: "InitializeV3Market" };
+  const names: Record<number, string> = { 0: "InitializeMarket", 1: "CreateTraderSeat", 2: "CloseTraderSeat", 3: "PlaceOrder", 4: "CancelOrder", 5: "CancelAll", 6: "UpdateFunding", 7: "Liquidate", 8: "InitializeSettlementScratch", 9: "InitializeVault", 10: "DepositCollateral", 11: "WithdrawCollateral", 12: "ConsumeOracleUpdate", 13: "DelegateMarket", 14: "CommitMarket", 15: "CommitAndUndelegate", 16: "UndelegationCallback", 17: "AuthorizeTradingSession", 18: "RevokeTradingSession", 19: "InitializeExchange", 20: "RegisterStockInstrument", 21: "CreatePerpMarket", 22: "UpdateStockInstrument", 23: "SuspendStockInstrument", 24: "UpdateMarketRisk", 25: "PauseMarket", 26: "ResumeMarket", 27: "SetCloseOnly", 28: "EnterCorporateAction", 29: "ResolveCorporateAction", 30: "CloseMarket", 31: "UpdateTradingSessionLimits", 32: "CloseTradingSession", 33: "ReplaceOrder", 34: "TransferToInsuranceFund", 35: "WithdrawProtocolFees", 36: "WithdrawInsuranceFunds", 37: "RecordBadDebt", 38: "ResolveBadDebt", 39: "ReconcileVault", 40: "UpdateExchangeConfig", 41: "DelegateClusterMember", 42: "CreateMarketAccount", 43: "CreateInstrumentAccount", 44: "CreateVaultAccount", 45: "CreateScratchAccount", 46: "CreateV3Account", 47: "InitializeV3Market", 48: "DelegateV3Account" };
   const name = names[data[0]];
   if (!name) throw new RangeError("Unknown instruction");
   return { name, data: data.slice() };

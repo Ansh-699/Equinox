@@ -28,6 +28,17 @@ pub const V3_BOOK_PAGE_DISCRIMINATOR: [u8; 8] = *b"STKBK003";
 pub const V3_SEAT_SHARD_DISCRIMINATOR: [u8; 8] = *b"STKST003";
 pub const V3_EVENT_SHARD_DISCRIMINATOR: [u8; 8] = *b"STKEV003";
 
+// `MarketCoreV3` byte offsets used by lifecycle code. They are named here,
+// beside the packed layout, rather than duplicated as fragile literals in
+// MagicBlock handlers.
+pub const V3_CORE_MODE_OFFSET: usize = 11;
+pub const V3_CORE_INSTRUMENT_OFFSET: usize = 12;
+pub const V3_CORE_MARKET_AUTHORITY_OFFSET: usize = 44;
+pub const V3_CORE_DELEGATION_STATUS_OFFSET: usize = 197;
+pub const V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET: usize = 198;
+pub const V3_CORE_LAST_COMMITTED_SEQUENCE_OFFSET: usize = 206;
+pub const V3_CORE_VALIDATOR_OFFSET: usize = 214;
+
 pub const V3_BOOK_NODES_PER_PAGE: usize = 256;
 pub const V3_BOOK_PAGES_PER_SIDE: usize = 4;
 pub const V3_BOOK_SLOTS_PER_SIDE: usize = V3_BOOK_NODES_PER_PAGE * V3_BOOK_PAGES_PER_SIDE;

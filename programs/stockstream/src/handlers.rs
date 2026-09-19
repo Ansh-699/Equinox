@@ -429,6 +429,17 @@ pub fn dispatch(
         StockStreamInstruction::InitializeV3Market => {
             crate::registry::initialize_v3_market(program_id, accounts)
         }
+        StockStreamInstruction::DelegateV3Account {
+            kind,
+            index,
+            validator,
+        } => crate::magicblock::delegate_v3_account(
+            program_id,
+            accounts,
+            kind,
+            index,
+            Address::new_from_array(validator),
+        ),
         StockStreamInstruction::CommitMarket { sequence } => {
             crate::magicblock::commit_market(program_id, accounts, sequence)
         }
