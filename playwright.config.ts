@@ -37,9 +37,17 @@ export default defineConfig({
       env: { MOCK_MARKET_API_PORT: String(MOCK_MARKET_API_PORT) },
     },
     {
-      // next build currently crashes (Turbopack native binary, pre-existing
-      // and unrelated to this branch -- reproduces on main too); next dev
-      // does not hit the same path, so the E2E server runs in dev mode.
+      // Dev mode, not a production build+start: NEXT_PUBLIC_E2E_TEST_MODE's
+      // server-side auth bypass (lib/auth/e2e-test-mode.ts) requires
+      // NODE_ENV !== "production", so the fake-wallet/injected-signature
+      // test-mode shim this whole fixture suite depends on cannot run
+      // against a real production server at all -- see
+      // playwright.production.config.ts (a separate, auth-free smoke
+      // config) and docs/frontend-build-diagnostics.md, which confirms
+      // `next build`/`next start` both work fine in this environment (an
+      // earlier, no-longer-reproducible crash was investigated and ruled
+      // out there); this dev-mode choice is about the auth bypass, not a
+      // build workaround.
       command: "npm run dev:e2e",
       url: `http://127.0.0.1:${APP_PORT}`,
       reuseExistingServer: false,
