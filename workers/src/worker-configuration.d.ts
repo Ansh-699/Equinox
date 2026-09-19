@@ -7,6 +7,8 @@ interface __BaseEnv_Env {
 	INGESTION_TOKEN?: string;
 	MARKET_STREAM?: DurableObjectNamespace<import("./index").MarketStream>;
 	PRIVY_APP_SECRET?: string;
+	PRIVY_APP_ID?: string;
+	RELAYER_KEYPAIR_JSON?: string;
 	PYTH_PRO_API_KEY?: string;
 	PYTH_PRO_ENDPOINTS?: string;
 	KEEPER_KEYPAIR_JSON?: string;

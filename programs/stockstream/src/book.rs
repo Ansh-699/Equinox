@@ -18,9 +18,9 @@ pub const MAX_EXPIRED_REMOVALS: usize = 8;
 pub const MAX_CANCELS_PER_INSTRUCTION: usize = 16;
 
 const TAG_UNINITIALIZED: u8 = 0;
-const TAG_INNER: u8 = 1;
-const TAG_LEAF: u8 = 2;
-const TAG_FREE: u8 = 3;
+pub const TAG_INNER: u8 = 1;
+pub const TAG_LEAF: u8 = 2;
+pub const TAG_FREE: u8 = 3;
 const TAG_LAST_FREE: u8 = 4;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -133,6 +133,7 @@ const _: [(); 88] = [(); size_of::<LeafNode>()];
 const _: [(); 88] = [(); size_of::<FreeNode>()];
 const _: [(); 88] = [(); size_of::<LastFreeNode>()];
 const _: [(); 88] = [(); size_of::<AnyNode>()];
+pub const ANY_NODE_SIZE: usize = 88;
 
 impl AnyNode {
     const fn uninitialized() -> Self {
