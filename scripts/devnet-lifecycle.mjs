@@ -140,6 +140,21 @@ async function stageCustody() {
     save({ vaultInitialized: true });
   }
 
+  // Every non-authority trader keypair (traderB) is freshly generated
+  // locally (see traderKeypair()) with zero SOL -- it cannot pay for its
+  // own seat/ATA/deposit transaction fees until funded. A devnet airdrop
+  // is rate-limited and unreliable, so fund it from the already-funded
+  // authority wallet directly instead.
+  const MIN_TRADER_LAMPORTS = 0.05 * LAMPORTS_PER_SOL;
+  for (const trader of [traderB]) {
+    const balance = await CONNECTION.getBalance(trader.publicKey);
+    if (balance < MIN_TRADER_LAMPORTS) {
+      await send(`fund ${trader.publicKey.toBase58().slice(0, 8)}`, [
+        SystemProgram.transfer({ fromPubkey: authority.publicKey, toPubkey: trader.publicKey, lamports: MIN_TRADER_LAMPORTS }),
+      ], [authority]);
+    }
+  }
+
   for (const [trader, seat] of [[authority, 0], [traderB, 1]]) {
     await send(`seat ${seat}`, [new TransactionInstruction({ programId: PROGRAM_ID, keys: [wr(market), sg(trader.publicKey)], data: Buffer.from([1, seat, 0]) })], [trader]).catch((e) => console.log(`seat ${seat}: ${String(e).slice(0, 90)}`));
     const ata = await getOrCreateAssociatedTokenAccount(CONNECTION, trader, mint, trader.publicKey);
