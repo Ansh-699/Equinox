@@ -44,7 +44,7 @@ use pinocchio_system::instructions::CreateAccount;
 use crate::{
     error::StockStreamError,
     handlers::{custom, event_timestamp, initialized_header, market_data, write_header},
-    registry::PERP_MARKET_SEED,
+    registry::{INSTRUMENT_DISCRIMINATOR, INSTRUMENT_SIZE, PERP_MARKET_SEED},
     scratch::{
         derive_settlement_scratch, ScratchStatus, SettlementScratchHeader, SETTLEMENT_SCRATCH_LEN,
     },
@@ -1214,7 +1214,12 @@ fn validate_v3_delegate_core(
     } else {
         // For a core, the parent is the active instrument and target embeds
         // that exact instrument address.
+        let instrument = unsafe { parent.borrow_unchecked() };
         if !parent.owned_by(program_id)
+            || instrument.len() != INSTRUMENT_SIZE
+            || instrument[0..8] != INSTRUMENT_DISCRIMINATOR
+            || instrument[10] != 1
+            || instrument[111] != 0
             || bytes[v3::V3_CORE_INSTRUMENT_OFFSET..v3::V3_CORE_INSTRUMENT_OFFSET + 32]
                 != parent.address().to_bytes()
             || bytes[v3::V3_CORE_DELEGATION_STATUS_OFFSET] != DelegationStatus::NotDelegated as u8

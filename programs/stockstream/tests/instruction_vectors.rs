@@ -181,6 +181,12 @@ fn typescript_golden_instruction_vectors_decode_in_rust() {
         StockStreamInstruction::decode(&[stockstream::instruction::CREATE_V3_ACCOUNT, 4, 0,])
             .is_err()
     );
+    let mut delegate_v3 = vec![stockstream::instruction::DELEGATE_V3_ACCOUNT, 1, 7];
+    delegate_v3.extend_from_slice(&[9; 32]);
+    assert!(matches!(
+        StockStreamInstruction::decode(&delegate_v3),
+        Ok(StockStreamInstruction::DelegateV3Account { kind: 1, index: 7, validator }) if validator == [9; 32]
+    ));
 }
 
 /// A `TypeScript -> Rust` golden vector for `UpdateExchangeConfig`, encoded
