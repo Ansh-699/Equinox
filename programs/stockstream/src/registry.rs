@@ -581,6 +581,73 @@ pub fn create_v3_account(
     Ok(())
 }
 
+/// Opcode 47: activates a fully created V3 core under the immutable exchange
+/// listing authority.
+///
+/// Accounts: `[exchange, instrument, core (writable), authority (signer)]`.
+/// Creation of a PDA is intentionally permissionless because it only spends
+/// the caller's rent. This instruction is the distinct authority boundary:
+/// it verifies the registered instrument belongs to the supplied exchange and
+/// writes the core's market authority exactly once. A zeroed/structural core
+/// therefore cannot be delegated or used as an active market by a rent payer.
+pub fn initialize_v3_market(program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
+    use crate::v3;
+
+    if accounts.len() != 4 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    if !accounts[2].is_writable() || !accounts[3].is_signer() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    if !accounts[0].owned_by(program_id) || !accounts[1].owned_by(program_id) {
+        return Err(ProgramError::IllegalOwner);
+    }
+    let authority = accounts[3].address().to_bytes();
+    let exchange = unsafe { accounts[0].borrow_unchecked() };
+    if exchange.len() != EXCHANGE_SIZE
+        || exchange[0..8] != EXCHANGE_DISCRIMINATOR
+        || exchange[8..10] != EXCHANGE_CONFIG_VERSION.to_le_bytes()
+        || exchange[10] != 1
+        || exchange[11..43] != authority
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let instrument = unsafe { accounts[1].borrow_unchecked() };
+    if instrument.len() != INSTRUMENT_SIZE
+        || instrument[0..8] != INSTRUMENT_DISCRIMINATOR
+        || instrument[10] != 1
+        || instrument[111] != 0
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let id: [u8; 32] = instrument[11..43]
+        .try_into()
+        .map_err(|_| custom(StockStreamError::InvalidInstruction))?;
+    if *accounts[1].address() != derive_instrument(program_id, accounts[0].address(), &id)
+        || *accounts[2].address() != v3::derive_market_core_v3(program_id, accounts[1].address())
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let instrument_key = accounts[1].address().to_bytes();
+    let data = account_data(&mut accounts[2], program_id, v3::V3_MARKET_CORE_SIZE)?;
+    if data[0..8] != v3::V3_MARKET_CORE_DISCRIMINATOR
+        || data[8..10] != v3::V3_LAYOUT_VERSION.to_le_bytes()
+        || data[10] != 1
+        || data[12..44] != instrument_key
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    // `mode == 0` and all-zero authority is the only structural-but-not-live
+    // state. Any other combination is a prior activation or malformed core;
+    // do not let an authority overwrite its lifecycle identity.
+    if data[11] != 0 || data[44..76].iter().any(|byte| *byte != 0) {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    data[11] = 1; // Open; later V3 risk/oracle activation remains explicit.
+    data[44..76].copy_from_slice(&authority);
+    Ok(())
+}
+
 fn validate_v3_instrument_parent(program_id: &Address, account: &AccountView) -> ProgramResult {
     if !account.owned_by(program_id) {
         return Err(ProgramError::IllegalOwner);

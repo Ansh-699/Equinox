@@ -48,6 +48,7 @@ export const STOCKSTREAM_INSTRUCTION = {
   createVaultAccount: 44,
   createScratchAccount: 45,
   createV3Account: 46,
+  initializeV3Market: 47,
 } as const;
 
 export const STOCKSTREAM_ACCOUNT_SIZE = 222_752;

@@ -28,6 +28,8 @@ pub const CREATE_SCRATCH_ACCOUNT: u8 = 45;
 /// Creates (or grows) one bounded, independently-committable V3 account.
 /// Data: `[46, kind:u8, index:u8]`; see `v3::V3AccountKind`.
 pub const CREATE_V3_ACCOUNT: u8 = 46;
+/// Governance-authorized activation for a structurally created V3 core.
+pub const INITIALIZE_V3_MARKET: u8 = 47;
 pub const COMMIT_MARKET: u8 = 14;
 pub const COMMIT_AND_UNDELEGATE: u8 = 15;
 /// Reserved: the real external-undelegate callback uses the delegation
@@ -190,6 +192,9 @@ pub enum StockStreamInstruction {
         kind: u8,
         index: u8,
     },
+    /// Binds a V3 core to the exchange listing authority. Structural account
+    /// creation is permissionless; activation is not.
+    InitializeV3Market,
     CommitMarket {
         sequence: u64,
     },
@@ -422,6 +427,7 @@ impl StockStreamInstruction {
                     index: data[2],
                 })
             }
+            Some(INITIALIZE_V3_MARKET) if data.len() == 1 => Ok(Self::InitializeV3Market),
             Some(CREATE_INSTRUMENT_ACCOUNT) if data.len() == 33 => {
                 Ok(Self::CreateInstrumentAccount {
                     instrument_id: data[1..33]
