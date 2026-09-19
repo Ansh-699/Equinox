@@ -97,10 +97,20 @@ export function decodeV3SeatShard(bytes: Uint8Array): V3SeatShardState | null {
   return { shard: bytes[10], core: address(bytes, 12), seats: bytes.slice(44) };
 }
 
-export interface V3EventShardState { shard: number; core: string; events: Uint8Array; }
+export interface V3EventRecord { kind: number; sequence: bigint; timestamp: bigint; payload: Uint8Array; }
+export function decodeV3EventRecord(bytes: Uint8Array): V3EventRecord | null {
+  if (bytes.length !== V3_EVENT_RECORD_SIZE) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const kind = view.getUint16(0, true);
+  if (kind === 0) return null;
+  return { kind, sequence: view.getBigUint64(4, true), timestamp: view.getBigUint64(44, true), payload: bytes.slice(52) };
+}
+export interface V3EventShardState { shard: number; core: string; events: Uint8Array; records: readonly (V3EventRecord | null)[]; }
 export function decodeV3EventShard(bytes: Uint8Array): V3EventShardState | null {
   if (!validVersion(bytes, "STKEV003", V3_EVENT_SHARD_SIZE) || bytes[10] >= 4 || bytes[11] !== 0) return null;
-  return { shard: bytes[10], core: address(bytes, 12), events: bytes.slice(44) };
+  const events = bytes.slice(44);
+  const records = Array.from({ length: V3_EVENTS_PER_SHARD }, (_, index) => decodeV3EventRecord(events.slice(index * V3_EVENT_RECORD_SIZE, (index + 1) * V3_EVENT_RECORD_SIZE)));
+  return { shard: bytes[10], core: address(bytes, 12), events, records };
 }
 
 export interface V3MarketAggregate {

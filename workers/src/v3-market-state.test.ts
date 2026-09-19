@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getBase58Decoder } from "@solana/kit";
-import { aggregateV3Market, decodeV3BookPage, decodeV3Core, V3_BOOK_PAGE_SIZE, V3_CORE_SIZE, V3_EVENT_SHARD_SIZE, V3_SEAT_SHARD_SIZE } from "./v3-market-state";
+import { aggregateV3Market, decodeV3BookPage, decodeV3Core, decodeV3EventShard, V3_BOOK_PAGE_SIZE, V3_CORE_SIZE, V3_EVENT_SHARD_SIZE, V3_SEAT_SHARD_SIZE } from "./v3-market-state";
 
 const decoder = getBase58Decoder();
 const coreAddress = decoder.decode(new Uint8Array(32).fill(7));
@@ -34,5 +34,13 @@ describe("V3 worker shard aggregation", () => {
     const events = Array.from({ length: 4 }, (_, value) => shard(true, value));
     expect(aggregateV3Market(core(), books, seats, events, coreAddress)).toMatchObject({ completeBook: true, completeExecutionState: true, withdrawalReady: true });
     expect(aggregateV3Market(core(), [...books.slice(0, 7), page(1, 2)], seats, events, coreAddress)).toBeNull();
+  });
+  it("decodes complete persisted event records", () => {
+    const bytes = shard(true, 0);
+    bytes[44] = 200; bytes[45] = 0;
+    new DataView(bytes.buffer).setBigUint64(48, 32n, true);
+    new DataView(bytes.buffer).setBigUint64(88, 77n, true);
+    bytes.fill(9, 96, 144);
+    expect(decodeV3EventShard(bytes)?.records[0]).toMatchObject({ kind: 200, sequence: 32n, timestamp: 77n });
   });
 });
