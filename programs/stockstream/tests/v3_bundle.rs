@@ -11,8 +11,9 @@ use stockstream::{
     v3::{
         append_event_record, close_trader_seat, create_trader_seat, derive_book_page_v3,
         derive_event_shard_v3, derive_market_core_v3, derive_seat_shard_v3,
-        initialize_book_page_metadata, validate_execution_bundle, PagedBookV3, V3_BOOK_PAGE_SIZE,
-        V3_EVENT_SHARD_SIZE, V3_EXECUTION_BUNDLE_LEN, V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
+        initialize_book_page_metadata, validate_execution_bundle, validate_v3_withdrawal_readiness,
+        PagedBookV3, V3_BOOK_PAGE_SIZE, V3_EVENT_SHARD_SIZE, V3_EXECUTION_BUNDLE_LEN,
+        V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
     },
     ID,
 };
@@ -256,4 +257,20 @@ fn v3_event_queue_uses_full_records_and_crosses_shard_boundary() {
     let second = unsafe { accounts[14].view.borrow_unchecked() };
     assert_eq!(u16::from_le_bytes(second[44..46].try_into().unwrap()), 200);
     assert_eq!(u64::from_le_bytes(second[48..56].try_into().unwrap()), 32);
+}
+
+#[test]
+fn v3_withdrawal_requires_restored_and_reconciled_full_bundle() {
+    let mut accounts = bundle();
+    unsafe {
+        let core = accounts[0].view.borrow_unchecked_mut();
+        core[197] = 3;
+        core[198..206].copy_from_slice(&7u64.to_le_bytes());
+        core[206..214].copy_from_slice(&7u64.to_le_bytes());
+    }
+    assert!(validate_v3_withdrawal_readiness(&ID, &views(&accounts)).is_ok());
+    unsafe {
+        accounts[0].view.borrow_unchecked_mut()[206] = 6;
+    }
+    assert!(validate_v3_withdrawal_readiness(&ID, &views(&accounts)).is_err());
 }
