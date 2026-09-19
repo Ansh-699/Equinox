@@ -2,8 +2,9 @@ import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { expect, test } from "vitest";
 import { STOCKSTREAM_PROGRAM_ID } from "./constants";
 import { MAGICBLOCK_DELEGATION_PROGRAM_ID, MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID, STOCKSTREAM_PROGRAM_KEY } from "./index";
-import { authorizeTradingSession, cancelOrder, commitMarket, delegateClusterMember, deriveClusterMemberPdas, createPerpMarket, decodeFillPayload, decodeInstruction, decodeMarketState, decodeSeatAmountPayload, decodeStockStreamEvent, delegateMarket, deriveTradingSession, depositCollateral, EVENT_SIZE, initializeExchange, initializeMarket, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateExchangeConfig, updateStockInstrument, withdrawCollateral, withdrawInsuranceFunds, withdrawProtocolFees, EXCHANGE_CONFIG_FIELD } from "./index";
+import { authorizeTradingSession, cancelOrder, commitMarket, delegateClusterMember, deriveClusterMemberPdas, createPerpMarket, createV3Account, decodeFillPayload, decodeInstruction, decodeMarketState, decodeSeatAmountPayload, decodeStockStreamEvent, delegateMarket, deriveTradingSession, depositCollateral, EVENT_SIZE, initializeExchange, initializeMarket, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateExchangeConfig, updateStockInstrument, withdrawCollateral, withdrawInsuranceFunds, withdrawProtocolFees, EXCHANGE_CONFIG_FIELD } from "./index";
 import { STOCKSTREAM_ACCOUNT_SIZE } from "./constants";
+import { deriveBookPageV3, deriveMarketCoreV3 } from "./abi/v3";
 
 const market = PublicKey.unique();
 const authority = PublicKey.unique();
@@ -17,6 +18,24 @@ test("instruction constructors use canonical program id and exact account flags"
     { pubkey: market, isSigner: false, isWritable: true },
     { pubkey: authority, isSigner: true, isWritable: false },
   ]);
+});
+
+test("createV3Account validates the isolated PDA and preserves the program account ABI", () => {
+  const instrument = PublicKey.unique();
+  const payer = PublicKey.unique();
+  const core = deriveMarketCoreV3(instrument);
+  const coreIx = createV3Account({ parent: instrument, target: core, payer }, "core");
+  expect(Array.from(coreIx.data)).toEqual([46, 0, 0]);
+  expect(coreIx.keys).toEqual([
+    { pubkey: instrument, isSigner: false, isWritable: false },
+    { pubkey: core, isSigner: false, isWritable: true },
+    { pubkey: payer, isSigner: true, isWritable: true },
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+  ]);
+  const page = deriveBookPageV3(core, 1, 3);
+  expect(Array.from(createV3Account({ parent: core, target: page, payer }, "book-page", 7).data)).toEqual([46, 1, 7]);
+  expect(() => createV3Account({ parent: core, target: market, payer }, "book-page", 0)).toThrow(/derived/);
+  expect(() => createV3Account({ parent: core, target: page, payer }, "book-page", 8)).toThrow(/index/);
 });
 
 test("depositCollateral encodes exactly 6 accounts -- no separate seat-slot account", () => {
