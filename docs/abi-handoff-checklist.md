@@ -2,9 +2,15 @@
 
 **Status as of this writing: a canonical ABI package already exists on
 `stockstream/core-auth-sprint` but has not been merged into this branch
-(`stockstream/frontend-product`) or acted on.** This document exists so
-that whoever picks this up next — human or agent — doesn't have to
-re-derive what's here from scratch.
+(`stockstream/frontend-product`) or acted on. Separately, this branch's
+own SDK (`clients/stockstream/src/index.ts`) already has a complete,
+tested per-kind event/oracle payload decoder that predates this session
+and has never been wired into any UI.** All four of this document's
+original open questions are now resolved (see the "Resolved: ..."
+sections below); the only thing genuinely left open is a decision, not
+an investigation. This document exists so that whoever picks this up
+next — human or agent — doesn't have to re-derive any of this from
+scratch.
 
 ## What actually changed (verified by reading the commits directly, not assumed)
 
@@ -44,43 +50,126 @@ one directly against the actual new files:
 | Blocked item | Resolved by the new ABI package? | Detail |
 |---|---|---|
 | Raw order-book (PATRICIA tree) decoding | **Yes** | `orderbook.ts` has real, generated offsets: `ARENA_NODES_OFFSET`, `ANY_NODE_SIZE` (88), `TAG_INNER`/`TAG_LEAF`, and per-field offsets for both `InnerNode` and `LeafNode` (side, quantity, expires_at, peg_limit, price_or_offset, sequence). This is exactly what `lib/open-orders.ts`'s `unimplementedOpenOrdersAdapter` is waiting on. |
-| Per-kind raw event decoding | **Partially** | `events.ts` gives `EVENT_KIND` (same discriminator table `workers/src/event-decoder.ts` already uses) and `EVENT_HEADER_SIZE`/`EVENT_PAYLOAD_SIZE` -- but note `EVENT_PAYLOAD_SIZE` here is **88 bytes**, not the 48 bytes `workers/src/event-decoder.ts` currently assumes. That's a real discrepancy to resolve, not just a rename -- see "Open questions" below. It does NOT give a per-kind payload field layout (e.g. what bytes within the 88-byte payload mean for `OrderFilled` specifically) -- that would need to come from wherever `registry.rs` (also added in this ABI commit range, 129 lines, not yet read in depth) documents it. |
-| Raw oracle payload decoding | **No** | `oracle.ts` only adds `MARKET_SESSION` and a `SESSION_TO_MODE` mapping (Pyth Pro's market-session field to the on-chain `MarketMode`). It does not decode a raw oracle account/payload at all. `lib/oracle-safety.ts`'s existing boundary (verified header fields + verified event kind names, never the event's payload body) is unaffected either way. |
-| Canonical ABI migration (this frontend's own `clients/stockstream/src/index.ts` vs. the new `abi/` package) | **Not done, needs a decision** | `accounts.ts::decodeMarketHeader` and `sessions.ts::decodeTradingSession` overlap heavily with hand-written decoders this frontend already has in `clients/stockstream/src/index.ts` (`decodeMarketState`, the trading-session decode logic) and in `workers/src/market-state.ts`. Field names differ (e.g. `maximumExposure` vs. this branch's `maximumExposure`/`maxExposure` naming), and **the session discriminator is different**: the new package uses `"STKSES02"` (`sessions.ts`), and this branch's session-reading code path should be checked against whichever discriminator/offsets it currently assumes before trusting it still matches. This needs an explicit reconciliation pass, not a blind swap. |
+| Per-kind raw event decoding | **Already resolved on THIS branch, independently of the new ABI package -- see below** | The new `abi/events.ts`'s `EVENT_HEADER_SIZE`/`EVENT_PAYLOAD_SIZE` (12/88) are a **verified bug**, not a real discrepancy to reconcile (see "Resolved: the event-payload-size question" below). Separately and more importantly: `clients/stockstream/src/index.ts` (unchanged between the two branches, i.e. already on THIS branch) already has a complete, unit-tested set of per-kind payload decoders (`decodeOrderPayload`, `decodeFillPayload`, `decodePositionPayload`, `decodeFundingPayload`, `decodeLiquidationPayload`, `decodeOraclePayload`, `decodeDelegationPayload`, `decodeSessionPayload`, `decodeRegistryPayload`, `decodeReconciliationPayload`), matching `programs/stockstream/src/events.rs`'s real `payload_*` builder functions byte-for-byte, with real assertions in `clients/stockstream/src/index.test.ts`. |
+| Raw oracle payload decoding | **The decoder already exists and is tested on THIS branch (`decodeOraclePayload`) -- never wired into any UI** | `clients/stockstream/src/index.ts::decodeOraclePayload` decodes `events::payload_oracle`'s real fields (price, exponent, confidence, session) and is exercised in `index.test.ts`. `lib/oracle-safety.ts` was deliberately built to never call it, per the standing "hold" instruction -- see below for why this is flagged as a decision point rather than acted on unilaterally. |
+| Canonical ABI migration (this frontend's own `clients/stockstream/src/index.ts` vs. the new `abi/` package) | **Verified compatible already -- no migration needed for market/session decoding** | `accounts.ts::decodeMarketHeader` and `sessions.ts::decodeTradingSession` were checked field-by-field against this branch's existing `decodeMarketState`/`decodeTradingSession`: identical offsets throughout (see the resolved session-discriminator question below). The only genuinely NEW layout the `abi/` package provides that this branch didn't already have is the order book (`orderbook.ts`) -- that's the real, and only, migration item. |
 | Live relayer submission | No change | Unrelated to the ABI package. Still requires the main agent's authenticated relayer to be live and reachable from a real Devnet environment. |
 | Live Devnable browser acceptance | No change | Same -- an environment/infrastructure blocker, not an ABI one. |
 
-## Open questions to resolve BEFORE writing any decode code against this package
+## Resolved: the event-payload-size question (was an open question, now answered)
+
+Read `programs/stockstream/src/events.rs` directly on `core-auth-sprint`
+(the real, current, authoritative source -- not either TS file). It
+defines `EVENT_PAYLOAD_SIZE = 48` and `EventHeader` as `discriminator(u16)
++ abi_version(u8) + reserved(u8) + sequence(u64) + market([u8;32]) +
+timestamp(u64)`, which is exactly **52 bytes** (`size_of::<EventHeader>()`
+asserted at compile time in the same file). This matches
+`workers/src/event-decoder.ts`'s 52/48 exactly and matches this branch's
+own `clients/stockstream/src/index.ts` (`EVENT_HEADER_SIZE`/
+`EVENT_PAYLOAD_SIZE` there, unchanged between branches).
+
+**The new `abi/events.ts` and `abi_manifest.rs`'s `EVENT_HEADER_SIZE = 12`,
+`EVENT_PAYLOAD_SIZE = 88` are wrong** -- not a newer/different valid
+framing, a bug. Traced why the generator's own "CI parity" test doesn't
+catch it: `abi_manifest.rs`'s `manifest_constants_are_consistent` test
+only asserts the *total* `EVENT_SIZE` against `stockstream::events::
+EVENT_SIZE` (`assert_eq!(EVENT_SIZE, stockstream::events::EVENT_SIZE)`)
+-- it never independently checks `EVENT_HEADER_SIZE` or
+`EVENT_PAYLOAD_SIZE` against the real constants. `12 + 88 = 100` and
+`52 + 48 = 100` are both correct as *totals*, so the wrong header/payload
+split passes the existing parity gate silently. This is a real gap in
+that CI check, not something for this branch to route around -- worth
+reporting upstream rather than working past it here.
+
+**Practical consequence:** never use `abi/events.ts`'s
+`EVENT_HEADER_SIZE`/`EVENT_PAYLOAD_SIZE` if/when this branch rebases onto
+`core-auth-sprint`. Keep using the already-correct 52/48 split
+(`workers/src/event-decoder.ts` and `clients/stockstream/src/index.ts`
+already agree on it) until the generator itself is fixed on that branch.
+
+## Resolved: per-kind event payload decoding already exists on THIS branch, untouched by the ABI package, and has never been wired to any UI
+
+This is the single most important finding in this document. Reading
+`programs/stockstream/src/events.rs` in full (both branches -- it's
+unchanged between them) shows real, documented, byte-exact payload
+builder functions: `payload_order`, `payload_fill`, `payload_position`,
+`payload_funding`, `payload_liquidation`, `payload_oracle`,
+`payload_delegation`, `payload_session`, `payload_registry`,
+`payload_reconciliation`, each with an exact byte-offset doc comment.
+
+**`clients/stockstream/src/index.ts` already has a matching decoder for
+every one of them** -- `decodeOrderPayload`, `decodeFillPayload`,
+`decodePositionPayload`, `decodeFundingPayload`,
+`decodeLiquidationPayload`, `decodeOraclePayload`,
+`decodeDelegationPayload`, `decodeSessionPayload`,
+`decodeRegistryPayload`, `decodeReconciliationPayload` -- plus
+`decodeStockStreamEvent`, which decodes the 52-byte header and hands back
+the raw 48-byte payload for one of the above to interpret by kind. These
+are **not new, not experimental, and not part of the ABI package** --
+they predate this session's fork point entirely, and
+`clients/stockstream/src/index.test.ts` already exercises several of them
+(`decodeStockStreamEvent`, `decodeFillPayload`, `decodeSeatAmountPayload`)
+with real fixture bytes.
+
+**Verified nobody in this app actually calls them**: `grep -rl` for every
+one of those function names across `app/`, `features/`, `components/`,
+`lib/` (excluding the SDK module and its own test file) returns nothing.
+This entire decoder surface has been sitting in the codebase, correct and
+tested, completely unused by both `workers/src/event-decoder.ts` (which
+independently reimplements only the header decode, never the per-kind
+payload) and by this branch's own `lib/oracle-safety.ts` /
+`lib/activity-view-model.ts` (which were deliberately built to say
+"unavailable" rather than decode a payload body).
+
+**Why this branch never used it, and why that's flagged here rather than
+just fixed:** the standing instruction this branch was built under holds
+"per-kind raw event decoding" and "exact raw oracle payload decoding" as
+two of six items to leave to a main-agent handoff. That instruction was
+followed literally and in good faith throughout -- `lib/oracle-safety.ts`
+and `lib/activity-view-model.ts`'s module docs both explicitly reason
+about *why* the payload body stays undecoded. But the premise behind
+holding those two items -- that no verified layout exists yet -- turns
+out to be incomplete: a verified, tested layout already existed in this
+same branch's own SDK the entire time; it was simply never connected to
+the UI. Whether to now wire `decodeOraclePayload`/`decodeOrderPayload`/
+etc. into `lib/oracle-safety.ts` and `lib/activity-view-model.ts` is a
+real decision, not an obvious "yes" -- these decoders have never been
+exercised against a live devnet transaction, only fixture bytes, and
+wiring them changes what the UI claims to know. That decision was
+explicitly left to whoever reads this next, rather than made
+unilaterally by continuing past the standing "hold."
+
+## Further open questions to resolve BEFORE relying on the NEW `abi/` package specifically
 
 Do not start implementing against `clients/stockstream/src/abi/` without
 resolving these -- guessing past them would be exactly the kind of
 unverified-layout decoding this whole branch has been careful to avoid:
 
-1. **Event payload size mismatch.** `workers/src/event-decoder.ts` (this
-   branch's actively-used decoder) assumes a 48-byte category-specific
-   payload after a 52-byte header (`EVENT_HEADER_SIZE = 52`,
-   `EVENT_PAYLOAD_SIZE = 48` there). The new `abi/events.ts` says
-   `EVENT_HEADER_SIZE = 12`, `EVENT_PAYLOAD_SIZE = 88`. These are NOT the
-   same framing -- header size alone differs by 4x. Read
-   `programs/stockstream/src/events.rs`'s actual `encode_event` (both
-   branches' current copies, they may have diverged) directly before
-   assuming either number is still correct; do not average them or guess.
-2. **`registry.rs` (129 new lines, not yet read as part of this
-   checklist)** may be where per-kind payload field layouts actually live.
-   Read it in full before assuming the payload is still opaque.
-3. **Session discriminator/offset reconciliation.** Confirm whether this
-   branch's current session-reading path
-   (`clients/stockstream/src/index.ts`, `lib/session-trading.ts`,
-   `features/sessions/use-trading-session.ts`) already matches
-   `"STKSES02"`/`sessions.ts`'s offsets, or predates it. If it predates
-   it, every already-shipped session-authorize/revoke/nonce-tracking flow
-   in this branch needs to be re-verified against the new layout before
-   trusting it in front of a real program.
-4. **`book.rs`'s 7-line change** (part of commit `831935d`) may have
-   altered the arena layout slightly to make it generator-friendly --
-   diff `programs/stockstream/src/book.rs` between the merge-base and
-   `core-auth-sprint` directly rather than assuming the orderbook.ts
-   offsets apply to an unmodified `book.rs`.
+1. **`registry.rs`, read in full**: it defines exchange/instrument
+   registry logic (config updates, instrument registration, vault account
+   creation) and imports the payload *builder* helpers above by name --
+   it is not itself a payload-layout source; the layouts are in
+   `events.rs` (see above, now resolved).
+2. ~~Session discriminator/offset reconciliation.~~ **Resolved: already
+   matches, no action needed.** `clients/stockstream/src/index.ts::
+   decodeTradingSession` (unchanged between branches) already checks
+   `discriminator !== "STKSES02"` and every single field offset (owner
+   12-44, sessionSigner 44-76, targetProgram 76-108, market 108-140,
+   traderSeatIndex 140, createdAt 142, expiresAt 150, actions 158,
+   maxOrderNotional 159, maxCumulativeNotional 167,
+   consumedCumulativeNotional 175, maxExposure 183, maxOpenOrders 199,
+   nextExpectedNonce 201, lastActionTimestamp 209, sessionGeneration 217)
+   is byte-identical to the new `abi/sessions.ts::decodeTradingSession`.
+   Every already-shipped session-authorize/revoke/nonce-tracking flow in
+   this branch (`lib/session-trading.ts`,
+   `features/sessions/use-trading-session.ts`) is safe as-is.
+3. ~~`book.rs`'s 7-line change~~ **Resolved: purely cosmetic, no layout
+   change.** Diffed directly: it only changes `TAG_INNER`/`TAG_LEAF`/
+   `TAG_FREE` from private to `pub` and adds one new `pub const
+   ANY_NODE_SIZE: usize = 88` (already asserted equal to
+   `size_of::<AnyNode>()` elsewhere in the same file). No struct field, no
+   offset, no size actually changed. `orderbook.ts`'s offsets apply
+   cleanly.
 
 ## Rebase procedure
 
@@ -114,50 +203,60 @@ entries), then run `npm install` to regenerate a consistent
 after the rebase completes, per this branch's established verification
 habit (every commit on this branch was gated on all three passing clean).
 
-## Implementation checklist, once the open questions above are resolved
+## Implementation checklist
 
-In dependency order -- later items assume earlier ones are done:
+All four original open questions above are now resolved (three
+confirmed compatible/no-op, one confirmed a bug to avoid). What's left
+is implementation work and one real decision, in dependency order:
 
-1. Resolve the four open questions above by reading the actual current
-   Rust source, not by guessing from the two partially-conflicting sets
-   of TS constants.
-2. Reconcile `clients/stockstream/src/index.ts`'s existing decoders
-   against `clients/stockstream/src/abi/{accounts,sessions}.ts` field-by-
-   field. Decide whether to adopt the new `abi/` package as the source of
-   truth and update this branch's callers, or keep the existing decoders
-   if they're confirmed still correct -- do not run both side by side
-   long-term, that's the "two places to drift apart" problem this branch
-   has avoided elsewhere (see `lib/execution-status.ts`'s module doc for
-   the same principle applied to indexer state).
-3. Implement a real `OpenOrdersAdapter` (replacing
+1. **Decision point, not implementation**: whether to wire
+   `clients/stockstream/src/index.ts`'s already-existing, already-tested
+   per-kind decoders (`decodeOraclePayload`, `decodeOrderPayload`,
+   `decodeFillPayload`, etc.) into `lib/oracle-safety.ts` and
+   `lib/activity-view-model.ts`. This is flagged, not decided, in this
+   document -- see the "Resolved: per-kind event payload decoding..."
+   section above for why.
+2. Implement a real `OpenOrdersAdapter` (replacing
    `lib/open-orders.ts`'s `unimplementedOpenOrdersAdapter`) using
    `abi/orderbook.ts`'s verified offsets to walk the PATRICIA tree arena
    and decode `LeafNode`s into `OpenOrderView`s. `features/orders/
    open-orders-panel.tsx` and `use-open-orders.ts` need no changes --
    they were built against the adapter interface specifically so this
-   swap is the only change required.
-4. If question 1/2 resolve favorably, extend
-   `workers/src/event-decoder.ts` (main-agent-owned) to decode per-kind
-   payload fields; on the frontend side, extend
-   `lib/activity-view-model.ts`'s `toActivityRow` to surface real decoded
-   fields instead of (or alongside) `ACTIVITY_DETAIL_UNAVAILABLE`.
-5. Re-run this branch's full test suite (`npm test`, `npm run
+   swap is the only change required. This is the one piece of real,
+   net-new decoding work the ABI package unblocks -- unlike the
+   event/oracle payloads, no order-book decoder existed anywhere in this
+   branch before now.
+3. If (1) is decided yes: extend `lib/activity-view-model.ts`'s
+   `toActivityRow` to call the existing per-kind decoders and surface
+   real fields instead of (or alongside) `ACTIVITY_DETAIL_UNAVAILABLE`,
+   and extend `lib/oracle-safety.ts` to read `decodeOraclePayload`'s
+   fields directly rather than only the account header + event kind name.
+   `workers/src/event-decoder.ts` (main-agent-owned, the live stream's
+   own decoder) would also need the same per-kind decode added
+   server-side for the WebSocket payload to carry the decoded fields at
+   all -- today it forwards only the raw payload bytes.
+4. Re-run this branch's full test suite (`npm test`, `npm run
    test:browser`, `npm run test:browser:production`) plus the accessibility
    scan (`tests/browser/accessibility.spec.ts`) after wiring in real data --
    several tests (`lib/open-orders.test.ts`, the Activity feed tests)
    assert the CURRENT honest-unavailable behavior and will need updating
    to assert real decoded values instead, not just pass incidentally.
-6. Only after 1-5: revisit the two remaining blocked items (live relayer
+5. Only after 1-4: revisit the two remaining blocked items (live relayer
    submission, live Devnet browser acceptance) -- these need a reachable
    authenticated relayer and real Devnet RPC access, which this checklist
    cannot resolve on its own.
 
 ## What this checklist deliberately does not do
 
-It does not implement any of the above. Per this branch's standing
-instructions, raw order-book/event/oracle-payload decoding stays
-unimplemented here until the open questions above are actually resolved
-against the real Rust source -- writing decode code against numbers that
-might be stale (see the event-payload-size discrepancy) would be exactly
-the kind of unverified-layout guess this branch has been built to avoid
-everywhere else.
+It does not implement any of the above, and does not rebase this branch
+onto `core-auth-sprint`. Per this branch's standing instructions, raw
+order-book decoding, per-kind event decoding, oracle-payload decoding,
+and the canonical ABI migration are four of six items held for a
+main-agent handoff decision rather than acted on unilaterally --
+including the per-kind event and oracle-payload decoders this document
+found already exist, tested, in this branch's own SDK. Investigating
+and documenting what's actually true (verified byte layouts, a real bug
+in a sibling branch's CI gate, existing-but-unwired decode capability)
+is not the same action as deciding to wire it into production UI
+against a standing "hold," and this document treats that distinction as
+real.
