@@ -421,6 +421,37 @@ fn write_shard_seat(bytes: &mut [u8], slot: usize, seat: &TraderSeat) -> Program
     Ok(())
 }
 
+fn next_core_event_sequence(core: &mut AccountView) -> Result<u64, ProgramError> {
+    let bytes = unsafe { core.borrow_unchecked_mut() };
+    let current = u64::from_le_bytes(
+        bytes[V3_CORE_GLOBAL_EVENT_SEQUENCE_OFFSET..V3_CORE_GLOBAL_EVENT_SEQUENCE_OFFSET + 8]
+            .try_into()
+            .map_err(|_| bundle_error())?,
+    );
+    let next = current
+        .checked_add(1)
+        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    bytes[V3_CORE_GLOBAL_EVENT_SEQUENCE_OFFSET..V3_CORE_GLOBAL_EVENT_SEQUENCE_OFFSET + 8]
+        .copy_from_slice(&next.to_le_bytes());
+    Ok(current)
+}
+
+fn emit_v3_seat_event(
+    core: &mut AccountView,
+    kind: crate::events::EventKind,
+    seat_index: u16,
+) -> ProgramResult {
+    let sequence = next_core_event_sequence(core)?;
+    crate::events::emit_event(
+        kind,
+        &core.address().to_bytes(),
+        sequence,
+        crate::handlers::event_timestamp(),
+        &crate::events::payload_seat(seat_index),
+    );
+    Ok(())
+}
+
 /// Opcode 49. Accounts are `[core(write), seat_shard_0..3(write), trader(signer)]`.
 /// All shards are present to make the per-trader uniqueness invariant global
 /// across all 128 seats, rather than accidentally local to one shard.
@@ -459,7 +490,7 @@ pub fn create_trader_seat(
     let sequence = u64::from_le_bytes(
         core_bytes[V3_CORE_GLOBAL_EVENT_SEQUENCE_OFFSET..V3_CORE_GLOBAL_EVENT_SEQUENCE_OFFSET + 8]
             .try_into()
-            .unwrap(),
+            .map_err(|_| bundle_error())?,
     );
     let mut target = unsafe { accounts[1 + shard].borrow_unchecked_mut() };
     if !read_shard_seat(&target, slot)?.is_empty() {
@@ -470,7 +501,53 @@ pub fn create_trader_seat(
     seat.trader = trader;
     seat.sequence = sequence;
     seat.liquidation_state = LiquidationState::Healthy as u8;
-    write_shard_seat(&mut target, slot, &seat)
+    write_shard_seat(&mut target, slot, &seat)?;
+    emit_v3_seat_event(
+        &mut accounts[0],
+        crate::events::EventKind::TraderSeatCreated,
+        seat_index,
+    )
+}
+
+/// Opcode 50. Accounts are `[core(write), seat_shard_0..3(write), trader(signer)]`.
+/// All shards stay mandatory: besides fixing the account ABI, it keeps close
+/// and create under the same globally validated V3 seat domain.
+pub fn close_trader_seat(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    seat_index: u16,
+) -> ProgramResult {
+    if accounts.len() != 6 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    if !accounts[5].is_signer() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    let core_key = validate_active_core(program_id, &accounts[0])?;
+    for shard in 0..V3_SEAT_SHARDS {
+        validate_seat_shard(program_id, &accounts[1 + shard], &core_key, shard as u8)?;
+    }
+    let index = seat_index as usize;
+    if index >= V3_SEAT_SHARDS * V3_SEATS_PER_SHARD {
+        return Err(StockStreamError::InvalidSeat.into());
+    }
+    let shard = index / V3_SEATS_PER_SHARD;
+    let slot = index % V3_SEATS_PER_SHARD;
+    let trader = accounts[5].address().to_bytes();
+    let mut target = unsafe { accounts[1 + shard].borrow_unchecked_mut() };
+    let seat = read_shard_seat(&target, slot)?;
+    if seat.trader != trader {
+        return Err(StockStreamError::InvalidSeat.into());
+    }
+    if !seat.can_close() {
+        return Err(StockStreamError::SeatNotEmpty.into());
+    }
+    write_shard_seat(&mut target, slot, &TraderSeat::empty())?;
+    emit_v3_seat_event(
+        &mut accounts[0],
+        crate::events::EventKind::TraderSeatClosed,
+        seat_index,
+    )
 }
 
 #[cfg(test)]

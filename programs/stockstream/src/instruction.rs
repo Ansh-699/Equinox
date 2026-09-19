@@ -36,6 +36,8 @@ pub const DELEGATE_V3_ACCOUNT: u8 = 48;
 /// Creates one 256-byte trader seat inside its V3 seat shard. Data:
 /// `[49, seat_index:u16]`.
 pub const CREATE_V3_TRADER_SEAT: u8 = 49;
+/// Closes an empty V3 trader seat. Data: `[50, seat_index:u16]`.
+pub const CLOSE_V3_TRADER_SEAT: u8 = 50;
 pub const COMMIT_MARKET: u8 = 14;
 pub const COMMIT_AND_UNDELEGATE: u8 = 15;
 /// Reserved: the real external-undelegate callback uses the delegation
@@ -207,6 +209,9 @@ pub enum StockStreamInstruction {
         validator: [u8; 32],
     },
     CreateV3TraderSeat {
+        seat_index: u16,
+    },
+    CloseV3TraderSeat {
         seat_index: u16,
     },
     CommitMarket {
@@ -467,6 +472,9 @@ impl StockStreamInstruction {
                 sequence: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
             }),
             Some(CREATE_V3_TRADER_SEAT) if data.len() == 3 => Ok(Self::CreateV3TraderSeat {
+                seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+            }),
+            Some(CLOSE_V3_TRADER_SEAT) if data.len() == 3 => Ok(Self::CloseV3TraderSeat {
                 seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
             }),
             Some(COMMIT_AND_UNDELEGATE) if data.len() == 9 => Ok(Self::CommitAndUndelegate {

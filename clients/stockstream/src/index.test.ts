@@ -2,7 +2,7 @@ import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { expect, test } from "vitest";
 import { STOCKSTREAM_PROGRAM_ID } from "./constants";
 import { MAGICBLOCK_DELEGATION_PROGRAM_ID, MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID, STOCKSTREAM_PROGRAM_KEY } from "./index";
-import { authorizeTradingSession, cancelOrder, commitMarket, delegateClusterMember, delegateV3Account, deriveClusterMemberPdas, createPerpMarket, createV3Account, createV3TraderSeat, decodeFillPayload, decodeInstruction, decodeMarketState, decodeSeatAmountPayload, decodeStockStreamEvent, delegateMarket, deriveTradingSession, depositCollateral, EVENT_SIZE, initializeExchange, initializeMarket, initializeV3Market, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateExchangeConfig, updateStockInstrument, withdrawCollateral, withdrawInsuranceFunds, withdrawProtocolFees, EXCHANGE_CONFIG_FIELD } from "./index";
+import { authorizeTradingSession, cancelOrder, closeV3TraderSeat, commitMarket, delegateClusterMember, delegateV3Account, deriveClusterMemberPdas, createPerpMarket, createV3Account, createV3TraderSeat, decodeFillPayload, decodeInstruction, decodeMarketState, decodeSeatAmountPayload, decodeStockStreamEvent, delegateMarket, deriveTradingSession, depositCollateral, EVENT_SIZE, initializeExchange, initializeMarket, initializeV3Market, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateExchangeConfig, updateStockInstrument, withdrawCollateral, withdrawInsuranceFunds, withdrawProtocolFees, EXCHANGE_CONFIG_FIELD } from "./index";
 import { STOCKSTREAM_ACCOUNT_SIZE } from "./constants";
 import { deriveBookPageV3, deriveMarketCoreV3, deriveSeatShardV3 } from "./abi/v3";
 
@@ -49,6 +49,7 @@ test("createV3Account validates the isolated PDA and preserves the program accou
   const seat = createV3TraderSeat({ core, seatShards, trader: authority }, 32);
   expect(Array.from(seat.data)).toEqual([49, 32, 0]);
   expect(seat.keys).toHaveLength(6);
+  expect(Array.from(closeV3TraderSeat({ core, seatShards, trader: authority }, 32).data)).toEqual([50, 32, 0]);
   expect(() => createV3TraderSeat({ core, seatShards: seatShards.slice(0, 3), trader: authority }, 0)).toThrow(/four/);
 });
 
