@@ -22,7 +22,7 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 | Devnet lifecycle script correctness | Complete | commit `25a1b0e` + follow-ups; matches the corrected ABI everywhere |
 | MagicBlock delegate (market + 4-account hot cluster) | Complete, live | market `9d75hK8GyfqajxcijLa35bEh8SYUtobqi6eSdtF42RuS` fully delegated: L1 owner `DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh`, router `isDelegated: true`; 2 real protocol bugs found and fixed live (buffer-growth cap, commit-CPI off-by-one) |
 | MagicBlock commit / undelegate / restore / withdraw | Blocked (root-caused) | Read-only live ER simulation rejects the 222,752-byte market itself as "too large to be committed". Account ordering, flags, owners, IDs, and CPI bytes are accepted first; the single-PDA market layout cannot fit the validator's base-layer commit path. See `docs/status/magicblock-commit-simulation-20260919.json` and `scripts/magicblock-commit-repro.mjs`. |
-| V3 committable account lifecycle | Partially source-complete; creation/activation SBF-runtime tested; not deployed | commits `7c91e31`, `8ffa31c`, `f037cc2`, `7e830d2`, `1148fbe`, `83a7d29`, `51d849c`, `7eb6a95`: distinct V3 core/book/seat/event PDAs all remain below 50,000 bytes; opcode 46 creates/resumes them without accepting a V2 PDA; opcode 47 binds a core once to the exchange listing authority; opcode 48 delegates a bounded core/page/shard with real Delegation Program wire encodings. LiteSVM exercised creation/activation and a book page across 10,240 -> 20,480 -> 22,592 bytes. V3 matching, custody, commit scheduling and Devnet deployment are still outstanding. |
+| V3 committable account lifecycle | Partially source-complete; creation/activation SBF-runtime tested; not deployed | commits `7c91e31`, `8ffa31c`, `f037cc2`, `7e830d2`, `1148fbe`, `83a7d29`, `51d849c`, `7eb6a95`, `c6db456`, `5482c9a`: distinct V3 core/book/seat/event PDAs all remain below 50,000 bytes; opcode 46 creates/resumes them without accepting a V2 PDA; opcode 47 binds a core once to the exchange listing authority; opcode 48 delegates a bounded core/page/shard with real Delegation Program wire encodings; opcodes 49/50 create and safely close sharded seats with global duplicate-owner checks and V3 event-sequence/log parity. LiteSVM exercised creation/activation and a book page across 10,240 -> 20,480 -> 22,592 bytes; native tests cover the V3 seat lifecycle. V3 matching, custody, commit scheduling and Devnet deployment are still outstanding. |
 | V3 bootstrap lifecycle runner | Source complete; dry-run tested; not executed on Devnet | commit `f549af0`, `scripts/v3-devnet-lifecycle.mjs`: uses `/tmp/opencode/v3-lifecycle-state.json`, refuses the preserved V2 market address, and only sends a fresh core plus 8 book/4 seat/4 event PDAs when `--execute` is explicit. It does not claim unsupported V3 custody/trading/commit stages. |
 | Session-signed trading (place/cancel/replace/cross) | Blocked | requires `header.oracle_valid`, which only a real Pyth Lazer-verified price can set; no Lazer API key in this environment (confirmed: anonymous WSS connection to the documented endpoint returns HTTP 403 at handshake) |
 | Pyth AAPL/USD live integration | Blocked (credential entitlement/configuration) | an installed test key authenticates but all three endpoints reject the inherited hard-coded Lazer ID 33 as an unentitled crypto-spot feed. `scripts/pyth-live-smoke.mjs` now refuses any default and requires the catalog-verified, entitled numeric Lazer ID for `Equity.US.AAPL/USD`; on-chain `consume_oracle_update` has no admin/test bypass by design. |
@@ -43,11 +43,12 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 - `tsc --noEmit` clean on both the frontend and workers packages.
 - `eslint .` clean.
 - ABI manifest parity: `ABI-OK`.
-- V3 continuation: 222 native Rust tests, 182 TypeScript tests, and one
-  feature-gated LiteSVM SBF lifecycle test passed. The SBF artifact passed
-  `scripts/verify-sbf-artifact.py`; this is not a live deployment claim.
-  Current V3-delegation-capable artifact SHA-256:
-  `e36f5edfff77b1fbc259babf805e136edc0cc03963053f5555e623fed43be04a`.
+- V3 continuation: targeted Rust instruction/bundle tests and all 184 root
+  TypeScript tests passed after `5482c9a`; `npx tsc --noEmit` and ABI parity
+  passed. `cargo build-sbf --manifest-path programs/stockstream/Cargo.toml
+  --features bpf-entrypoint` and `scripts/verify-sbf-artifact.py` passed.
+  This is a local build, not a live deployment. Current V3-seat-lifecycle
+  artifact SHA-256: `f4e86719bf75db3ee28b6623787c1ed6ee674eace8dc48d7c295afccc3531662`.
 
 ## Known external blockers (not fixable from this codebase alone)
 
@@ -65,16 +66,13 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
    deployed Worker has neither Privy secrets nor a relayer key, so it
    correctly remains unable to sponsor a live request; the real round trip
    is untested.
-3. **MagicBlock `commit_market` live rejection** -- after two real,
-   confirmed, and fixed protocol bugs (the delegation buffer-growth cap
-   and the commit-CPI account off-by-one), a further rejection
-   ("invalid account data for instruction") persists even for a bare
-   market-only commit with zero trailing members. Traced into the vendored
-   `magicblock-validator` source (`programs/magicblock/src/
-   magic_scheduled_base_intent.rs`'s `validate_commit_type_accounts`) far
-   enough to rule out the "not delegated" and "confined" explanations, but
-   full root-causing needs direct access to that validator's own runtime
-   logs, which this environment doesn't have.
+3. **MagicBlock V2 commit rejection is structural** -- the sanitized
+   read-only ER simulation in
+   `docs/status/magicblock-commit-simulation-20260919.json` reaches
+   `ScheduleCommit` and reports that the 222,752-byte market is too large
+   to be committed. The V2 monolith cannot fit the committor's `u16`
+   buffered state length; V3 avoids that boundary but is not deployed or
+   live-verified yet.
 
 The V3 layout avoids the identified account-size boundary, but does not
 retrofit the preserved V2 market. It must be deployed and its full trading
