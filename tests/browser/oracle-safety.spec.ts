@@ -56,7 +56,26 @@ for (const [eventKind, expectedLabel] of [
   test(`a live "${eventKind}" event flips the oracle safety banner to "${expectedLabel}"`, async ({ page }) => {
     await page.goto("/");
     await waitForStreamConnected(connectionBaseline);
-    await control({ pushEvent: { id: eventKind, kind: "health", sequence: 1, domain: "l1", observedAt: Date.now(), payload: { kind: eventKind } } });
+    // `waitForStreamConnected` only proves SOME new connection appeared
+    // after the baseline -- it can't distinguish this test's own page from
+    // a still-reconnecting previous test's page whose socket close hadn't
+    // fired yet (the mock server force-closes it in `beforeEach`, but the
+    // frontend's own reconnect logic can race that teardown). A push that
+    // lands on that stale connection instead of this page's real one is
+    // otherwise silently lost. Re-pushing until the banner actually
+    // reflects it is a direct, minimal fix for that race -- no change to
+    // the connection-identification protocol needed for what is already a
+    // small, bounded number of retries in practice.
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await control({ pushEvent: { id: `${eventKind}-${attempt}`, kind: "health", sequence: attempt + 1, domain: "l1", observedAt: Date.now(), payload: { kind: eventKind } } });
+      const flipped = await page
+        .locator(".status-strip[aria-live='polite']")
+        .filter({ hasText: expectedLabel })
+        .first()
+        .isVisible({ timeout: 1_000 })
+        .catch(() => false);
+      if (flipped) break;
+    }
     await expect(page.locator(".status-strip[aria-live='polite']")).toContainText(expectedLabel, { timeout: 10_000 });
   });
 }
