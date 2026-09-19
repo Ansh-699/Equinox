@@ -7,10 +7,12 @@ use pinocchio::{
     Address,
 };
 use stockstream::{
+    book::{LeafNode, Side, TreeKind},
     v3::{
         close_trader_seat, create_trader_seat, derive_book_page_v3, derive_event_shard_v3,
-        derive_market_core_v3, derive_seat_shard_v3, validate_execution_bundle, V3_BOOK_PAGE_SIZE,
-        V3_EVENT_SHARD_SIZE, V3_EXECUTION_BUNDLE_LEN, V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
+        derive_market_core_v3, derive_seat_shard_v3, initialize_book_page_metadata,
+        validate_execution_bundle, PagedBookV3, V3_BOOK_PAGE_SIZE, V3_EVENT_SHARD_SIZE,
+        V3_EXECUTION_BUNDLE_LEN, V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
     },
     ID,
 };
@@ -74,6 +76,7 @@ fn bundle() -> Vec<TestAccount> {
         header(&mut value, b"STKBK003", side, Some(core_key));
         unsafe {
             value.view.borrow_unchecked_mut()[11] = page;
+            initialize_book_page_metadata(value.view.borrow_unchecked_mut(), page).unwrap();
         }
         accounts.push(value);
     }
@@ -96,6 +99,31 @@ fn bundle() -> Vec<TestAccount> {
         accounts.push(value);
     }
     accounts
+}
+
+fn leaf(key: u128, owner: u32) -> LeafNode {
+    LeafNode {
+        tag: 2,
+        side: Side::Ask as u8,
+        time_in_force: 0,
+        _padding: 0,
+        owner,
+        key,
+        quantity: 1,
+        expires_at: u64::MAX,
+        peg_limit: 0,
+        client_order_id: owner as u64,
+        price_or_offset: owner as i64,
+        sequence: owner as u64,
+        flags: 0,
+        _reserved: [0; 15],
+    }
+}
+
+fn expiring_leaf(key: u128, owner: u32, expires_at: u64) -> LeafNode {
+    let mut value = leaf(key, owner);
+    value.expires_at = expires_at;
+    value
 }
 fn views(accounts: &[TestAccount]) -> Vec<AccountView> {
     accounts.iter().map(|value| value.view.clone()).collect()
@@ -148,4 +176,45 @@ fn v3_seat_creation_uses_derived_shard_and_prevents_cross_shard_duplicates() {
     create_trader_seat(&ID, &mut call, 32).expect("closed seat can be reused");
     let core = unsafe { accounts[0].view.borrow_unchecked() };
     assert_eq!(u64::from_le_bytes(core[148..156].try_into().unwrap()), 3);
+}
+
+#[test]
+fn v3_paged_book_preserves_global_handles_across_page_boundaries() {
+    let accounts = bundle();
+    let mut pages = vec![
+        accounts[1].view.clone(),
+        accounts[2].view.clone(),
+        accounts[3].view.clone(),
+        accounts[4].view.clone(),
+    ];
+    let mut book = PagedBookV3::new(&mut pages).unwrap();
+    for index in 0..129u128 {
+        let key = index << 64;
+        book.insert(TreeKind::Fixed, leaf(key, index as u32))
+            .unwrap();
+        assert!(book.find(TreeKind::Fixed, key).is_ok());
+    }
+    assert_eq!(book.node_tag(256).unwrap(), 1);
+    let best = book.best(TreeKind::Fixed).unwrap().unwrap();
+    let best_leaf = book.leaf(best).unwrap();
+    assert_eq!(
+        unsafe { core::ptr::addr_of!(best_leaf.key).read_unaligned() },
+        0
+    );
+    assert_eq!(
+        unsafe { accounts[1].view.borrow_unchecked() }[60..64],
+        257u32.to_le_bytes()
+    );
+    book.remove_owned(TreeKind::Fixed, 128u128 << 64, 128)
+        .expect("cross-page leaf can be removed");
+    assert!(book.find(TreeKind::Fixed, 128u128 << 64).is_err());
+    let reused = book
+        .insert(TreeKind::Fixed, leaf(999u128 << 64, 999))
+        .expect("free-list slot is reusable");
+    assert_eq!(reused, 255);
+    book.insert(TreeKind::Fixed, expiring_leaf(2000u128 << 64, 2000, 10))
+        .expect("expiry leaf inserts");
+    assert!(book.first_expired(TreeKind::Fixed, 9).unwrap().is_none());
+    assert!(book.first_expired(TreeKind::Fixed, 10).unwrap().is_some());
+    assert_eq!(book.sweep_expired(TreeKind::Fixed, 10, 1).unwrap(), 1);
 }

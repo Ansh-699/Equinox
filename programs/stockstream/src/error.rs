@@ -29,6 +29,7 @@ pub enum StockStreamError {
     CustodyViolation = 0x6018,
     SelfTradeAborted = 0x6019,
     MagicBlockClusterTooLarge = 0x601A,
+    V3BookFull = 0x601B,
 }
 
 impl From<StockStreamError> for ProgramError {

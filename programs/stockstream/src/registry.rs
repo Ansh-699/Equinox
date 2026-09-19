@@ -789,6 +789,10 @@ fn initialize_v3_account(
             data[10] = index / crate::v3::V3_BOOK_PAGES_PER_SIDE as u8;
             data[11] = index % crate::v3::V3_BOOK_PAGES_PER_SIDE as u8;
             data[12..44].copy_from_slice(parent.as_ref());
+            crate::v3::initialize_book_page_metadata(
+                data,
+                index % crate::v3::V3_BOOK_PAGES_PER_SIDE as u8,
+            )?;
         }
         crate::v3::V3AccountKind::SeatShard => {
             data[0..8].copy_from_slice(&crate::v3::V3_SEAT_SHARD_DISCRIMINATOR);
