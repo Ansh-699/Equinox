@@ -675,17 +675,15 @@ pub fn delegate_market(
     // with ones it only reads (payer, delegation record/metadata, ...).
     let mut market_view = accounts[0].clone();
 
-    // Validate lifecycle state and stamp the new delegation state into the
-    // market's own bytes *before* it is mirrored into the buffer: the
-    // delegation program's `Delegate` instruction copies the buffer back
-    // into this account verbatim as its last step, so this is how the
-    // updated state survives the CPI. If any later step in this instruction
-    // fails, the whole instruction (and every account write in it,
-    // including this one) is rolled back by the runtime, so this still
-    // satisfies "only update local state after the CPI succeeds".
+    // Validate lifecycle state (authority, not already delegated) BEFORE
+    // any buffer growth -- a rejected call must never even attempt a CPI,
+    // and this read-only check is safe to repeat on every resumed call
+    // (delegation_status only flips to `Delegated` on the final one, so a
+    // legitimate in-progress resume always still reads `NotDelegated`/
+    // `Restored` here).
     {
         let data = market_data(&mut market_view, program_id)?;
-        let mut header = initialized_header(data)?;
+        let header = initialized_header(data)?;
         if header.market_authority != authority {
             return Err(ProgramError::MissingRequiredSignature);
         }
@@ -695,6 +693,34 @@ pub fn delegate_market(
         {
             return Err(custom(StockStreamError::MagicBlockAlreadyDelegated));
         }
+    }
+
+    // The market's buffer must be fully grown to the market's own size
+    // BEFORE any of the header/event mutation below runs -- growth can take
+    // multiple calls (see `ensure_buffer_ready`), and none of the
+    // delegation-state changes below are safe to apply more than once. A
+    // caller must keep invoking this instruction (same accounts) until it
+    // returns having actually delegated; `market_view`'s delegation_status
+    // only flips to `Delegated` on that final call.
+    {
+        let mut buffer_view = accounts[4].clone();
+        let payer_view = accounts[3].clone();
+        if !ensure_buffer_ready(&accounts[0], &mut buffer_view, &payer_view, program_id)? {
+            return Ok(());
+        }
+    }
+
+    // Stamp the new delegation state into the market's own bytes *before*
+    // it is mirrored into the buffer: the delegation program's `Delegate`
+    // instruction copies the buffer back into this account verbatim as its
+    // last step, so this is how the updated state survives the CPI. If any
+    // later step in this instruction fails, the whole instruction (and
+    // every account write in it, including this one) is rolled back by the
+    // runtime, so this still satisfies "only update local state after the
+    // CPI succeeds".
+    {
+        let data = market_data(&mut market_view, program_id)?;
+        let mut header = initialized_header(data)?;
         header.set_delegation_status(DelegationStatus::Delegated);
         header.set_validator(validator.to_bytes());
         header.set_delegation_sequence(header.delegation_sequence().saturating_add(1));
@@ -771,6 +797,63 @@ pub fn delegate_market(
     Ok(())
 }
 
+/// Creates (if needed) and grows `buffer` until its data length matches
+/// `account`'s -- returns `true` once ready. A single instruction can only
+/// increase an account's data length by `MAX_PERMITTED_DATA_INCREASE`
+/// (10,240) bytes, whether via a fresh `CreateAccount` CPI or a direct
+/// owner-side realloc, so an account this large (the market itself, up to
+/// `state::MARKET_ACCOUNT_SIZE` bytes) cannot be buffered in one call: the
+/// caller must invoke this (and therefore `delegate_market`) repeatedly,
+/// once per top-level instruction, until it returns `true` -- exactly the
+/// same constraint and technique `registry::create_market_account` already
+/// uses for the market's own incremental growth. Cluster members (the
+/// largest being `SETTLEMENT_SCRATCH_LEN` bytes) are always well under the
+/// cap, so this always completes for them in one call.
+fn ensure_buffer_ready(
+    account: &AccountView,
+    buffer: &mut AccountView,
+    payer: &AccountView,
+    program_id: &Address,
+) -> Result<bool, ProgramError> {
+    const MAX_PERMITTED_DATA_INCREASE: usize = 10_240;
+    let target_len = account.data_len();
+
+    if !buffer.owned_by(program_id) {
+        if buffer.data_len() != 0 {
+            // A foreign, non-empty account already sits at this PDA.
+            return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+        }
+        let (_, buffer_bump) = Address::find_program_address(
+            &[DELEGATE_BUFFER_TAG, account.address().as_ref()],
+            program_id,
+        );
+        let buffer_bump_slice = [buffer_bump];
+        let buffer_signer_seeds: [Seed; 3] = [
+            Seed::from(DELEGATE_BUFFER_TAG),
+            Seed::from(account.address().as_ref()),
+            Seed::from(&buffer_bump_slice),
+        ];
+        let buffer_signer = Signer::from(&buffer_signer_seeds);
+        let rent = Rent::get()?;
+        CreateAccount {
+            from: payer,
+            to: buffer,
+            lamports: rent.try_minimum_balance(target_len)?,
+            space: target_len.min(MAX_PERMITTED_DATA_INCREASE) as u64,
+            owner: program_id,
+        }
+        .invoke_signed(core::slice::from_ref(&buffer_signer))?;
+    } else if buffer.data_len() < target_len {
+        let next = (buffer.data_len() + MAX_PERMITTED_DATA_INCREASE).min(target_len);
+        unsafe {
+            let raw = buffer.account_mut_ptr();
+            core::ptr::write_unaligned(&mut (*raw).data_len as *mut u64, next as u64);
+        }
+    }
+
+    Ok(buffer.data_len() >= target_len)
+}
+
 /// The delegation sequence shared by `delegate_market` and
 /// `delegate_cluster_member`, per `dlp_api::processor::fast::delegate.rs`:
 /// 1. Create the buffer PDA (`["buffer", account]`, StockStream-owned) sized
@@ -798,32 +881,17 @@ fn delegate_single_account(
     seeds_payload: &[u8],
     validator: &Address,
     program_id: &Address,
-) -> ProgramResult {
-    let rent = Rent::get()?;
-    let data_len = account.data_len();
-
-    // 1. Create the buffer PDA.
+) -> Result<bool, ProgramError> {
+    // 1. Create and/or grow the buffer PDA. Always completes in one call
+    // for cluster members (well under the per-instruction growth cap);
+    // `delegate_market` already confirmed this for the market itself
+    // before ever reaching this call, so this is a cheap, idempotent
+    // re-check for it, not redundant work.
     let mut buffer_view = buffer.clone();
     let mut payer_view = payer.clone();
-    let (_, buffer_bump) = Address::find_program_address(
-        &[DELEGATE_BUFFER_TAG, account.address().as_ref()],
-        program_id,
-    );
-    let buffer_bump_slice = [buffer_bump];
-    let buffer_signer_seeds: [Seed; 3] = [
-        Seed::from(DELEGATE_BUFFER_TAG),
-        Seed::from(account.address().as_ref()),
-        Seed::from(&buffer_bump_slice),
-    ];
-    let buffer_signer = Signer::from(&buffer_signer_seeds);
-    CreateAccount {
-        from: &payer_view,
-        to: &buffer_view,
-        lamports: rent.try_minimum_balance(data_len)?,
-        space: data_len as u64,
-        owner: program_id,
+    if !ensure_buffer_ready(account, &mut buffer_view, &payer_view, program_id)? {
+        return Ok(false);
     }
-    .invoke_signed(core::slice::from_ref(&buffer_signer))?;
 
     // 2. Copy the account's data into the buffer, then zero the account's
     //    data.
@@ -895,7 +963,7 @@ fn delegate_single_account(
         payer_view.set_lamports(payer_lamports.saturating_add(refund));
     }
 
-    Ok(())
+    Ok(true)
 }
 
 /// `DelegateArgs` instruction data from a pre-encoded borsh seeds payload:
@@ -1044,6 +1112,10 @@ pub fn delegate_cluster_member(
                 &validator,
                 program_id,
             )
+            // Cluster members (scratch/session) are always well under the
+            // per-instruction growth cap, so this always completes in one
+            // call -- the bool is never meaningfully `false` here.
+            .map(|_ready| ())
         }
         ClusterMember::Session {
             owner,
@@ -1087,6 +1159,7 @@ pub fn delegate_cluster_member(
                 &validator,
                 program_id,
             )
+            .map(|_ready| ())
         }
     }
 }
