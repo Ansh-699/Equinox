@@ -1071,6 +1071,34 @@ pub fn validate_execution_bundle(
     Ok(())
 }
 
+/// L1 custody may release collateral only after every execution shard has
+/// returned and the core's commit cursor is reconciled. The vault remains a
+/// separate L1 account and is never part of the delegated execution bundle.
+pub fn validate_v3_withdrawal_readiness(
+    program_id: &Address,
+    accounts: &[AccountView],
+) -> ProgramResult {
+    validate_execution_bundle(program_id, accounts, false)?;
+    let core = unsafe { accounts[0].borrow_unchecked() };
+    if core[V3_CORE_DELEGATION_STATUS_OFFSET] != DelegationStatus::Restored as u8 {
+        return Err(StockStreamError::CustodyViolation.into());
+    }
+    let expected = u64::from_le_bytes(
+        core[V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET..V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET + 8]
+            .try_into()
+            .map_err(|_| bundle_error())?,
+    );
+    let committed = u64::from_le_bytes(
+        core[V3_CORE_LAST_COMMITTED_SEQUENCE_OFFSET..V3_CORE_LAST_COMMITTED_SEQUENCE_OFFSET + 8]
+            .try_into()
+            .map_err(|_| bundle_error())?,
+    );
+    if expected != committed {
+        return Err(StockStreamError::CustodyViolation.into());
+    }
+    Ok(())
+}
+
 fn validate_active_core(program_id: &Address, core: &AccountView) -> Result<Address, ProgramError> {
     if !core.owned_by(program_id) || !core.is_writable() {
         return Err(bundle_error());
