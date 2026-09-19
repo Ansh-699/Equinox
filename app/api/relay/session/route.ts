@@ -20,17 +20,32 @@ import { E2E_TEST_TOKEN, isE2eTestModeServer, verifyE2eTestToken } from "@/lib/a
  *      and the token's own linked wallets. A stale or hijacked app-session
  *      cookie without a currently-valid Privy token is rejected here.
  *
- * The Worker itself is reached with a static server-to-server bearer
- * (STOCKSTREAM_RELAYER_TOKEN, today the same value as its INGESTION_TOKEN
- * -- see .env.example) that authenticates THIS SERVER to the Worker, not
- * the end user; it must never reach the browser, and it is not treated as
- * user authorization anywhere in this route. expectedMarket/expectedNonce/
- * clientRequestId are forwarded for the Worker to enforce once its own
- * per-user validation lands (main-agent workstream item 1) -- this proxy
- * checks their presence/shape now so no frontend change is needed later,
- * but does not itself decode the transaction to verify them: that
- * remains the Worker's job, per session-relayer.ts's existing opcode/
- * fee-payer/signature validation.
+ * The Worker itself is reached with two independent, separately-purposed
+ * credentials, no longer conflated into one shared bearer:
+ *   - `x-stockstream-relayer-service-token` (STOCKSTREAM_RELAYER_TOKEN):
+ *     authenticates THIS SERVER to the Worker as a legitimate backend. It
+ *     must never reach the browser and proves nothing about which user is
+ *     making the request.
+ *   - `Authorization: Bearer <privyAccessToken>`: the same real, freshly-
+ *     verified Privy access token this route just checked above, forwarded
+ *     as-is so the Worker can independently re-verify the user's identity
+ *     and confirm the claimed wallet is genuinely one Privy has linked to
+ *     it (`relay-auth.ts::verifyPrivyToken`) -- defense in depth, not a
+ *     redundant formality, since this route and the Worker are separately
+ *     deployed and either could drift.
+ *
+ * expectedProgramAddress/expectedNonce are no longer forwarded: the Worker
+ * hardcodes its own canonical program address and derives the opcode/seat/
+ * nonce it actually checks straight from the signed transaction bytes, so
+ * trusting either as a client claim would have been meaningless.
+ *
+ * KNOWN GAP: in e2e test mode, `body.privyAccessToken` may be the
+ * `E2E_TEST_TOKEN` sentinel (accepted above via `verifyE2eTestToken`), which
+ * is forwarded to the Worker as-is; the Worker has no matching e2e bypass,
+ * so a full session-relayed trade cannot yet succeed end-to-end under e2e
+ * test mode. No current test exercises that path (existing coverage only
+ * reaches the earlier cookie/CSRF rejection), so this is a documented
+ * follow-up, not a regression.
  */
 export async function POST(request: Request) {
   const cookieStore = await cookies();
@@ -45,22 +60,16 @@ export async function POST(request: Request) {
     privyAccessToken?: unknown;
     ownerWallet?: unknown;
     transactionBase64?: unknown;
-    expectedProgramAddress?: unknown;
     expectedMarket?: unknown;
-    expectedNonce?: unknown;
     sessionSignerAddress?: unknown;
-    clientRequestId?: unknown;
     domain?: unknown;
   } | null;
   if (
     typeof body?.privyAccessToken !== "string" ||
     typeof body.ownerWallet !== "string" ||
     typeof body.transactionBase64 !== "string" ||
-    typeof body.expectedProgramAddress !== "string" ||
     typeof body.expectedMarket !== "string" ||
-    typeof body.expectedNonce !== "string" ||
-    typeof body.sessionSignerAddress !== "string" ||
-    typeof body.clientRequestId !== "string"
+    typeof body.sessionSignerAddress !== "string"
   ) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
@@ -83,23 +92,22 @@ export async function POST(request: Request) {
   }
 
   const relayerUrl = process.env.STOCKSTREAM_RELAYER_URL;
-  const relayerToken = process.env.STOCKSTREAM_RELAYER_TOKEN;
-  if (!relayerUrl || !relayerToken) return NextResponse.json({ error: "relayer_unconfigured" }, { status: 503 });
+  const relayerServiceToken = process.env.STOCKSTREAM_RELAYER_TOKEN;
+  if (!relayerUrl || !relayerServiceToken) return NextResponse.json({ error: "relayer_unconfigured" }, { status: 503 });
 
   const upstream = await fetch(`${relayerUrl}/v1/relay/session`, {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${relayerToken}` },
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${body.privyAccessToken}`,
+      "x-stockstream-relayer-service-token": relayerServiceToken,
+    },
     body: JSON.stringify({
       transactionBase64: body.transactionBase64,
-      expectedProgramAddress: body.expectedProgramAddress,
       sessionSignerAddress: body.sessionSignerAddress,
       domain: body.domain === "er" ? "er" : "l1",
-      // Forwarded ahead of Worker support so no frontend change is needed
-      // once main-agent item 1 lands; the Worker ignores unknown fields today.
       ownerWallet: body.ownerWallet,
       expectedMarket: body.expectedMarket,
-      expectedNonce: body.expectedNonce,
-      clientRequestId: body.clientRequestId,
     }),
   }).catch(() => null);
   if (!upstream) return NextResponse.json({ error: "relayer_unavailable" }, { status: 502 });

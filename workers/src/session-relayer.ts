@@ -1,5 +1,6 @@
 import {
   getBase58Decoder,
+  getBase58Encoder,
   getCompiledTransactionMessageDecoder,
   getTransactionDecoder,
   getBase64EncodedWireTransaction,
@@ -47,17 +48,53 @@ export interface RelaySessionTransactionRequest {
 }
 
 export type RelayValidation =
-  | { ok: true; transaction: Transaction }
+  | { ok: true; transaction: Transaction; opcode: number; seatIndex: number; actionNonce: bigint; placeOrderFlags: number }
   | { ok: false; reason: string };
+
+/** Byte offset of `seat_index` (u16, LE) within each session-relayable
+ * opcode's own instruction data -- mirrors `workers/src/transactions.ts`'s
+ * builders exactly (`placeOrderData`/`cancelOrderInstruction`/
+ * `cancelAllInstruction`/`replaceOrderInstruction`), never re-derived by
+ * guesswork. `replaceOrder`'s data is `[opcode(1), oldOrderKey(16),
+ * side(1), tree(1), flags(1), seatIndex(2), ...]`. */
+const SEAT_INDEX_OFFSET: Readonly<Record<number, number>> = {
+  [OPCODE.placeOrder]: 4,
+  [OPCODE.cancelOrder]: 1,
+  [OPCODE.cancelAll]: 1,
+  [OPCODE.replaceOrder]: 20,
+};
+
+/** Byte offset of the order `flags` field, present only on the two opcodes
+ * that can carry the reduce-only bit (`ORDER_FLAGS.reduceOnly = 4`). */
+const FLAGS_OFFSET: Readonly<Record<number, number>> = {
+  [OPCODE.placeOrder]: 3,
+  [OPCODE.replaceOrder]: 19,
+};
+
+/** Every session-relayable opcode's instruction data ends with `actionNonce`
+ * as its final 8 bytes (u64, LE) -- true of `placeOrderData`,
+ * `cancelOrderInstruction`, `cancelAllInstruction`, and `replaceOrderInstruction`
+ * (which reuses `placeOrderData`'s tail) alike. */
+function extractActionNonce(data: Uint8Array): bigint | null {
+  if (data.length < 8) return null;
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  return view.getBigUint64(data.length - 8, true);
+}
 
 /**
  * Decodes the incoming transaction and checks, independently of the
  * program: the fee-payer slot is exactly this relayer's own signer address
- * and still unsigned, the session signer already produced a real
- * signature, and every non-compute-budget instruction targets the
- * StockStream program with an opcode in `SESSION_ALLOWED_OPCODES`.
+ * and still unsigned, the session signer's signature is a real,
+ * cryptographically valid Ed25519 signature over this exact message (not
+ * merely present), and the transaction carries exactly one non-compute-
+ * budget instruction, targeting the caller-supplied canonical StockStream
+ * program address with an opcode in `SESSION_ALLOWED_OPCODES`. On success,
+ * also returns the opcode/seatIndex/actionNonce/flags extracted directly
+ * from that instruction's own bytes -- never from caller-asserted fields --
+ * so the authoritative on-chain chain check (`relay-auth.ts`) can verify
+ * them against real session/seat state instead of trusting the request body.
  */
-export function validateSessionTransaction(request: RelaySessionTransactionRequest, relayerAddress: string): RelayValidation {
+export async function validateSessionTransaction(request: RelaySessionTransactionRequest, relayerAddress: string): Promise<RelayValidation> {
   let transaction: Transaction;
   try {
     transaction = getTransactionDecoder().decode(base64ToBytes(request.transactionBase64)) as Transaction;
@@ -80,24 +117,60 @@ export function validateSessionTransaction(request: RelaySessionTransactionReque
   if (feePayerSignature != null) {
     return { ok: false, reason: "fee-payer signature slot must still be empty" };
   }
-  const sessionSignature = (transaction.signatures as Record<string, unknown>)[request.sessionSignerAddress];
+  const sessionSignature = (transaction.signatures as Record<string, unknown>)[request.sessionSignerAddress] as Uint8Array | null;
   if (sessionSignature == null) {
     return { ok: false, reason: "session signer has not signed this transaction" };
   }
-
-  for (const instruction of compiled.instructions) {
-    const programAddress = staticAccounts[instruction.programAddressIndex];
-    if (programAddress === COMPUTE_BUDGET_PROGRAM_ID) continue;
-    if (programAddress !== request.expectedProgramAddress) {
-      return { ok: false, reason: `instruction targets an unexpected program: ${programAddress}` };
-    }
-    const opcode = instruction.data?.[0];
-    if (opcode === undefined || !SESSION_ALLOWED_OPCODES.has(opcode)) {
-      return { ok: false, reason: `opcode ${opcode ?? "<none>"} is not allowed for a session-signed transaction` };
-    }
+  const signatureIsValid = await verifyEd25519(request.sessionSignerAddress, sessionSignature, Uint8Array.from(transaction.messageBytes));
+  if (!signatureIsValid) {
+    return { ok: false, reason: "session signer's signature does not verify against this message" };
   }
 
-  return { ok: true, transaction };
+  const tradingInstructions = compiled.instructions.filter((instruction) => staticAccounts[instruction.programAddressIndex] !== COMPUTE_BUDGET_PROGRAM_ID);
+  if (tradingInstructions.length !== 1) {
+    return { ok: false, reason: `expected exactly one trading instruction, found ${tradingInstructions.length}` };
+  }
+  const instruction = tradingInstructions[0];
+  const programAddress = staticAccounts[instruction.programAddressIndex];
+  if (programAddress !== request.expectedProgramAddress) {
+    return { ok: false, reason: `instruction targets an unexpected program: ${programAddress}` };
+  }
+  const data = instruction.data as Uint8Array | undefined;
+  if (!data || data.length === 0) {
+    return { ok: false, reason: "instruction carries no data" };
+  }
+  const opcode = data[0];
+  if (!SESSION_ALLOWED_OPCODES.has(opcode)) {
+    return { ok: false, reason: `opcode ${opcode} is not allowed for a session-signed transaction` };
+  }
+
+  const seatIndexOffset = SEAT_INDEX_OFFSET[opcode];
+  if (seatIndexOffset === undefined || seatIndexOffset + 2 > data.length) {
+    return { ok: false, reason: "instruction data too short to contain a seat index" };
+  }
+  const seatIndex = data[seatIndexOffset] | (data[seatIndexOffset + 1] << 8);
+  const actionNonce = extractActionNonce(data);
+  if (actionNonce === null) {
+    return { ok: false, reason: "instruction data too short to contain an action nonce" };
+  }
+  const flagsOffset = FLAGS_OFFSET[opcode];
+  const placeOrderFlags = flagsOffset !== undefined && flagsOffset < data.length ? data[flagsOffset] : 0;
+
+  return { ok: true, transaction, opcode, seatIndex, actionNonce, placeOrderFlags };
+}
+
+/** Real Ed25519 verification, not merely "a signature-shaped blob is
+ * present" -- uses the same `crypto.subtle` Ed25519 support
+ * `signer.ts` already relies on for signing (no new dependency, no
+ * hand-rolled curve math). */
+async function verifyEd25519(signerAddress: string, signature: Uint8Array, message: Uint8Array): Promise<boolean> {
+  try {
+    const publicKeyBytes = getBase58Encoder().encode(signerAddress) as Uint8Array;
+    const key = await crypto.subtle.importKey("raw", publicKeyBytes, { name: "Ed25519" }, false, ["verify"]);
+    return await crypto.subtle.verify("Ed25519", key, signature, message);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -108,7 +181,7 @@ export function validateSessionTransaction(request: RelaySessionTransactionReque
  */
 export async function coSignSessionTransaction(request: RelaySessionTransactionRequest, signer: Signer): Promise<{ base64: string } | { error: string }> {
   const relayerAddress = getBase58Decoder().decode(await signer.publicKey());
-  const validation = validateSessionTransaction(request, relayerAddress);
+  const validation = await validateSessionTransaction(request, relayerAddress);
   if (!validation.ok) return { error: validation.reason };
 
   const signatureBytes = await signer.sign(Uint8Array.from(validation.transaction.messageBytes));
