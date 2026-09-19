@@ -5,6 +5,7 @@ import {
   V3_COMMIT_ACCOUNT_SAFE_MAX, V3_EVENT_SHARD_SIZE, V3_MARKET_CORE_SIZE,
   V3_SEAT_SHARD_SIZE, deriveBookPageV3, deriveEventShardV3,
   deriveMarketCoreV3, deriveSeatShardV3, v3AccountIsCommittable,
+  decodeV3BookPage, decodeV3MarketCore,
 } from "./v3";
 
 describe("V3 sharded ABI", () => {
@@ -28,5 +29,15 @@ describe("V3 sharded ABI", () => {
     expect(deriveEventShardV3(market, 0)).not.toEqual(deriveEventShardV3(market, 1));
     expect(() => deriveBookPageV3(market, 2, 0)).toThrow(RangeError);
     expect(() => deriveSeatShardV3(market, 4)).toThrow(RangeError);
+  });
+
+  it("decodes V3 bytes without interpreting them as a V2 header", () => {
+    const core = new Uint8Array(V3_MARKET_CORE_SIZE);
+    core.set(Buffer.from("STKMK003")); new DataView(core.buffer).setUint16(8, 3, true); core[10] = 1; core[11] = 1; core[12] = 4;
+    expect(decodeV3MarketCore(core)).toMatchObject({ mode: 1, oracleValid: false });
+    const page = new Uint8Array(V3_BOOK_PAGE_SIZE);
+    page.set(Buffer.from("STKBK003")); new DataView(page.buffer).setUint16(8, 3, true); page[10] = 1; page[11] = 3;
+    expect(decodeV3BookPage(page)).toMatchObject({ side: 1, page: 3, nodeCount: 0 });
+    expect(() => decodeV3MarketCore(new Uint8Array(V3_MARKET_CORE_SIZE))).toThrow(RangeError);
   });
 });
