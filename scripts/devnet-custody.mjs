@@ -18,4 +18,9 @@ const conn = new Connection("https://api.devnet.solana.com", "confirmed");
 
 // Check vault exists
 const vaultStr = "EoiYduem3nbxK6FNccU9gj6a5KpX7cYSmNQhqXr4ik2e";
-solana account "$vaultStr" --url devnet 2>&1 | head -3
+const vaultInfo = await conn.getAccountInfo(new PublicKey(vaultStr));
+if (!vaultInfo) {
+  console.log(`vault ${vaultStr}: does not exist`);
+} else {
+  console.log(`vault ${vaultStr}: owner=${vaultInfo.owner.toBase58()} lamports=${vaultInfo.lamports} dataLen=${vaultInfo.data.length}`);
+}
