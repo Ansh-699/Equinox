@@ -36,6 +36,46 @@ pub const V3_SEAT_SHARDS: usize = 4;
 pub const V3_EVENTS_PER_SHARD: usize = 32;
 pub const V3_EVENT_SHARDS: usize = 4;
 
+/// Wire-stable account kinds for V3 creation and bundle validation. `BookPage`
+/// uses a flattened index (`side * 4 + page`) so callers cannot supply an
+/// ambiguous side/page pair.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum V3AccountKind {
+    MarketCore = 0,
+    BookPage = 1,
+    SeatShard = 2,
+    EventShard = 3,
+}
+
+impl V3AccountKind {
+    pub const fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::MarketCore),
+            1 => Some(Self::BookPage),
+            2 => Some(Self::SeatShard),
+            3 => Some(Self::EventShard),
+            _ => None,
+        }
+    }
+    pub const fn max_index(self) -> u8 {
+        match self {
+            Self::MarketCore => 0,
+            Self::BookPage => 7,
+            Self::SeatShard => 3,
+            Self::EventShard => 3,
+        }
+    }
+    pub const fn account_size(self) -> usize {
+        match self {
+            Self::MarketCore => V3_MARKET_CORE_SIZE,
+            Self::BookPage => V3_BOOK_PAGE_SIZE,
+            Self::SeatShard => V3_SEAT_SHARD_SIZE,
+            Self::EventShard => V3_EVENT_SHARD_SIZE,
+        }
+    }
+}
+
 /// A V3 core contains only durable market/risk/delegation metadata. The
 /// order book, seats and event queue live in independently committable pages.
 #[repr(C, packed(1))]
@@ -151,6 +191,31 @@ pub fn derive_event_shard_v3(program_id: &Address, market: &Address, shard: u8) 
     .0
 }
 
+/// Derives exactly one V3 account. `parent` is the instrument only for the
+/// core; for every shard it is the V3 market core. Bounds are checked before
+/// deriving so a malformed page cannot alias a valid PDA through wrapping.
+pub fn derive_v3_account(
+    program_id: &Address,
+    parent: &Address,
+    kind: V3AccountKind,
+    index: u8,
+) -> Option<Address> {
+    if index > kind.max_index() {
+        return None;
+    }
+    Some(match kind {
+        V3AccountKind::MarketCore => derive_market_core_v3(program_id, parent),
+        V3AccountKind::BookPage => derive_book_page_v3(
+            program_id,
+            parent,
+            index / V3_BOOK_PAGES_PER_SIDE as u8,
+            index % V3_BOOK_PAGES_PER_SIDE as u8,
+        ),
+        V3AccountKind::SeatShard => derive_seat_shard_v3(program_id, parent, index),
+        V3AccountKind::EventShard => derive_event_shard_v3(program_id, parent, index),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,5 +233,17 @@ mod tests {
     fn v2_monolith_is_rejected_by_v3_commit_layout_gate() {
         assert!(MARKET_ACCOUNT_SIZE > V3_COMMIT_ACCOUNT_HARD_MAX);
         assert!(!committable_account_size(MARKET_ACCOUNT_SIZE));
+    }
+
+    #[test]
+    fn v3_account_kinds_are_bounded_and_non_aliasing() {
+        let id = Address::new_from_array([7; 32]);
+        let market = derive_market_core_v3(&id, &Address::new_from_array([8; 32]));
+        assert_eq!(V3AccountKind::BookPage.account_size(), V3_BOOK_PAGE_SIZE);
+        assert!(derive_v3_account(&id, &market, V3AccountKind::BookPage, 8).is_none());
+        assert_ne!(
+            derive_v3_account(&id, &market, V3AccountKind::BookPage, 0),
+            derive_v3_account(&id, &market, V3AccountKind::BookPage, 1)
+        );
     }
 }
