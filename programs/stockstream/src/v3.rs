@@ -55,6 +55,7 @@ pub const V3_SEATS_PER_SHARD: usize = 32;
 pub const V3_SEAT_SHARDS: usize = 4;
 pub const V3_EVENTS_PER_SHARD: usize = 32;
 pub const V3_EVENT_SHARDS: usize = 4;
+pub const V3_EVENT_RECORD_SIZE: usize = crate::events::EVENT_SIZE;
 /// One fully hot V3 execution domain: core, 8 pages, 4 seat shards, and 4
 /// event shards. Vaults remain outside this bundle on L1 by design.
 pub const V3_EXECUTION_BUNDLE_LEN: usize = 1 + 8 + V3_SEAT_SHARDS + V3_EVENT_SHARDS;
@@ -179,14 +180,14 @@ pub struct EventShardV3 {
     pub shard_index: u8,
     pub reserved: u8,
     pub market: [u8; 32],
-    pub events: [[u8; 64]; V3_EVENTS_PER_SHARD],
+    pub events: [[u8; V3_EVENT_RECORD_SIZE]; V3_EVENTS_PER_SHARD],
 }
 pub const V3_EVENT_SHARD_SIZE: usize = size_of::<EventShardV3>();
 
 const _: [(); 4_096] = [(); V3_MARKET_CORE_SIZE];
 const _: [(); 22_592] = [(); V3_BOOK_PAGE_SIZE];
 const _: [(); 8_236] = [(); V3_SEAT_SHARD_SIZE];
-const _: [(); 2_092] = [(); V3_EVENT_SHARD_SIZE];
+const _: [(); 3_244] = [(); V3_EVENT_SHARD_SIZE];
 
 /// Every account that may be delegated must satisfy this bound before it is
 /// created. This is a layout gate, not an attempt to infer a runtime error.
