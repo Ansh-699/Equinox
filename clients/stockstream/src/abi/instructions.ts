@@ -23,6 +23,7 @@ export const OPCODE = {
   createScratchAccount: 45, createV3Account: 46,
   initializeV3Market: 47,
   delegateV3Account: 48,
+  createV3TraderSeat: 49,
 } as const;
 
 /** Session action allowlist bits — must match `session::SESSION_ACTION_*`. */

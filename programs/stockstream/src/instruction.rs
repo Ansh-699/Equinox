@@ -33,6 +33,9 @@ pub const INITIALIZE_V3_MARKET: u8 = 47;
 /// Delegates one V3 core/page/shard to the core's selected ER validator.
 /// Data: `[48, kind:u8, index:u8, validator:Pubkey]`.
 pub const DELEGATE_V3_ACCOUNT: u8 = 48;
+/// Creates one 256-byte trader seat inside its V3 seat shard. Data:
+/// `[49, seat_index:u16]`.
+pub const CREATE_V3_TRADER_SEAT: u8 = 49;
 pub const COMMIT_MARKET: u8 = 14;
 pub const COMMIT_AND_UNDELEGATE: u8 = 15;
 /// Reserved: the real external-undelegate callback uses the delegation
@@ -202,6 +205,9 @@ pub enum StockStreamInstruction {
         kind: u8,
         index: u8,
         validator: [u8; 32],
+    },
+    CreateV3TraderSeat {
+        seat_index: u16,
     },
     CommitMarket {
         sequence: u64,
@@ -459,6 +465,9 @@ impl StockStreamInstruction {
             }
             Some(COMMIT_MARKET) if data.len() == 9 => Ok(Self::CommitMarket {
                 sequence: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+            }),
+            Some(CREATE_V3_TRADER_SEAT) if data.len() == 3 => Ok(Self::CreateV3TraderSeat {
+                seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
             }),
             Some(COMMIT_AND_UNDELEGATE) if data.len() == 9 => Ok(Self::CommitAndUndelegate {
                 sequence: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
