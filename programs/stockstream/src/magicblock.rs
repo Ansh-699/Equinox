@@ -1254,13 +1254,28 @@ fn commit_market_inner(
         &mut commit_data_buf,
     )
     .map_err(custom)?;
+    // Output slot `i` (i >= 3) is trailing committed member `i - 3`, which
+    // lives at `accounts[5 + (i - 3)] = accounts[2 + i]` -- `accounts[0..5]`
+    // are the fixed market/authority/payer/magic_context/magic_program
+    // quintet, so the first real member starts at `accounts[5]`, not
+    // `accounts[3]`. `commit_views` below already gets this right (its own
+    // `accounts[5..]` iteration); this metadata array previously read
+    // `accounts.get(3 + i)`, which is off by two slots and either points at
+    // the WRONG member (shifted by two) or silently falls back to
+    // `accounts[0]` (the market, duplicated) once past the real bounds --
+    // producing a CPI instruction whose declared pubkeys didn't match the
+    // account views actually passed to it, which the Magic Program
+    // correctly rejects. Found only by actually committing a real
+    // delegated cluster with a trailing member on live Devnet; no existing
+    // test invoked the real (builtin, not a regular deployed program)
+    // Magic Program to catch it.
     let commit_accounts: [InstructionAccount; MAX_COMMITTED_ACCOUNTS + 2] =
         core::array::from_fn(|i| match i {
             0 => InstructionAccount::writable_signer(accounts[2].address()),
             1 => InstructionAccount::writable(accounts[3].address()),
             2 => InstructionAccount::writable(accounts[0].address()),
             _ => {
-                let member = accounts.get(3 + i).unwrap_or(&accounts[0]);
+                let member = accounts.get(2 + i).unwrap_or(&accounts[0]);
                 InstructionAccount::writable(member.address())
             }
         });

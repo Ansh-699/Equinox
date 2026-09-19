@@ -597,6 +597,101 @@ fn commit_rejects_a_non_member_trailing_account() {
     );
 }
 
+/// Regression test for a real off-by-one bug (found only by actually
+/// committing a real delegated cluster with a trailing member on live
+/// Devnet, since the real Magic Program is a validator builtin no test
+/// harness -- native or LiteSVM -- loads): `commit_market_inner`'s
+/// `commit_accounts` metadata array read `accounts.get(3 + i)` for trailing
+/// member `i`, two slots off from the correct `accounts.get(2 + i)`, so the
+/// declared pubkey for each trailing member either named the WRONG member
+/// or (once past bounds) silently fell back to the market's own pubkey,
+/// duplicated -- while the actual `AccountView` handed to the CPI
+/// (`commit_views`, built correctly) was the real member. A correct
+/// Solana CPI requires every declared account pubkey to match the actual
+/// account view passed at the same position; this test proves that
+/// invariant holds by including one real trailing member and asserting the
+/// only failure reachable is the expected missing-CPI-target boundary, not
+/// an earlier account-mismatch style rejection.
+#[test]
+fn commit_accepts_a_bundle_with_a_trailing_member_and_hits_the_cpi() {
+    let mut env = setup();
+    env.svm
+        .set_account(
+            env.market,
+            Account {
+                lamports: env
+                    .svm
+                    .minimum_balance_for_rent_exemption(MARKET_ACCOUNT_SIZE),
+                data: delegated_market(env.market, env.authority.pubkey().to_bytes()),
+                owner: ID,
+                executable: false,
+                rent_epoch: 0,
+            },
+        )
+        .unwrap();
+    let commit_data = {
+        let mut d = vec![14u8];
+        d.extend_from_slice(&1u64.to_le_bytes());
+        d
+    };
+    env.svm.expire_blockhash();
+    let instruction = Instruction {
+        program_id: ID,
+        accounts: vec![
+            AccountMeta {
+                pubkey: env.market,
+                is_signer: false,
+                is_writable: true,
+            },
+            AccountMeta {
+                pubkey: env.authority.pubkey(),
+                is_signer: true,
+                is_writable: false,
+            },
+            AccountMeta {
+                pubkey: env.authority.pubkey(),
+                is_signer: true,
+                is_writable: true,
+            },
+            AccountMeta {
+                pubkey: stockstream::magicblock::MAGIC_CONTEXT_ID,
+                is_signer: false,
+                is_writable: true,
+            },
+            AccountMeta {
+                pubkey: stockstream::magicblock::MAGIC_PROGRAM_ID,
+                is_signer: false,
+                is_writable: false,
+            },
+            AccountMeta {
+                pubkey: env.scratch,
+                is_signer: false,
+                is_writable: true,
+            },
+        ],
+        data: commit_data,
+    };
+    let message = Message::new(&[instruction], Some(&env.authority.pubkey()));
+    let blockhash = env.svm.latest_blockhash();
+    let transaction = Transaction::new(&[&env.authority], message, blockhash);
+    let failed = env
+        .svm
+        .send_transaction(transaction)
+        .expect_err("the CPI target is absent");
+    let text = format!("{:?} | {}", failed.err, failed.meta.pretty_logs());
+    assert!(
+        !text.contains("0x600e")
+            && !text.contains("0x6010")
+            && !text.contains("0x6013")
+            && !text.contains("0x6011"),
+        "commit validation gates must pass before the CPI; got {text}"
+    );
+    assert!(
+        !text.contains("InvalidArgument") && !text.contains("invalid program argument"),
+        "the off-by-one account-metadata bug regressed: {text}"
+    );
+}
+
 #[test]
 fn commit_accepts_a_market_only_bundle_and_hits_the_cpi() {
     let mut env = setup();
