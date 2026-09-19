@@ -50,6 +50,7 @@ use crate::{
     },
     session, state,
     state::DelegationStatus,
+    v3,
 };
 
 use crate::scratch;
@@ -127,6 +128,14 @@ pub const SCRATCH_SEEDS_PAYLOAD_LEN: usize = 4 + (4 + 10) + (4 + 32) + (4 + 2);
 /// session_signer(32)]`: `4 + (4+15) + (4+32) + (4+32) + (4+2) + (4+32)`.
 pub const SESSION_SEEDS_PAYLOAD_LEN: usize =
     4 + (4 + 15) + (4 + 32) + (4 + 32) + (4 + 2) + (4 + 32);
+/// V3 core: `vec![b"market-v3", instrument]`.
+pub const V3_CORE_SEEDS_PAYLOAD_LEN: usize = 4 + (4 + 9) + (4 + 32);
+/// V3 book page: `vec![b"book-page-v3", core, side, page]`.
+pub const V3_BOOK_PAGE_SEEDS_PAYLOAD_LEN: usize = 4 + (4 + 12) + (4 + 32) + (4 + 1) + (4 + 1);
+/// V3 seat shard: `vec![b"seat-shard-v3", core, shard]`.
+pub const V3_SEAT_SHARD_SEEDS_PAYLOAD_LEN: usize = 4 + (4 + 13) + (4 + 32) + (4 + 1);
+/// V3 event shard: `vec![b"event-shard-v3", core, shard]`.
+pub const V3_EVENT_SHARD_SEEDS_PAYLOAD_LEN: usize = 4 + (4 + 14) + (4 + 32) + (4 + 1);
 /// Largest of the three seed payloads; upper bound for the fixed callback
 /// buffer.
 pub const MAX_SEEDS_PAYLOAD_LEN: usize = const {
@@ -242,6 +251,65 @@ pub fn encode_session_delegate_seeds(
     out
 }
 
+fn encode_v3_seed_prefix(out: &mut [u8], tag: &[u8], market: &Address, trailing: &[u8]) {
+    let count = if trailing.len() == 2 { 4u32 } else { 3u32 };
+    out[0..4].copy_from_slice(&count.to_le_bytes());
+    let mut offset = 4;
+    out[offset..offset + 4].copy_from_slice(&(tag.len() as u32).to_le_bytes());
+    offset += 4;
+    out[offset..offset + tag.len()].copy_from_slice(tag);
+    offset += tag.len();
+    out[offset..offset + 4].copy_from_slice(&32u32.to_le_bytes());
+    offset += 4;
+    out[offset..offset + 32].copy_from_slice(market.as_ref());
+    offset += 32;
+    for value in trailing {
+        out[offset..offset + 4].copy_from_slice(&1u32.to_le_bytes());
+        offset += 4;
+        out[offset] = *value;
+        offset += 1;
+    }
+}
+
+pub fn encode_v3_core_delegate_seeds(instrument: &Address) -> [u8; V3_CORE_SEEDS_PAYLOAD_LEN] {
+    let mut out = [0u8; V3_CORE_SEEDS_PAYLOAD_LEN];
+    out[0..4].copy_from_slice(&2u32.to_le_bytes());
+    out[4..8].copy_from_slice(&(v3::V3_MARKET_CORE_SEED.len() as u32).to_le_bytes());
+    out[8..8 + v3::V3_MARKET_CORE_SEED.len()].copy_from_slice(v3::V3_MARKET_CORE_SEED);
+    let offset = 8 + v3::V3_MARKET_CORE_SEED.len();
+    out[offset..offset + 4].copy_from_slice(&32u32.to_le_bytes());
+    out[offset + 4..offset + 36].copy_from_slice(instrument.as_ref());
+    out
+}
+
+pub fn encode_v3_book_page_delegate_seeds(
+    core: &Address,
+    side: u8,
+    page: u8,
+) -> [u8; V3_BOOK_PAGE_SEEDS_PAYLOAD_LEN] {
+    let mut out = [0u8; V3_BOOK_PAGE_SEEDS_PAYLOAD_LEN];
+    encode_v3_seed_prefix(&mut out, v3::V3_BOOK_PAGE_SEED, core, &[side, page]);
+    out
+}
+
+pub fn encode_v3_seat_shard_delegate_seeds(
+    core: &Address,
+    shard: u8,
+) -> [u8; V3_SEAT_SHARD_SEEDS_PAYLOAD_LEN] {
+    let mut out = [0u8; V3_SEAT_SHARD_SEEDS_PAYLOAD_LEN];
+    encode_v3_seed_prefix(&mut out, v3::V3_SEAT_SHARD_SEED, core, &[shard]);
+    out
+}
+
+pub fn encode_v3_event_shard_delegate_seeds(
+    core: &Address,
+    shard: u8,
+) -> [u8; V3_EVENT_SHARD_SEEDS_PAYLOAD_LEN] {
+    let mut out = [0u8; V3_EVENT_SHARD_SEEDS_PAYLOAD_LEN];
+    encode_v3_seed_prefix(&mut out, v3::V3_EVENT_SHARD_SEED, core, &[shard]);
+    out
+}
+
 /// What a `DelegateArgs::seeds` payload identifies. `Vec<Vec<u8>>` seed lists
 /// are parsed from the fixed encoded payload so the external-undelegate
 /// callback can route the restore to the right account kind without heap
@@ -252,7 +320,10 @@ pub enum DelegatedAccountKind {
     Market,
     /// `["settlement", market, seat_le]`, 3 seeds,
     /// payload len `SCRATCH_SEEDS_PAYLOAD_LEN`.
-    Scratch { market: Address, seat: u16 },
+    Scratch {
+        market: Address,
+        seat: u16,
+    },
     /// `["trading_session", owner, market, seat_le, session_signer]`,
     /// 5 seeds, payload len `SESSION_SEEDS_PAYLOAD_LEN`.
     Session {
@@ -260,6 +331,22 @@ pub enum DelegatedAccountKind {
         market: Address,
         seat: u16,
         session_signer: Address,
+    },
+    V3Core {
+        instrument: Address,
+    },
+    V3BookPage {
+        core: Address,
+        side: u8,
+        page: u8,
+    },
+    V3SeatShard {
+        core: Address,
+        shard: u8,
+    },
+    V3EventShard {
+        core: Address,
+        shard: u8,
     },
 }
 
@@ -363,6 +450,72 @@ pub fn parse_delegated_seeds(payload: &[u8]) -> Option<DelegatedAccountKind> {
             seat,
             session_signer: session_signer_address,
         });
+    }
+    // V3 account kinds all use `[tag, core/instrument, u8...]`. Re-encode
+    // each accepted form so a merely similar Borsh list cannot be replayed
+    // into the external callback with a different PDA meaning.
+    let parse_v3 = |tag: &[u8], count: u32, trailing: usize| -> Option<(Address, [u8; 2])> {
+        if read_u32(0)? != count {
+            return None;
+        }
+        let mut offset = expect_vec(4, tag)?;
+        if read_u32(offset)? != 32 {
+            return None;
+        }
+        offset += 4;
+        let parent = read_address(offset)?;
+        offset += 32;
+        let mut values = [0u8; 2];
+        for value in values.iter_mut().take(trailing) {
+            if read_u32(offset)? != 1 {
+                return None;
+            }
+            offset += 4;
+            *value = *payload.get(offset)?;
+            offset += 1;
+        }
+        (offset == payload.len()).then_some((parent, values))
+    };
+    if payload.len() == V3_CORE_SEEDS_PAYLOAD_LEN {
+        let (instrument, _) = parse_v3(v3::V3_MARKET_CORE_SEED, 2, 0)?;
+        if encode_v3_core_delegate_seeds(&instrument).as_slice() == payload {
+            return Some(DelegatedAccountKind::V3Core { instrument });
+        }
+    }
+    if payload.len() == V3_BOOK_PAGE_SEEDS_PAYLOAD_LEN {
+        let (core, bytes) = parse_v3(v3::V3_BOOK_PAGE_SEED, 4, 2)?;
+        if bytes[0] <= 1
+            && bytes[1] < v3::V3_BOOK_PAGES_PER_SIDE as u8
+            && encode_v3_book_page_delegate_seeds(&core, bytes[0], bytes[1]).as_slice() == payload
+        {
+            return Some(DelegatedAccountKind::V3BookPage {
+                core,
+                side: bytes[0],
+                page: bytes[1],
+            });
+        }
+    }
+    if payload.len() == V3_SEAT_SHARD_SEEDS_PAYLOAD_LEN {
+        let (core, bytes) = parse_v3(v3::V3_SEAT_SHARD_SEED, 3, 1)?;
+        if bytes[0] < v3::V3_SEAT_SHARDS as u8
+            && encode_v3_seat_shard_delegate_seeds(&core, bytes[0]).as_slice() == payload
+        {
+            return Some(DelegatedAccountKind::V3SeatShard {
+                core,
+                shard: bytes[0],
+            });
+        }
+    }
+    if payload.len() == V3_EVENT_SHARD_SEEDS_PAYLOAD_LEN {
+        let (core, bytes) = parse_v3(v3::V3_EVENT_SHARD_SEED, 3, 1)?;
+        if bytes[0] < v3::V3_EVENT_SHARDS as u8
+            && encode_v3_event_shard_delegate_seeds(&core, bytes[0]).as_slice() == payload
+        {
+            return Some(DelegatedAccountKind::V3EventShard {
+                core,
+                shard: bytes[0],
+            });
+        }
     }
     None
 }
@@ -1627,7 +1780,179 @@ pub fn external_undelegate(
             }
             Ok(())
         }
+        DelegatedAccountKind::V3Core { instrument } => {
+            let expected = v3::derive_market_core_v3(program_id, &instrument);
+            let (_, bump) = Address::find_program_address(
+                &[v3::V3_MARKET_CORE_SEED, instrument.as_ref()],
+                program_id,
+            );
+            let bump_slice = [bump];
+            let seeds = [
+                Seed::from(v3::V3_MARKET_CORE_SEED),
+                Seed::from(instrument.as_ref()),
+                Seed::from(&bump_slice),
+            ];
+            restore_v3_callback_account(
+                accounts,
+                &expected,
+                v3::V3_MARKET_CORE_SIZE,
+                &Signer::from(&seeds),
+                program_id,
+            )?;
+            validate_restored_v3_account(
+                unsafe { accounts[0].borrow_unchecked() },
+                v3::V3AccountKind::MarketCore,
+                &instrument,
+                0,
+            )
+        }
+        DelegatedAccountKind::V3BookPage { core, side, page } => {
+            let expected = v3::derive_book_page_v3(program_id, &core, side, page);
+            let (_, bump) = Address::find_program_address(
+                &[v3::V3_BOOK_PAGE_SEED, core.as_ref(), &[side], &[page]],
+                program_id,
+            );
+            let side_slice = [side];
+            let page_slice = [page];
+            let bump_slice = [bump];
+            let seeds = [
+                Seed::from(v3::V3_BOOK_PAGE_SEED),
+                Seed::from(core.as_ref()),
+                Seed::from(&side_slice),
+                Seed::from(&page_slice),
+                Seed::from(&bump_slice),
+            ];
+            restore_v3_callback_account(
+                accounts,
+                &expected,
+                v3::V3_BOOK_PAGE_SIZE,
+                &Signer::from(&seeds),
+                program_id,
+            )?;
+            validate_restored_v3_account(
+                unsafe { accounts[0].borrow_unchecked() },
+                v3::V3AccountKind::BookPage,
+                &core,
+                side * v3::V3_BOOK_PAGES_PER_SIDE as u8 + page,
+            )
+        }
+        DelegatedAccountKind::V3SeatShard { core, shard } => {
+            let expected = v3::derive_seat_shard_v3(program_id, &core, shard);
+            let (_, bump) = Address::find_program_address(
+                &[v3::V3_SEAT_SHARD_SEED, core.as_ref(), &[shard]],
+                program_id,
+            );
+            let shard_slice = [shard];
+            let bump_slice = [bump];
+            let seeds = [
+                Seed::from(v3::V3_SEAT_SHARD_SEED),
+                Seed::from(core.as_ref()),
+                Seed::from(&shard_slice),
+                Seed::from(&bump_slice),
+            ];
+            restore_v3_callback_account(
+                accounts,
+                &expected,
+                v3::V3_SEAT_SHARD_SIZE,
+                &Signer::from(&seeds),
+                program_id,
+            )?;
+            validate_restored_v3_account(
+                unsafe { accounts[0].borrow_unchecked() },
+                v3::V3AccountKind::SeatShard,
+                &core,
+                shard,
+            )
+        }
+        DelegatedAccountKind::V3EventShard { core, shard } => {
+            let expected = v3::derive_event_shard_v3(program_id, &core, shard);
+            let (_, bump) = Address::find_program_address(
+                &[v3::V3_EVENT_SHARD_SEED, core.as_ref(), &[shard]],
+                program_id,
+            );
+            let shard_slice = [shard];
+            let bump_slice = [bump];
+            let seeds = [
+                Seed::from(v3::V3_EVENT_SHARD_SEED),
+                Seed::from(core.as_ref()),
+                Seed::from(&shard_slice),
+                Seed::from(&bump_slice),
+            ];
+            restore_v3_callback_account(
+                accounts,
+                &expected,
+                v3::V3_EVENT_SHARD_SIZE,
+                &Signer::from(&seeds),
+                program_id,
+            )?;
+            validate_restored_v3_account(
+                unsafe { accounts[0].borrow_unchecked() },
+                v3::V3AccountKind::EventShard,
+                &core,
+                shard,
+            )
+        }
     }
+}
+
+fn restore_v3_callback_account(
+    accounts: &mut [AccountView],
+    expected: &Address,
+    expected_len: usize,
+    signer: &Signer,
+    program_id: &Address,
+) -> ProgramResult {
+    if *accounts[0].address() != *expected || accounts[1].data_len() != expected_len {
+        return Err(custom(StockStreamError::MagicBlockInvalidCallback));
+    }
+    let (account, rest) = accounts.split_at_mut(1);
+    recreate_account_from_buffer(&mut account[0], &rest[0], &rest[1], signer, program_id)
+}
+
+/// Checks the recovered bytes against the exact V3 PDA tuple replayed by the
+/// delegation program. The core must remain activated; children carry their
+/// parent core in the account header, so a valid page cannot be substituted
+/// for a sibling at restoration time.
+pub fn validate_restored_v3_account(
+    bytes: &[u8],
+    kind: v3::V3AccountKind,
+    parent: &Address,
+    index: u8,
+) -> ProgramResult {
+    if bytes.len() != kind.account_size() {
+        return Err(custom(StockStreamError::MagicBlockInvalidCallback));
+    }
+    let valid = match kind {
+        v3::V3AccountKind::MarketCore => {
+            bytes[0..8] == v3::V3_MARKET_CORE_DISCRIMINATOR
+                && bytes[8..10] == v3::V3_LAYOUT_VERSION.to_le_bytes()
+                && bytes[10] == 1
+                && bytes[11] == 1
+                && bytes[12..44] == *parent.as_ref()
+        }
+        v3::V3AccountKind::BookPage => {
+            bytes[0..8] == v3::V3_BOOK_PAGE_DISCRIMINATOR
+                && bytes[8..10] == v3::V3_LAYOUT_VERSION.to_le_bytes()
+                && bytes[10] == index / v3::V3_BOOK_PAGES_PER_SIDE as u8
+                && bytes[11] == index % v3::V3_BOOK_PAGES_PER_SIDE as u8
+                && bytes[12..44] == *parent.as_ref()
+        }
+        v3::V3AccountKind::SeatShard => {
+            bytes[0..8] == v3::V3_SEAT_SHARD_DISCRIMINATOR
+                && bytes[8..10] == v3::V3_LAYOUT_VERSION.to_le_bytes()
+                && bytes[10] == index
+                && bytes[12..44] == *parent.as_ref()
+        }
+        v3::V3AccountKind::EventShard => {
+            bytes[0..8] == v3::V3_EVENT_SHARD_DISCRIMINATOR
+                && bytes[8..10] == v3::V3_LAYOUT_VERSION.to_le_bytes()
+                && bytes[10] == index
+                && bytes[12..44] == *parent.as_ref()
+        }
+    };
+    valid
+        .then_some(())
+        .ok_or(custom(StockStreamError::MagicBlockInvalidCallback))
 }
 
 /// Restoration-mismatch detection for a restored scratch account: a

@@ -1200,6 +1200,24 @@ fn cluster_member_seed_encodings_match_real_borsh_delegate_args() {
     let mut full = 0u64.to_le_bytes().to_vec();
     full.extend_from_slice(&expected);
     assert_eq!(&out[..len], full.as_slice());
+
+    // V3 pages use the exact same DelegateArgs Borsh seed-vector contract;
+    // the only difference is the V3 PDA seed tuple.
+    let ours = stockstream::magicblock::encode_v3_book_page_delegate_seeds(&market_key, 1, 3);
+    let mut expected = Vec::new();
+    dlp_api::args::DelegateArgs {
+        commit_frequency_ms: 0,
+        seeds: vec![
+            b"book-page-v3".to_vec(),
+            market_key.as_ref().to_vec(),
+            vec![1],
+            vec![3],
+        ],
+        validator: None,
+    }
+    .serialize(&mut expected)
+    .unwrap();
+    assert_eq!(ours.as_slice(), &expected[4..expected.len() - 1]);
 }
 
 #[test]
@@ -1243,6 +1261,39 @@ fn parse_delegated_seeds_round_trips_every_kind_and_rejects_foreign_shapes() {
         })
     );
 
+    let core_seeds = stockstream::magicblock::encode_v3_core_delegate_seeds(&instrument);
+    assert_eq!(
+        parse_delegated_seeds(&core_seeds),
+        Some(DelegatedAccountKind::V3Core { instrument })
+    );
+    let page_seeds = stockstream::magicblock::encode_v3_book_page_delegate_seeds(&market_key, 1, 3);
+    assert_eq!(
+        parse_delegated_seeds(&page_seeds),
+        Some(DelegatedAccountKind::V3BookPage {
+            core: market_key,
+            side: 1,
+            page: 3
+        })
+    );
+    let seat_shard_seeds =
+        stockstream::magicblock::encode_v3_seat_shard_delegate_seeds(&market_key, 2);
+    assert_eq!(
+        parse_delegated_seeds(&seat_shard_seeds),
+        Some(DelegatedAccountKind::V3SeatShard {
+            core: market_key,
+            shard: 2
+        })
+    );
+    let event_shard_seeds =
+        stockstream::magicblock::encode_v3_event_shard_delegate_seeds(&market_key, 3);
+    assert_eq!(
+        parse_delegated_seeds(&event_shard_seeds),
+        Some(DelegatedAccountKind::V3EventShard {
+            core: market_key,
+            shard: 3
+        })
+    );
+
     // Market seeds with a corrupted ownership tag must not parse (a flipped
     // instrument byte would just be a valid delegation of a different
     // instrument, which legitimately parses as `Market`).
@@ -1257,6 +1308,11 @@ fn parse_delegated_seeds_round_trips_every_kind_and_rejects_foreign_shapes() {
     );
     assert_eq!(parse_delegated_seeds(&[0u8; 60]), None);
     assert_eq!(parse_delegated_seeds(&[0u8; 137]), None);
+    // Valid V3 tag with an out-of-range page cannot be interpreted as an
+    // adjacent page through a flattened-index wrap.
+    let mut invalid_page = page_seeds;
+    *invalid_page.last_mut().unwrap() = 4;
+    assert_eq!(parse_delegated_seeds(&invalid_page), None);
     assert_eq!(parse_delegated_seeds(&[]), None);
 }
 
