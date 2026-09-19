@@ -1,0 +1,336 @@
+{
+  "events": [
+    {
+      "name": "create exchange",
+      "signature": "2wPq7xWUs6XYGiJ46pdW4eXg8JVyAs74ZweuvewikFQL8AChb9XHXcemPACj1h2L82DGNtcLYErMpK1SNekMSXqj",
+      "slot": 500915548,
+      "ms": 781,
+      "wireBytes": 319
+    },
+    {
+      "name": "create instrument (op43)",
+      "signature": "2ekp8ZKVrppMqga8RQ6h3Yo82VMyDofLsKAABUNfEhAJDejTsrWMRQktpDNSp84c8v162xbBvXN3q8fqqpjzWAp4",
+      "slot": 500915552,
+      "ms": 616,
+      "wireBytes": 269
+    },
+    {
+      "name": "market first chunk",
+      "signature": "2QKq49ELQGFALV5VwWrBCrg3ruNTKzYKzhj861byd9hYDYvgYS4Lh9D5rVWYNFNYDcQ3DxFg61pp5wfXbW38rT4Y",
+      "slot": 500915556,
+      "ms": 594,
+      "wireBytes": 270
+    },
+    {
+      "name": "grow market (10240/222752)",
+      "signature": "2uo8s5fBonmx8QCC92Y5n1tKCN2SPQSeYb44Y9LmJXaA2P3k2oLUaJDh7d4eY6kDWKKKVfw7HhVxUiMzkdPV8MEr",
+      "slot": 500915561,
+      "ms": 669,
+      "wireBytes": 270
+    },
+    {
+      "name": "grow market (20480/222752)",
+      "signature": "3wZPbyS6G3hMYJWoFo72gqBPM39XsjLPgSpxVqmAPUc83L9VxWBYpGRLTsrjFQruNomwCCuCGqWrMd4kVSuSEBQL",
+      "slot": 500915576,
+      "ms": 817,
+      "wireBytes": 270
+    },
+    {
+      "name": "grow market (30720/222752)",
+      "signature": "2onn7eSJXXXqSw7dGMMA2WbiBrvwqZnEDm3LMuDhVN9GfXvz9e7QpQtUQLaGLBdFS8KrScvjDYnGE4Nj48XaAw5N",
+      "slot": 500915588,
+      "ms": 738,
+      "wireBytes": 270
+    },
+    {
+      "name": "grow market (40960/222752)",
+      "signature": "2MdVMaHQEmxGYkJ4WNj132crY8btJ9jHGgf5DdAyBmg3Gm7jXywcMdHMYBnsfRZqpHwumVoZqMrDPVF1RCmTPU4w",
+      "slot": 500915608,
+      "ms": 1651,
+      "wireBytes": 270
+    },
+    {
+      "name": "grow market (51200/222752)",
+      "signature": "2qLvJVVARXs23qfEC92xwo36hbigtm8kZ176TzPSgayHJrsXZeU4GWgCRCnKbx5eGUE6P61XZDnYBxmcbaHRxNbA",
+      "slot": 500915624,
+      "ms": 975,
+      "wireBytes": 270
+    },
+    {
+      "name": "grow market (61440/222752)",
+      "signature": "H891SsZJNfwWrtSzNrbSfDyzq7fSTRatknsz7vGzFQJAsmTxoxL2tHjJ5XrB37HANnyoiS9S4TVqPmuchivNtzz",
+      "slot": 500915640,
+      "ms": 1090,
+      "wireBytes": 270
+    },
+    {
+      "name": "grow market (71680/222752)",
+      "signature": "595ZsrnaXzWZCwDBCeaKxG25yCKwm66P6TWhyvStdKprtAsisJ6hyq6ui2qbCApCDvNJHANeB6zrA8ysQzXCrHga",
+      "slot": 500915653,
+      "ms": 647,
+      "wireBytes": 270
+    },
+    {
+      "name": "grow market (81920/222752)",
+      "signature": "5xG8D9QSgBzdJTtmb74BhvNffrvu9vGjNhLkTnh9JvtMwWwvtVavjCEZduKmVcPyEKqnCQ7AKqFTTPwPWhFB4bgG",
+      "slot": 500915668,
+      "ms": 722,
+      "wireBytes": 270
+    },
+    {
+      "name": "grow market (92160/222752)",
+      "signature": "34Uys1kV8zjBUbZnbfJabqb1ZXBWy89FWxuKxL7CJxhzRrBrKjPed7oHpRu5h77w4PSS1Eh5vJWZXhv3SUkpA9VJ",
+      "slot": 500915681,
+      "ms": 712,
+      "wireBytes": 270
+    },
+    {
+      "name": "grow market (102400/222752)",
+      "signature": "3dSoeUkX43jMhxzdaDXhvKMH4kL257vKd5DQjVRJWSbnEZ8yAY8bgBZCmLQX6D3LYm9RHJy86XQXNmqjR91rLp77",
+      "slot": 500915696,
+      "ms": 709,
+      "wireBytes": 270
+    },
+    {
+      "name": "grow market (112640/222752)",
+      "signature": "2xrf9bzMmeberwUFcaGbCaXDSVUvRQgCr32KVckxH3SNrxtd9xGVZ6khpmxZpfn8aQffyxaHh7V3NCSCgMLKS8jU",
+      "slot": 500915711,
+      "ms": 825,
+      "wireBytes": 270
+    },
+    {
+      "name": "grow market (122880/222752)",
+      "signature": "5bMwipEqKZGNxwLp2qdvKSKVmiwFXmdnEV8rgTq1xaTfBwR1sbXksQb5nMmGSvTsKqTCGeHUkrLKtQcwXjpE3a7D",
+      "slot": 500915724,
+      "ms": 668,
+      "wireBytes": 270
+    },
+    {
+      "name": "grow market (133120/222752)",
+      "signature": "4ZzcZMfuhfwhx9Gv2JosFBt6k8GWHyayxGAbsyBJmnt46H8Ryb7zmKpgfuQHKiydYUDzhqtSFonzKEVs3FtTNZUV",
+      "slot": 500915738,
+      "ms": 735,
+      "wireBytes": 270
+    },
+    {
+      "name": "grow market (143360/222752)",
+      "signature": "4C5if1NgqmTM684gxhR1muyxE2dyCdNAXEp1MywpPay4RRoEsapiVwoBCb1VGrCAcMHoCWvFvK7o3J1jRoChxb8m",
+      "slot": 500915752,
+      "ms": 710,
+      "wireBytes": 270
+    },
+    {
+      "name": "grow market (153600/222752)",
+      "signature": "2Svj82prfSDYztPgKEdK2qPQpa1J3AbXP3UyvQU5KKyq8A2vcHLsqdzKWN425k85QidyVfGDqkLpDnE8VesnHjde",
+      "slot": 500915768,
+      "ms": 716,
+      "wireBytes": 270
+    },
+    {
+      "name": "grow market (163840/222752)",
+      "signature": "4WB6QfYHLHAQL9BEJahX7UkVEhVWz7DjKvLAZ8SBmWa53DB1DpFRgPUjQ5nCoufvv5J59dyuWdocb89gjh2KGDrf",
+      "slot": 500915784,
+      "ms": 1133,
+      "wireBytes": 270
+    },
+    {
+      "name": "grow market (174080/222752)",
+      "signature": "3baoBKUxjpiGSGB7vbLQDTuvF1VMPZxeUzEms6xBmA3nKRLHWHUv8k4AmeEN1NosdbExSWn2dHMKgRGCwvzeEPy5",
+      "slot": 500915797,
+      "ms": 632,
+      "wireBytes": 270
+    },
+    {
+      "name": "grow market (184320/222752)",
+      "signature": "5c6dPdCVrH8Dy9d8deu71vBKuuNuuCHBYYxqqm8wLM8NKNmAXyGXZS3SPse9ucptFtmi9yHmGZwz54xohCDERy2c",
+      "slot": 500915812,
+      "ms": 812,
+      "wireBytes": 270
+    },
+    {
+      "name": "grow market (194560/222752)",
+      "signature": "4fMUiXV1JswyTtvRMRc6EEMFPUuScPJMM5KtikVKu5ffEVsF3N7izA3pUvQQUSFjibturjL1VZcGq9dGs8FjmWur",
+      "slot": 500915828,
+      "ms": 880,
+      "wireBytes": 270
+    },
+    {
+      "name": "grow market (204800/222752)",
+      "signature": "59zvCrbMKv4dmtnTaqUMq3d3DgFx3DrsL8kxQNacHf21PbighGNGo69e4H3XA5hzbazWH1Cb1WhmKUAwGMpN492C",
+      "slot": 500915841,
+      "ms": 691,
+      "wireBytes": 270
+    },
+    {
+      "name": "grow market (215040/222752)",
+      "signature": "3nNgP8sS31twGGX6c82ar2NPCvNCZ2NHcUtxaHK3oefYNBBVtbrHjR81qNpa4vfNrw3kmSux6aNRbYTAyGJ59fu8",
+      "slot": 500915854,
+      "ms": 802,
+      "wireBytes": 270
+    },
+    {
+      "name": "init exchange",
+      "signature": "68ViBHj6eMK11AAR4QogjGGHFGo4E2xuReLRNEu89k7PYbV5eZFCaX8hbH5Td5xknUNuMYPpXRQf9RdG3dkDDZ4",
+      "slot": 500915868,
+      "ms": 618,
+      "wireBytes": 204
+    },
+    {
+      "name": "register instrument",
+      "signature": "jgy2HB7RqLLFS8mx63fYLWjwEjFBnFtJhXkbjBaYXdo1myxsvqZRHyfiKMi2NyaxvxYMGXbbEHcxCE4cnEqR4qS",
+      "slot": 500915873,
+      "ms": 768,
+      "wireBytes": 269
+    },
+    {
+      "name": "update instrument",
+      "signature": "5p4CPovaSzXW5uWKusPj4NqnCP1V35qhYv1pPyyat9PdqZLuXurZp2rt3cWvdHNzCs7xsExqWj4RpxdDrJpvXTw3",
+      "slot": 500915877,
+      "ms": 613,
+      "wireBytes": 278
+    },
+    {
+      "name": "create perp market",
+      "signature": "3keE6DjGXCwayBSoj95duDoshw8beWHdZEws4gD49hEWGxngjwYBWLsFo1TLZcDqHtnrwsBhTQa3ZMkRNECGWJRc",
+      "slot": 500915880,
+      "ms": 573,
+      "wireBytes": 269
+    },
+    {
+      "name": "create vault (op44)",
+      "signature": "CGZWL6RJkLKkoYTqwr16VtnRWGRQCivp2e1fSnjmgNjQPNQEPwd8hs6YMMttvqKUHAhU7sLDmKXJik2E416p7hr",
+      "slot": 500916011,
+      "ms": 700,
+      "wireBytes": 336
+    },
+    {
+      "name": "seat 0",
+      "signature": "4TF3VAPtpiE6AUB9DZ7JvnS1w9QnA4bBC5225kxFBXqiAnb3K7UBSEVkfToCi4eiEqay3QeHPJ2MpGKd7ETAAmFp",
+      "slot": 500916018,
+      "ms": 974,
+      "wireBytes": 206
+    },
+    {
+      "name": "mint to trader 0",
+      "signature": "4hPEmwJBqDfbnBAoyMJWKGFxEE6AQNRqVFdKdjxR81AZScownq79zkmpT3jYGW7D7tHJWU3zLzn8oTTCo7qgz6eQ",
+      "slot": 500916026,
+      "ms": 687,
+      "wireBytes": 245
+    },
+    {
+      "name": "deposit 0",
+      "signature": "4W48PtACBNhntB5biuXRnQLcxsdu48nwi7xFxEf9o2k7oeZFVNLt92o9zWZEK8m8ATPS8XNXnaygfuNEMxfVMaES",
+      "slot": 500916030,
+      "ms": 756,
+      "wireBytes": 346
+    },
+    {
+      "name": "fund 6oZFFUus",
+      "signature": "4yYsy9uDozkq7JKTZfhP2NqXp5AxxKd4wjeokQ14YgVjRyRD3FJYa1o3VdvVC9iW4HMWhU92RrMGuXtLxgHhuPzj",
+      "slot": 500916340,
+      "ms": 871,
+      "wireBytes": 215
+    },
+    {
+      "name": "mint to trader 0",
+      "signature": "2GxL8WVp8qZNF9FGzPRzV8VZj6GfzKuL6JcLe9xusYWCv9qjQS2sUSzKUFUZyRM9EAjk3bhmREkFQKDBEbTsugEP",
+      "slot": 500916345,
+      "ms": 779,
+      "wireBytes": 245
+    },
+    {
+      "name": "seat 1",
+      "signature": "rZLDGJGkMGgiqqDBpMg9yUaEErfkz7RTdji8oxdppP7x6BnQzGsSFUdoc3xAzLSd63ZiVstRCBSKcj6kqBmmGob",
+      "slot": 500916350,
+      "ms": 816,
+      "wireBytes": 206
+    },
+    {
+      "name": "mint to trader 1",
+      "signature": "5dfQzQKSwnqQDyqyDsz2VFPqVo5NbfqWhbcCMzi5WAzZMkw5PdrXnwQpiuHmfjyF7EoKsxD8YeKYQuRu1t8XCpCr",
+      "slot": 500916364,
+      "ms": 792,
+      "wireBytes": 245
+    },
+    {
+      "name": "deposit 1",
+      "signature": "5Dwny6heEgdUh8QaCo5tNUUCSr8jvLy9GbSzduq33TjnnWwQysqNJofrAMjt7QnrNp2h6Pkevw727oUHdFDqdn1U",
+      "slot": 500916369,
+      "ms": 746,
+      "wireBytes": 346
+    },
+    {
+      "name": "create scratch 0",
+      "signature": "3H4Xm8Kzv4cnfgV1jHCqAi3iVamiDBU4oPKaNAvW7HWxHDSTbLCJu7BUQG3c9DK2pn5hrZ7Q4BVVTEkRmgE79Hhr",
+      "slot": 500916469,
+      "ms": 761,
+      "wireBytes": 273
+    },
+    {
+      "name": "authorize session A",
+      "signature": "4eVwknWQQYJBQGt6bmgBHeyxNcGdTU8ThYftziMbtZQHZjHUguzAyeV3wD1XbygqehQVzVW2kSwKnAuSYthSUZsi",
+      "slot": 500916474,
+      "ms": 668,
+      "wireBytes": 348
+    },
+    {
+      "name": "create scratch 1",
+      "signature": "47rNhrhjbENLHUyjxbAyH7pSDi3GsupNwf3NquxApmxw1jsBqhZMGbLhSUZMxbwGovC7wc3vVzUoB9SkxiXcJZYi",
+      "slot": 500916478,
+      "ms": 710,
+      "wireBytes": 369
+    },
+    {
+      "name": "authorize session B",
+      "signature": "2ASmrxX9zgmatVshERHgoBjqtUfhGFcFskSfs17JsyGNeCUx9597pPKKb73GqEtMCyWkYUsWRbyNCsgLPoCy7TGf",
+      "slot": 500916483,
+      "ms": 711,
+      "wireBytes": 348
+    }
+  ],
+  "instrumentId": [
+    76,
+    73,
+    70,
+    69,
+    67,
+    89,
+    67,
+    76,
+    69,
+    45,
+    49,
+    55,
+    56,
+    57,
+    56,
+    51,
+    48,
+    51,
+    51,
+    54,
+    57,
+    55,
+    51,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "exchange": "GxtKQ1wEfX6jte84CdT2gb58F69SVcHYbnh5TW8gWuQ1",
+  "instrument": "26X9hDmNPpsTCU85uCyzmazsjJeLXKQpwn2NvACb3hpc",
+  "market": "9d75hK8GyfqajxcijLa35bEh8SYUtobqi6eSdtF42RuS",
+  "mint": "4JHSAu3gj5K3w5G9bBH7uyRd42akrn1yyPHue5mbupyB",
+  "vaultInitialized": true,
+  "depositedA": 400000,
+  "depositedB": 400000,
+  "sessionA": "C6A12WfRSQHsAJfwnR4ATgSoaAz2oeqc7uVpSKtdpUS9",
+  "sessionSignerA": "47oTCY7LY78tv1hjEhpkTS4k96H7pRhsHiMzHNipcbM5",
+  "sessionB": "Bg5KQ4aAM5gRTNTAxdGnrynNLKQ9jUjpZWpMoaehsonF",
+  "sessionSignerB": "2BKxMb2EEw2S2SVBm6HWC8EgSZZ4yfUEHpUSZZXE8kQF"
+}
