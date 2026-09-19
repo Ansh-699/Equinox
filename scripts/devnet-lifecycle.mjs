@@ -122,14 +122,18 @@ async function stageCustody() {
     log("MINT =", mint.toBase58());
   }
   const vault = PublicKey.findProgramAddressSync([Buffer.from("vault"), market.toBuffer()], PROGRAM_ID)[0];
-  const vaultAuthority = PublicKey.findProgramAddressSync([Buffer.from("vault-authority"), market.toBuffer()], PROGRAM_ID)[0];
 
   if (!state.vaultInitialized) {
     const vaultInfo = await CONNECTION.getAccountInfo(vault);
     if (!vaultInfo) {
+      // 6 accounts, not 7: the vault authority PDA is derived on-chain by
+      // the handler itself (registry.rs::create_vault_account), never a
+      // caller-supplied account. token_program IS still required (a CPI's
+      // target program must be one of the calling instruction's own
+      // accounts), just no longer left unvalidated.
       await send("create vault (op44)", [new TransactionInstruction({
         programId: PROGRAM_ID,
-        keys: [wr(market), wr(vault), wsg(authority.publicKey), ro(mint), ro(TOKEN_PROGRAM), ro(vaultAuthority), ro(SystemProgram.programId)],
+        keys: [wr(market), wr(vault), wsg(authority.publicKey), ro(mint), ro(TOKEN_PROGRAM), ro(SystemProgram.programId)],
         data: Buffer.from([44]),
       })], [authority]);
     }
@@ -145,15 +149,14 @@ async function stageCustody() {
         (() => { const d = Buffer.alloc(9); d[0] = 7; d.writeBigUInt64LE(1_000_000n, 1); return new TransactionInstruction({ programId: TOKEN_PROGRAM, keys: [wr(mint), wr(ata.address), sg(authority.publicKey)], data: d }); })(),
       ], [authority]);
     }
-    const seatSlot = Keypair.generate();
-    await send(`seat-slot ${seat}`, [SystemProgram.createAccount({
-      fromPubkey: authority.publicKey, newAccountPubkey: seatSlot.publicKey, lamports: 5000, space: 0, programId: PROGRAM_ID,
-    })], [authority, seatSlot]).catch(() => {});
     const deposited = seat === 0 ? state.depositedA : state.depositedB;
     if (!deposited) {
+      // 6 accounts, not 7: the seat lives inside the market account itself,
+      // so there is no separate "seat slot" account to create or pass here
+      // (handlers.rs::deposit_collateral).
       await send(`deposit ${seat}`, [new TransactionInstruction({
         programId: PROGRAM_ID,
-        keys: [wr(market), sg(trader.publicKey), wr(seatSlot.publicKey), wr(ata.address), wr(vault), ro(mint), ro(TOKEN_PROGRAM)],
+        keys: [wr(market), sg(trader.publicKey), wr(ata.address), wr(vault), ro(mint), ro(TOKEN_PROGRAM)],
         data: (() => { const d = Buffer.alloc(11); d[0] = 10; d.writeUInt16LE(seat, 1); d.writeBigUInt64LE(BigInt(DEPOSIT), 3); return d; })(),
       })], [trader]);
       save(seat === 0 ? { depositedA: DEPOSIT } : { depositedB: DEPOSIT });
@@ -169,13 +172,19 @@ async function stageSessions() {
   for (const [trader, seat, name] of [[authority, 0, "A"], [traderB, 1, "B"]]) {
     const scratch = PublicKey.findProgramAddressSync([Buffer.from("settlement"), market.toBuffer(), Buffer.from([seat, 0])], PROGRAM_ID)[0];
     if (!(await CONNECTION.getAccountInfo(scratch))) {
-      // Opcode 45: the program CPI-creates the scratch PDA (PDA cannot sign top-level).
+      // Opcode 45: the program CPI-creates AND initializes the scratch PDA
+      // in one atomic instruction (a PDA cannot sign a top-level
+      // SystemProgram::createAccount, only invoke_signed from inside the
+      // owning program) -- registry.rs::create_scratch_account's real
+      // account order is [market(w), trader(signer), scratch(w),
+      // payer(signer,w), system_program]. There is no separate opcode-8
+      // "initialize" step to run afterward: this instruction already
+      // leaves the scratch account fully initialized.
       await send(`create scratch ${seat}`, [new TransactionInstruction({
         programId: PROGRAM_ID,
-        keys: [ro(market), wr(scratch), wsg(authority.publicKey), sg(trader.publicKey), ro(SystemProgram.programId)],
+        keys: [wr(market), sg(trader.publicKey), wr(scratch), wsg(authority.publicKey), ro(SystemProgram.programId)],
         data: Buffer.from([45, seat, 0]),
       })], [trader, authority]);
-      await send(`init scratch ${seat}`, [new TransactionInstruction({ programId: PROGRAM_ID, keys: [wr(market), sg(trader.publicKey), wr(scratch)], data: Buffer.from([8, seat, 0]) })], [trader]);
     }
     const sessionSigner = traderKeypair(`sessionSigner${name}`);
     const sessionPda = PublicKey.findProgramAddressSync([
@@ -207,16 +216,33 @@ async function stageDelegate() {
   const record = PublicKey.findProgramAddressSync([Buffer.from("delegation"), market.toBuffer()], DELEGATION_PROGRAM)[0];
   const metadata = PublicKey.findProgramAddressSync([Buffer.from("delegation-metadata"), market.toBuffer()], DELEGATION_PROGRAM)[0];
 
-  await send("delegate market", [new TransactionInstruction({
-    programId: PROGRAM_ID,
-    keys: [wr(market), sg(authority.publicKey), ro(instrument), wsg(authority.publicKey), wr(buffer), wr(record), wr(metadata), ro(DELEGATION_PROGRAM), ro(SystemProgram.programId), ro(PROGRAM_ID)],
-    data: Buffer.from([13, ...VALIDATOR.toBuffer()]),
-  })], [authority]);
-  save({ delegated: true });
+  // `delegated` is the completion marker for the WHOLE 5-account hot
+  // cluster (market + 2 scratch + 2 sessions) -- it must only be saved
+  // after every member below has ALSO been delegated, never right after
+  // the market alone, or a crash mid-loop would make a resume believe an
+  // incompletely-delegated cluster was done and skip it entirely.
+  // `marketDelegated` is the narrower, separate checkpoint that lets a
+  // resume skip re-delegating the market specifically (which would
+  // otherwise fail as already-delegated) while still finishing the loop.
+  if (!state.marketDelegated) {
+    const marketInfo = await CONNECTION.getAccountInfo(market);
+    if (marketInfo && marketInfo.owner.equals(DELEGATION_PROGRAM)) {
+      save({ marketDelegated: true });
+    } else {
+      await send("delegate market", [new TransactionInstruction({
+        programId: PROGRAM_ID,
+        keys: [wr(market), sg(authority.publicKey), ro(instrument), wsg(authority.publicKey), wr(buffer), wr(record), wr(metadata), ro(DELEGATION_PROGRAM), ro(SystemProgram.programId), ro(PROGRAM_ID)],
+        data: Buffer.from([13, ...VALIDATOR.toBuffer()]),
+      })], [authority]);
+      save({ marketDelegated: true });
+    }
+  } else { log("market already delegated"); }
 
   const members = [[pk(state.sessionA), "sessionA"], [pk(state.sessionB), "sessionB"]];
   for (const seat of [0, 1]) members.push([PublicKey.findProgramAddressSync([Buffer.from("settlement"), market.toBuffer(), Buffer.from([seat, 0])], PROGRAM_ID)[0], `scratch${seat}`]);
   for (const [member, name] of members) {
+    const memberInfo = await CONNECTION.getAccountInfo(member);
+    if (memberInfo && memberInfo.owner.equals(DELEGATION_PROGRAM)) { log(`${name} already delegated`); continue; }
     const mBuffer = PublicKey.findProgramAddressSync([Buffer.from("buffer"), member.toBuffer()], PROGRAM_ID)[0];
     const mRecord = PublicKey.findProgramAddressSync([Buffer.from("delegation"), member.toBuffer()], DELEGATION_PROGRAM)[0];
     const mMetadata = PublicKey.findProgramAddressSync([Buffer.from("delegation-metadata"), member.toBuffer()], DELEGATION_PROGRAM)[0];
@@ -226,6 +252,7 @@ async function stageDelegate() {
       data: Buffer.from([41, ...VALIDATOR.toBuffer()]),
     })], [authority]);
   }
+  save({ delegated: true });
 }
 
 async function stageStatus() {
@@ -245,54 +272,114 @@ async function stageStatus() {
   console.log("router:", JSON.stringify(body.result ?? body.error));
 }
 
+/** The full 5-account hot cluster: market + both settlement-scratch PDAs +
+ * both trading-session PDAs -- re-derived deterministically rather than
+ * trusted from state, matching stageDelegate's own member list exactly. */
+function hotCluster(state) {
+  const market = pk(state.market);
+  const scratch0 = PublicKey.findProgramAddressSync([Buffer.from("settlement"), market.toBuffer(), Buffer.from([0, 0])], PROGRAM_ID)[0];
+  const scratch1 = PublicKey.findProgramAddressSync([Buffer.from("settlement"), market.toBuffer(), Buffer.from([1, 0])], PROGRAM_ID)[0];
+  return { market, scratch0, scratch1, sessionA: pk(state.sessionA), sessionB: pk(state.sessionB) };
+}
+
+async function routerCall(method, params) {
+  const res = await fetch(ROUTER, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
+  const body = await res.json().catch(() => null);
+  if (!body) throw new Error(`${method}: router returned a non-JSON response`);
+  if (body.error) throw new Error(`${method}: ${JSON.stringify(body.error)}`);
+  if (body.result === undefined) throw new Error(`${method}: router returned neither result nor error`);
+  return body.result;
+}
+
 async function stageEr() {
   const state = load();
   if (!state.delegated) throw new Error("delegate first");
-  const res = await fetch(ROUTER, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getBlockhashForAccounts", params: [[state.market, state.sessionA, state.sessionB]] }) });
-  const body = await res.json();
-  if (!body.result) throw new Error(`getBlockhashForAccounts: ${JSON.stringify(body.error)}`);
-  const { blockhash } = body.result;
-  console.log("router blockhash:", blockhash.slice(0, 16) + "…");
-  save({ erBlockhash: blockhash });
+  const cluster = hotCluster(state);
+  // The whole hot cluster, not just market+sessions: the ER's account-aware
+  // blockhash must reflect every account this stage's transactions will
+  // write to, and the order commit below writes the scratch PDAs too.
+  const clusterAddresses = [cluster.market, cluster.scratch0, cluster.scratch1, cluster.sessionA, cluster.sessionB].map((a) => a.toBase58());
+  const { blockhash: orderBlockhash } = await routerCall("getBlockhashForAccounts", [clusterAddresses]);
+  save({ erBlockhash: orderBlockhash });
 
+  // A real trading action inside the ER, not just a commit of unchanged
+  // state: a resting, non-crossing bid (price 1, far below any real ask)
+  // from seat 0's own settlement scratch, proving delegated execution
+  // actually mutates the book before it's ever committed back to L1.
+  const orderTx = new Transaction({ recentBlockhash: orderBlockhash, feePayer: authority.publicKey });
+  orderTx.add(new TransactionInstruction({
+    programId: PROGRAM_ID,
+    keys: [wr(cluster.market), sg(authority.publicKey), wr(cluster.scratch0)],
+    data: (() => {
+      const d = Buffer.alloc(54);
+      d[0] = 3; d[1] = 0; d[2] = 0; d[3] = 0; // PlaceOrder, bid, fixed tree, no flags
+      d.writeUInt16LE(0, 4); // seatIndex
+      d.writeBigUInt64LE(1n, 6); // quantity
+      d.writeBigInt64LE(1n, 14); // priceOrOffset
+      d.writeBigUInt64LE(0n, 22); // expiresAt (none)
+      d.writeBigInt64LE(0n, 30); // pegLimit (unused for a fixed-tree order)
+      d.writeBigUInt64LE(BigInt(Date.now()), 38); // clientOrderId
+      d.writeBigUInt64LE(0n, 46); // actionNonce (main-wallet action)
+      return d;
+    })(),
+  }));
+  orderTx.sign(authority);
+  const orderT0 = Date.now();
+  const orderSignature = await routerCall("sendTransaction", [orderTx.serialize().toString("base64"), { encoding: "base64" }]);
+  console.log(`ER order: sig=${orderSignature} submitMs=${Date.now() - orderT0}`);
+  save({ erOrderSignature: orderSignature });
+
+  // Re-fetch the blockhash for the commit -- the order above already
+  // consumed the previous one.
+  const { blockhash: commitBlockhash } = await routerCall("getBlockhashForAccounts", [clusterAddresses]);
   const sequence = state.commitSequence ?? 1;
   const t0 = Date.now();
-  const tx = new Transaction({ recentBlockhash: blockhash, feePayer: authority.publicKey });
+  const tx = new Transaction({ recentBlockhash: commitBlockhash, feePayer: authority.publicKey });
   tx.add(new TransactionInstruction({
     programId: PROGRAM_ID,
-    keys: [wr(state.market), sg(authority.publicKey), wsg(authority.publicKey), wr(MAGIC_CONTEXT), ro(MAGIC_PROGRAM)],
+    // Trailing cluster members after the fixed 5 (market, authority,
+    // authority-as-payer, magic context, magic program): the scratch and
+    // session PDAs, so this proves and commits the WHOLE delegated
+    // cluster's state -- not just the market account -- in one call
+    // (magicblock.rs::commit_market_inner accepts `accounts[5..]` as
+    // additional committed members).
+    keys: [
+      wr(cluster.market), sg(authority.publicKey), wsg(authority.publicKey), wr(MAGIC_CONTEXT), ro(MAGIC_PROGRAM),
+      wr(cluster.scratch0), wr(cluster.scratch1), wr(cluster.sessionA), wr(cluster.sessionB),
+    ],
     data: (() => { const d = Buffer.alloc(9); d[0] = 14; d.writeBigUInt64LE(BigInt(sequence), 1); return d; })(),
   }));
   tx.sign(authority);
-  const er = await fetch(ROUTER, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "sendTransaction", params: [tx.serialize().toString("base64"), { encoding: "base64" }] }) });
-  const erBody = await er.json();
-  if (erBody.error) { console.log(`ER commit: error ${JSON.stringify(erBody.error).slice(0, 200)}`); return; }
-  console.log(`ER commit: sig=${erBody.result} submitMs=${Date.now() - t0}`);
-  save({ commitSignature: erBody.result, commitSequence: sequence });
+  const commitSignature = await routerCall("sendTransaction", [tx.serialize().toString("base64"), { encoding: "base64" }]);
+  console.log(`ER commit: sig=${commitSignature} submitMs=${Date.now() - t0}`);
+  save({ commitSignature, commitSequence: sequence });
 }
 
 async function stageUndelegate() {
   const state = load();
+  const cluster = hotCluster(state);
+  const clusterAddresses = [cluster.market, cluster.scratch0, cluster.scratch1, cluster.sessionA, cluster.sessionB].map((a) => a.toBase58());
+  const { blockhash } = await routerCall("getBlockhashForAccounts", [clusterAddresses]);
   const sequence = (state.commitSequence ?? 1) + 1;
-  const res = await fetch(ROUTER, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getBlockhashForAccounts", params: [[state.market]] }) });
-  const { result } = await res.json();
   const t0 = Date.now();
-  const tx = new Transaction({ recentBlockhash: result.blockhash, feePayer: authority.publicKey });
+  const tx = new Transaction({ recentBlockhash: blockhash, feePayer: authority.publicKey });
   tx.add(new TransactionInstruction({
     programId: PROGRAM_ID,
-    keys: [wr(state.market), sg(authority.publicKey), wsg(authority.publicKey), wr(MAGIC_CONTEXT), ro(MAGIC_PROGRAM)],
+    keys: [
+      wr(cluster.market), sg(authority.publicKey), wsg(authority.publicKey), wr(MAGIC_CONTEXT), ro(MAGIC_PROGRAM),
+      wr(cluster.scratch0), wr(cluster.scratch1), wr(cluster.sessionA), wr(cluster.sessionB),
+    ],
     data: (() => { const d = Buffer.alloc(9); d[0] = 15; d.writeBigUInt64LE(BigInt(sequence), 1); return d; })(),
   }));
   tx.sign(authority);
-  const er = await fetch(ROUTER, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "sendTransaction", params: [tx.serialize().toString("base64"), { encoding: "base64" }] }) });
-  const body = await er.json();
-  if (body.error) { console.log(`ER undelegate: error ${JSON.stringify(body.error).slice(0, 200)}`); return; }
-  console.log(`ER undelegate: sig=${body.result} submitMs=${Date.now() - t0}`);
-  save({ undelegateSignature: body.result, undelegateSequence: sequence });
+  const signature = await routerCall("sendTransaction", [tx.serialize().toString("base64"), { encoding: "base64" }]);
+  console.log(`ER undelegate: sig=${signature} submitMs=${Date.now() - t0}`);
+  save({ undelegateSignature: signature, undelegateSequence: sequence });
 }
 
 async function stageWithdraw() {
   const state = load();
+  if (state.withdrawn) { log("already withdrawn:", state.withdrawn); return; }
   const market = pk(state.market);
   const mint = pk(state.mint);
   const vault = PublicKey.findProgramAddressSync([Buffer.from("vault"), market.toBuffer()], PROGRAM_ID)[0];
@@ -302,13 +389,14 @@ async function stageWithdraw() {
   console.log("L1 market owner:", header.owner.toBase58());
   const ata = await getOrCreateAssociatedTokenAccount(CONNECTION, authority, mint, traderB.publicKey);
   const before = Number((await getAccount(CONNECTION, ata.address)).amount);
-  await send(`withdraw traderB`, [new TransactionInstruction({
+  const { signature } = await send(`withdraw traderB`, [new TransactionInstruction({
     programId: PROGRAM_ID,
     keys: [wr(market), sg(traderB.publicKey), wr(ata.address), ro(mint), wr(vault), ro(vaultAuthority), ro(TOKEN_PROGRAM)],
     data: (() => { const d = Buffer.alloc(11); d[0] = 11; d.writeUInt16LE(1, 1); d.writeBigUInt64LE(BigInt(DEPOSIT), 3); return d; })(),
   })], [traderB]);
   const after = Number((await getAccount(CONNECTION, ata.address)).amount);
   console.log(`traderB ATA: ${before} -> ${after} (delta ${after - before})`);
+  save({ withdrawn: signature });
 }
 
 const STAGES = { setup: stageSetup, custody: stageCustody, sessions: stageSessions, delegate: stageDelegate, status: stageStatus, er: stageEr, undelegate: stageUndelegate, withdraw: stageWithdraw };
@@ -320,8 +408,12 @@ else if (stageArg === "plan") { console.log(JSON.stringify({ dryRun, stages: Obj
 else if (stageArg === "all") {
   for (const stage of ["setup", "custody", "sessions", "delegate", "er", "undelegate", "withdraw"]) {
     const state = load();
+    // Each stage's REAL completion marker, not a key literally named after
+    // the stage (state never has one) -- the previous version's
+    // `state[stage]` check was always false, so `all` silently re-ran
+    // every already-completed stage from scratch on every resume.
     const flags = { setup: state.market, custody: state.depositedB, sessions: state.sessionB, delegate: state.delegated, er: state.commitSignature, undelegate: state.undelegateSignature, withdraw: state.withdrawn };
-    if (state[stage] !== undefined && state[stage] !== null) { log(`${stage}: complete`); continue; }
+    if (flags[stage] !== undefined && flags[stage] !== null) { log(`${stage}: complete`); continue; }
     log(`running: ${stage}`);
     await STAGES[stage]();
   }
