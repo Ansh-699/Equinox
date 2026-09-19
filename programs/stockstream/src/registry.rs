@@ -915,15 +915,33 @@ pub fn update_exchange_config(
     Ok(())
 }
 
-/// Opcode 45: creates the settlement-scratch PDA account (12,288 bytes).
-/// The scratch PDA can only sign via CPI, so this instruction performs
-/// SystemProgram::createAccount in one atomic step.
+/// Opcode 45: atomically creates AND initializes the settlement-scratch
+/// PDA account (`crate::scratch::SETTLEMENT_SCRATCH_LEN` bytes -- the
+/// real, computed size, not the compile-time upper bound `scratch.rs`
+/// merely asserts it stays under). The scratch PDA can only sign via CPI,
+/// so account creation happens here via `SystemProgram::createAccount`
+/// with `invoke_signed`, not a top-level client-submitted
+/// `SystemProgram.createAccount` (which cannot work: a PDA cannot sign a
+/// top-level instruction, only a CPI the owning program itself issues).
+/// Doing creation and initialization in one instruction (rather than
+/// create-then-separately-call-`InitializeSettlementScratch`) means there
+/// is no window where the scratch account exists but is uninitialized.
+///
+/// Reuses exactly the same seat-ownership check
+/// `initialize_settlement_scratch` (opcode 8) already uses, and the same
+/// account ordering for the three accounts they share
+/// (market/trader/scratch), so a caller already familiar with that
+/// instruction needs to learn only the two appended accounts.
 ///
 /// Accounts:
-/// 0. `[]`               the market PDA (validated for PDA derivation)
-/// 1. `[WRITE]`          the scratch PDA to create (must not exist)
-/// 2. `[WRITE, SIGNER]`  payer
-/// 3. `[SIGNER]`         the trader (must own the seat)
+/// 0. `[WRITE]`          the market PDA (read-only use, but required
+///                        writable to match `market_data`'s existing
+///                        convention, same as `initialize_settlement_scratch`)
+/// 1. `[SIGNER]`         the trader (must own the claimed seat)
+/// 2. `[WRITE]`          the scratch PDA to create (must not already exist)
+/// 3. `[SIGNER, WRITE]`  payer (may be the trader or a sponsor -- never
+///                        assumed to be the trader; ownership is proven by
+///                        account 1's own signature, not by matching payer)
 /// 4. `[]`               the system program
 ///
 /// Data: `[45, seat_index: u16 LE]`.
@@ -937,35 +955,59 @@ pub fn create_scratch_account(
     if accounts.len() != 5 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
-    if !accounts[1].is_writable()
-        || !accounts[2].is_signer()
-        || !accounts[2].is_writable()
-        || !accounts[3].is_signer()
-    {
-        return Err(ProgramError::MissingRequiredSignature);
+    handlers::signer(&accounts[1])?;
+    if !accounts[2].is_writable() {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    handlers::signer(&accounts[3])?;
+    if !accounts[3].is_writable() {
+        return Err(ProgramError::InvalidAccountData);
     }
     if *accounts[4].address() != pinocchio_system::ID {
         return Err(ProgramError::InvalidAccountOwner);
     }
-    if accounts[1].data_len() != 0 {
-        return Err(custom(StockStreamError::InvalidInstruction));
+    // No account substitution: every account must be genuinely distinct
+    // (a trader signing as their own payer is fine and common -- that's
+    // accounts[1] == accounts[3], deliberately still allowed -- but the
+    // scratch PDA must never coincide with the market, trader, or payer).
+    if accounts[2].address() == accounts[0].address()
+        || accounts[2].address() == accounts[1].address()
+        || accounts[2].address() == accounts[3].address()
+    {
+        return Err(custom(StockStreamError::InvalidSettlementScratch));
     }
+    if accounts[2].data_len() != 0 || accounts[2].lamports() != 0 {
+        return Err(custom(StockStreamError::InvalidSettlementScratch));
+    }
+
     let market_key = *accounts[0].address();
-    let scratch_key = *accounts[1].address();
+    let trader_key = accounts[1].address().to_bytes();
     let seat_le = seat_index.to_le_bytes();
-    let (expected_scratch, scratch_bump) =
-        Address::find_program_address(&[b"settlement", market_key.as_ref(), &seat_le], program_id);
-    if expected_scratch != scratch_key {
-        return Err(custom(StockStreamError::InvalidInstruction));
+    let (expected_scratch, scratch_bump) = Address::find_program_address(
+        &[
+            crate::scratch::SETTLEMENT_SEED,
+            market_key.as_ref(),
+            &seat_le,
+        ],
+        program_id,
+    );
+    if expected_scratch != *accounts[2].address() {
+        return Err(custom(StockStreamError::InvalidSettlementScratch));
     }
-    // Verify the seat is owned by the trader (accounts[3]).
-    if accounts[3].address().to_bytes() != accounts[2].address().to_bytes() {
-        // The trader (accounts[3]) must match the payer for the seat they claim.
+
+    // Exact market + exact seat, reusing the same authoritative on-chain
+    // check `initialize_settlement_scratch` already relies on: the seat's
+    // own `trader` field, decoded from the market account itself, not the
+    // caller's unverified say-so.
+    let market = handlers::market_data(&mut accounts[0], program_id)?;
+    handlers::initialized_header(market)?;
+    if handlers::seat_at(market, seat_index as usize)?.trader != trader_key {
+        return Err(custom(StockStreamError::InvalidSeat));
     }
 
     let bump_slice = [scratch_bump];
     let scratch_seeds = [
-        pinocchio::cpi::Seed::from(b"settlement"),
+        pinocchio::cpi::Seed::from(crate::scratch::SETTLEMENT_SEED),
         pinocchio::cpi::Seed::from(market_key.as_ref()),
         pinocchio::cpi::Seed::from(&seat_le),
         pinocchio::cpi::Seed::from(&bump_slice),
@@ -973,11 +1015,18 @@ pub fn create_scratch_account(
     let scratch_signer = pinocchio::cpi::Signer::from(&scratch_seeds);
 
     pinocchio_system::instructions::CreateAccount {
-        from: &accounts[2],
-        to: &accounts[1],
+        from: &accounts[3],
+        to: &accounts[2],
         lamports: Rent::get()?.try_minimum_balance(crate::scratch::SETTLEMENT_SCRATCH_LEN)?,
         space: crate::scratch::SETTLEMENT_SCRATCH_LEN as u64,
         owner: program_id,
     }
-    .invoke_signed(core::slice::from_ref(&scratch_signer))
+    .invoke_signed(core::slice::from_ref(&scratch_signer))?;
+
+    // SAFETY: this instruction just created this exact account via the
+    // CPI above -- no other borrow of it exists anywhere in this call.
+    let scratch_data = unsafe { accounts[2].borrow_unchecked_mut() };
+    let mut view = crate::scratch::SettlementScratchView::new(scratch_data)?;
+    view.initialize(market_key.to_bytes(), trader_key, seat_index);
+    Ok(())
 }

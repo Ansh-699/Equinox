@@ -115,7 +115,7 @@ pub(crate) fn configure_market_oracle(
     write_header(data, &header)
 }
 
-fn signer(account: &AccountView) -> ProgramResult {
+pub(crate) fn signer(account: &AccountView) -> ProgramResult {
     if account.is_signer() {
         Ok(())
     } else {
@@ -287,7 +287,7 @@ fn consume_session_action(
     session::write_session(bytes, &trading_session)
 }
 
-fn seat_at(data: &[u8], index: usize) -> Result<TraderSeat, ProgramError> {
+pub(crate) fn seat_at(data: &[u8], index: usize) -> Result<TraderSeat, ProgramError> {
     if index >= MAX_TRADER_SEATS {
         return Err(custom(StockStreamError::InvalidSeat));
     }
