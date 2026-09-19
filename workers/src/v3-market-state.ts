@@ -15,6 +15,7 @@ export const V3_BOOK_PAGES_PER_SIDE = 4;
 export const V3_SEATS_PER_SHARD = 32;
 export const V3_EVENTS_PER_SHARD = 32;
 export const V3_NODE_SIZE = 88;
+export const V3_SEAT_SIZE = 256;
 
 const base58 = getBase58Decoder();
 const text = new TextDecoder();
@@ -120,10 +121,31 @@ export function decodeV3BookPage(bytes: Uint8Array): V3BookPageState | null {
   };
 }
 
-export interface V3SeatShardState { shard: number; core: string; seats: Uint8Array; }
+export interface V3SeatPositionState {
+  shard: number; slot: number; trader: string; availableCollateral: bigint; reservedMargin: bigint;
+  basePosition: bigint; quoteEntryValue: bigint; realizedPnl: bigint; openBidExposure: bigint;
+  openAskExposure: bigint; openOrderCount: number; liquidationState: number; sequence: bigint;
+}
+function signed128(view: DataView, offset: number): bigint {
+  const value = view.getBigUint64(offset, true) | (view.getBigUint64(offset + 8, true) << 64n);
+  return value >= (1n << 127n) ? value - (1n << 128n) : value;
+}
+function decodeSeat(bytes: Uint8Array, shard: number, slot: number): V3SeatPositionState | null {
+  if (bytes.length !== V3_SEAT_SIZE || bytes[0] === 0) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return {
+    shard, slot, trader: address(bytes, 1), availableCollateral: signed128(view, 40), reservedMargin: signed128(view, 56),
+    basePosition: signed128(view, 72), quoteEntryValue: signed128(view, 88), realizedPnl: signed128(view, 104),
+    openBidExposure: signed128(view, 136), openAskExposure: signed128(view, 152), openOrderCount: view.getUint32(168, true),
+    liquidationState: bytes[172], sequence: view.getBigUint64(176, true),
+  };
+}
+export interface V3SeatShardState { shard: number; core: string; seats: Uint8Array; positions: readonly V3SeatPositionState[]; }
 export function decodeV3SeatShard(bytes: Uint8Array): V3SeatShardState | null {
   if (!validVersion(bytes, "STKST003", V3_SEAT_SHARD_SIZE) || bytes[10] >= 4 || bytes[11] !== 0) return null;
-  return { shard: bytes[10], core: address(bytes, 12), seats: bytes.slice(44) };
+  const seats = bytes.slice(44);
+  const positions = Array.from({ length: V3_SEATS_PER_SHARD }, (_, index) => decodeSeat(seats.slice(index * V3_SEAT_SIZE, (index + 1) * V3_SEAT_SIZE), bytes[10], index)).filter((seat): seat is V3SeatPositionState => seat !== null);
+  return { shard: bytes[10], core: address(bytes, 12), seats, positions };
 }
 
 export interface V3EventRecord { kind: number; sequence: bigint; timestamp: bigint; payload: Uint8Array; }
@@ -153,6 +175,7 @@ export interface V3MarketAggregate {
   completeExecutionState: boolean;
   withdrawalReady: boolean;
   orderBook: { bids: readonly V3BookNodeState[]; asks: readonly V3BookNodeState[] };
+  positions: readonly V3SeatPositionState[];
 }
 
 /** Rejects duplicates, cross-market substitution, malformed bytes, and
@@ -190,6 +213,7 @@ export function aggregateV3Market(
       bids: leaves.filter((node) => node.side === 0).sort((left, right) => left.key < right.key ? -1 : left.key > right.key ? 1 : 0),
       asks: leaves.filter((node) => node.side === 1).sort((left, right) => left.key < right.key ? -1 : left.key > right.key ? 1 : 0),
     },
+    positions: seatShards.flatMap((shard) => shard.positions),
   };
 }
 

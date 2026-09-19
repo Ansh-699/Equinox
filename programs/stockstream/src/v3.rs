@@ -56,6 +56,19 @@ pub const V3_SEAT_SHARDS: usize = 4;
 pub const V3_EVENTS_PER_SHARD: usize = 32;
 pub const V3_EVENT_SHARDS: usize = 4;
 pub const V3_EVENT_RECORD_SIZE: usize = crate::events::EVENT_SIZE;
+pub const V3_SEAT_OCCUPANCY_OFFSET: usize = 0;
+pub const V3_SEAT_TRADER_OFFSET: usize = 1;
+pub const V3_SEAT_AVAILABLE_COLLATERAL_OFFSET: usize = 40;
+pub const V3_SEAT_RESERVED_MARGIN_OFFSET: usize = 56;
+pub const V3_SEAT_BASE_POSITION_OFFSET: usize = 72;
+pub const V3_SEAT_QUOTE_ENTRY_VALUE_OFFSET: usize = 88;
+pub const V3_SEAT_REALIZED_PNL_OFFSET: usize = 104;
+pub const V3_SEAT_LAST_FUNDING_OFFSET: usize = 120;
+pub const V3_SEAT_OPEN_BID_EXPOSURE_OFFSET: usize = 136;
+pub const V3_SEAT_OPEN_ASK_EXPOSURE_OFFSET: usize = 152;
+pub const V3_SEAT_OPEN_ORDER_COUNT_OFFSET: usize = 168;
+pub const V3_SEAT_LIQUIDATION_STATE_OFFSET: usize = 172;
+pub const V3_SEAT_SEQUENCE_OFFSET: usize = 176;
 /// One fully hot V3 execution domain: core, 8 pages, 4 seat shards, and 4
 /// event shards. Vaults remain outside this bundle on L1 by design.
 pub const V3_EXECUTION_BUNDLE_LEN: usize = 1 + 8 + V3_SEAT_SHARDS + V3_EVENT_SHARDS;
@@ -188,6 +201,23 @@ const _: [(); 4_096] = [(); V3_MARKET_CORE_SIZE];
 const _: [(); 22_592] = [(); V3_BOOK_PAGE_SIZE];
 const _: [(); 8_236] = [(); V3_SEAT_SHARD_SIZE];
 const _: [(); 3_244] = [(); V3_EVENT_SHARD_SIZE];
+
+#[cfg(test)]
+const _: () = {
+    assert!(core::mem::offset_of!(TraderSeat, occupancy) == V3_SEAT_OCCUPANCY_OFFSET);
+    assert!(core::mem::offset_of!(TraderSeat, trader) == V3_SEAT_TRADER_OFFSET);
+    assert!(core::mem::offset_of!(TraderSeat, available_collateral) == V3_SEAT_AVAILABLE_COLLATERAL_OFFSET);
+    assert!(core::mem::offset_of!(TraderSeat, reserved_margin) == V3_SEAT_RESERVED_MARGIN_OFFSET);
+    assert!(core::mem::offset_of!(TraderSeat, base_position) == V3_SEAT_BASE_POSITION_OFFSET);
+    assert!(core::mem::offset_of!(TraderSeat, quote_entry_value) == V3_SEAT_QUOTE_ENTRY_VALUE_OFFSET);
+    assert!(core::mem::offset_of!(TraderSeat, realized_pnl) == V3_SEAT_REALIZED_PNL_OFFSET);
+    assert!(core::mem::offset_of!(TraderSeat, last_funding_accumulator) == V3_SEAT_LAST_FUNDING_OFFSET);
+    assert!(core::mem::offset_of!(TraderSeat, open_bid_exposure) == V3_SEAT_OPEN_BID_EXPOSURE_OFFSET);
+    assert!(core::mem::offset_of!(TraderSeat, open_ask_exposure) == V3_SEAT_OPEN_ASK_EXPOSURE_OFFSET);
+    assert!(core::mem::offset_of!(TraderSeat, open_order_count) == V3_SEAT_OPEN_ORDER_COUNT_OFFSET);
+    assert!(core::mem::offset_of!(TraderSeat, liquidation_state) == V3_SEAT_LIQUIDATION_STATE_OFFSET);
+    assert!(core::mem::offset_of!(TraderSeat, sequence) == V3_SEAT_SEQUENCE_OFFSET);
+};
 
 /// Every account that may be delegated must satisfy this bound before it is
 /// created. This is a layout gate, not an attempt to infer a runtime error.

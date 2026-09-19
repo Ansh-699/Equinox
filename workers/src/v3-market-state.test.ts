@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getBase58Decoder } from "@solana/kit";
-import { aggregateV3Market, decodeV3BookPage, decodeV3Core, decodeV3EventShard, V3_BOOK_PAGE_SIZE, V3_CORE_SIZE, V3_EVENT_SHARD_SIZE, V3_SEAT_SHARD_SIZE } from "./v3-market-state";
+import { aggregateV3Market, decodeV3BookPage, decodeV3Core, decodeV3EventShard, decodeV3SeatShard, V3_BOOK_PAGE_SIZE, V3_CORE_SIZE, V3_EVENT_SHARD_SIZE, V3_SEAT_SHARD_SIZE } from "./v3-market-state";
 
 const decoder = getBase58Decoder();
 const coreAddress = decoder.decode(new Uint8Array(32).fill(7));
@@ -48,5 +48,10 @@ describe("V3 worker shard aggregation", () => {
     new DataView(bytes.buffer).setBigUint64(88, 77n, true);
     bytes.fill(9, 96, 144);
     expect(decodeV3EventShard(bytes)?.records[0]).toMatchObject({ kind: 200, sequence: 32n, timestamp: 77n });
+  });
+  it("decodes occupied V3 seat positions with Rust ABI offsets", () => {
+    const bytes = shard(false, 2); const base = 44; bytes[base] = 1; bytes.fill(8, base + 1, base + 33);
+    const view = new DataView(bytes.buffer); view.setBigUint64(base + 72, 5n, true); view.setUint32(base + 168, 2, true);
+    expect(decodeV3SeatShard(bytes)?.positions[0]).toMatchObject({ shard: 2, slot: 0, basePosition: 5n, openOrderCount: 2 });
   });
 });
