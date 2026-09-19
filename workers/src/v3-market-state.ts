@@ -80,7 +80,8 @@ export function decodeV3BookPage(bytes: Uint8Array): V3BookPageState | null {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const nodeCount = view.getUint32(60, true);
   const freeCount = view.getUint32(56, true);
-  if (nodeCount > V3_BOOK_NODES_PER_PAGE || freeCount > V3_BOOK_NODES_PER_PAGE) return null;
+  const limit = bytes[11] === 0 ? V3_BOOK_PAGES_PER_SIDE * V3_BOOK_NODES_PER_PAGE : V3_BOOK_NODES_PER_PAGE;
+  if (nodeCount > limit || freeCount > limit) return null;
   return {
     side: bytes[10] as 0 | 1,
     page: bytes[11], core: address(bytes, 12),

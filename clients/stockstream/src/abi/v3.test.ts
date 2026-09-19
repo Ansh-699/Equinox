@@ -41,4 +41,13 @@ describe("V3 sharded ABI", () => {
     expect(decodeV3BookPage(page)).toMatchObject({ side: 1, page: 3, nodeCount: 0 });
     expect(() => decodeV3MarketCore(new Uint8Array(V3_MARKET_CORE_SIZE))).toThrow(RangeError);
   });
+
+  it("allows global metadata on page zero but bounds other pages locally", () => {
+    const page = new Uint8Array(V3_BOOK_PAGE_SIZE);
+    page.set(Buffer.from("STKBK003")); new DataView(page.buffer).setUint16(8, 3, true); page[10] = 0; page[11] = 0;
+    new DataView(page.buffer).setUint32(60, V3_BOOK_SLOTS_PER_SIDE, true);
+    expect(decodeV3BookPage(page)?.nodeCount).toBe(V3_BOOK_SLOTS_PER_SIDE);
+    page[11] = 1;
+    expect(() => decodeV3BookPage(page)).toThrow(RangeError);
+  });
 });

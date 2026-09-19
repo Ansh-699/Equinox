@@ -71,6 +71,7 @@ export function decodeV3BookPage(bytes: Uint8Array): V3BookPageView {
   if (!versioned(bytes, "STKBK003", V3_BOOK_PAGE_SIZE) || bytes[10] > 1 || bytes[11] >= V3_BOOK_PAGES_PER_SIDE) throw new RangeError("Invalid V3 book page");
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const freeCount = view.getUint32(56, true); const nodeCount = view.getUint32(60, true);
-  if (freeCount > V3_BOOK_NODES_PER_PAGE || nodeCount > V3_BOOK_NODES_PER_PAGE) throw new RangeError("Invalid V3 book page metadata");
+  const limit = bytes[11] === 0 ? V3_BOOK_SLOTS_PER_SIDE : V3_BOOK_NODES_PER_PAGE;
+  if (freeCount > limit || nodeCount > limit) throw new RangeError("Invalid V3 book page metadata");
   return { side: bytes[10] as 0 | 1, page: bytes[11], market: key(bytes, 12), fixedRoot: view.getUint32(44, true), peggedRoot: view.getUint32(48, true), freeHead: view.getUint32(52, true), freeCount, nodeCount, nodes: bytes.slice(64) };
 }

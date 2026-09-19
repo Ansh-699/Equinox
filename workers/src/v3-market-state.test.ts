@@ -23,6 +23,10 @@ describe("V3 worker shard aggregation", () => {
     expect(decodeV3Core(core())?.delegationStatus).toBe(3);
     expect(decodeV3BookPage(page(1, 3))).toMatchObject({ side: 1, page: 3, core: coreAddress });
     expect(decodeV3Core(new Uint8Array(V3_CORE_SIZE))).toBeNull();
+    const globalPage = page(0, 0); new DataView(globalPage.buffer).setUint32(60, 1_024, true);
+    expect(decodeV3BookPage(globalPage)?.nodeCount).toBe(1_024);
+    const localPage = page(0, 1); new DataView(localPage.buffer).setUint32(60, 257, true);
+    expect(decodeV3BookPage(localPage)).toBeNull();
   });
   it("requires every distinct shard before declaring withdrawal ready", () => {
     const books = Array.from({ length: 8 }, (_, value) => page(Math.floor(value / 4), value % 4));
