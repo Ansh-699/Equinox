@@ -64,7 +64,7 @@ export interface V3CreationAccounts { parent: AddressInput; target: AddressInput
 export type V3AccountKind = "core" | "book-page" | "seat-shard" | "event-shard";
 export interface V3InitializationAccounts { exchange: AddressInput; instrument: AddressInput; core: AddressInput; authority: AddressInput; }
 export interface V3DelegationAccounts extends V3CreationAccounts { authority: AddressInput; }
-export interface V3SeatAccounts { core: AddressInput; seatShards: readonly AddressInput[]; trader: AddressInput; }
+export interface V3SeatAccounts { core: AddressInput; seatShards: readonly AddressInput[]; eventShards: readonly AddressInput[]; trader: AddressInput; }
 
 function publicKey(value: AddressInput): PublicKey {
   if (value instanceof PublicKey) return value;
@@ -785,21 +785,27 @@ export function delegateV3Account(accounts: V3DelegationAccounts, kind: V3Accoun
 export function createV3TraderSeat(accounts: V3SeatAccounts, seatIndex: number): TransactionInstruction {
   if (!Number.isInteger(seatIndex) || seatIndex < 0 || seatIndex >= 128) throw new RangeError("invalid V3 seat index");
   if (accounts.seatShards.length !== 4) throw new RangeError("exactly four V3 seat shards are required");
+  if (accounts.eventShards.length !== 4) throw new RangeError("exactly four V3 event shards are required");
   const core = publicKey(accounts.core);
   const shards = accounts.seatShards.map(publicKey);
+  const events = accounts.eventShards.map(publicKey);
   for (let index = 0; index < 4; index += 1) if (!shards[index].equals(deriveSeatShardV3(core, index))) throw new RangeError("seat shard is not the derived V3 PDA");
+  for (let index = 0; index < 4; index += 1) if (!events[index].equals(deriveEventShardV3(core, index))) throw new RangeError("event shard is not the derived V3 PDA");
   const data = new Uint8Array(3); data[0] = STOCKSTREAM_INSTRUCTION.createV3TraderSeat; new DataView(data.buffer).setUint16(1, seatIndex, true);
-  return instruction(data, [accountMeta(core, false, true), ...shards.map((shard) => accountMeta(shard, false, true)), accountMeta(accounts.trader, true, false)]);
+  return instruction(data, [accountMeta(core, false, true), ...shards.map((shard) => accountMeta(shard, false, true)), ...events.map((event) => accountMeta(event, false, true)), accountMeta(accounts.trader, true, false)]);
 }
 /** Closes an empty V3 trader seat owned by `trader`. */
 export function closeV3TraderSeat(accounts: V3SeatAccounts, seatIndex: number): TransactionInstruction {
   if (!Number.isInteger(seatIndex) || seatIndex < 0 || seatIndex >= 128) throw new RangeError("invalid V3 seat index");
   if (accounts.seatShards.length !== 4) throw new RangeError("exactly four V3 seat shards are required");
+  if (accounts.eventShards.length !== 4) throw new RangeError("exactly four V3 event shards are required");
   const core = publicKey(accounts.core);
   const shards = accounts.seatShards.map(publicKey);
+  const events = accounts.eventShards.map(publicKey);
   for (let index = 0; index < 4; index += 1) if (!shards[index].equals(deriveSeatShardV3(core, index))) throw new RangeError("seat shard is not the derived V3 PDA");
+  for (let index = 0; index < 4; index += 1) if (!events[index].equals(deriveEventShardV3(core, index))) throw new RangeError("event shard is not the derived V3 PDA");
   const data = new Uint8Array(3); data[0] = STOCKSTREAM_INSTRUCTION.closeV3TraderSeat; new DataView(data.buffer).setUint16(1, seatIndex, true);
-  return instruction(data, [accountMeta(core, false, true), ...shards.map((shard) => accountMeta(shard, false, true)), accountMeta(accounts.trader, true, false)]);
+  return instruction(data, [accountMeta(core, false, true), ...shards.map((shard) => accountMeta(shard, false, true)), ...events.map((event) => accountMeta(event, false, true)), accountMeta(accounts.trader, true, false)]);
 }
 export function updateStockInstrument(accounts: InstrumentAccounts, instrumentId: Uint8Array, pythFeedId: number, oracleChannel: number, priceExponent: number): TransactionInstruction { if (!Number.isInteger(pythFeedId) || pythFeedId <= 0 || pythFeedId > 0xffff_ffff) throw new RangeError("pythFeedId must be a non-zero u32"); if (!Number.isInteger(oracleChannel) || oracleChannel < 1 || oracleChannel > 4) throw new RangeError("oracleChannel must be between 1 and 4"); const data = new Uint8Array(42); const view = new DataView(data.buffer); data[0] = STOCKSTREAM_INSTRUCTION.updateStockInstrument; data.set(instrumentId, 1); view.setUint32(33, pythFeedId, true); data[37] = oracleChannel; view.setInt32(38, priceExponent, true); return instruction(data, [accountMeta(accounts.exchange, false, false), accountMeta(accounts.instrument, false, true), accountMeta(accounts.authority, true, false)]); }
 export function suspendStockInstrument(accounts: InstrumentAccounts, instrumentId: Uint8Array): TransactionInstruction { return identifierInstruction(STOCKSTREAM_INSTRUCTION.suspendStockInstrument, instrumentId, [accountMeta(accounts.exchange, false, false), accountMeta(accounts.instrument, false, true), accountMeta(accounts.authority, true, false)]); }
