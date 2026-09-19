@@ -310,9 +310,9 @@ function hotCluster(state) {
  * `null` through the generic alias but returned real, populated data
  * through the market's own delegation record `fqdn`. Every ER call after
  * delegation must therefore target that specific fqdn, resolved once via
- * `useErEndpointFor` and cached for the rest of the process. */
+ * `resolveErEndpointFor` and cached for the rest of the process. */
 let ER_ENDPOINT = ROUTER;
-async function useErEndpointFor(market) {
+async function resolveErEndpointFor(market) {
   const res = await fetch(ROUTER, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getDelegationStatus", params: [market] }) });
   const body = await res.json().catch(() => null);
   const fqdn = body?.result?.fqdn;
@@ -482,7 +482,7 @@ async function commitCluster(cluster, clusterAddresses, sequence) {
 async function stageEr() {
   const state = load();
   if (!state.delegated) throw new Error("delegate first");
-  await useErEndpointFor(state.market);
+  await resolveErEndpointFor(state.market);
   const cluster = hotCluster(state);
   // The whole hot cluster, not just market+sessions: the ER's account-aware
   // blockhash must reflect every account this stage's transactions will
@@ -667,7 +667,7 @@ async function stageEr() {
 
 async function stageUndelegate() {
   const state = load();
-  await useErEndpointFor(state.market);
+  await resolveErEndpointFor(state.market);
   const cluster = hotCluster(state);
   const clusterAddresses = [cluster.market, cluster.scratch0, cluster.scratch1, cluster.sessionA, cluster.sessionB].map((a) => a.toBase58());
   const sequence = (state.commitSequence ?? 1) + 1;
