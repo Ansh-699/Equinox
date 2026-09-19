@@ -18,7 +18,16 @@ const endpoints = process.argv.includes("--local")
         "wss://pyth-lazer-1.dourolabs.app/v1/stream",
         "wss://pyth-lazer-2.dourolabs.app/v1/stream",
       ];
-const feedId = Number(process.env.PYTH_PRO_FEED_ID ?? "33");
+// Lazer subscription IDs are provider configuration, not Hermes feed hashes
+// and not a safe hard-coded default.  In particular, the former fallback
+// (33) is a crypto spot feed, so it could never prove the required AAPL/USD
+// equity path.  Require the entitled, catalog-verified numeric Lazer ID.
+const rawFeedId = process.env.PYTH_PRO_FEED_ID;
+if (!rawFeedId || !/^\d+$/.test(rawFeedId)) {
+  console.error("PYTH_PRO_FEED_ID must be the catalog-verified numeric Lazer ID for Equity.US.AAPL/USD");
+  process.exit(1);
+}
+const feedId = Number(rawFeedId);
 console.log(`connecting to ${endpoints.length} endpoints, feed ${feedId}...`);
 
 const sockets = [];

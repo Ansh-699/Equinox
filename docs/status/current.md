@@ -21,10 +21,10 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 | E2E auth-bypass parity (Worker <-> Next.js) | Complete | commit `822ec18`; double-gated, Miniflare-tested, confirmed inert on the live deployment |
 | Devnet lifecycle script correctness | Complete | commit `25a1b0e` + follow-ups; matches the corrected ABI everywhere |
 | MagicBlock delegate (market + 4-account hot cluster) | Complete, live | market `9d75hK8GyfqajxcijLa35bEh8SYUtobqi6eSdtF42RuS` fully delegated: L1 owner `DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh`, router `isDelegated: true`; 2 real protocol bugs found and fixed live (buffer-growth cap, commit-CPI off-by-one) |
-| MagicBlock commit / undelegate / restore / withdraw | Blocked | `commit_market` reaches a MagicBlock-validator-side rejection ("invalid account data for instruction", reproducible even market-only) not yet root-caused from this side; downstream stages unexecuted live |
+| MagicBlock commit / undelegate / restore / withdraw | Blocked (root-caused) | Read-only live ER simulation rejects the 222,752-byte market itself as "too large to be committed". Account ordering, flags, owners, IDs, and CPI bytes are accepted first; the single-PDA market layout cannot fit the validator's base-layer commit path. See `docs/status/magicblock-commit-simulation-20260919.json` and `scripts/magicblock-commit-repro.mjs`. |
 | Session-signed trading (place/cancel/replace/cross) | Blocked | requires `header.oracle_valid`, which only a real Pyth Lazer-verified price can set; no Lazer API key in this environment (confirmed: anonymous WSS connection to the documented endpoint returns HTTP 403 at handshake) |
-| Pyth AAPL/USD live integration | Blocked | same credential gap as above; on-chain `consume_oracle_update` has no admin/test bypass by design |
-| Privy live verification | Blocked | no real Privy app credentials in this environment; the Worker's own chain (wallet-linkage, session/seat/nonce checks) is unit- and live-auth-gate-tested, just not against real Privy |
+| Pyth AAPL/USD live integration | Blocked (credential entitlement/configuration) | an installed test key authenticates but all three endpoints reject the inherited hard-coded Lazer ID 33 as an unentitled crypto-spot feed. `scripts/pyth-live-smoke.mjs` now refuses any default and requires the catalog-verified, entitled numeric Lazer ID for `Equity.US.AAPL/USD`; on-chain `consume_oracle_update` has no admin/test bypass by design. |
+| Privy live verification | Blocked (user/relayer prerequisites) | local server-only app credentials are configured, but no real Privy access token for a wallet linked to either preserved Devnet trader is available, and the deployed Worker lacks both Privy and relayer-key secrets. The wallet-linkage, session/seat/nonce checks remain unit- and live-auth-gate-tested; live success, nonce consumption, and replay rejection are not claimed. |
 | Frontend fixture E2E (Playwright) | Complete | 50/50 pass; 2 real bugs found and fixed (stale mock-relayer auth contract, a WS-connection race in oracle-safety.spec.ts) |
 | Frontend production build | Complete | `npm run build` exit 0; `next start` serves real HTTP 200; production smoke suite 6/6 |
 | Opt-in Devnet browser E2E | Not built | no dedicated Playwright suite exists yet; a real trading flow through it would hit the same Pyth/Privy credential gaps as the CLI lifecycle script |
@@ -44,16 +44,20 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 
 ## Known external blockers (not fixable from this codebase alone)
 
-1. **Pyth Lazer API key** -- required for any real oracle price, which
-   gates every session-signed trade and the market's own "Open" trading
-   path. `PYTH_PRO_API_KEY` is unset everywhere in this environment;
-   anonymous access to the documented Lazer WSS endpoints is refused
-   (HTTP 403 at handshake, confirmed directly).
-2. **Real Privy app credentials** -- `PRIVY_APP_ID`/`PRIVY_APP_SECRET` are
-   unset; the relayer's Privy-dependent identity check is verified by unit
-   tests and by the deployed Worker correctly returning
-   `503 privy_unconfigured` rather than falsely accepting, but the real
-   round trip is untested.
+1. **Pyth Lazer equity entitlement and numeric feed ID** -- required for
+   any real oracle price, which gates every session-signed trade and the
+   market's own "Open" trading path. A local server-only test key is
+   installed but does not entitle the inherited feed ID 33 (the provider
+   reports crypto-spot); the authorized numeric Lazer ID for
+   `Equity.US.AAPL/USD` has not been supplied. The public Hermes catalog
+   identifies the required feed hash and its `fixed_rate@50ms` minimum,
+   but that hash is not a Lazer subscription ID.
+2. **Privy-linked test wallet and deployed relayer configuration** -- local
+   server-only app credentials are configured, but a real Privy access token
+   for a linked wallet matching a preserved trader is not present. The
+   deployed Worker has neither Privy secrets nor a relayer key, so it
+   correctly remains unable to sponsor a live request; the real round trip
+   is untested.
 3. **MagicBlock `commit_market` live rejection** -- after two real,
    confirmed, and fixed protocol bugs (the delegation buffer-growth cap
    and the commit-CPI account off-by-one), a further rejection
@@ -76,3 +80,6 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
   session).
 - Live Worker: `https://stockstream-market-api.ansht.workers.dev`
   (D1 database `1dced396-c76a-4147-8a4f-70465e9aff55`).
+- `docs/status/magicblock-commit-simulation-20260919.json` -- sanitized,
+  read-only ER simulation; the full regenerable output is
+  `/tmp/opencode/magicblock-commit-simulation.json`.
