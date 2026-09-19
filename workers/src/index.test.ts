@@ -151,3 +151,35 @@ it('runKeeperOrchestrationTick discovers a registered market and produces a summ
   // -- one broken market must never throw out of the scheduled tick.
   expect(result.summary?.discoveryErrors.some((e) => e.marketPda === 'orch-market-pda')).toBe(true);
 });
+
+it('e2e test mode bypasses Privy verification for the exact sentinel token, but never for a real-looking one', async () => {
+  const relaySession = (bearer: string) => new Request('https://stockstream.test/v1/relay/session', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${bearer}`,
+      'x-stockstream-relayer-service-token': 'test-only-relayer-service-token',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      transactionBase64: 'not-a-real-transaction',
+      sessionSignerAddress: '11111111111111111111111111111111111111111',
+      ownerWallet: '11111111111111111111111111111111111111111',
+      expectedMarket: '11111111111111111111111111111111111111111',
+    }),
+  });
+
+  // The sentinel token skips Privy entirely and reaches real shape
+  // validation, which then rejects the garbage transaction -- proof the
+  // bypass only ever substitutes the identity check, never the rest of
+  // the authoritative chain.
+  const bypassed = await SELF.fetch(relaySession('e2e-test-token'));
+  expect(bypassed.status).toBe(400);
+  expect(await bypassed.json()).toEqual({ error: 'malformed transaction' });
+
+  // Any other bearer value (not the exact sentinel) must still require
+  // real Privy configuration, even with E2E_TEST_MODE=1 set -- the bypass
+  // is gated on the literal token match, not just the env flag.
+  const notBypassed = await SELF.fetch(relaySession('some-other-token'));
+  expect(notBypassed.status).toBe(503);
+  expect(await notBypassed.json()).toEqual({ error: 'privy_unconfigured' });
+});

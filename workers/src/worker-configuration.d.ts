@@ -19,6 +19,7 @@ interface __BaseEnv_Env {
 	MAGICBLOCK_RPC_URL?: string;
 	MAGICBLOCK_VALIDATOR?: string;
 	KEEPER_PUBLIC_KEY?: string;
+	E2E_TEST_MODE?: string;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {

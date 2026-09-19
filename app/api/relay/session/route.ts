@@ -39,13 +39,13 @@ import { E2E_TEST_TOKEN, isE2eTestModeServer, verifyE2eTestToken } from "@/lib/a
  * nonce it actually checks straight from the signed transaction bytes, so
  * trusting either as a client claim would have been meaningless.
  *
- * KNOWN GAP: in e2e test mode, `body.privyAccessToken` may be the
- * `E2E_TEST_TOKEN` sentinel (accepted above via `verifyE2eTestToken`), which
- * is forwarded to the Worker as-is; the Worker has no matching e2e bypass,
- * so a full session-relayed trade cannot yet succeed end-to-end under e2e
- * test mode. No current test exercises that path (existing coverage only
- * reaches the earlier cookie/CSRF rejection), so this is a documented
- * follow-up, not a regression.
+ * In e2e test mode, `body.privyAccessToken` may be the `E2E_TEST_TOKEN`
+ * sentinel (accepted above via `verifyE2eTestToken`) and is forwarded to
+ * the Worker as-is; the Worker has its own matching, equally double-gated
+ * bypass (`workers/src/index.ts`'s `e2eTestMode` check: an explicit
+ * `E2E_TEST_MODE=1` AND never in production AND the same fixed sentinel
+ * token), so a full session-relayed trade can succeed end-to-end under e2e
+ * test mode without either side ever touching real Privy credentials.
  */
 export async function POST(request: Request) {
   const cookieStore = await cookies();

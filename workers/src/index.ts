@@ -19,6 +19,15 @@ import { getBase58Decoder } from '@solana/kit';
 
 export { MarketStream };
 
+/** Must equal lib/auth/e2e-test-mode.ts::E2E_TEST_TOKEN exactly -- a fixed,
+ * public, non-secret string forwarded as-is by
+ * app/api/relay/session/route.ts when the Next.js side's own e2e bypass
+ * already accepted the request. Duplicated here (not imported) because the
+ * Worker and the Next.js app are separately deployed bundles; this proves
+ * nothing on its own without the E2E_TEST_MODE + non-production gate at
+ * its one call site. */
+const E2E_TEST_TOKEN = "e2e-test-token";
+
 const eventKinds = new Set<MarketEventKind>(["book", "fill", "funding", "health", "oracle"]);
 
 function json(data: unknown, status = 200): Response {
@@ -363,11 +372,17 @@ export default {
       }
       // Per-user Privy auth: a fresh access token for the specific wallet
       // asserted below, verified against that wallet's real linked accounts
-      // (never just the token's own claims).
+      // (never just the token's own claims). E2E_TEST_TOKEN is the exact
+      // sentinel app/api/relay/session/route.ts forwards as-is when the
+      // Next.js side's own e2e-test-mode bypass accepted the request
+      // (lib/auth/e2e-test-mode.ts) -- double-gated the same way that side
+      // gates it (an explicit flag AND never in production), so a stray
+      // flag left set can never open a real bypass in production.
       const authHeader = request.headers.get("authorization");
       if (!authHeader?.startsWith("Bearer ")) return json({ error: "unauthorized" }, 401);
       const privyToken = authHeader.slice(7);
-      if (!env.PRIVY_APP_ID || !env.PRIVY_APP_SECRET) return json({ error: "privy_unconfigured" }, 503);
+      const e2eTestMode = env.E2E_TEST_MODE === "1" && env.ENVIRONMENT !== "production" && privyToken === E2E_TEST_TOKEN;
+      if (!e2eTestMode && (!env.PRIVY_APP_ID || !env.PRIVY_APP_SECRET)) return json({ error: "privy_unconfigured" }, 503);
       const body = await request.json().catch(() => null) as {
         transactionBase64?: string;
         sessionSignerAddress?: string;
@@ -410,19 +425,27 @@ export default {
 
       // Per-user Privy auth (authoritative, fail-closed): the token must
       // verify AND the asserted wallet must be one Privy actually has
-      // linked to this identity.
-      const privyResult = await verifyPrivyToken(privyToken, env.PRIVY_APP_ID, body.ownerWallet, {
-        verify: async (token: string) => {
-          const { PrivyClient } = await import("@privy-io/node");
-          const client = new PrivyClient({ appId: env.PRIVY_APP_ID!, appSecret: env.PRIVY_APP_SECRET! });
-          const verified = await client.utils().auth().verifyAccessToken(token);
-          const user = await client.users()._get(verified.user_id);
-          const solanaWallets = (user.linked_accounts ?? [])
-            .filter((account): account is typeof account & { chain_type: "solana"; address: string } => "chain_type" in account && account.chain_type === "solana" && "address" in account)
-            .map((account) => account.address);
-          return { user_id: verified.user_id, app_id: verified.app_id, solanaWallets };
-        },
-      });
+      // linked to this identity. In e2e test mode, this is a fixed,
+      // non-secret synthetic identity that trivially "links" whatever
+      // wallet the request claims -- exactly as permissive as the Next.js
+      // side's own verifyE2eTestToken, and no more meaningful outside the
+      // gate above.
+      const privyResult = e2eTestMode
+        ? await verifyPrivyToken(privyToken, "e2e", body.ownerWallet, {
+            verify: async () => ({ user_id: "e2e-test-user", app_id: "e2e", solanaWallets: [body.ownerWallet!] }),
+          })
+        : await verifyPrivyToken(privyToken, env.PRIVY_APP_ID!, body.ownerWallet, {
+            verify: async (token: string) => {
+              const { PrivyClient } = await import("@privy-io/node");
+              const client = new PrivyClient({ appId: env.PRIVY_APP_ID!, appSecret: env.PRIVY_APP_SECRET! });
+              const verified = await client.utils().auth().verifyAccessToken(token);
+              const user = await client.users()._get(verified.user_id);
+              const solanaWallets = (user.linked_accounts ?? [])
+                .filter((account): account is typeof account & { chain_type: "solana"; address: string } => "chain_type" in account && account.chain_type === "solana" && "address" in account)
+                .map((account) => account.address);
+              return { user_id: verified.user_id, app_id: verified.app_id, solanaWallets };
+            },
+          });
       if ("error" in privyResult) return json({ error: privyResult.error }, 401);
 
       // Authoritative on-chain chain: market bytes, the real TradingSession
