@@ -50,6 +50,7 @@ export const STOCKSTREAM_INSTRUCTION = {
   createV3Account: 46,
   initializeV3Market: 47,
   delegateV3Account: 48,
+  createV3TraderSeat: 49,
 } as const;
 
 export const STOCKSTREAM_ACCOUNT_SIZE = 222_752;

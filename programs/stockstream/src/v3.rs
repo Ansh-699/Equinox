@@ -9,11 +9,17 @@
 //! keep all pages at 24,640 bytes: that is also comfortably below the
 //! vendored committor's exercised 50,000-byte buffered commit path.
 
-use core::mem::size_of;
+use core::{
+    mem::{size_of, MaybeUninit},
+    ptr,
+};
 
 use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
 
-use crate::{error::StockStreamError, state::DelegationStatus};
+use crate::{
+    error::StockStreamError,
+    state::{DelegationStatus, LiquidationState, TraderSeat, TRADER_SEAT_SIZE},
+};
 
 pub const V3_LAYOUT_VERSION: u16 = 3;
 pub const V3_COMMIT_ACCOUNT_HARD_MAX: usize = u16::MAX as usize;
@@ -51,6 +57,8 @@ pub const V3_EVENT_SHARDS: usize = 4;
 /// One fully hot V3 execution domain: core, 8 pages, 4 seat shards, and 4
 /// event shards. Vaults remain outside this bundle on L1 by design.
 pub const V3_EXECUTION_BUNDLE_LEN: usize = 1 + 8 + V3_SEAT_SHARDS + V3_EVENT_SHARDS;
+const V3_CORE_GLOBAL_EVENT_SEQUENCE_OFFSET: usize = 148;
+const V3_SHARD_HEADER_SIZE: usize = 44;
 
 /// Wire-stable account kinds for V3 creation and bundle validation. `BookPage`
 /// uses a flattened index (`side * 4 + page`) so callers cannot supply an
@@ -331,6 +339,138 @@ pub fn validate_execution_bundle(
         }
     }
     Ok(())
+}
+
+fn validate_active_core(program_id: &Address, core: &AccountView) -> Result<Address, ProgramError> {
+    if !core.owned_by(program_id) || !core.is_writable() {
+        return Err(bundle_error());
+    }
+    let bytes = unsafe { core.borrow_unchecked() };
+    if bytes.len() != V3_MARKET_CORE_SIZE
+        || bytes[0..8] != V3_MARKET_CORE_DISCRIMINATOR
+        || bytes[8..10] != V3_LAYOUT_VERSION.to_le_bytes()
+        || bytes[10] != 1
+        || bytes[V3_CORE_MODE_OFFSET] != 1
+        || bytes[V3_CORE_DELEGATION_STATUS_OFFSET] != DelegationStatus::NotDelegated as u8
+    {
+        return Err(bundle_error());
+    }
+    Ok(*core.address())
+}
+
+fn validate_seat_shard(
+    program_id: &Address,
+    account: &AccountView,
+    core: &Address,
+    index: u8,
+) -> ProgramResult {
+    if !account.owned_by(program_id)
+        || !account.is_writable()
+        || *account.address() != derive_seat_shard_v3(program_id, core, index)
+    {
+        return Err(bundle_error());
+    }
+    let bytes = unsafe { account.borrow_unchecked() };
+    if bytes.len() != V3_SEAT_SHARD_SIZE
+        || bytes[0..8] != V3_SEAT_SHARD_DISCRIMINATOR
+        || bytes[8..10] != V3_LAYOUT_VERSION.to_le_bytes()
+        || bytes[10] != index
+        || bytes[11] != 0
+        || bytes[12..44] != core.to_bytes()
+    {
+        return Err(bundle_error());
+    }
+    Ok(())
+}
+
+fn read_shard_seat(bytes: &[u8], slot: usize) -> Result<TraderSeat, ProgramError> {
+    if slot >= V3_SEATS_PER_SHARD {
+        return Err(bundle_error());
+    }
+    let start = V3_SHARD_HEADER_SIZE + slot * TRADER_SEAT_SIZE;
+    let end = start + TRADER_SEAT_SIZE;
+    if end > bytes.len() {
+        return Err(bundle_error());
+    }
+    let mut seat = MaybeUninit::<TraderSeat>::uninit();
+    unsafe {
+        ptr::copy_nonoverlapping(
+            bytes.as_ptr().add(start),
+            seat.as_mut_ptr().cast::<u8>(),
+            TRADER_SEAT_SIZE,
+        );
+        Ok(seat.assume_init())
+    }
+}
+
+fn write_shard_seat(bytes: &mut [u8], slot: usize, seat: &TraderSeat) -> ProgramResult {
+    if slot >= V3_SEATS_PER_SHARD {
+        return Err(bundle_error());
+    }
+    let start = V3_SHARD_HEADER_SIZE + slot * TRADER_SEAT_SIZE;
+    if start + TRADER_SEAT_SIZE > bytes.len() {
+        return Err(bundle_error());
+    }
+    unsafe {
+        ptr::copy_nonoverlapping(
+            seat as *const TraderSeat as *const u8,
+            bytes.as_mut_ptr().add(start),
+            TRADER_SEAT_SIZE,
+        );
+    }
+    Ok(())
+}
+
+/// Opcode 49. Accounts are `[core(write), seat_shard_0..3(write), trader(signer)]`.
+/// All shards are present to make the per-trader uniqueness invariant global
+/// across all 128 seats, rather than accidentally local to one shard.
+pub fn create_trader_seat(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    seat_index: u16,
+) -> ProgramResult {
+    if accounts.len() != 6 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    if !accounts[5].is_signer() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    let core_key = validate_active_core(program_id, &accounts[0])?;
+    for shard in 0..V3_SEAT_SHARDS {
+        validate_seat_shard(program_id, &accounts[1 + shard], &core_key, shard as u8)?;
+    }
+    let index = seat_index as usize;
+    if index >= V3_SEAT_SHARDS * V3_SEATS_PER_SHARD {
+        return Err(StockStreamError::InvalidSeat.into());
+    }
+    let trader = accounts[5].address().to_bytes();
+    for shard in 0..V3_SEAT_SHARDS {
+        let bytes = unsafe { accounts[1 + shard].borrow_unchecked() };
+        for slot in 0..V3_SEATS_PER_SHARD {
+            let seat = read_shard_seat(bytes, slot)?;
+            if !seat.is_empty() && seat.trader == trader {
+                return Err(StockStreamError::SeatOccupied.into());
+            }
+        }
+    }
+    let shard = index / V3_SEATS_PER_SHARD;
+    let slot = index % V3_SEATS_PER_SHARD;
+    let core_bytes = unsafe { accounts[0].borrow_unchecked() };
+    let sequence = u64::from_le_bytes(
+        core_bytes[V3_CORE_GLOBAL_EVENT_SEQUENCE_OFFSET..V3_CORE_GLOBAL_EVENT_SEQUENCE_OFFSET + 8]
+            .try_into()
+            .unwrap(),
+    );
+    let mut target = unsafe { accounts[1 + shard].borrow_unchecked_mut() };
+    if !read_shard_seat(&target, slot)?.is_empty() {
+        return Err(StockStreamError::SeatOccupied.into());
+    }
+    let mut seat = TraderSeat::empty();
+    seat.occupancy = 1;
+    seat.trader = trader;
+    seat.sequence = sequence;
+    seat.liquidation_state = LiquidationState::Healthy as u8;
+    write_shard_seat(&mut target, slot, &seat)
 }
 
 #[cfg(test)]

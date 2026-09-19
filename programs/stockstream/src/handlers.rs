@@ -440,6 +440,9 @@ pub fn dispatch(
             index,
             Address::new_from_array(validator),
         ),
+        StockStreamInstruction::CreateV3TraderSeat { seat_index } => {
+            crate::v3::create_trader_seat(program_id, accounts, seat_index)
+        }
         StockStreamInstruction::CommitMarket { sequence } => {
             crate::magicblock::commit_market(program_id, accounts, sequence)
         }
