@@ -162,6 +162,10 @@ fn v3_seat_creation_uses_derived_shard_and_prevents_cross_shard_duplicates() {
         accounts[10].view.clone(),
         accounts[11].view.clone(),
         accounts[12].view.clone(),
+        accounts[13].view.clone(),
+        accounts[14].view.clone(),
+        accounts[15].view.clone(),
+        accounts[16].view.clone(),
     ];
     call.push(trader.view.clone());
     create_trader_seat(&ID, &mut call, 32).expect("seat 32 lives in shard 1 slot 0");
