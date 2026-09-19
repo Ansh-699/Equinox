@@ -145,11 +145,15 @@ async function stageCustody() {
         (() => { const d = Buffer.alloc(9); d[0] = 7; d.writeBigUInt64LE(1_000_000n, 1); return new TransactionInstruction({ programId: TOKEN_PROGRAM, keys: [wr(mint), wr(ata.address), sg(authority.publicKey)], data: d }); })(),
       ], [authority]);
     }
+    const seatSlot = Keypair.generate();
+    await send(`seat-slot ${seat}`, [SystemProgram.createAccount({
+      fromPubkey: authority.publicKey, newAccountPubkey: seatSlot.publicKey, lamports: 5000, space: 0, programId: PROGRAM_ID,
+    })], [authority, seatSlot]).catch(() => {});
     const deposited = seat === 0 ? state.depositedA : state.depositedB;
     if (!deposited) {
       await send(`deposit ${seat}`, [new TransactionInstruction({
         programId: PROGRAM_ID,
-        keys: [wr(market), sg(trader.publicKey), wr(trader.publicKey), wr(ata.address), wr(vault), ro(mint), ro(TOKEN_PROGRAM)],
+        keys: [wr(market), sg(trader.publicKey), wr(seatSlot.publicKey), wr(ata.address), wr(vault), ro(mint), ro(TOKEN_PROGRAM)],
         data: (() => { const d = Buffer.alloc(11); d[0] = 10; d.writeUInt16LE(seat, 1); d.writeBigUInt64LE(BigInt(DEPOSIT), 3); return d; })(),
       })], [trader]);
       save(seat === 0 ? { depositedA: DEPOSIT } : { depositedB: DEPOSIT });
@@ -165,8 +169,12 @@ async function stageSessions() {
   for (const [trader, seat, name] of [[authority, 0, "A"], [traderB, 1, "B"]]) {
     const scratch = PublicKey.findProgramAddressSync([Buffer.from("settlement"), market.toBuffer(), Buffer.from([seat, 0])], PROGRAM_ID)[0];
     if (!(await CONNECTION.getAccountInfo(scratch))) {
-      const rent = await CONNECTION.getMinimumBalanceForRentExemption(SCRATCH_SIZE);
-      await send(`create scratch ${seat}`, [SystemProgram.createAccount({ fromPubkey: authority.publicKey, newAccountPubkey: scratch, lamports: rent, space: SCRATCH_SIZE, programId: PROGRAM_ID })], [authority]);
+      // Opcode 45: the program CPI-creates the scratch PDA (PDA cannot sign top-level).
+      await send(`create scratch ${seat}`, [new TransactionInstruction({
+        programId: PROGRAM_ID,
+        keys: [ro(market), wr(scratch), wsg(authority.publicKey), sg(trader.publicKey), ro(SystemProgram.programId)],
+        data: Buffer.from([45, seat, 0]),
+      })], [trader, authority]);
       await send(`init scratch ${seat}`, [new TransactionInstruction({ programId: PROGRAM_ID, keys: [wr(market), sg(trader.publicKey), wr(scratch)], data: Buffer.from([8, seat, 0]) })], [trader]);
     }
     const sessionSigner = traderKeypair(`sessionSigner${name}`);

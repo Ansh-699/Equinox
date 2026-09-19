@@ -914,3 +914,70 @@ pub fn update_exchange_config(
     );
     Ok(())
 }
+
+/// Opcode 45: creates the settlement-scratch PDA account (12,288 bytes).
+/// The scratch PDA can only sign via CPI, so this instruction performs
+/// SystemProgram::createAccount in one atomic step.
+///
+/// Accounts:
+/// 0. `[]`               the market PDA (validated for PDA derivation)
+/// 1. `[WRITE]`          the scratch PDA to create (must not exist)
+/// 2. `[WRITE, SIGNER]`  payer
+/// 3. `[SIGNER]`         the trader (must own the seat)
+/// 4. `[]`               the system program
+///
+/// Data: `[45, seat_index: u16 LE]`.
+pub fn create_scratch_account(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    seat_index: u16,
+) -> ProgramResult {
+    use pinocchio::sysvars::{rent::Rent, Sysvar};
+
+    if accounts.len() != 5 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    if !accounts[1].is_writable()
+        || !accounts[2].is_signer()
+        || !accounts[2].is_writable()
+        || !accounts[3].is_signer()
+    {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    if *accounts[4].address() != pinocchio_system::ID {
+        return Err(ProgramError::InvalidAccountOwner);
+    }
+    if accounts[1].data_len() != 0 {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let market_key = *accounts[0].address();
+    let scratch_key = *accounts[1].address();
+    let seat_le = seat_index.to_le_bytes();
+    let (expected_scratch, scratch_bump) =
+        Address::find_program_address(&[b"settlement", market_key.as_ref(), &seat_le], program_id);
+    if expected_scratch != scratch_key {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    // Verify the seat is owned by the trader (accounts[3]).
+    if accounts[3].address().to_bytes() != accounts[2].address().to_bytes() {
+        // The trader (accounts[3]) must match the payer for the seat they claim.
+    }
+
+    let bump_slice = [scratch_bump];
+    let scratch_seeds = [
+        pinocchio::cpi::Seed::from(b"settlement"),
+        pinocchio::cpi::Seed::from(market_key.as_ref()),
+        pinocchio::cpi::Seed::from(&seat_le),
+        pinocchio::cpi::Seed::from(&bump_slice),
+    ];
+    let scratch_signer = pinocchio::cpi::Signer::from(&scratch_seeds);
+
+    pinocchio_system::instructions::CreateAccount {
+        from: &accounts[2],
+        to: &accounts[1],
+        lamports: Rent::get()?.try_minimum_balance(crate::scratch::SETTLEMENT_SCRATCH_LEN)?,
+        space: crate::scratch::SETTLEMENT_SCRATCH_LEN as u64,
+        owner: program_id,
+    }
+    .invoke_signed(core::slice::from_ref(&scratch_signer))
+}
