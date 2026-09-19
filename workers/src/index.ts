@@ -15,6 +15,9 @@ import { LocalKeypairSigner } from './signer';
 import { relaySessionTransaction, validateSessionTransaction } from './session-relayer';
 import { ProtocolKeeperOrchestrator, type OrchestratorRunSummary } from './keeper-orchestrator';
 import { STOCKSTREAM_PROGRAM_ID } from '../../clients/stockstream/src/constants';
+import { deriveBookPageV3, deriveEventShardV3, deriveSeatShardV3 } from '../../clients/stockstream/src/abi/v3';
+import { PublicKey } from '@solana/web3.js';
+import { fetchAuthoritativeV3Market, type V3MarketAggregate } from './v3-market-state';
 import { getBase58Decoder } from '@solana/kit';
 
 export { MarketStream };
@@ -32,6 +35,37 @@ const eventKinds = new Set<MarketEventKind>(["book", "fill", "funding", "health"
 
 function json(data: unknown, status = 200): Response {
   return Response.json(data, { status, headers: { "Cache-Control": "no-store" } });
+}
+
+function v3JsonValue(value: unknown): unknown {
+  if (typeof value === 'bigint') return value.toString();
+  if (value instanceof Uint8Array) return Array.from(value);
+  if (Array.isArray(value)) return value.map(v3JsonValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, v3JsonValue(entry)]));
+  }
+  return value;
+}
+
+/** Fetches a complete V3 execution bundle from one authoritative domain.
+ * The caller supplies only the core PDA; every shard address is derived here
+ * so a public read cannot silently substitute a page from another market. */
+export async function fetchV3MarketSnapshot(
+  env: Env,
+  coreAddress: string,
+  domain: 'l1' | 'er' = 'l1',
+  fetcher: typeof fetch = fetch,
+): Promise<V3MarketAggregate | null> {
+  if (!env.SOLANA_RPC_URL) return null;
+  let core: PublicKey;
+  try { core = new PublicKey(coreAddress); } catch { return null; }
+  const transport = domain === 'er'
+    ? new MagicBlockErTransport(env.MAGICBLOCK_RPC_URL ?? env.SOLANA_RPC_URL, fetcher)
+    : new SolanaL1Transport(env.SOLANA_RPC_URL, fetcher);
+  const bookPages = Array.from({ length: 8 }, (_, flat) => deriveBookPageV3(core, Math.floor(flat / 4), flat % 4).toBase58());
+  const seatShards = Array.from({ length: 4 }, (_, shard) => deriveSeatShardV3(core, shard).toBase58());
+  const eventShards = Array.from({ length: 4 }, (_, shard) => deriveEventShardV3(core, shard).toBase58());
+  return fetchAuthoritativeV3Market(transport, { core: core.toBase58(), bookPages, seatShards, eventShards });
 }
 
 function isAuthorized(request: Request, env: Env): boolean {
@@ -347,6 +381,17 @@ export default {
     if (request.method === "GET" && url.pathname === "/v1/markets") {
       const result = await bindings(env).DB.prepare("SELECT symbol, instrument_id AS instrumentId, market_index AS marketIndex, market_pda AS marketPda, vault_pda AS vaultPda, status, oracle_feed_id AS oracleFeedId, session_policy AS sessionPolicy FROM markets ORDER BY market_index").all<MarketDefinition>();
       return json({ markets: result.results });
+    }
+
+    // V3 is an explicit shard bundle, not a V2 market-account fallback. The
+    // core PDA is the only path parameter; all book/seat/event PDAs are
+    // derived above and the aggregate is null when any authoritative shard
+    // is missing or malformed.
+    if (request.method === "GET" && parts[0] === "v1" && parts[1] === "v3" && parts[2] === "markets" && parts.length === 4) {
+      const domain = url.searchParams.get("domain") === "er" ? "er" : "l1";
+      const aggregate = await fetchV3MarketSnapshot(env, parts[3], domain);
+      if (!aggregate) return json({ error: "v3_market_unavailable", domain }, 404);
+      return json(v3JsonValue(aggregate));
     }
 
     if (request.method === "GET" && parts[0] === "v1" && parts[1] === "markets" && parts.length === 3) {
