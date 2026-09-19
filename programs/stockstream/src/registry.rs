@@ -234,32 +234,27 @@ pub fn create_instrument_account(
 /// performs fund + allocate + SPL initializeAccount3 in one atomic
 /// instruction, all CPIs signed by the vault PDA's own seeds.
 ///
-/// Accounts:
+/// Accounts (exactly 6 -- the account-ABI hardening pass removed one
+/// genuinely unused slot this handler never read; `token_program` stays and
+/// is now validated -- it is still required as a real account even though
+/// the CPI's `program_id` is the hardcoded canonical Tokenkeg constant,
+/// because a CPI's target program must be present among the *current*
+/// instruction's own accounts for the runtime to locate its executable
+/// data; leaving it unchecked was the original hardening gap, not the
+/// account's presence itself):
 /// 0. `[WRITE]`          the market PDA (validated + header configured)
 /// 1. `[WRITE]`          the vault PDA to create (must not exist)
-/// 2. `[WRITE, SIGNER]`  payer (funds the rent-exempt minimum)
+/// 2. `[WRITE, SIGNER]`  payer (funds the rent-exempt minimum; must equal
+///                        the market's own `market_authority`)
 /// 3. `[]`               the mint (SPL Token)
 /// 4. `[]`               the SPL Token program (Tokenkeg)
 /// 5. `[]`               the system program
 ///
 /// Data: `[tag(1)]` (no arguments beyond the market).
-/// Opcode 44: creates the vault SPL token account (165 bytes) at the
-/// vault PDA address, owned by the vault-authority PDA, then configures the
-/// market header.
-///
-/// Accounts:
-/// 0. `[WRITE]`          the market PDA (validated + header configured)
-/// 1. `[WRITE]`          the vault PDA to create (must not exist)
-/// 2. `[WRITE, SIGNER]`  payer (funds the rent-exempt minimum)
-/// 3. `[]`               the mint (SPL Token)
-/// 4. `[]`               the SPL Token program (Tokenkeg)
-/// 5. `[]`               the system program
-///
-/// Data: `[tag(1)]`.
 pub fn create_vault_account(program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
     use pinocchio::sysvars::{rent::Rent, Sysvar};
 
-    if accounts.len() != 7 {
+    if accounts.len() != 6 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
     if !accounts[0].is_writable()
@@ -269,7 +264,10 @@ pub fn create_vault_account(program_id: &Address, accounts: &mut [AccountView]) 
     {
         return Err(ProgramError::MissingRequiredSignature);
     }
-    if *accounts[6].address() != pinocchio_system::ID {
+    if *accounts[4].address() != crate::handlers::TOKEN_PROGRAM_ID {
+        return Err(ProgramError::InvalidAccountOwner);
+    }
+    if *accounts[5].address() != pinocchio_system::ID {
         return Err(ProgramError::InvalidAccountOwner);
     }
     if accounts[1].data_len() != 0 {
