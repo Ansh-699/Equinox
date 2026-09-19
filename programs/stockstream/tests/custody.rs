@@ -296,17 +296,9 @@ fn deposit_credits_the_seat_and_rejects_a_non_owner_and_insufficient_balance() {
         1_000,
         true,
     );
-    let unused_slot = account(
-        Address::new_from_array([71; 32]),
-        Address::default(),
-        0,
-        false,
-        false,
-    );
     let mut accounts = [
         f.market.view.clone(),
         f.trader.view.clone(),
-        unused_slot.view.clone(),
         source.view.clone(),
         f.vault.view.clone(),
         f.mint.view.clone(),
@@ -328,7 +320,6 @@ fn deposit_credits_the_seat_and_rejects_a_non_owner_and_insufficient_balance() {
     let mut accounts = [
         f.market.view.clone(),
         attacker.view.clone(),
-        unused_slot.view.clone(),
         source.view.clone(),
         f.vault.view.clone(),
         f.mint.view.clone(),
@@ -340,7 +331,6 @@ fn deposit_credits_the_seat_and_rejects_a_non_owner_and_insufficient_balance() {
     let mut accounts = [
         f.market.view.clone(),
         f.trader.view.clone(),
-        unused_slot.view.clone(),
         source.view.clone(),
         f.vault.view.clone(),
         f.mint.view.clone(),
@@ -359,33 +349,25 @@ fn deposit_rejects_every_prohibited_account_alias() {
         1_000,
         true,
     );
-    let unused_slot = account(
-        Address::new_from_array([74; 32]),
-        Address::default(),
-        0,
-        false,
-        false,
-    );
     let base = [
         f.market.view.clone(),
         f.trader.view.clone(),
-        unused_slot.view.clone(),
         source.view.clone(),
         f.vault.view.clone(),
         f.mint.view.clone(),
         f.token_program.view.clone(),
     ];
-    // Vault aliased to source: still 7 accounts, but two of them collide.
+    // Vault aliased to source: still 6 accounts, but two of them collide.
     let mut aliased = base.clone();
-    aliased[4] = aliased[3].clone();
+    aliased[3] = aliased[2].clone();
     assert!(process_instruction(&ID, &mut aliased, &deposit_data(0, 1)).is_err());
     // Mint aliased to token_program.
     let mut aliased = base.clone();
-    aliased[5] = aliased[6].clone();
+    aliased[4] = aliased[5].clone();
     assert!(process_instruction(&ID, &mut aliased, &deposit_data(0, 1)).is_err());
     // Market aliased to source.
     let mut aliased = base;
-    aliased[3] = aliased[0].clone();
+    aliased[2] = aliased[0].clone();
     assert!(process_instruction(&ID, &mut aliased, &deposit_data(0, 1)).is_err());
 }
 

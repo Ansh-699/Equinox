@@ -875,32 +875,42 @@ pub fn configure_vault_header(
     Ok(())
 }
 
+/// Accounts (exactly 6 -- see the account-ABI hardening pass that removed
+/// a 7th, entirely unused slot this handler never read; the seat itself
+/// lives inside the market account, so a separate "seat account" was
+/// never meaningful here):
+/// 0. `[WRITE]`   market
+/// 1. `[SIGNER]`  owner (main wallet; must be the claimed seat's trader)
+/// 2. `[WRITE]`   source token account (owned by `owner`, holds `mint`)
+/// 3. `[WRITE]`   vault (must be this market's canonical vault PDA)
+/// 4. `[]`        collateral mint
+/// 5. `[]`        token program
 fn deposit_collateral(
     program_id: &Address,
     accounts: &mut [AccountView],
     seat_index: usize,
     amount: u64,
 ) -> ProgramResult {
-    if accounts.len() < 7 || amount == 0 {
+    if accounts.len() < 6 || amount == 0 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
-    validate_custody_aliases(accounts)?;
+    validate_custody_aliases(&accounts[..6])?;
     let (market_accounts, rest) = accounts.split_at_mut(1);
     signer(&rest[0])?;
-    if market_accounts[0].address() == rest[2].address()
-        || market_accounts[0].address() == rest[3].address()
+    if market_accounts[0].address() == rest[1].address()
+        || market_accounts[0].address() == rest[2].address()
     {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
-    if *rest[3].address() != derive_vault(market_accounts[0].address(), program_id) {
+    if *rest[2].address() != derive_vault(market_accounts[0].address(), program_id) {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
     let vault_authority = derive_vault_authority(market_accounts[0].address(), program_id);
     let market_key = market_accounts[0].address().to_bytes();
     let data = market_data(&mut market_accounts[0], program_id)?;
     let mut header = initialized_header(data)?;
-    custody_config(&header, rest[4].address(), rest[5].address())?;
-    validate_custody_tokens(&header, &rest[4], &rest[3], &vault_authority)?;
+    custody_config(&header, rest[3].address(), rest[4].address())?;
+    validate_custody_tokens(&header, &rest[3], &rest[2], &vault_authority)?;
     let mut seat = seat_at(data, seat_index)?;
     // Only the seat's own owner may deposit for it -- there is no scoped
     // trading-session account in this instruction's account list at all, so
@@ -916,8 +926,8 @@ fn deposit_collateral(
         // across the call would make every deposit fail with
         // `AccountBorrowFailed` -- a real, pre-existing defect this test
         // suite caught, not a test-only artifact.
-        let token_account = pinocchio_token::state::Account::from_account_view(&rest[2])?;
-        if token_account.mint() != rest[4].address()
+        let token_account = pinocchio_token::state::Account::from_account_view(&rest[1])?;
+        if token_account.mint() != rest[3].address()
             || token_account.owner() != rest[0].address()
             || token_account.amount() < amount
         {
@@ -935,8 +945,8 @@ fn deposit_collateral(
     // Solana's atomic rollback discards the in-memory `seat` mutation along
     // with everything else, so the credit is never actually observed unless
     // the transfer also succeeded.
-    Transfer::<&AccountView>::new(&rest[2], &rest[3], &rest[0], amount)
-        .invoke_with_program(rest[5].address())?;
+    Transfer::<&AccountView>::new(&rest[1], &rest[2], &rest[0], amount)
+        .invoke_with_program(rest[4].address())?;
     write_seat(data, seat_index, &seat)?;
     let sequence = next_event_sequence(&mut header)?;
     let timestamp = event_timestamp();
@@ -964,7 +974,7 @@ fn withdraw_collateral(
     if accounts.len() < 7 || amount == 0 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
-    validate_custody_aliases(accounts)?;
+    validate_custody_aliases(&accounts[..7])?;
     let (market_accounts, rest) = accounts.split_at_mut(1);
     signer(&rest[0])?;
     if *rest[3].address() != derive_vault(market_accounts[0].address(), program_id)
@@ -1059,11 +1069,13 @@ fn withdraw_collateral(
     Ok(())
 }
 
+/// Pairwise-distinct check over exactly the accounts the caller passes --
+/// no fixed count here. `deposit_collateral` (6 real accounts) and
+/// `withdraw_collateral` (7) each pass their own exact slice, so an
+/// account substitution attempt (the same address reused for two
+/// different roles) is caught regardless of which instruction is calling.
 fn validate_custody_aliases(accounts: &[AccountView]) -> ProgramResult {
-    if accounts.len() != 7 {
-        return Err(ProgramError::InvalidInstructionData);
-    }
-    for i in 0..7 {
+    for i in 0..accounts.len() {
         for j in 0..i {
             if accounts[i].address() == accounts[j].address() {
                 return Err(ProgramError::InvalidAccountData);

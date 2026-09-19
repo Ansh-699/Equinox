@@ -80,7 +80,6 @@ struct Env {
     source: Address,
     vault: Address,
     vault_authority: Address,
-    seat_slot: Address,
 }
 
 fn install(svm: &mut LiteSVM, address: Address, data: Vec<u8>, owner: Address) {
@@ -255,8 +254,6 @@ fn setup() -> Env {
     install(&mut svm, mint, vec![0; Mint::LEN], TOKENKEG);
     install(&mut svm, source, vec![0; TokenAccount::LEN], TOKENKEG);
     install(&mut svm, vault, vec![0; TokenAccount::LEN], TOKENKEG);
-    let seat_slot = Address::new_unique();
-    install(&mut svm, seat_slot, Vec::new(), Address::default());
 
     let init_mint =
         token_ix::initialize_mint2(&TOKENKEG, &mint, &authority.pubkey(), None, DECIMALS).unwrap();
@@ -305,7 +302,6 @@ fn setup() -> Env {
         source,
         vault,
         vault_authority,
-        seat_slot,
     }
 }
 
@@ -318,7 +314,6 @@ fn deposit(env: &mut Env, amount: u64) -> Result<(), String> {
         vec![
             AccountMeta::new(env.market, false),
             AccountMeta::new_readonly(env.trader.pubkey(), true),
-            AccountMeta::new(env.seat_slot, false),
             AccountMeta::new(env.source, false),
             AccountMeta::new(env.vault, false),
             AccountMeta::new_readonly(env.mint, false),

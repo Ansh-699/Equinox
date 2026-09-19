@@ -38,7 +38,7 @@ export interface InstructionFixture {
 export interface SessionAuthorizedAccounts extends InstructionAccounts { session?: AddressInput; }
 
 export interface VaultAccounts { market: AddressInput; authority: AddressInput; mint: AddressInput; tokenProgram: AddressInput; vault: AddressInput; vaultAuthority: AddressInput; }
-export interface CustodyAccounts extends VaultAccounts { seat: AddressInput; seatIndex: number; sourceOrDestination: AddressInput; }
+export interface CustodyAccounts extends VaultAccounts { seatIndex: number; sourceOrDestination: AddressInput; }
 export interface InsuranceTransferAccounts { market: AddressInput; authority: AddressInput; }
 /** `authority` is the market authority for `withdrawProtocolFees`, the market's `emergencyAuthority` for `withdrawInsuranceFunds`. */
 export interface LedgerWithdrawalAccounts { market: AddressInput; authority: AddressInput; vault: AddressInput; vaultAuthority: AddressInput; destination: AddressInput; mint: AddressInput; tokenProgram: AddressInput; }
@@ -198,7 +198,9 @@ export function initializeVault(accounts: VaultAccounts): TransactionInstruction
 
 function amountInstruction(discriminator: number, accounts: CustodyAccounts, amount: bigint | number): TransactionInstruction {
   const data = new Uint8Array(11); data[0] = discriminator; writeUnsigned(data, 1, checkedUnsigned(accounts.seatIndex, 16, "seatIndex"), 2); writeUnsigned(data, 3, checkedUnsigned(amount, 64, "amount"), 8);
-  return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false), accountMeta(accounts.seat, false, true), accountMeta(accounts.sourceOrDestination, false, true), accountMeta(accounts.vault, false, true), accountMeta(accounts.mint, false, false), accountMeta(accounts.tokenProgram, false, false)]);
+  // 6 accounts, not 7: the seat lives inside the market account itself, so a
+  // separate "seat slot" account is never read by the deposit handler.
+  return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false), accountMeta(accounts.sourceOrDestination, false, true), accountMeta(accounts.vault, false, true), accountMeta(accounts.mint, false, false), accountMeta(accounts.tokenProgram, false, false)]);
 }
 export function depositCollateral(accounts: CustodyAccounts, amount: bigint | number) { return amountInstruction(STOCKSTREAM_INSTRUCTION.depositCollateral, accounts, amount); }
 export function withdrawCollateral(accounts: CustodyAccounts, amount: bigint | number) {
