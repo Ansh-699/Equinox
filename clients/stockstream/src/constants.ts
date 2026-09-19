@@ -43,6 +43,11 @@ export const STOCKSTREAM_INSTRUCTION = {
   reconcileVault: 39,
   updateExchangeConfig: 40,
   delegateClusterMember: 41,
+  createMarketAccount: 42,
+  createInstrumentAccount: 43,
+  createVaultAccount: 44,
+  createScratchAccount: 45,
+  createV3Account: 46,
 } as const;
 
 export const STOCKSTREAM_ACCOUNT_SIZE = 222_752;
