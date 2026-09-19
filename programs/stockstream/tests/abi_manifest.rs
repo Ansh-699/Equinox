@@ -22,9 +22,9 @@
 //! the npm script itself didn't even match (`/tmp/abi-check.json` vs
 //! `/tmp/abi_layout.json`).
 
+use std::mem::offset_of;
 use stockstream::book::{InnerNode, LeafNode};
 use stockstream::state::MarketStateHeader;
-use std::mem::offset_of;
 
 #[test]
 fn generate_manifest() {
@@ -49,15 +49,22 @@ fn build_manifest() -> String {
     // start of that field to the program's own relative constant (never a
     // pre-added magic number).
     let reserved_upgrade_start = offset_of!(MarketStateHeader, reserved_upgrade);
-    let delegation_status_offset = reserved_upgrade_start + stockstream::state::RESERVED_DELEGATION_STATUS;
+    let delegation_status_offset =
+        reserved_upgrade_start + stockstream::state::RESERVED_DELEGATION_STATUS;
     let validator_offset = reserved_upgrade_start + stockstream::state::RESERVED_VALIDATOR;
-    let protocol_fee_balance_offset = reserved_upgrade_start + stockstream::state::RESERVED_PROTOCOL_FEE_BALANCE;
-    let insurance_fund_balance_offset = reserved_upgrade_start + stockstream::state::RESERVED_INSURANCE_FUND_BALANCE;
-    let recognized_bad_debt_offset = reserved_upgrade_start + stockstream::state::RESERVED_RECOGNIZED_BAD_DEBT;
-    let reconciliation_status_offset = reserved_upgrade_start + stockstream::state::RESERVED_RECONCILIATION_STATUS;
+    let protocol_fee_balance_offset =
+        reserved_upgrade_start + stockstream::state::RESERVED_PROTOCOL_FEE_BALANCE;
+    let insurance_fund_balance_offset =
+        reserved_upgrade_start + stockstream::state::RESERVED_INSURANCE_FUND_BALANCE;
+    let recognized_bad_debt_offset =
+        reserved_upgrade_start + stockstream::state::RESERVED_RECOGNIZED_BAD_DEBT;
+    let reconciliation_status_offset =
+        reserved_upgrade_start + stockstream::state::RESERVED_RECONCILIATION_STATUS;
     let vault_surplus_offset = reserved_upgrade_start + stockstream::state::RESERVED_VAULT_SURPLUS;
-    let cluster_member_count_offset = reserved_upgrade_start + stockstream::state::RESERVED_CLUSTER_MEMBER_COUNT;
-    let max_mark_deviation_bps_offset = reserved_upgrade_start + stockstream::state::RESERVED_MAX_MARK_DEVIATION_BPS;
+    let cluster_member_count_offset =
+        reserved_upgrade_start + stockstream::state::RESERVED_CLUSTER_MEMBER_COUNT;
+    let max_mark_deviation_bps_offset =
+        reserved_upgrade_start + stockstream::state::RESERVED_MAX_MARK_DEVIATION_BPS;
 
     let oracle_valid_offset = offset_of!(MarketStateHeader, oracle_valid);
     let oracle_price_offset = offset_of!(MarketStateHeader, last_verified_oracle_price);
