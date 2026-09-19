@@ -3,7 +3,7 @@ import { PublicKey } from "@solana/web3.js";
 import {
   V3_BOOK_PAGE_SIZE, V3_BOOK_SLOTS_PER_SIDE, V3_COMMIT_ACCOUNT_HARD_MAX,
   V3_COMMIT_ACCOUNT_SAFE_MAX, V3_EVENT_SHARD_SIZE, V3_MARKET_CORE_SIZE,
-  V3_SEAT_SHARD_SIZE, deriveBookPageV3, deriveEventShardV3,
+  V3_SEAT_SHARD_SIZE, V3_EXECUTION_BUNDLE_LEN, deriveBookPageV3, deriveEventShardV3,
   deriveMarketCoreV3, deriveSeatShardV3, v3AccountIsCommittable,
   decodeV3BookPage, decodeV3MarketCore,
 } from "./v3";
@@ -13,6 +13,7 @@ describe("V3 sharded ABI", () => {
 
   it("keeps the required 1,024 slots per side below MagicBlock commit limits", () => {
     expect(V3_BOOK_SLOTS_PER_SIDE).toBe(1_024);
+    expect(V3_EXECUTION_BUNDLE_LEN).toBe(17);
     for (const size of [V3_MARKET_CORE_SIZE, V3_BOOK_PAGE_SIZE, V3_SEAT_SHARD_SIZE, V3_EVENT_SHARD_SIZE]) {
       expect(v3AccountIsCommittable(size)).toBe(true);
       expect(size).toBeLessThan(V3_COMMIT_ACCOUNT_SAFE_MAX);

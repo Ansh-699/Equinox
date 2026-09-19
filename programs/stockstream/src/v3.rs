@@ -11,7 +11,9 @@
 
 use core::mem::size_of;
 
-use pinocchio::Address;
+use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
+
+use crate::{error::StockStreamError, state::DelegationStatus};
 
 pub const V3_LAYOUT_VERSION: u16 = 3;
 pub const V3_COMMIT_ACCOUNT_HARD_MAX: usize = u16::MAX as usize;
@@ -46,6 +48,9 @@ pub const V3_SEATS_PER_SHARD: usize = 32;
 pub const V3_SEAT_SHARDS: usize = 4;
 pub const V3_EVENTS_PER_SHARD: usize = 32;
 pub const V3_EVENT_SHARDS: usize = 4;
+/// One fully hot V3 execution domain: core, 8 pages, 4 seat shards, and 4
+/// event shards. Vaults remain outside this bundle on L1 by design.
+pub const V3_EXECUTION_BUNDLE_LEN: usize = 1 + 8 + V3_SEAT_SHARDS + V3_EVENT_SHARDS;
 
 /// Wire-stable account kinds for V3 creation and bundle validation. `BookPage`
 /// uses a flattened index (`side * 4 + page`) so callers cannot supply an
@@ -225,6 +230,107 @@ pub fn derive_v3_account(
         V3AccountKind::SeatShard => derive_seat_shard_v3(program_id, parent, index),
         V3AccountKind::EventShard => derive_event_shard_v3(program_id, parent, index),
     })
+}
+
+fn bundle_error() -> ProgramError {
+    StockStreamError::InvalidInstruction.into()
+}
+
+/// Validates the exact account order required by future V3 trading handlers:
+/// `[core, book(side 0/page 0..3), book(side 1/page 0..3), seat(0..3),
+/// event(0..3)]`. No handler may accept caller-selected page ordering or a
+/// partial bundle, since that would make cross-page PATRICIA traversal and
+/// atomic matching ambiguous. `require_writable` is true for mutations and
+/// false for read-only aggregation/preflight paths.
+pub fn validate_execution_bundle(
+    program_id: &Address,
+    accounts: &[AccountView],
+    require_writable: bool,
+) -> ProgramResult {
+    if accounts.len() != V3_EXECUTION_BUNDLE_LEN {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    for (index, account) in accounts.iter().enumerate() {
+        if !account.owned_by(program_id) || (require_writable && !account.is_writable()) {
+            return Err(bundle_error());
+        }
+        if accounts[..index]
+            .iter()
+            .any(|other| other.address() == account.address())
+        {
+            return Err(bundle_error());
+        }
+    }
+    let core = &accounts[0];
+    let core_bytes = unsafe { core.borrow_unchecked() };
+    if core_bytes.len() != V3_MARKET_CORE_SIZE
+        || core_bytes[0..8] != V3_MARKET_CORE_DISCRIMINATOR
+        || core_bytes[8..10] != V3_LAYOUT_VERSION.to_le_bytes()
+        || core_bytes[10] != 1
+        || core_bytes[V3_CORE_MODE_OFFSET] != 1
+    {
+        return Err(bundle_error());
+    }
+    // A V2 market (wrong size/discriminator) cannot reach this point. A V3
+    // delegated core is deliberately rejected here too: these program-owned
+    // account views are only valid on the appropriate execution domain.
+    if core_bytes[V3_CORE_DELEGATION_STATUS_OFFSET] > DelegationStatus::Restored as u8 {
+        return Err(bundle_error());
+    }
+    let core_key = *core.address();
+    for flat in 0..8usize {
+        let account = &accounts[1 + flat];
+        let side = (flat / V3_BOOK_PAGES_PER_SIDE) as u8;
+        let page = (flat % V3_BOOK_PAGES_PER_SIDE) as u8;
+        if *account.address() != derive_book_page_v3(program_id, &core_key, side, page) {
+            return Err(bundle_error());
+        }
+        let bytes = unsafe { account.borrow_unchecked() };
+        if bytes.len() != V3_BOOK_PAGE_SIZE
+            || bytes[0..8] != V3_BOOK_PAGE_DISCRIMINATOR
+            || bytes[8..10] != V3_LAYOUT_VERSION.to_le_bytes()
+            || bytes[10] != side
+            || bytes[11] != page
+            || bytes[12..44] != core_key.to_bytes()
+            || u32::from_le_bytes(bytes[56..60].try_into().unwrap()) > V3_BOOK_NODES_PER_PAGE as u32
+            || u32::from_le_bytes(bytes[60..64].try_into().unwrap()) > V3_BOOK_NODES_PER_PAGE as u32
+        {
+            return Err(bundle_error());
+        }
+    }
+    for shard in 0..V3_SEAT_SHARDS {
+        let account = &accounts[9 + shard];
+        if *account.address() != derive_seat_shard_v3(program_id, &core_key, shard as u8) {
+            return Err(bundle_error());
+        }
+        let bytes = unsafe { account.borrow_unchecked() };
+        if bytes.len() != V3_SEAT_SHARD_SIZE
+            || bytes[0..8] != V3_SEAT_SHARD_DISCRIMINATOR
+            || bytes[8..10] != V3_LAYOUT_VERSION.to_le_bytes()
+            || bytes[10] != shard as u8
+            || bytes[11] != 0
+            || bytes[12..44] != core_key.to_bytes()
+        {
+            return Err(bundle_error());
+        }
+    }
+    for shard in 0..V3_EVENT_SHARDS {
+        let account = &accounts[9 + V3_SEAT_SHARDS + shard];
+        if *account.address() != derive_event_shard_v3(program_id, &core_key, shard as u8) {
+            return Err(bundle_error());
+        }
+        let bytes = unsafe { account.borrow_unchecked() };
+        if bytes.len() != V3_EVENT_SHARD_SIZE
+            || bytes[0..8] != V3_EVENT_SHARD_DISCRIMINATOR
+            || bytes[8..10] != V3_LAYOUT_VERSION.to_le_bytes()
+            || bytes[10] != shard as u8
+            || bytes[11] != 0
+            || bytes[12..44] != core_key.to_bytes()
+        {
+            return Err(bundle_error());
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -142,6 +142,7 @@ fn build_manifest() -> String {
   "V3_SEAT_SHARDS": {v3_seat_shards},
   "V3_EVENTS_PER_SHARD": {v3_events_per_shard},
   "V3_EVENT_SHARDS": {v3_event_shards}
+  ,"V3_EXECUTION_BUNDLE_LEN": {v3_execution_bundle_len}
 }}
 "#,
         market_version = stockstream::state::MARKET_VERSION,
@@ -179,6 +180,7 @@ fn build_manifest() -> String {
         v3_seat_shards = stockstream::v3::V3_SEAT_SHARDS,
         v3_events_per_shard = stockstream::v3::V3_EVENTS_PER_SHARD,
         v3_event_shards = stockstream::v3::V3_EVENT_SHARDS,
+        v3_execution_bundle_len = stockstream::v3::V3_EXECUTION_BUNDLE_LEN,
     )
 }
 
