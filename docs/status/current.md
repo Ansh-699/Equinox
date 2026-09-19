@@ -12,7 +12,7 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 
 | Area | Status | Evidence |
 |---|---|---|
-| ABI authority/parity | Partial | `npm run check:stockstream-abi` -> `ABI-OK`; `clients/stockstream/src/index.ts` is still a large independent implementation, not yet reduced to a facade over `abi/` |
+| ABI authority/parity | Partial | `npm run check:stockstream-abi` -> `ABI-OK`; commit `7fba664` makes the public `STOCKSTREAM_INSTRUCTION` compatibility export a direct re-export of `abi/instructions::OPCODE`, removing one duplicated 51-opcode authority. `clients/stockstream/src/index.ts` still owns most instruction construction and is not yet a thin facade. |
 | DepositCollateral account ABI | Complete | commit `8abc245`; 254+ Rust tests; live Devnet vault balance matched exactly (800,000 = 2x400,000 deposits) |
 | CreateVaultAccount account ABI | Complete | commit `54cd92b`; 8 new LiteSVM tests incl. a proven CPI-rollback case |
 | CreateScratchAccount (op45) | Complete | commit `00c4fb7`; 6 LiteSVM tests; live on Devnet |
@@ -31,7 +31,7 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 | Frontend production build | Complete | `npm run build` exit 0; `next start` serves real HTTP 200; production smoke suite 6/6 |
 | Opt-in Devnet browser E2E | Not built | no dedicated Playwright suite exists yet; a real trading flow through it would hit the same Pyth/Privy credential gaps as the CLI lifecycle script |
 | Repository cleanup / doc classification | Partial | this file added; the ~35 other `docs/*.md` files not yet individually classified (canonical/runbook/historical/obsolete) |
-| `clients/stockstream/src/index.ts` facade reduction | Not started | deliberately deferred -- the original audit itself specifies this only after every import/parity test has migrated; not safe to rush |
+| `clients/stockstream/src/index.ts` facade reduction | Started, partial | commit `7fba664` removes the duplicated public opcode table in favour of the ABI authority. Instruction encoders and account-meta construction remain in the legacy facade and need incremental, parity-tested extraction. |
 
 ## Test counts (latest rerun; scope is stated explicitly)
 
