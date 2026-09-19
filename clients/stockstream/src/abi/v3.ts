@@ -9,6 +9,7 @@ export const V3_COMMIT_ACCOUNT_SAFE_MAX = 50_000;
 export const V3_MARKET_CORE_SIZE = 4_096;
 export const V3_BOOK_PAGE_SIZE = 22_592;
 export const V3_SEAT_SHARD_SIZE = 8_236;
+export const V3_SEAT_SIZE = 256;
 export const V3_EVENT_RECORD_SIZE = 100;
 export const V3_EVENT_SHARD_SIZE = 3_244;
 export const V3_BOOK_NODES_PER_PAGE = 256;
@@ -66,6 +67,32 @@ export function decodeV3MarketCore(bytes: Uint8Array): V3MarketCoreView {
 export interface V3BookPageView {
   side: 0 | 1; page: number; market: PublicKey; fixedRoot: number; peggedRoot: number;
   freeHead: number; freeCount: number; nodeCount: number; nodes: Uint8Array;
+}
+
+export interface V3SeatPositionView {
+  shard: number; slot: number; trader: PublicKey; availableCollateral: bigint; reservedMargin: bigint;
+  basePosition: bigint; quoteEntryValue: bigint; realizedPnl: bigint; openBidExposure: bigint;
+  openAskExposure: bigint; openOrderCount: number; liquidationState: number; sequence: bigint;
+}
+function signed128(view: DataView, offset: number): bigint {
+  const value = view.getBigUint64(offset, true) | (view.getBigUint64(offset + 8, true) << 64n);
+  return value >= (1n << 127n) ? value - (1n << 128n) : value;
+}
+export interface V3SeatShardView { shard: number; market: PublicKey; positions: readonly V3SeatPositionView[]; }
+export function decodeV3SeatShard(bytes: Uint8Array): V3SeatShardView {
+  if (!versioned(bytes, "STKST003", V3_SEAT_SHARD_SIZE) || bytes[10] >= V3_SEAT_SHARDS || bytes[11] !== 0) throw new RangeError("Invalid V3 seat shard");
+  const positions = Array.from({ length: V3_SEATS_PER_SHARD }, (_, slot) => {
+    const base = 44 + slot * V3_SEAT_SIZE;
+    if (bytes[base] === 0) return null;
+    const view = new DataView(bytes.buffer, bytes.byteOffset + base, V3_SEAT_SIZE);
+    return {
+      shard: bytes[10], slot, trader: new PublicKey(bytes.subarray(base + 1, base + 33)), availableCollateral: signed128(view, 40),
+      reservedMargin: signed128(view, 56), basePosition: signed128(view, 72), quoteEntryValue: signed128(view, 88),
+      realizedPnl: signed128(view, 104), openBidExposure: signed128(view, 136), openAskExposure: signed128(view, 152),
+      openOrderCount: view.getUint32(168, true), liquidationState: bytes[base + 172], sequence: view.getBigUint64(176, true),
+    } satisfies V3SeatPositionView;
+  }).filter((position): position is V3SeatPositionView => position !== null);
+  return { shard: bytes[10], market: key(bytes, 12), positions };
 }
 
 export interface V3EventRecordView { kind: number; sequence: bigint; timestamp: bigint; payload: Uint8Array; }
