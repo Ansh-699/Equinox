@@ -126,7 +126,22 @@ fn build_manifest() -> String {
   "LEAF_PEG_LIMIT_OFFSET": {leaf_peg_limit_offset},
   "LEAF_PRICE_OFFSET": {leaf_price_offset},
   "LEAF_SEQUENCE_OFFSET": {leaf_sequence_offset},
-  "COMMIT_INTERVAL_MS": {commit_interval_ms}
+  "COMMIT_INTERVAL_MS": {commit_interval_ms},
+  "V3_LAYOUT_VERSION": {v3_layout_version},
+  "V3_COMMIT_ACCOUNT_HARD_MAX": {v3_commit_account_hard_max},
+  "V3_COMMIT_ACCOUNT_SAFE_MAX": {v3_commit_account_safe_max},
+  "V3_PAGE_ACCOUNT_SIZE": {v3_page_account_size},
+  "V3_MARKET_CORE_SIZE": {v3_market_core_size},
+  "V3_BOOK_PAGE_SIZE": {v3_book_page_size},
+  "V3_SEAT_SHARD_SIZE": {v3_seat_shard_size},
+  "V3_EVENT_SHARD_SIZE": {v3_event_shard_size},
+  "V3_BOOK_NODES_PER_PAGE": {v3_book_nodes_per_page},
+  "V3_BOOK_PAGES_PER_SIDE": {v3_book_pages_per_side},
+  "V3_BOOK_SLOTS_PER_SIDE": {v3_book_slots_per_side},
+  "V3_SEATS_PER_SHARD": {v3_seats_per_shard},
+  "V3_SEAT_SHARDS": {v3_seat_shards},
+  "V3_EVENTS_PER_SHARD": {v3_events_per_shard},
+  "V3_EVENT_SHARDS": {v3_event_shards}
 }}
 "#,
         market_version = stockstream::state::MARKET_VERSION,
@@ -149,6 +164,21 @@ fn build_manifest() -> String {
         event_payload_size = stockstream::events::EVENT_PAYLOAD_SIZE,
         event_size = stockstream::events::EVENT_SIZE,
         commit_interval_ms = 30_000,
+        v3_layout_version = stockstream::v3::V3_LAYOUT_VERSION,
+        v3_commit_account_hard_max = stockstream::v3::V3_COMMIT_ACCOUNT_HARD_MAX,
+        v3_commit_account_safe_max = stockstream::v3::V3_COMMIT_ACCOUNT_SAFE_MAX,
+        v3_page_account_size = stockstream::v3::V3_PAGE_ACCOUNT_SIZE,
+        v3_market_core_size = stockstream::v3::V3_MARKET_CORE_SIZE,
+        v3_book_page_size = stockstream::v3::V3_BOOK_PAGE_SIZE,
+        v3_seat_shard_size = stockstream::v3::V3_SEAT_SHARD_SIZE,
+        v3_event_shard_size = stockstream::v3::V3_EVENT_SHARD_SIZE,
+        v3_book_nodes_per_page = stockstream::v3::V3_BOOK_NODES_PER_PAGE,
+        v3_book_pages_per_side = stockstream::v3::V3_BOOK_PAGES_PER_SIDE,
+        v3_book_slots_per_side = stockstream::v3::V3_BOOK_SLOTS_PER_SIDE,
+        v3_seats_per_shard = stockstream::v3::V3_SEATS_PER_SHARD,
+        v3_seat_shards = stockstream::v3::V3_SEAT_SHARDS,
+        v3_events_per_shard = stockstream::v3::V3_EVENTS_PER_SHARD,
+        v3_event_shards = stockstream::v3::V3_EVENT_SHARDS,
     )
 }
 
@@ -166,6 +196,7 @@ fn manifest_constants_are_consistent() {
     assert_eq!(stockstream::registry::EXCHANGE_SIZE, 256);
     assert_eq!(stockstream::registry::INSTRUMENT_SIZE, 128);
     assert_eq!(stockstream::book::ANY_NODE_SIZE, 88);
+    assert!(stockstream::v3::v3_layout_is_committable());
     assert_eq!(
         stockstream::events::EVENT_HEADER_SIZE,
         std::mem::size_of::<stockstream::events::EventHeader>()
