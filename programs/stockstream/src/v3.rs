@@ -733,6 +733,65 @@ pub fn initialize_book_page_metadata(data: &mut [u8], page: u8) -> ProgramResult
     Ok(())
 }
 
+fn validate_event_shard(
+    program_id: &Address,
+    account: &AccountView,
+    core: &Address,
+    index: u8,
+) -> ProgramResult {
+    if !account.owned_by(program_id)
+        || !account.is_writable()
+        || *account.address() != derive_event_shard_v3(program_id, core, index)
+    {
+        return Err(bundle_error());
+    }
+    let bytes = unsafe { account.borrow_unchecked() };
+    if bytes.len() != V3_EVENT_SHARD_SIZE
+        || bytes[0..8] != V3_EVENT_SHARD_DISCRIMINATOR
+        || bytes[8..10] != V3_LAYOUT_VERSION.to_le_bytes()
+        || bytes[10] != index
+        || bytes[11] != 0
+        || bytes[12..44] != core.to_bytes()
+    {
+        return Err(bundle_error());
+    }
+    Ok(())
+}
+
+/// Appends one canonical 100-byte event record to the global four-shard
+/// queue. The core sequence is the source of truth; sequence modulo 128 gives
+/// a deterministic ring slot and therefore cannot be caller-selected.
+pub fn append_event_record(
+    program_id: &Address,
+    core: &mut AccountView,
+    shards: &mut [AccountView],
+    kind: u16,
+    payload: &[u8; crate::events::EVENT_PAYLOAD_SIZE],
+    timestamp: u64,
+) -> ProgramResult {
+    if shards.len() != V3_EVENT_SHARDS || !core.is_writable() {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    let core_key = validate_active_core(program_id, core)?;
+    for (index, shard) in shards.iter().enumerate() {
+        validate_event_shard(program_id, shard, &core_key, index as u8)?;
+    }
+    let sequence = next_core_event_sequence(core)?;
+    let shard_index = (sequence as usize / V3_EVENTS_PER_SHARD) % V3_EVENT_SHARDS;
+    let slot = sequence as usize % V3_EVENTS_PER_SHARD;
+    let mut record = [0u8; V3_EVENT_RECORD_SIZE];
+    record[0..2].copy_from_slice(&kind.to_le_bytes());
+    record[2] = crate::events::EVENT_ABI_VERSION;
+    record[4..12].copy_from_slice(&sequence.to_le_bytes());
+    record[12..44].copy_from_slice(core_key.as_ref());
+    record[44..52].copy_from_slice(&timestamp.to_le_bytes());
+    record[52..].copy_from_slice(payload);
+    let mut bytes = unsafe { shards[shard_index].borrow_unchecked_mut() };
+    let offset = V3_SHARD_HEADER_SIZE + slot * V3_EVENT_RECORD_SIZE;
+    bytes[offset..offset + V3_EVENT_RECORD_SIZE].copy_from_slice(&record);
+    Ok(())
+}
+
 fn bundle_error() -> ProgramError {
     StockStreamError::InvalidInstruction.into()
 }

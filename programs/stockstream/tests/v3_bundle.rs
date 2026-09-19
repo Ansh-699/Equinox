@@ -9,10 +9,10 @@ use pinocchio::{
 use stockstream::{
     book::{LeafNode, Side, TreeKind},
     v3::{
-        close_trader_seat, create_trader_seat, derive_book_page_v3, derive_event_shard_v3,
-        derive_market_core_v3, derive_seat_shard_v3, initialize_book_page_metadata,
-        validate_execution_bundle, PagedBookV3, V3_BOOK_PAGE_SIZE, V3_EVENT_SHARD_SIZE,
-        V3_EXECUTION_BUNDLE_LEN, V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
+        append_event_record, close_trader_seat, create_trader_seat, derive_book_page_v3,
+        derive_event_shard_v3, derive_market_core_v3, derive_seat_shard_v3,
+        initialize_book_page_metadata, validate_execution_bundle, PagedBookV3, V3_BOOK_PAGE_SIZE,
+        V3_EVENT_SHARD_SIZE, V3_EXECUTION_BUNDLE_LEN, V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
     },
     ID,
 };
@@ -217,4 +217,26 @@ fn v3_paged_book_preserves_global_handles_across_page_boundaries() {
     assert!(book.first_expired(TreeKind::Fixed, 9).unwrap().is_none());
     assert!(book.first_expired(TreeKind::Fixed, 10).unwrap().is_some());
     assert_eq!(book.sweep_expired(TreeKind::Fixed, 10, 1).unwrap(), 1);
+}
+
+#[test]
+fn v3_event_queue_uses_full_records_and_crosses_shard_boundary() {
+    let accounts = bundle();
+    let mut core = accounts[0].view.clone();
+    let mut shards = vec![
+        accounts[13].view.clone(),
+        accounts[14].view.clone(),
+        accounts[15].view.clone(),
+        accounts[16].view.clone(),
+    ];
+    let payload = [9u8; 48];
+    for _ in 0..33 {
+        append_event_record(&ID, &mut core, &mut shards, 200, &payload, 77).unwrap();
+    }
+    let first = unsafe { accounts[13].view.borrow_unchecked() };
+    assert_eq!(u16::from_le_bytes(first[44..46].try_into().unwrap()), 200);
+    assert_eq!(&first[96..144], &payload);
+    let second = unsafe { accounts[14].view.borrow_unchecked() };
+    assert_eq!(u16::from_le_bytes(second[44..46].try_into().unwrap()), 200);
+    assert_eq!(u64::from_le_bytes(second[48..56].try_into().unwrap()), 32);
 }
