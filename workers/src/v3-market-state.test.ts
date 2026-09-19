@@ -14,6 +14,10 @@ function core(): Uint8Array {
 function page(side: number, index: number): Uint8Array {
   const bytes = new Uint8Array(V3_BOOK_PAGE_SIZE); write(bytes, "STKBK003"); u16(bytes, 8, 3); bytes[10] = side; bytes[11] = index; bytes.set(new Uint8Array(32).fill(7), 12); return bytes;
 }
+function leafPage(side: number, index: number): Uint8Array {
+  const bytes = page(side, index); const at = 64; bytes[at] = 2; bytes[at + 1] = side; bytes[at + 4] = 1;
+  new DataView(bytes.buffer).setBigUint64(at + 8, BigInt(index + 1), true); new DataView(bytes.buffer).setBigUint64(at + 24, 5n, true); return bytes;
+}
 function shard(event: boolean, index: number): Uint8Array {
   const bytes = new Uint8Array(event ? V3_EVENT_SHARD_SIZE : V3_SEAT_SHARD_SIZE); write(bytes, event ? "STKEV003" : "STKST003"); u16(bytes, 8, 3); bytes[10] = index; bytes.set(new Uint8Array(32).fill(7), 12); return bytes;
 }
@@ -33,6 +37,8 @@ describe("V3 worker shard aggregation", () => {
     const seats = Array.from({ length: 4 }, (_, value) => shard(false, value));
     const events = Array.from({ length: 4 }, (_, value) => shard(true, value));
     expect(aggregateV3Market(core(), books, seats, events, coreAddress)).toMatchObject({ completeBook: true, completeExecutionState: true, withdrawalReady: true });
+    const aggregate = aggregateV3Market(core(), [leafPage(0, 0), ...books.slice(1)], seats, events, coreAddress)!;
+    expect(aggregate.orderBook.bids[0]).toMatchObject({ tag: 2, side: 0, quantity: 5n });
     expect(aggregateV3Market(core(), [...books.slice(0, 7), page(1, 2)], seats, events, coreAddress)).toBeNull();
   });
   it("decodes complete persisted event records", () => {

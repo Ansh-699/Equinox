@@ -14,6 +14,7 @@ export const V3_BOOK_NODES_PER_PAGE = 256;
 export const V3_BOOK_PAGES_PER_SIDE = 4;
 export const V3_SEATS_PER_SHARD = 32;
 export const V3_EVENTS_PER_SHARD = 32;
+export const V3_NODE_SIZE = 88;
 
 const base58 = getBase58Decoder();
 const text = new TextDecoder();
@@ -73,6 +74,32 @@ export interface V3BookPageState {
   /** The 256 raw, 88-byte PATRICIA node slots. Decoding node shape stays in
    * the ABI client; preserving slots here avoids an off-chain BTree facade. */
   nodeBytes: Uint8Array;
+  nodes: readonly V3BookNodeState[];
+}
+
+export interface V3BookNodeState {
+  handle: number;
+  tag: 1 | 2;
+  key: bigint;
+  side?: 0 | 1;
+  owner?: number;
+  quantity?: bigint;
+  expiresAt?: bigint;
+  sequence?: bigint;
+}
+
+function nodeKey(bytes: Uint8Array): bigint {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return (view.getBigUint64(16, true) << 64n) | view.getBigUint64(8, true);
+}
+function decodeBookNode(bytes: Uint8Array, handle: number): V3BookNodeState | null {
+  if (bytes.length !== V3_NODE_SIZE) return null;
+  const tag = bytes[0];
+  if (tag !== 1 && tag !== 2) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const base: V3BookNodeState = { handle, tag, key: nodeKey(bytes) };
+  if (tag === 1) return base;
+  return { ...base, side: bytes[1] as 0 | 1, owner: view.getUint32(4, true), quantity: view.getBigUint64(24, true), expiresAt: view.getBigUint64(32, true), sequence: view.getBigUint64(64, true) };
 }
 
 export function decodeV3BookPage(bytes: Uint8Array): V3BookPageState | null {
@@ -82,12 +109,14 @@ export function decodeV3BookPage(bytes: Uint8Array): V3BookPageState | null {
   const freeCount = view.getUint32(56, true);
   const limit = bytes[11] === 0 ? V3_BOOK_PAGES_PER_SIDE * V3_BOOK_NODES_PER_PAGE : V3_BOOK_NODES_PER_PAGE;
   if (nodeCount > limit || freeCount > limit) return null;
+  const nodeBytes = bytes.slice(64);
+  const nodes = Array.from({ length: V3_BOOK_NODES_PER_PAGE }, (_, index) => decodeBookNode(nodeBytes.slice(index * V3_NODE_SIZE, (index + 1) * V3_NODE_SIZE), bytes[11] * V3_BOOK_NODES_PER_PAGE + index)).filter((node): node is V3BookNodeState => node !== null);
   return {
     side: bytes[10] as 0 | 1,
     page: bytes[11], core: address(bytes, 12),
     fixedRoot: view.getUint32(44, true), peggedRoot: view.getUint32(48, true),
     freeHead: view.getUint32(52, true), freeCount, nodeCount,
-    nodeBytes: bytes.slice(64),
+    nodeBytes, nodes,
   };
 }
 
@@ -123,6 +152,7 @@ export interface V3MarketAggregate {
   completeBook: boolean;
   completeExecutionState: boolean;
   withdrawalReady: boolean;
+  orderBook: { bids: readonly V3BookNodeState[]; asks: readonly V3BookNodeState[] };
 }
 
 /** Rejects duplicates, cross-market substitution, malformed bytes, and
@@ -152,9 +182,14 @@ export function aggregateV3Market(
   if (!unique(bookPages.map((page) => page.side * 4 + page.page))
     || !unique(seatShards.map((shard) => shard.shard))
     || !unique(eventShards.map((shard) => shard.shard))) return null;
+  const leaves = bookPages.flatMap((page) => page.nodes).filter((node) => node.tag === 2);
   return {
     core, bookPages, seatShards, eventShards, completeBook, completeExecutionState,
     withdrawalReady: completeExecutionState && core.delegationStatus === 3,
+    orderBook: {
+      bids: leaves.filter((node) => node.side === 0).sort((left, right) => left.key < right.key ? -1 : left.key > right.key ? 1 : 0),
+      asks: leaves.filter((node) => node.side === 1).sort((left, right) => left.key < right.key ? -1 : left.key > right.key ? 1 : 0),
+    },
   };
 }
 
