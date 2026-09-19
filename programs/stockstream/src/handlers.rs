@@ -420,6 +420,9 @@ pub fn dispatch(
         StockStreamInstruction::CreateVaultAccount => {
             crate::registry::create_vault_account(program_id, accounts)
         }
+        StockStreamInstruction::CreateScratchAccount { seat_index } => {
+            crate::registry::create_scratch_account(program_id, accounts, seat_index)
+        }
         StockStreamInstruction::CommitMarket { sequence } => {
             crate::magicblock::commit_market(program_id, accounts, sequence)
         }
