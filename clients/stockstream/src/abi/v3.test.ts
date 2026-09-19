@@ -6,7 +6,7 @@ import {
   V3_SEAT_SHARD_SIZE, V3_EXECUTION_BUNDLE_LEN, deriveBookPageV3, deriveEventShardV3,
   deriveMarketCoreV3, deriveSeatShardV3, v3AccountIsCommittable,
   decodeV3BookPage, decodeV3MarketCore,
-  decodeV3EventShard,
+  decodeV3EventShard, decodeV3SeatShard,
 } from "./v3";
 
 describe("V3 sharded ABI", () => {
@@ -57,5 +57,12 @@ describe("V3 sharded ABI", () => {
     shard.set(Buffer.from("STKEV003")); new DataView(shard.buffer).setUint16(8, 3, true); shard[10] = 0; shard[11] = 0;
     new DataView(shard.buffer).setUint16(44, 200, true); new DataView(shard.buffer).setBigUint64(48, 32n, true);
     expect(decodeV3EventShard(shard).records[0]).toMatchObject({ kind: 200, sequence: 32n });
+  });
+
+  it("decodes occupied seat positions using the generated V3 offsets", () => {
+    const shard = new Uint8Array(8_236); shard.set(Buffer.from("STKST003")); new DataView(shard.buffer).setUint16(8, 3, true); shard[10] = 2; shard[11] = 0;
+    const base = 44; shard[base] = 1; shard.fill(8, base + 1, base + 33);
+    const view = new DataView(shard.buffer); view.setBigUint64(base + 72, 5n, true); view.setUint32(base + 168, 2, true);
+    expect(decodeV3SeatShard(shard).positions[0]).toMatchObject({ shard: 2, slot: 0, basePosition: 5n, openOrderCount: 2 });
   });
 });
