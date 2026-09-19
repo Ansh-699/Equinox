@@ -221,6 +221,11 @@ fn v3_paged_book_preserves_global_handles_across_page_boundaries() {
     assert!(book.first_expired(TreeKind::Fixed, 9).unwrap().is_none());
     assert!(book.first_expired(TreeKind::Fixed, 10).unwrap().is_some());
     assert_eq!(book.sweep_expired(TreeKind::Fixed, 10, 1).unwrap(), 1);
+    let pegged = book
+        .insert(TreeKind::OraclePegged, leaf(7u128 << 64, 7))
+        .expect("oracle-pegged root uses the same paged storage");
+    assert!(book.find(TreeKind::OraclePegged, 7u128 << 64).is_ok());
+    assert_eq!(book.node_tag(pegged).unwrap(), 2);
 }
 
 #[test]
