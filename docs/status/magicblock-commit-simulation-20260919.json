@@ -1,0 +1,32 @@
+{
+  "readOnly": true,
+  "reproducer": "scripts/magicblock-commit-repro.mjs",
+  "endpoint": "https://devnet-as.magicblock.app",
+  "program": "H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET",
+  "delegation": {
+    "market": "9d75hK8GyfqajxcijLa35bEh8SYUtobqi6eSdtF42RuS",
+    "validator": "MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57",
+    "delegationSlot": 500930125
+  },
+  "instruction": {
+    "opcode": 14,
+    "dataHex": "0e0100000000000000",
+    "accountOrder": ["payer", "magic_context", "market", "scratch_0", "scratch_1", "session_a", "session_b"],
+    "allCommittedAccountsWritable": true,
+    "payerSigner": true
+  },
+  "observedAccounts": {
+    "market": { "owner": "H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET", "dataLength": 222752 },
+    "magicContext": { "owner": "Magic11111111111111111111111111111111111111", "dataLength": 5242880 },
+    "magicProgram": { "owner": "NativeLoader1111111111111111111111111111111", "executable": true, "dataLength": 18 }
+  },
+  "simulation": {
+    "error": "InstructionError[0]: InvalidAccountData",
+    "unitsConsumed": 36955,
+    "keyLogs": [
+      "ScheduleCommit: parent program id: H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET",
+      "ScheduleCommit ERR: account 9d75hK8GyfqajxcijLa35bEh8SYUtobqi6eSdtF42RuS is too large to be committed",
+      "Program Magic11111111111111111111111111111111111111 failed: invalid account data for instruction"
+    ]
+  }
+}
