@@ -46,8 +46,69 @@ describe("validateSessionTransaction", () => {
     const { base64, sessionAddress } = await browserBuiltTransaction(relayerAddress, sessionSigner, (s) =>
       placeOrderInstruction(PROGRAM, [meta(MARKET), meta(s, 3 as never)], { side: "bid", seatIndex: 0, quantity: 1n, priceOrOffset: 1n, clientOrderId: 1n }),
     );
-    const result = validateSessionTransaction({ transactionBase64: base64, expectedProgramAddress: PROGRAM, sessionSignerAddress: sessionAddress }, relayerAddress);
+    const result = await validateSessionTransaction({ transactionBase64: base64, expectedProgramAddress: PROGRAM, sessionSignerAddress: sessionAddress }, relayerAddress);
     expect(result.ok).toBe(true);
+  });
+
+  it("extracts the real opcode/seatIndex/actionNonce from the instruction bytes, not from caller-asserted fields", async () => {
+    const relayer = new DeterministicTestSigner("relayer");
+    const relayerAddress = getBase58Decoder().decode(await relayer.publicKey());
+    const sessionSigner = new DeterministicTestSigner("session-key");
+    const { base64, sessionAddress } = await browserBuiltTransaction(relayerAddress, sessionSigner, (s) =>
+      cancelOrderInstruction(PROGRAM, [meta(MARKET), meta(s, 3 as never)], 7, 1n, 42n),
+    );
+    const result = await validateSessionTransaction({ transactionBase64: base64, expectedProgramAddress: PROGRAM, sessionSignerAddress: sessionAddress }, relayerAddress);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.opcode).toBe(4);
+    expect(result.seatIndex).toBe(7);
+    expect(result.actionNonce).toBe(42n);
+  });
+
+  it("rejects a forged session signature that never actually signed this message -- real Ed25519 verification, not presence-only", async () => {
+    const relayer = new DeterministicTestSigner("relayer");
+    const relayerAddress = getBase58Decoder().decode(await relayer.publicKey());
+    const sessionSigner = new DeterministicTestSigner("session-key");
+    const sessionAddress = getBase58Decoder().decode(await sessionSigner.publicKey());
+    const message = pipe(
+      createTransactionMessage({ version: 0 }),
+      (m) => setTransactionMessageFeePayer(address(relayerAddress), m),
+      (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash: BLOCKHASH as never, lastValidBlockHeight: 2n ** 64n - 1n }, m),
+      (m) => appendTransactionMessageInstructions([placeOrderInstruction(PROGRAM, [meta(MARKET), meta(sessionAddress, 3 as never)], { side: "bid", seatIndex: 0, quantity: 1n, priceOrOffset: 1n, clientOrderId: 1n })], m),
+    );
+    const compiled = compileTransaction(message);
+    // Garbage bytes in the session signer's signature slot -- structurally
+    // "present" (the earlier presence-only check would have accepted this),
+    // but not a real signature over this message.
+    const forgedSignature = new Uint8Array(64).fill(7) as SignatureBytes;
+    const signed = { ...compiled, signatures: { ...compiled.signatures, [sessionAddress]: forgedSignature } };
+    const base64 = getBase64EncodedWireTransaction(signed);
+    const result = await validateSessionTransaction({ transactionBase64: base64, expectedProgramAddress: PROGRAM, sessionSignerAddress: sessionAddress }, relayerAddress);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toMatch(/does not verify/);
+  });
+
+  it("rejects a transaction carrying more than one trading instruction", async () => {
+    const relayer = new DeterministicTestSigner("relayer");
+    const relayerAddress = getBase58Decoder().decode(await relayer.publicKey());
+    const sessionSigner = new DeterministicTestSigner("session-key");
+    const sessionAddress = getBase58Decoder().decode(await sessionSigner.publicKey());
+    const message = pipe(
+      createTransactionMessage({ version: 0 }),
+      (m) => setTransactionMessageFeePayer(address(relayerAddress), m),
+      (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash: BLOCKHASH as never, lastValidBlockHeight: 2n ** 64n - 1n }, m),
+      (m) => appendTransactionMessageInstructions([
+        placeOrderInstruction(PROGRAM, [meta(MARKET), meta(sessionAddress, 3 as never)], { side: "bid", seatIndex: 0, quantity: 1n, priceOrOffset: 1n, clientOrderId: 1n }),
+        cancelOrderInstruction(PROGRAM, [meta(MARKET), meta(sessionAddress, 3 as never)], 0, 1n),
+      ], m),
+    );
+    const compiled = compileTransaction(message);
+    const sessionSignatureBytes = await sessionSigner.sign(Uint8Array.from(compiled.messageBytes));
+    const signed = { ...compiled, signatures: { ...compiled.signatures, [sessionAddress]: sessionSignatureBytes as SignatureBytes } };
+    const base64 = getBase64EncodedWireTransaction(signed);
+    const result = await validateSessionTransaction({ transactionBase64: base64, expectedProgramAddress: PROGRAM, sessionSignerAddress: sessionAddress }, relayerAddress);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toMatch(/exactly one trading instruction/);
   });
 
   it("rejects a disallowed opcode (DepositCollateral is never session-signable)", async () => {
@@ -57,7 +118,7 @@ describe("validateSessionTransaction", () => {
     const { base64, sessionAddress } = await browserBuiltTransaction(relayerAddress, sessionSigner, (s) =>
       depositCollateralInstruction(PROGRAM, [meta(MARKET), meta(s, 3 as never)], 0, 100n),
     );
-    const result = validateSessionTransaction({ transactionBase64: base64, expectedProgramAddress: PROGRAM, sessionSignerAddress: sessionAddress }, relayerAddress);
+    const result = await validateSessionTransaction({ transactionBase64: base64, expectedProgramAddress: PROGRAM, sessionSignerAddress: sessionAddress }, relayerAddress);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toMatch(/opcode/);
   });
@@ -70,7 +131,7 @@ describe("validateSessionTransaction", () => {
       // Same PlaceOrder opcode, but addressed to a different program entirely.
       placeOrderInstruction("SysvarC1ock11111111111111111111111111111111", [meta(MARKET), meta(s, 3 as never)], { side: "bid", seatIndex: 0, quantity: 1n, priceOrOffset: 1n, clientOrderId: 1n }),
     );
-    const result = validateSessionTransaction({ transactionBase64: base64, expectedProgramAddress: PROGRAM, sessionSignerAddress: sessionAddress }, relayerAddress);
+    const result = await validateSessionTransaction({ transactionBase64: base64, expectedProgramAddress: PROGRAM, sessionSignerAddress: sessionAddress }, relayerAddress);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toMatch(/unexpected program/);
   });
@@ -87,7 +148,7 @@ describe("validateSessionTransaction", () => {
     );
     const compiled = compileTransaction(message); // no signatures at all
     const base64 = getBase64EncodedWireTransaction(compiled);
-    const result = validateSessionTransaction({ transactionBase64: base64, expectedProgramAddress: PROGRAM, sessionSignerAddress: sessionAddress }, relayerAddress);
+    const result = await validateSessionTransaction({ transactionBase64: base64, expectedProgramAddress: PROGRAM, sessionSignerAddress: sessionAddress }, relayerAddress);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toMatch(/session signer/);
   });
@@ -100,7 +161,7 @@ describe("validateSessionTransaction", () => {
     const { base64, sessionAddress } = await browserBuiltTransaction(someoneElse, sessionSigner, (s) =>
       placeOrderInstruction(PROGRAM, [meta(MARKET), meta(s, 3 as never)], { side: "bid", seatIndex: 0, quantity: 1n, priceOrOffset: 1n, clientOrderId: 1n }),
     );
-    const result = validateSessionTransaction({ transactionBase64: base64, expectedProgramAddress: PROGRAM, sessionSignerAddress: sessionAddress }, relayerAddress);
+    const result = await validateSessionTransaction({ transactionBase64: base64, expectedProgramAddress: PROGRAM, sessionSignerAddress: sessionAddress }, relayerAddress);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toMatch(/fee payer/);
   });

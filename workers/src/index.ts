@@ -10,10 +10,12 @@ import { isWithdrawalDisplaySafe, reconcileMarketExecutionStatus } from './execu
 import { PrivateSessionRepository, publishSeatProjection, seatsAffectedByEvent } from './private-sessions';
 import { classifyKeeperConfiguration, startKeeperRuntime } from './keeper-config';
 import { resolveKeeperSigning } from './keeper-signer';
-import { verifyPrivyToken, verifySessionFromBytes, type PrivyVerifier } from './relay-auth';
+import { deriveTradingSessionAddress, verifyPrivyToken, verifyTradingSession, type PrivyVerifier } from './relay-auth';
 import { LocalKeypairSigner } from './signer';
 import { relaySessionTransaction, validateSessionTransaction } from './session-relayer';
 import { ProtocolKeeperOrchestrator, type OrchestratorRunSummary } from './keeper-orchestrator';
+import { STOCKSTREAM_PROGRAM_ID } from '../../clients/stockstream/src/constants';
+import { getBase58Decoder } from '@solana/kit';
 
 export { MarketStream };
 
@@ -351,53 +353,34 @@ export default {
     // and submits through the domain the client picked. Never forwards a
     // transaction that failed validation.
     if (request.method === "POST" && url.pathname === "/v1/relay/session") {
-      // Authoritative per-user Privy auth (replaces shared INGESTION_TOKEN).
+      // Server-to-server auth: only this app's own Next.js backend may reach
+      // this route at all (the browser never holds this credential). This
+      // is independent of, and never a substitute for, the per-user Privy
+      // check below -- it proves "a legitimate backend", not "which user".
+      if (!env.RELAYER_SERVICE_TOKEN) return json({ error: "relayer_service_unconfigured" }, 503);
+      if (request.headers.get("x-stockstream-relayer-service-token") !== env.RELAYER_SERVICE_TOKEN) {
+        return json({ error: "unauthorized" }, 401);
+      }
+      // Per-user Privy auth: a fresh access token for the specific wallet
+      // asserted below, verified against that wallet's real linked accounts
+      // (never just the token's own claims).
       const authHeader = request.headers.get("authorization");
       if (!authHeader?.startsWith("Bearer ")) return json({ error: "unauthorized" }, 401);
       const privyToken = authHeader.slice(7);
       if (!env.PRIVY_APP_ID || !env.PRIVY_APP_SECRET) return json({ error: "privy_unconfigured" }, 503);
       const body = await request.json().catch(() => null) as {
         transactionBase64?: string;
-        expectedProgramAddress?: string;
         sessionSignerAddress?: string;
         ownerWallet?: string;
         expectedMarket?: string;
-        expectedNonce?: number;
         domain?: string;
         clientRequestId?: string;
       } | null;
-      if (!body?.transactionBase64 || !body.expectedProgramAddress || !body.sessionSignerAddress || !body.ownerWallet || !body.expectedMarket) {
+      if (!body?.transactionBase64 || !body.sessionSignerAddress || !body.ownerWallet || !body.expectedMarket) {
         return json({ error: "invalid_request" }, 400);
       }
-      // 1-6: verify Privy identity (authoritative, fail-closed)
-      // Lazy Privy verification: @privy-io/node is loaded dynamically inside
-      // the verifier, keeping it out of the main Worker bundle.
-      const privyResult = await verifyPrivyToken(privyToken, env.PRIVY_APP_ID!, body.ownerWallet, {
-        verify: async (token: string) => {
-          const { PrivyClient } = await import("@privy-io/node");
-          const client = new PrivyClient({ appId: env.PRIVY_APP_ID!, appSecret: env.PRIVY_APP_SECRET! });
-          return client.utils().auth().verifyAccessToken(token);
-        },
-      });
-      if ("error" in privyResult) return json({ error: privyResult.error }, 401);
-      // Steps 7-16: authoritative session/seat/nonce/expiry verification via RPC
-      const rpcResponse = await fetch(env.SOLANA_RPC_URL!, {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getAccountInfo", params: [body.expectedMarket, { encoding: "base64" }] }),
-      }).catch(() => null);
-      if (!rpcResponse) return json({ error: "rpc_unavailable" }, 502);
-      const marketData = await rpcResponse.json().catch(() => null) as { result?: { value?: { data?: [string, string] } } } | null;
-      const marketDataValue = marketData?.result?.value;
-      if (!marketDataValue) return json({ error: "market_not_found" }, 404);
-      const marketBytes = Uint8Array.from(atob(marketDataValue.data![0]), (c) => c.charCodeAt(0));
-      const chainCheck = verifySessionFromBytes({
-        marketBytes, ownerWallet: body.ownerWallet!,
-        sessionSignerAddress: body.sessionSignerAddress!, seatIndex: 0,
-        marketPda: body.expectedMarket!, programId: body.expectedProgramAddress!,
-        expectedNonce: body.expectedNonce ?? 1,
-      });
-      if (!chainCheck.ok) return json({ error: chainCheck.reason }, 403);
-      // Rate limits: per-IP, per-wallet, per-market
+      // Rate limits first: per-IP, per-wallet, per-signer -- before paying
+      // for Privy verification or any RPC round trip.
       const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
       if (!await new ProtocolRepository(bindings(env).DB).allow(`relay:${ip}`, 30, 60_000, Date.now()))
         return json({ error: 'rate_limited' }, 429);
@@ -405,17 +388,77 @@ export default {
         return json({ error: 'rate_limited' }, 429);
       if (!await new ProtocolRepository(bindings(env).DB).allow(`relay:${body.sessionSignerAddress}`, 30, 60_000, Date.now()))
         return json({ error: 'rate_limited' }, 429);
+
       const relayerSigner = env.RELAYER_KEYPAIR_JSON
         ? new LocalKeypairSigner("relayer:fee-payer", env.RELAYER_KEYPAIR_JSON)
         : null;
       if (!relayerSigner) return json({ error: "relayer_signer_unconfigured" }, 503);
+      const relayerAddress = getBase58Decoder().decode(await relayerSigner.publicKey());
       const transport = body.domain === "er"
         ? new MagicBlockErTransport(env.MAGIC_ROUTER_URL ?? env.MAGICBLOCK_RPC_URL ?? env.SOLANA_RPC_URL!, fetch)
         : new SolanaL1Transport(env.SOLANA_RPC_URL!, fetch);
+
+      // Shape/signature validation FIRST: the canonical program address is
+      // hardcoded here, never taken from the request body, and the
+      // opcode/seatIndex/actionNonce below are extracted from the real,
+      // cryptographically-signed instruction bytes -- not client claims.
+      const shapeCheck = await validateSessionTransaction(
+        { transactionBase64: body.transactionBase64, expectedProgramAddress: STOCKSTREAM_PROGRAM_ID, sessionSignerAddress: body.sessionSignerAddress },
+        relayerAddress,
+      );
+      if (!shapeCheck.ok) return json({ error: shapeCheck.reason }, 400);
+
+      // Per-user Privy auth (authoritative, fail-closed): the token must
+      // verify AND the asserted wallet must be one Privy actually has
+      // linked to this identity.
+      const privyResult = await verifyPrivyToken(privyToken, env.PRIVY_APP_ID, body.ownerWallet, {
+        verify: async (token: string) => {
+          const { PrivyClient } = await import("@privy-io/node");
+          const client = new PrivyClient({ appId: env.PRIVY_APP_ID!, appSecret: env.PRIVY_APP_SECRET! });
+          const verified = await client.utils().auth().verifyAccessToken(token);
+          const user = await client.users()._get(verified.user_id);
+          const solanaWallets = (user.linked_accounts ?? [])
+            .filter((account): account is typeof account & { chain_type: "solana"; address: string } => "chain_type" in account && account.chain_type === "solana" && "address" in account)
+            .map((account) => account.address);
+          return { user_id: verified.user_id, app_id: verified.app_id, solanaWallets };
+        },
+      });
+      if ("error" in privyResult) return json({ error: privyResult.error }, 401);
+
+      // Authoritative on-chain chain: market bytes, the real TradingSession
+      // PDA this relayer itself derives (never a client-supplied address),
+      // and the session's own owner/signer/market/seat/expiry/revocation/
+      // action-allowlist/nonce -- all checked against genuine RPC reads.
+      const marketAccount = await transport.account(body.expectedMarket).catch(() => null);
+      if (!marketAccount?.value?.data) return json({ error: "market_not_found" }, 404);
+      const marketBytes = Uint8Array.from(atob(marketAccount.value.data[0]), (c) => c.charCodeAt(0));
+
+      const sessionAddress = await deriveTradingSessionAddress(
+        body.ownerWallet, body.expectedMarket, shapeCheck.seatIndex, body.sessionSignerAddress, STOCKSTREAM_PROGRAM_ID,
+      );
+      const sessionAccount = await transport.account(sessionAddress).catch(() => null);
+      const sessionBytes = sessionAccount?.value?.data ? Uint8Array.from(atob(sessionAccount.value.data[0]), (c) => c.charCodeAt(0)) : null;
+
+      const chainCheck = verifyTradingSession({
+        marketBytes,
+        sessionBytes,
+        sessionAccountOwner: sessionAccount?.value?.owner ?? null,
+        ownerWallet: body.ownerWallet,
+        sessionSignerAddress: body.sessionSignerAddress,
+        seatIndex: shapeCheck.seatIndex,
+        marketPda: body.expectedMarket,
+        programId: STOCKSTREAM_PROGRAM_ID,
+        actionNonce: shapeCheck.actionNonce,
+        opcode: shapeCheck.opcode,
+        placeOrderFlags: shapeCheck.placeOrderFlags,
+        now: new Date(),
+      });
+      if (!chainCheck.ok) return json({ error: chainCheck.reason }, 403);
+
       const outcome = await relaySessionTransaction(
         {
           transactionBase64: body.transactionBase64,
-          expectedProgramAddress: body.expectedProgramAddress,
+          expectedProgramAddress: STOCKSTREAM_PROGRAM_ID,
           sessionSignerAddress: body.sessionSignerAddress,
         },
         relayerSigner,

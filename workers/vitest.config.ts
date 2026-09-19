@@ -11,5 +11,5 @@ export default defineConfig({
       bindings: { TEST_MIGRATIONS: await readD1Migrations('./migrations'), INGESTION_TOKEN: 'test-only-ingestion' },
     },
   })],
-  test: { include: ["src/**/*.test.ts"] },
+  test: { include: ["src/**/*.test.ts"], setupFiles: ["./src/test-setup.ts"] },
 });

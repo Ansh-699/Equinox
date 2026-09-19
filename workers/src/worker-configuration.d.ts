@@ -9,6 +9,7 @@ interface __BaseEnv_Env {
 	PRIVY_APP_SECRET?: string;
 	PRIVY_APP_ID?: string;
 	RELAYER_KEYPAIR_JSON?: string;
+	RELAYER_SERVICE_TOKEN?: string;
 	PYTH_PRO_API_KEY?: string;
 	PYTH_PRO_ENDPOINTS?: string;
 	KEEPER_KEYPAIR_JSON?: string;
