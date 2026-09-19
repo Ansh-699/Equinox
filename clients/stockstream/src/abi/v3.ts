@@ -67,6 +67,22 @@ export interface V3BookPageView {
   side: 0 | 1; page: number; market: PublicKey; fixedRoot: number; peggedRoot: number;
   freeHead: number; freeCount: number; nodeCount: number; nodes: Uint8Array;
 }
+
+export interface V3EventRecordView { kind: number; sequence: bigint; timestamp: bigint; payload: Uint8Array; }
+export function decodeV3EventRecord(bytes: Uint8Array): V3EventRecordView | null {
+  if (bytes.length !== V3_EVENT_RECORD_SIZE) throw new RangeError("Invalid V3 event record");
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const kind = view.getUint16(0, true);
+  if (kind === 0) return null;
+  return { kind, sequence: view.getBigUint64(4, true), timestamp: view.getBigUint64(44, true), payload: bytes.slice(52) };
+}
+
+export interface V3EventShardView { shard: number; market: PublicKey; records: readonly (V3EventRecordView | null)[]; }
+export function decodeV3EventShard(bytes: Uint8Array): V3EventShardView {
+  if (!versioned(bytes, "STKEV003", V3_EVENT_SHARD_SIZE) || bytes[10] >= V3_EVENT_SHARDS || bytes[11] !== 0) throw new RangeError("Invalid V3 event shard");
+  const records = Array.from({ length: V3_EVENTS_PER_SHARD }, (_, index) => decodeV3EventRecord(bytes.slice(44 + index * V3_EVENT_RECORD_SIZE, 44 + (index + 1) * V3_EVENT_RECORD_SIZE)));
+  return { shard: bytes[10], market: key(bytes, 12), records };
+}
 export function decodeV3BookPage(bytes: Uint8Array): V3BookPageView {
   if (!versioned(bytes, "STKBK003", V3_BOOK_PAGE_SIZE) || bytes[10] > 1 || bytes[11] >= V3_BOOK_PAGES_PER_SIDE) throw new RangeError("Invalid V3 book page");
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
