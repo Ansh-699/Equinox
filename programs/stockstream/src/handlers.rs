@@ -443,6 +443,9 @@ pub fn dispatch(
         StockStreamInstruction::CreateV3TraderSeat { seat_index } => {
             crate::v3::create_trader_seat(program_id, accounts, seat_index)
         }
+        StockStreamInstruction::CloseV3TraderSeat { seat_index } => {
+            crate::v3::close_trader_seat(program_id, accounts, seat_index)
+        }
         StockStreamInstruction::CommitMarket { sequence } => {
             crate::magicblock::commit_market(program_id, accounts, sequence)
         }

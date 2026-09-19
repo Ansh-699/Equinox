@@ -8,9 +8,9 @@ use pinocchio::{
 };
 use stockstream::{
     v3::{
-        create_trader_seat, derive_book_page_v3, derive_event_shard_v3, derive_market_core_v3,
-        derive_seat_shard_v3, validate_execution_bundle, V3_BOOK_PAGE_SIZE, V3_EVENT_SHARD_SIZE,
-        V3_EXECUTION_BUNDLE_LEN, V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
+        close_trader_seat, create_trader_seat, derive_book_page_v3, derive_event_shard_v3,
+        derive_market_core_v3, derive_seat_shard_v3, validate_execution_bundle, V3_BOOK_PAGE_SIZE,
+        V3_EVENT_SHARD_SIZE, V3_EXECUTION_BUNDLE_LEN, V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
     },
     ID,
 };
@@ -142,4 +142,10 @@ fn v3_seat_creation_uses_derived_shard_and_prevents_cross_shard_duplicates() {
     assert_eq!(&occupied[45..77], trader.view.address().as_ref());
     assert!(create_trader_seat(&ID, &mut call, 1).is_err());
     assert!(create_trader_seat(&ID, &mut call, 128).is_err());
+    close_trader_seat(&ID, &mut call, 32).expect("empty seat closes");
+    assert_eq!(unsafe { accounts[10].view.borrow_unchecked() }[44], 0);
+    assert!(close_trader_seat(&ID, &mut call, 32).is_err());
+    create_trader_seat(&ID, &mut call, 32).expect("closed seat can be reused");
+    let core = unsafe { accounts[0].view.borrow_unchecked() };
+    assert_eq!(u64::from_le_bytes(core[148..156].try_into().unwrap()), 3);
 }
