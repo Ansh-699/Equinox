@@ -6,6 +6,7 @@ import {
   V3_SEAT_SHARD_SIZE, V3_EXECUTION_BUNDLE_LEN, deriveBookPageV3, deriveEventShardV3,
   deriveMarketCoreV3, deriveSeatShardV3, v3AccountIsCommittable,
   decodeV3BookPage, decodeV3MarketCore,
+  decodeV3EventShard,
 } from "./v3";
 
 describe("V3 sharded ABI", () => {
@@ -49,5 +50,12 @@ describe("V3 sharded ABI", () => {
     expect(decodeV3BookPage(page)?.nodeCount).toBe(V3_BOOK_SLOTS_PER_SIDE);
     page[11] = 1;
     expect(() => decodeV3BookPage(page)).toThrow(RangeError);
+  });
+
+  it("decodes persisted V3 event records at shard boundaries", () => {
+    const shard = new Uint8Array(3_244);
+    shard.set(Buffer.from("STKEV003")); new DataView(shard.buffer).setUint16(8, 3, true); shard[10] = 0; shard[11] = 0;
+    new DataView(shard.buffer).setUint16(44, 200, true); new DataView(shard.buffer).setBigUint64(48, 32n, true);
+    expect(decodeV3EventShard(shard).records[0]).toMatchObject({ kind: 200, sequence: 32n });
   });
 });
