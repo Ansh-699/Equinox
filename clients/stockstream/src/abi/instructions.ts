@@ -22,6 +22,7 @@ export const OPCODE = {
   createInstrumentAccount: 43, createVaultAccount: 44,
   createScratchAccount: 45, createV3Account: 46,
   initializeV3Market: 47,
+  delegateV3Account: 48,
 } as const;
 
 /** Session action allowlist bits — must match `session::SESSION_ACTION_*`. */

@@ -950,6 +950,281 @@ pub fn delegate_market(
     Ok(())
 }
 
+/// Opcode 48: delegates one bounded V3 PDA. The core is delegated first;
+/// subsequent pages/shards must present that already-delegated core and the
+/// identical validator. This is intentionally one account per instruction:
+/// every account has its own delegation buffer/record/metadata PDA, and a
+/// 22,592-byte page may require multiple resumable buffer-growth calls.
+///
+/// Accounts: `[parent, target(write), authority(signer), payer(write signer),
+/// buffer(write), record(write), metadata(write), delegation_program, system,
+/// owner_program]`. `parent` is the instrument for a core, otherwise the V3
+/// core. The V2 perp market is never accepted by this path.
+pub fn delegate_v3_account(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    kind_raw: u8,
+    index: u8,
+    validator: Address,
+) -> ProgramResult {
+    if accounts.len() != 10 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    if validator == Address::default() {
+        return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+    }
+    if !accounts[1].is_writable()
+        || !accounts[2].is_signer()
+        || !accounts[3].is_signer()
+        || !accounts[3].is_writable()
+    {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    if *accounts[7].address() != DELEGATION_PROGRAM_ID
+        || *accounts[8].address() != pinocchio_system::ID
+        || *accounts[9].address() != *program_id
+        || !accounts[4].is_writable()
+        || !accounts[5].is_writable()
+        || !accounts[6].is_writable()
+        || !no_duplicate_addresses(&[
+            accounts[1].address(),
+            accounts[3].address(),
+            accounts[4].address(),
+            accounts[5].address(),
+            accounts[6].address(),
+        ])
+    {
+        return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+    }
+    let kind = v3::V3AccountKind::from_u8(kind_raw)
+        .filter(|value| index <= value.max_index())
+        .ok_or(ProgramError::InvalidInstructionData)?;
+    let parent = *accounts[0].address();
+    let expected = v3::derive_v3_account(program_id, &parent, kind, index)
+        .ok_or(ProgramError::InvalidInstructionData)?;
+    if expected != *accounts[1].address() || !accounts[1].owned_by(program_id) {
+        return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+    }
+
+    let authority = accounts[2].address().to_bytes();
+    match kind {
+        v3::V3AccountKind::MarketCore => {
+            validate_v3_delegate_core(program_id, &accounts[0], &accounts[1], &authority, None)?;
+        }
+        _ => {
+            // The core is intentionally read-only here: once delegated it is
+            // owned by the delegation program on L1, but its committed bytes
+            // remain the authority/validator binding for every child shard.
+            validate_v3_delegate_core(
+                program_id,
+                &accounts[0],
+                &accounts[1],
+                &authority,
+                Some(&validator),
+            )?;
+            validate_restored_v3_account(
+                unsafe { accounts[1].borrow_unchecked() },
+                kind,
+                &parent,
+                index,
+            )?;
+        }
+    }
+    let (expected_buffer, _) = Address::find_program_address(
+        &[DELEGATE_BUFFER_TAG, accounts[1].address().as_ref()],
+        program_id,
+    );
+    let (expected_record, _) = Address::find_program_address(
+        &[DELEGATION_RECORD_TAG, accounts[1].address().as_ref()],
+        &DELEGATION_PROGRAM_ID,
+    );
+    let (expected_metadata, _) = Address::find_program_address(
+        &[DELEGATION_METADATA_TAG, accounts[1].address().as_ref()],
+        &DELEGATION_PROGRAM_ID,
+    );
+    if expected_buffer != *accounts[4].address()
+        || expected_record != *accounts[5].address()
+        || expected_metadata != *accounts[6].address()
+    {
+        return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+    }
+
+    // The core records the validator before it is copied to its delegation
+    // buffer. A child cannot be handed to a different ER validator later.
+    if kind == v3::V3AccountKind::MarketCore {
+        let bytes = unsafe { accounts[1].borrow_unchecked_mut() };
+        bytes[v3::V3_CORE_DELEGATION_STATUS_OFFSET] = DelegationStatus::Delegated as u8;
+        bytes[v3::V3_CORE_VALIDATOR_OFFSET..v3::V3_CORE_VALIDATOR_OFFSET + 32]
+            .copy_from_slice(validator.as_ref());
+        bytes[v3::V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET
+            ..v3::V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET + 8]
+            .copy_from_slice(&1u64.to_le_bytes());
+    }
+
+    let delegated = match kind {
+        v3::V3AccountKind::MarketCore => {
+            let (_, bump) = Address::find_program_address(
+                &[v3::V3_MARKET_CORE_SEED, parent.as_ref()],
+                program_id,
+            );
+            let bump_slice = [bump];
+            let seeds = [
+                Seed::from(v3::V3_MARKET_CORE_SEED),
+                Seed::from(parent.as_ref()),
+                Seed::from(&bump_slice),
+            ];
+            delegate_single_account(
+                &mut accounts[1].clone(),
+                &accounts[4].clone(),
+                &accounts[5].clone(),
+                &accounts[6].clone(),
+                &accounts[3].clone(),
+                &accounts[8].clone(),
+                &accounts[9].clone(),
+                &Signer::from(&seeds),
+                &encode_v3_core_delegate_seeds(&parent),
+                &validator,
+                program_id,
+            )?
+        }
+        v3::V3AccountKind::BookPage => {
+            let side = index / v3::V3_BOOK_PAGES_PER_SIDE as u8;
+            let page = index % v3::V3_BOOK_PAGES_PER_SIDE as u8;
+            let (_, bump) = Address::find_program_address(
+                &[v3::V3_BOOK_PAGE_SEED, parent.as_ref(), &[side], &[page]],
+                program_id,
+            );
+            let side_slice = [side];
+            let page_slice = [page];
+            let bump_slice = [bump];
+            let seeds = [
+                Seed::from(v3::V3_BOOK_PAGE_SEED),
+                Seed::from(parent.as_ref()),
+                Seed::from(&side_slice),
+                Seed::from(&page_slice),
+                Seed::from(&bump_slice),
+            ];
+            delegate_single_account(
+                &mut accounts[1].clone(),
+                &accounts[4].clone(),
+                &accounts[5].clone(),
+                &accounts[6].clone(),
+                &accounts[3].clone(),
+                &accounts[8].clone(),
+                &accounts[9].clone(),
+                &Signer::from(&seeds),
+                &encode_v3_book_page_delegate_seeds(&parent, side, page),
+                &validator,
+                program_id,
+            )?
+        }
+        v3::V3AccountKind::SeatShard => {
+            let (_, bump) = Address::find_program_address(
+                &[v3::V3_SEAT_SHARD_SEED, parent.as_ref(), &[index]],
+                program_id,
+            );
+            let index_slice = [index];
+            let bump_slice = [bump];
+            let seeds = [
+                Seed::from(v3::V3_SEAT_SHARD_SEED),
+                Seed::from(parent.as_ref()),
+                Seed::from(&index_slice),
+                Seed::from(&bump_slice),
+            ];
+            delegate_single_account(
+                &mut accounts[1].clone(),
+                &accounts[4].clone(),
+                &accounts[5].clone(),
+                &accounts[6].clone(),
+                &accounts[3].clone(),
+                &accounts[8].clone(),
+                &accounts[9].clone(),
+                &Signer::from(&seeds),
+                &encode_v3_seat_shard_delegate_seeds(&parent, index),
+                &validator,
+                program_id,
+            )?
+        }
+        v3::V3AccountKind::EventShard => {
+            let (_, bump) = Address::find_program_address(
+                &[v3::V3_EVENT_SHARD_SEED, parent.as_ref(), &[index]],
+                program_id,
+            );
+            let index_slice = [index];
+            let bump_slice = [bump];
+            let seeds = [
+                Seed::from(v3::V3_EVENT_SHARD_SEED),
+                Seed::from(parent.as_ref()),
+                Seed::from(&index_slice),
+                Seed::from(&bump_slice),
+            ];
+            delegate_single_account(
+                &mut accounts[1].clone(),
+                &accounts[4].clone(),
+                &accounts[5].clone(),
+                &accounts[6].clone(),
+                &accounts[3].clone(),
+                &accounts[8].clone(),
+                &accounts[9].clone(),
+                &Signer::from(&seeds),
+                &encode_v3_event_shard_delegate_seeds(&parent, index),
+                &validator,
+                program_id,
+            )?
+        }
+    };
+    // For page buffers this false result means callers repeat opcode 48;
+    // only the fully successful call reaches the real Delegate CPI.
+    if !delegated && kind == v3::V3AccountKind::MarketCore {
+        return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+    }
+    Ok(())
+}
+
+fn validate_v3_delegate_core(
+    program_id: &Address,
+    parent: &AccountView,
+    target: &AccountView,
+    authority: &[u8; 32],
+    expected_validator: Option<&Address>,
+) -> ProgramResult {
+    let core = if expected_validator.is_none() {
+        target
+    } else {
+        parent
+    };
+    let bytes = unsafe { core.borrow_unchecked() };
+    if bytes.len() != v3::V3_MARKET_CORE_SIZE
+        || bytes[0..8] != v3::V3_MARKET_CORE_DISCRIMINATOR
+        || bytes[8..10] != v3::V3_LAYOUT_VERSION.to_le_bytes()
+        || bytes[10] != 1
+        || bytes[v3::V3_CORE_MODE_OFFSET] != 1
+        || bytes[v3::V3_CORE_MARKET_AUTHORITY_OFFSET..v3::V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
+            != *authority
+    {
+        return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+    }
+    if let Some(validator) = expected_validator {
+        if bytes[v3::V3_CORE_DELEGATION_STATUS_OFFSET] != DelegationStatus::Delegated as u8
+            || bytes[v3::V3_CORE_VALIDATOR_OFFSET..v3::V3_CORE_VALIDATOR_OFFSET + 32]
+                != *validator.as_ref()
+        {
+            return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+        }
+    } else {
+        // For a core, the parent is the active instrument and target embeds
+        // that exact instrument address.
+        if !parent.owned_by(program_id)
+            || bytes[v3::V3_CORE_INSTRUMENT_OFFSET..v3::V3_CORE_INSTRUMENT_OFFSET + 32]
+                != parent.address().to_bytes()
+            || bytes[v3::V3_CORE_DELEGATION_STATUS_OFFSET] != DelegationStatus::NotDelegated as u8
+        {
+            return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+        }
+    }
+    Ok(())
+}
+
 /// Creates (if needed) and grows `buffer` until its data length matches
 /// `account`'s -- returns `true` once ready. A single instruction can only
 /// increase an account's data length by `MAX_PERMITTED_DATA_INCREASE`
