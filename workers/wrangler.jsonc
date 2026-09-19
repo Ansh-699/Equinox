@@ -17,7 +17,7 @@
     {
       "binding": "DB",
       "database_name": "stockstream-index",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "1dced396-c76a-4147-8a4f-70465e9aff55",
       "migrations_dir": "migrations"
     }
   ],
