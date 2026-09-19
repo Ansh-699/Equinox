@@ -8,12 +8,13 @@ use pinocchio::{
 };
 use stockstream::{
     book::{LeafNode, Side, TreeKind},
+    session::{self, TradingSession, SESSION_ACTION_PLACE, TRADING_SESSION_SIZE},
     v3::{
         append_event_record, close_trader_seat, create_trader_seat, derive_book_page_v3,
         derive_event_shard_v3, derive_market_core_v3, derive_seat_shard_v3,
-        initialize_book_page_metadata, validate_execution_bundle, validate_v3_withdrawal_readiness,
-        PagedBookV3, V3_BOOK_PAGE_SIZE, V3_EVENT_SHARD_SIZE, V3_EXECUTION_BUNDLE_LEN,
-        V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
+        initialize_book_page_metadata, validate_execution_bundle, validate_v3_session_actor,
+        validate_v3_withdrawal_readiness, PagedBookV3, V3_BOOK_PAGE_SIZE, V3_EVENT_SHARD_SIZE,
+        V3_EXECUTION_BUNDLE_LEN, V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
     },
     ID,
 };
@@ -151,6 +152,103 @@ fn v3_bundle_rejects_duplicate_substitution_and_foreign_parent() {
         accounts[9].view.borrow_unchecked_mut()[12] ^= 1;
     }
     assert!(validate_execution_bundle(&ID, &views(&accounts), true).is_err());
+}
+
+#[test]
+fn v3_session_actor_binds_sharded_seat_and_rejects_replay_or_risk() {
+    let accounts = bundle();
+    let owner = account(Address::new_from_array([42; 32]), 0, true);
+    let session_signer = account(Address::new_from_array([43; 32]), 0, true);
+    let mut seat_call = vec![
+        accounts[0].view.clone(),
+        accounts[9].view.clone(),
+        accounts[10].view.clone(),
+        accounts[11].view.clone(),
+        accounts[12].view.clone(),
+        accounts[13].view.clone(),
+        accounts[14].view.clone(),
+        accounts[15].view.clone(),
+        accounts[16].view.clone(),
+        owner.view.clone(),
+    ];
+    create_trader_seat(&ID, &mut seat_call, 32).unwrap();
+    let core_key = *accounts[0].view.address();
+    let session_key = session::derive_trading_session(
+        &owner.view.address(),
+        &core_key,
+        32,
+        &session_signer.view.address(),
+        &ID,
+    );
+    let mut session_account = account(session_key, TRADING_SESSION_SIZE, false);
+    let mut state = TradingSession::empty();
+    state.initialized = 1;
+    state.owner = owner.view.address().to_bytes();
+    state.session_signer = session_signer.view.address().to_bytes();
+    state.target_program = ID.to_bytes();
+    state.market = core_key.to_bytes();
+    state.trader_seat_index = 32;
+    state.expires_at = 100;
+    state.actions = SESSION_ACTION_PLACE;
+    state.max_order_notional = 10;
+    state.max_cumulative_notional = 20;
+    state.max_exposure = 10;
+    state.max_open_orders = 2;
+    {
+        let mut session_bytes = unsafe { session_account.view.borrow_unchecked_mut() };
+        session::write_session(&mut session_bytes, &state).unwrap();
+    }
+    let shards = [
+        accounts[9].view.clone(),
+        accounts[10].view.clone(),
+        accounts[11].view.clone(),
+        accounts[12].view.clone(),
+    ];
+    let authorized = validate_v3_session_actor(
+        &ID,
+        &accounts[0].view,
+        &shards,
+        &session_account.view,
+        &session_signer.view,
+        32,
+        SESSION_ACTION_PLACE,
+        5,
+        5,
+        1,
+        1,
+    )
+    .unwrap();
+    let next_nonce = authorized.session.next_expected_nonce;
+    assert_eq!(next_nonce, 1);
+    assert_eq!(authorized.seat.trader, owner.view.address().to_bytes());
+    assert!(validate_v3_session_actor(
+        &ID,
+        &accounts[0].view,
+        &shards,
+        &session_account.view,
+        &session_signer.view,
+        32,
+        SESSION_ACTION_PLACE,
+        5,
+        5,
+        2,
+        1,
+    )
+    .is_err());
+    assert!(validate_v3_session_actor(
+        &ID,
+        &accounts[0].view,
+        &shards,
+        &session_account.view,
+        &session_signer.view,
+        32,
+        SESSION_ACTION_PLACE,
+        21,
+        5,
+        1,
+        1,
+    )
+    .is_err());
 }
 
 #[test]

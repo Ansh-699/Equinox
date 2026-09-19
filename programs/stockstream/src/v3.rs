@@ -19,6 +19,7 @@ use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
 use crate::{
     book::{InnerNode, LeafNode, TreeKind, ANY_NODE_SIZE, NONE, TAG_INNER, TAG_LEAF},
     error::StockStreamError,
+    session::{self, TradingSession},
     state::{DelegationStatus, LiquidationState, TraderSeat, TRADER_SEAT_SIZE},
 };
 
@@ -206,16 +207,29 @@ const _: [(); 3_244] = [(); V3_EVENT_SHARD_SIZE];
 const _: () = {
     assert!(core::mem::offset_of!(TraderSeat, occupancy) == V3_SEAT_OCCUPANCY_OFFSET);
     assert!(core::mem::offset_of!(TraderSeat, trader) == V3_SEAT_TRADER_OFFSET);
-    assert!(core::mem::offset_of!(TraderSeat, available_collateral) == V3_SEAT_AVAILABLE_COLLATERAL_OFFSET);
+    assert!(
+        core::mem::offset_of!(TraderSeat, available_collateral)
+            == V3_SEAT_AVAILABLE_COLLATERAL_OFFSET
+    );
     assert!(core::mem::offset_of!(TraderSeat, reserved_margin) == V3_SEAT_RESERVED_MARGIN_OFFSET);
     assert!(core::mem::offset_of!(TraderSeat, base_position) == V3_SEAT_BASE_POSITION_OFFSET);
-    assert!(core::mem::offset_of!(TraderSeat, quote_entry_value) == V3_SEAT_QUOTE_ENTRY_VALUE_OFFSET);
+    assert!(
+        core::mem::offset_of!(TraderSeat, quote_entry_value) == V3_SEAT_QUOTE_ENTRY_VALUE_OFFSET
+    );
     assert!(core::mem::offset_of!(TraderSeat, realized_pnl) == V3_SEAT_REALIZED_PNL_OFFSET);
-    assert!(core::mem::offset_of!(TraderSeat, last_funding_accumulator) == V3_SEAT_LAST_FUNDING_OFFSET);
-    assert!(core::mem::offset_of!(TraderSeat, open_bid_exposure) == V3_SEAT_OPEN_BID_EXPOSURE_OFFSET);
-    assert!(core::mem::offset_of!(TraderSeat, open_ask_exposure) == V3_SEAT_OPEN_ASK_EXPOSURE_OFFSET);
+    assert!(
+        core::mem::offset_of!(TraderSeat, last_funding_accumulator) == V3_SEAT_LAST_FUNDING_OFFSET
+    );
+    assert!(
+        core::mem::offset_of!(TraderSeat, open_bid_exposure) == V3_SEAT_OPEN_BID_EXPOSURE_OFFSET
+    );
+    assert!(
+        core::mem::offset_of!(TraderSeat, open_ask_exposure) == V3_SEAT_OPEN_ASK_EXPOSURE_OFFSET
+    );
     assert!(core::mem::offset_of!(TraderSeat, open_order_count) == V3_SEAT_OPEN_ORDER_COUNT_OFFSET);
-    assert!(core::mem::offset_of!(TraderSeat, liquidation_state) == V3_SEAT_LIQUIDATION_STATE_OFFSET);
+    assert!(
+        core::mem::offset_of!(TraderSeat, liquidation_state) == V3_SEAT_LIQUIDATION_STATE_OFFSET
+    );
     assert!(core::mem::offset_of!(TraderSeat, sequence) == V3_SEAT_SEQUENCE_OFFSET);
 };
 
@@ -1031,7 +1045,7 @@ pub fn validate_execution_bundle(
         || core_bytes[0..8] != V3_MARKET_CORE_DISCRIMINATOR
         || core_bytes[8..10] != V3_LAYOUT_VERSION.to_le_bytes()
         || core_bytes[10] != 1
-        || core_bytes[V3_CORE_MODE_OFFSET] != 1
+        || core_bytes[V3_CORE_MODE_OFFSET] > 2
     {
         return Err(bundle_error());
     }
@@ -1127,6 +1141,112 @@ pub fn validate_v3_withdrawal_readiness(
         return Err(StockStreamError::CustodyViolation.into());
     }
     Ok(())
+}
+
+/// The result of validating a V3 session signer against the sharded seat
+/// domain.  The caller must consume the returned session nonce only after its
+/// complete state transition succeeds.
+#[derive(Clone, Copy)]
+pub struct V3SessionAuthorization {
+    pub session: TradingSession,
+    pub seat: TraderSeat,
+}
+
+/// Validates a scoped session action for a V3 seat.  This is deliberately
+/// separate from the legacy V2 handler helper: V3 seats are spread across
+/// four PDAs, and accepting a caller-selected shard would permit an account
+/// substitution between authorization and settlement.
+#[allow(clippy::too_many_arguments)]
+pub fn validate_v3_session_actor(
+    program_id: &Address,
+    core: &AccountView,
+    seat_shards: &[AccountView],
+    session_account: &AccountView,
+    signer_account: &AccountView,
+    seat_index: u16,
+    required_actions: u8,
+    notional: i128,
+    resulting_exposure: u128,
+    action_nonce: u64,
+    now: u64,
+) -> Result<V3SessionAuthorization, ProgramError> {
+    if seat_shards.len() != V3_SEAT_SHARDS || !signer_account.is_signer() || required_actions == 0 {
+        return Err(StockStreamError::InvalidTradingSession.into());
+    }
+    let core_key = *core.address();
+    let core_bytes = unsafe { core.borrow_unchecked() };
+    if !core.owned_by(program_id)
+        || core_bytes.len() != V3_MARKET_CORE_SIZE
+        || core_bytes[0..8] != V3_MARKET_CORE_DISCRIMINATOR
+        || core_bytes[8..10] != V3_LAYOUT_VERSION.to_le_bytes()
+        || core_bytes[10] != 1
+        || core_bytes[V3_CORE_MODE_OFFSET] != 1
+    {
+        return Err(StockStreamError::InvalidTradingSession.into());
+    }
+    for (shard, account) in seat_shards.iter().enumerate() {
+        if !account.owned_by(program_id)
+            || *account.address() != derive_seat_shard_v3(program_id, &core_key, shard as u8)
+        {
+            return Err(StockStreamError::InvalidTradingSession.into());
+        }
+        let bytes = unsafe { account.borrow_unchecked() };
+        if bytes.len() != V3_SEAT_SHARD_SIZE
+            || bytes[0..8] != V3_SEAT_SHARD_DISCRIMINATOR
+            || bytes[8..10] != V3_LAYOUT_VERSION.to_le_bytes()
+            || bytes[10] != shard as u8
+            || bytes[11] != 0
+            || bytes[12..44] != core_key.to_bytes()
+        {
+            return Err(StockStreamError::InvalidTradingSession.into());
+        }
+    }
+    let index = seat_index as usize;
+    if index >= V3_SEAT_SHARDS * V3_SEATS_PER_SHARD {
+        return Err(StockStreamError::InvalidSeat.into());
+    }
+    let shard = index / V3_SEATS_PER_SHARD;
+    let slot = index % V3_SEATS_PER_SHARD;
+    let seat_bytes = unsafe { seat_shards[shard].borrow_unchecked() };
+    let seat = read_shard_seat(seat_bytes, slot)?;
+    if seat.occupancy != 1 || seat.trader == [0; 32] {
+        return Err(StockStreamError::InvalidSeat.into());
+    }
+    let owner = Address::new_from_array(seat.trader);
+    let signer = *signer_account.address();
+    if owner == signer {
+        return Err(StockStreamError::InvalidTradingSession.into());
+    }
+    let session_state = session::validated_session_account(
+        program_id,
+        session_account,
+        &owner,
+        &core_key,
+        seat_index,
+        &signer,
+        true,
+    )?;
+    if !session_state.is_live(now) || session_state.actions & required_actions == 0 {
+        return Err(StockStreamError::InvalidTradingSession.into());
+    }
+    if action_nonce != session_state.next_expected_nonce {
+        return Err(StockStreamError::SessionNonceReplay.into());
+    }
+    if session_state.next_expected_nonce == u64::MAX {
+        return Err(StockStreamError::ArithmeticOverflow.into());
+    }
+    if notional < 0
+        || notional as u128 > session_state.max_order_notional as u128
+        || (notional as u128).saturating_add(session_state.consumed_cumulative_notional as u128)
+            > session_state.max_cumulative_notional as u128
+        || resulting_exposure > session_state.max_exposure as u128
+    {
+        return Err(StockStreamError::RiskViolation.into());
+    }
+    Ok(V3SessionAuthorization {
+        session: session_state,
+        seat,
+    })
 }
 
 fn validate_active_core(program_id: &Address, core: &AccountView) -> Result<Address, ProgramError> {
