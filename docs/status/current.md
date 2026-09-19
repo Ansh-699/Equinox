@@ -17,7 +17,7 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 | CreateVaultAccount account ABI | Complete | commit `54cd92b`; 8 new LiteSVM tests incl. a proven CPI-rollback case |
 | CreateScratchAccount (op45) | Complete | commit `00c4fb7`; 6 LiteSVM tests; live on Devnet |
 | Session-relayer authorization chain | Complete | commit `8c4d624`; 31 new unit tests; deployed live, all 4 auth gates verified via curl |
-| Worker deployment | Complete | `https://stockstream-market-api.ansht.workers.dev`; real D1 database (`1dced396-c76a-4147-8a4f-70465e9aff55`, 7 migrations applied); `/v1/health/keepers` reports `signer: ready`, `magicRouter: ready`. V3 aggregation now decodes complete persisted event records, 88-byte PATRICIA leaves into ordered bid/ask views, and occupied seat positions using Rust-verified offsets (commits `a1f48af`, `ea90ec0`, `1642137`) while retaining strict 17-account and shard-relationship validation. |
+| Worker deployment | Complete | `https://stockstream-market-api.ansht.workers.dev`; real D1 database (`1dced396-c76a-4147-8a4f-70465e9aff55`, 7 migrations applied); `/v1/health/keepers` reports `signer: ready`, `magicRouter: ready`. V3 aggregation now decodes complete persisted event records, 88-byte PATRICIA leaves into ordered bid/ask views, and occupied seat positions using Rust-verified offsets (commits `a1f48af`, `ea90ec0`, `1642137`, `a1219c3`) while retaining strict 17-account and shard-relationship validation. The new `GET /v1/v3/markets/:core?domain=l1|er` route derives all 16 shard PDAs from the core and returns a bigint-safe aggregate; it remains read-only until a deployed V3 core exists. |
 | E2E auth-bypass parity (Worker <-> Next.js) | Complete | commit `822ec18`; double-gated, Miniflare-tested, confirmed inert on the live deployment |
 | Devnet lifecycle script correctness | Complete | commit `25a1b0e` + follow-ups; matches the corrected ABI everywhere |
 | MagicBlock delegate (market + 4-account hot cluster) | Complete, live | market `9d75hK8GyfqajxcijLa35bEh8SYUtobqi6eSdtF42RuS` fully delegated: L1 owner `DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh`, router `isDelegated: true`; 2 real protocol bugs found and fixed live (buffer-growth cap, commit-CPI off-by-one) |
@@ -34,6 +34,8 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 | `clients/stockstream/src/index.ts` facade reduction | Started, partial | commit `7fba664` removes the duplicated public opcode table in favour of the ABI authority. Instruction encoders and account-meta construction remain in the legacy facade and need incremental, parity-tested extraction. |
 
 ## Test counts (latest rerun; scope is stated explicitly)
+
+Worker V3 read-path checkpoint (`a1219c3`): `GET /v1/v3/markets/:core?domain=l1|er` derives all 16 shard PDAs from the supplied core and returns a bigint-safe aggregate. It is read-only and cannot claim live V3 state until a V3 core is deployed.
 
 - Rust (native + LiteSVM runtime): 290 passing, `cargo fmt --check` clean.
 - Workers (Miniflare/vitest): 332 passing.
