@@ -343,7 +343,15 @@ describe("ProtocolKeeperOrchestrator (real Miniflare D1 + mock JSON-RPC)", () =>
     const marketPda = fakeMarketAddress();
     await insertMarket("DUP", marketPda);
     const setup = await orchestratorFor(mockRpc({}));
-    const now = Date.now();
+    // Pinned to a Monday at 12:00 UTC (regular trading hours for this
+    // test's UTC calendar, regularOpen 00:00 - regularClose 23:59) rather
+    // than Date.now(): sessionCalendarStatus treats Sat/Sun as "closed"
+    // regardless of time of day, which made this test's target transition
+    // (and therefore its whole idempotency assertion) depend on which day
+    // of the real week it happened to run -- it deterministically failed
+    // on a weekend, since "closed" -> targetMode "close-only" (mode 2),
+    // not the "open" (mode 1) this test's mock hardcodes on submission.
+    const now = Date.UTC(2026, 8, 21, 12, 0, 0); // 2026-09-21 is a Monday
     // Stateful mock: the account starts Paused; once a transaction is sent
     // (the session keeper's transition-to-open), subsequent reads reflect
     // Open -- simulating a real chain applying the submitted instruction,
