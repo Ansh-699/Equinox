@@ -13,7 +13,12 @@ export const MARKET_HEADER_SIZE = 512;
 export const MARKET_ACCOUNT_SIZE = 222_752;
 export const TRADER_SEAT_SIZE = 256;
 export const TRADING_SESSION_SIZE = 256;
-export const SETTLEMENT_SCRATCH_LEN = 12_288;
+/** The real, computed (`align_up`-derived) settlement-scratch account
+ * size -- NOT the 12,288-byte upper bound `scratch.rs` asserts it stays
+ * under at compile time. This was wrong (hardcoded as the cap) until the
+ * ABI parity generator was fixed to read the real Rust constant instead
+ * of copying the previously-committed manifest back onto itself. */
+export const SETTLEMENT_SCRATCH_LEN = 2_992;
 export const TOKEN_ACCOUNT_LEN = 165;
 
 export const BID_ARENA_OFFSET = 512;
