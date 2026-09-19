@@ -163,6 +163,24 @@ fn typescript_golden_instruction_vectors_decode_in_rust() {
             action_nonce: 8,
         })
     ));
+    assert!(matches!(
+        StockStreamInstruction::decode(&[stockstream::instruction::CREATE_V3_ACCOUNT, 0, 0]),
+        Ok(StockStreamInstruction::CreateV3Account { kind: 0, index: 0 })
+    ));
+    assert!(matches!(
+        StockStreamInstruction::decode(&[stockstream::instruction::CREATE_V3_ACCOUNT, 1, 7]),
+        Ok(StockStreamInstruction::CreateV3Account { kind: 1, index: 7 })
+    ));
+    // The parser rejects bad kinds and bounds before a handler can derive a
+    // PDA, preventing malformed flattened page indices from aliasing pages.
+    assert!(
+        StockStreamInstruction::decode(&[stockstream::instruction::CREATE_V3_ACCOUNT, 1, 8,])
+            .is_err()
+    );
+    assert!(
+        StockStreamInstruction::decode(&[stockstream::instruction::CREATE_V3_ACCOUNT, 4, 0,])
+            .is_err()
+    );
 }
 
 /// A `TypeScript -> Rust` golden vector for `UpdateExchangeConfig`, encoded

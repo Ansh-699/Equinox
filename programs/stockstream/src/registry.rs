@@ -445,6 +445,300 @@ pub fn create_market_account(program_id: &Address, accounts: &mut [AccountView])
     Ok(())
 }
 
+/// Opcode 46: creates one independently-committable V3 PDA.
+///
+/// Accounts are `[parent, target (writable), payer (writable signer), system]`.
+/// `parent` is a registered instrument for a `MarketCore`, and an initialized
+/// V3 core for a page/shard. Allocation is resumable for the book pages (the
+/// only V3 account larger than Solana's 10,240-byte per-instruction growth
+/// limit). No V2 PDA, header, or delegated account is accepted here.
+pub fn create_v3_account(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    kind_raw: u8,
+    index: u8,
+) -> ProgramResult {
+    use crate::v3::{self, V3AccountKind};
+
+    if accounts.len() != 4 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    if !accounts[1].is_writable() || !accounts[2].is_signer() || !accounts[2].is_writable() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    if *accounts[3].address() != pinocchio_system::ID {
+        return Err(ProgramError::InvalidAccountOwner);
+    }
+    let kind = V3AccountKind::from_u8(kind_raw)
+        .filter(|kind| index <= kind.max_index())
+        .ok_or(ProgramError::InvalidInstructionData)?;
+    let parent = *accounts[0].address();
+    let expected = v3::derive_v3_account(program_id, &parent, kind, index)
+        .ok_or(ProgramError::InvalidInstructionData)?;
+    if expected != *accounts[1].address() || !v3::committable_account_size(kind.account_size()) {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+
+    match kind {
+        V3AccountKind::MarketCore => validate_v3_instrument_parent(program_id, &accounts[0])?,
+        _ => validate_v3_core_parent(program_id, &accounts[0])?,
+    }
+    let (before_payer, payer_and_rest) = accounts.split_at_mut(2);
+    let target = &mut before_payer[1];
+    let payer = &mut payer_and_rest[0];
+
+    let complete = match kind {
+        V3AccountKind::MarketCore => {
+            let (_, bump) = Address::find_program_address(
+                &[v3::V3_MARKET_CORE_SEED, parent.as_ref()],
+                program_id,
+            );
+            let bump_slice = [bump];
+            let seeds = [
+                pinocchio::cpi::Seed::from(v3::V3_MARKET_CORE_SEED),
+                pinocchio::cpi::Seed::from(parent.as_ref()),
+                pinocchio::cpi::Seed::from(&bump_slice),
+            ];
+            grow_v3_account(
+                program_id,
+                target,
+                payer,
+                kind.account_size(),
+                &pinocchio::cpi::Signer::from(&seeds),
+            )?
+        }
+        V3AccountKind::BookPage => {
+            let side = index / v3::V3_BOOK_PAGES_PER_SIDE as u8;
+            let page = index % v3::V3_BOOK_PAGES_PER_SIDE as u8;
+            let (_, bump) = Address::find_program_address(
+                &[v3::V3_BOOK_PAGE_SEED, parent.as_ref(), &[side], &[page]],
+                program_id,
+            );
+            let bump_slice = [bump];
+            let side_slice = [side];
+            let page_slice = [page];
+            let seeds = [
+                pinocchio::cpi::Seed::from(v3::V3_BOOK_PAGE_SEED),
+                pinocchio::cpi::Seed::from(parent.as_ref()),
+                pinocchio::cpi::Seed::from(&side_slice),
+                pinocchio::cpi::Seed::from(&page_slice),
+                pinocchio::cpi::Seed::from(&bump_slice),
+            ];
+            grow_v3_account(
+                program_id,
+                target,
+                payer,
+                kind.account_size(),
+                &pinocchio::cpi::Signer::from(&seeds),
+            )?
+        }
+        V3AccountKind::SeatShard => {
+            let (_, bump) = Address::find_program_address(
+                &[v3::V3_SEAT_SHARD_SEED, parent.as_ref(), &[index]],
+                program_id,
+            );
+            let bump_slice = [bump];
+            let index_slice = [index];
+            let seeds = [
+                pinocchio::cpi::Seed::from(v3::V3_SEAT_SHARD_SEED),
+                pinocchio::cpi::Seed::from(parent.as_ref()),
+                pinocchio::cpi::Seed::from(&index_slice),
+                pinocchio::cpi::Seed::from(&bump_slice),
+            ];
+            grow_v3_account(
+                program_id,
+                target,
+                payer,
+                kind.account_size(),
+                &pinocchio::cpi::Signer::from(&seeds),
+            )?
+        }
+        V3AccountKind::EventShard => {
+            let (_, bump) = Address::find_program_address(
+                &[v3::V3_EVENT_SHARD_SEED, parent.as_ref(), &[index]],
+                program_id,
+            );
+            let bump_slice = [bump];
+            let index_slice = [index];
+            let seeds = [
+                pinocchio::cpi::Seed::from(v3::V3_EVENT_SHARD_SEED),
+                pinocchio::cpi::Seed::from(parent.as_ref()),
+                pinocchio::cpi::Seed::from(&index_slice),
+                pinocchio::cpi::Seed::from(&bump_slice),
+            ];
+            grow_v3_account(
+                program_id,
+                target,
+                payer,
+                kind.account_size(),
+                &pinocchio::cpi::Signer::from(&seeds),
+            )?
+        }
+    };
+    if complete {
+        initialize_v3_account(program_id, target, parent, kind, index)?;
+    }
+    Ok(())
+}
+
+fn validate_v3_instrument_parent(program_id: &Address, account: &AccountView) -> ProgramResult {
+    if !account.owned_by(program_id) {
+        return Err(ProgramError::IllegalOwner);
+    }
+    let data = unsafe { account.borrow_unchecked() };
+    if data.len() != INSTRUMENT_SIZE
+        || data[0..8] != INSTRUMENT_DISCRIMINATOR
+        || data[10] == 0
+        || data[111] != 0
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    Ok(())
+}
+
+fn validate_v3_core_parent(program_id: &Address, account: &AccountView) -> ProgramResult {
+    if !account.owned_by(program_id) {
+        return Err(ProgramError::IllegalOwner);
+    }
+    let data = unsafe { account.borrow_unchecked() };
+    if data.len() != crate::v3::V3_MARKET_CORE_SIZE
+        || data[0..8] != crate::v3::V3_MARKET_CORE_DISCRIMINATOR
+        || data[8..10] != crate::v3::V3_LAYOUT_VERSION.to_le_bytes()
+        || data[10] != 1
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    Ok(())
+}
+
+/// Returns true only once `target` has reached its final data length.
+fn grow_v3_account(
+    program_id: &Address,
+    target: &mut AccountView,
+    payer: &mut AccountView,
+    final_len: usize,
+    signer: &pinocchio::cpi::Signer,
+) -> Result<bool, ProgramError> {
+    use pinocchio::sysvars::{rent::Rent, Sysvar};
+    const MAX_PERMITTED_DATA_INCREASE: usize = 10_240;
+
+    let data_len = target.data_len();
+    if data_len == final_len && target.owned_by(program_id) {
+        return Ok(true);
+    }
+    if data_len == 0 {
+        if target.owned_by(program_id) || !target.owned_by(&pinocchio_system::ID) {
+            return Err(custom(StockStreamError::InvalidInstruction));
+        }
+        let first_len = final_len.min(MAX_PERMITTED_DATA_INCREASE);
+        pinocchio_system::instructions::Allocate {
+            account: target,
+            space: first_len as u64,
+        }
+        .invoke_signed(core::slice::from_ref(signer))?;
+        let needed = Rent::get()?.try_minimum_balance(final_len)?;
+        let deficit = needed.saturating_sub(target.lamports());
+        if deficit > 0 {
+            pinocchio_system::instructions::Transfer {
+                from: payer,
+                to: target,
+                lamports: deficit,
+            }
+            .invoke()?;
+        }
+        pinocchio_system::instructions::Assign {
+            account: target,
+            owner: program_id,
+        }
+        .invoke_signed(core::slice::from_ref(signer))?;
+        return Ok(first_len == final_len);
+    }
+    if !target.owned_by(program_id) || data_len > final_len {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let next = (data_len + MAX_PERMITTED_DATA_INCREASE).min(final_len);
+    unsafe {
+        let account = target.account_mut_ptr();
+        core::ptr::write_unaligned(&mut (*account).data_len as *mut u64, next as u64);
+    }
+    Ok(next == final_len)
+}
+
+fn initialize_v3_account(
+    program_id: &Address,
+    target: &mut AccountView,
+    parent: Address,
+    kind: crate::v3::V3AccountKind,
+    index: u8,
+) -> ProgramResult {
+    let data = account_data(target, program_id, kind.account_size())?;
+    // The four layouts share only discriminator, version and parent at the
+    // front.  In particular, byte 10 is `initialized` on the core but
+    // `side`/`shard_index` on every child, so idempotence is deliberately
+    // kind-specific rather than relying on one misleading common flag.
+    let already_initialized = match kind {
+        crate::v3::V3AccountKind::MarketCore => {
+            data[0..8] == crate::v3::V3_MARKET_CORE_DISCRIMINATOR
+                && data[8..10] == crate::v3::V3_LAYOUT_VERSION.to_le_bytes()
+                && data[10] == 1
+                && data[12..44] == *parent.as_ref()
+        }
+        crate::v3::V3AccountKind::BookPage => {
+            data[0..8] == crate::v3::V3_BOOK_PAGE_DISCRIMINATOR
+                && data[8..10] == crate::v3::V3_LAYOUT_VERSION.to_le_bytes()
+                && data[10] == index / crate::v3::V3_BOOK_PAGES_PER_SIDE as u8
+                && data[11] == index % crate::v3::V3_BOOK_PAGES_PER_SIDE as u8
+                && data[12..44] == *parent.as_ref()
+        }
+        crate::v3::V3AccountKind::SeatShard => {
+            data[0..8] == crate::v3::V3_SEAT_SHARD_DISCRIMINATOR
+                && data[8..10] == crate::v3::V3_LAYOUT_VERSION.to_le_bytes()
+                && data[10] == index
+                && data[12..44] == *parent.as_ref()
+        }
+        crate::v3::V3AccountKind::EventShard => {
+            data[0..8] == crate::v3::V3_EVENT_SHARD_DISCRIMINATOR
+                && data[8..10] == crate::v3::V3_LAYOUT_VERSION.to_le_bytes()
+                && data[10] == index
+                && data[12..44] == *parent.as_ref()
+        }
+    };
+    if already_initialized {
+        return Ok(());
+    }
+    if data[..44].iter().any(|byte| *byte != 0) {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    match kind {
+        crate::v3::V3AccountKind::MarketCore => {
+            data[0..8].copy_from_slice(&crate::v3::V3_MARKET_CORE_DISCRIMINATOR);
+            data[8..10].copy_from_slice(&crate::v3::V3_LAYOUT_VERSION.to_le_bytes());
+            data[10] = 1;
+            data[12..44].copy_from_slice(parent.as_ref());
+        }
+        crate::v3::V3AccountKind::BookPage => {
+            data[0..8].copy_from_slice(&crate::v3::V3_BOOK_PAGE_DISCRIMINATOR);
+            data[8..10].copy_from_slice(&crate::v3::V3_LAYOUT_VERSION.to_le_bytes());
+            data[10] = index / crate::v3::V3_BOOK_PAGES_PER_SIDE as u8;
+            data[11] = index % crate::v3::V3_BOOK_PAGES_PER_SIDE as u8;
+            data[12..44].copy_from_slice(parent.as_ref());
+        }
+        crate::v3::V3AccountKind::SeatShard => {
+            data[0..8].copy_from_slice(&crate::v3::V3_SEAT_SHARD_DISCRIMINATOR);
+            data[8..10].copy_from_slice(&crate::v3::V3_LAYOUT_VERSION.to_le_bytes());
+            data[10] = index;
+            data[12..44].copy_from_slice(parent.as_ref());
+        }
+        crate::v3::V3AccountKind::EventShard => {
+            data[0..8].copy_from_slice(&crate::v3::V3_EVENT_SHARD_DISCRIMINATOR);
+            data[8..10].copy_from_slice(&crate::v3::V3_LAYOUT_VERSION.to_le_bytes());
+            data[10] = index;
+            data[12..44].copy_from_slice(parent.as_ref());
+        }
+    }
+    Ok(())
+}
+
 fn account_data<'a>(
     account: &'a mut AccountView,
     program_id: &Address,
