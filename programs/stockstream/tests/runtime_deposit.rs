@@ -14,7 +14,9 @@
 //!   * `InitializeVault` [9]: accounts
 //!     `[market (w), authority (signer), mint, token_program, vault (w), vault_authority]`;
 //!   * `DepositCollateral` [10, seat:u16@1, amount:u64@3]: accounts
-//!     `[market (w), authority (signer), seat-slot (w), source (w), vault (w), mint, token_program]`.
+//!     `[market (w), authority (signer), source (w), vault (w), mint, token_program]`
+//!     -- 6 accounts, not 7: the seat lives inside the market account itself,
+//!     so a separate "seat slot" account was never read by the handler.
 //!
 //! Vault/authority are PDAs: `["vault", market]` and `["vault-authority", market]`.
 
@@ -75,7 +77,6 @@ struct Env {
     vault: Address,
     #[allow(dead_code)] // consumed by the withdrawal runtime tests.
     vault_authority: Address,
-    seat_slot: Address,
 }
 
 fn install(svm: &mut LiteSVM, address: Address, data: Vec<u8>, owner: Address) {
@@ -256,8 +257,6 @@ fn setup() -> Env {
     install(&mut svm, mint, vec![0; Mint::LEN], TOKENKEG);
     install(&mut svm, source, vec![0; TokenAccount::LEN], TOKENKEG);
     install(&mut svm, vault, vec![0; TokenAccount::LEN], TOKENKEG);
-    let seat_slot = Address::new_unique();
-    install(&mut svm, seat_slot, Vec::new(), Address::default());
 
     let init_mint =
         token_ix::initialize_mint2(&TOKENKEG, &mint, &authority.pubkey(), None, DECIMALS).unwrap();
@@ -310,7 +309,6 @@ fn setup() -> Env {
         source,
         vault,
         vault_authority,
-        seat_slot,
     }
 }
 
@@ -319,7 +317,6 @@ fn setup() -> Env {
 fn deposit_ix(
     market: Address,
     authority: Address,
-    seat_slot: Address,
     source: Address,
     vault: Address,
     mint: Address,
@@ -331,7 +328,6 @@ fn deposit_ix(
         vec![
             AccountMeta::new(market, false),
             AccountMeta::new_readonly(authority, true),
-            AccountMeta::new(seat_slot, false),
             AccountMeta::new(source, false),
             AccountMeta::new(vault, false),
             AccountMeta::new_readonly(mint, false),
@@ -344,7 +340,6 @@ fn standard_deposit(env: &Env, amount: u64) -> Instruction {
     deposit_ix(
         env.market,
         env.trader.pubkey(),
-        env.seat_slot,
         env.source,
         env.vault,
         env.mint,
@@ -516,7 +511,6 @@ fn deposit_rejects_a_non_owner_and_leaves_state_byte_for_byte_unchanged() {
     let instruction = deposit_ix(
         env.market,
         attacker.pubkey(),
-        env.seat_slot,
         env.source,
         env.vault,
         env.mint,
@@ -550,7 +544,6 @@ fn deposit_rejects_wrong_source_mint_vault_and_token_program() {
     let wrong_source = deposit_ix(
         env.market,
         env.trader.pubkey(),
-        env.seat_slot,
         foreign,
         env.vault,
         env.mint,
@@ -566,7 +559,6 @@ fn deposit_rejects_wrong_source_mint_vault_and_token_program() {
     let wrong_vault = deposit_ix(
         env.market,
         env.trader.pubkey(),
-        env.seat_slot,
         env.source,
         Address::new_unique(),
         env.mint,
@@ -582,7 +574,6 @@ fn deposit_rejects_wrong_source_mint_vault_and_token_program() {
     let wrong_program = deposit_ix(
         env.market,
         env.trader.pubkey(),
-        env.seat_slot,
         env.source,
         env.vault,
         env.mint,
@@ -624,7 +615,6 @@ fn deposit_rejects_insufficient_balance_zero_amount_and_aliasing() {
     let aliased = deposit_ix(
         env.market,
         env.trader.pubkey(),
-        env.seat_slot,
         env.source,
         env.source,
         env.mint,

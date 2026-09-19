@@ -13,5 +13,5 @@ export function resolveCustodyAccounts(walletAddress: string | null, marketAddre
   const vaultAuthority = process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT_AUTHORITY;
   if (!mint || !tokenProgram || !vault || !vaultAuthority) return null;
   const sourceOrDestination = deriveCollateralTokenAccount(walletAddress, mint, tokenProgram);
-  return { market: marketAddress, authority: walletAddress, seat: walletAddress, seatIndex: 0, sourceOrDestination, mint, tokenProgram, vault, vaultAuthority };
+  return { market: marketAddress, authority: walletAddress, seatIndex: 0, sourceOrDestination, mint, tokenProgram, vault, vaultAuthority };
 }

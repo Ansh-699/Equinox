@@ -2,7 +2,7 @@ import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { expect, test } from "vitest";
 import { STOCKSTREAM_PROGRAM_ID } from "./constants";
 import { MAGICBLOCK_DELEGATION_PROGRAM_ID, MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID, STOCKSTREAM_PROGRAM_KEY } from "./index";
-import { authorizeTradingSession, cancelOrder, commitMarket, delegateClusterMember, deriveClusterMemberPdas, createPerpMarket, decodeFillPayload, decodeInstruction, decodeMarketState, decodeSeatAmountPayload, decodeStockStreamEvent, delegateMarket, deriveTradingSession, EVENT_SIZE, initializeExchange, initializeMarket, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateExchangeConfig, updateStockInstrument, withdrawInsuranceFunds, withdrawProtocolFees, EXCHANGE_CONFIG_FIELD } from "./index";
+import { authorizeTradingSession, cancelOrder, commitMarket, delegateClusterMember, deriveClusterMemberPdas, createPerpMarket, decodeFillPayload, decodeInstruction, decodeMarketState, decodeSeatAmountPayload, decodeStockStreamEvent, delegateMarket, deriveTradingSession, depositCollateral, EVENT_SIZE, initializeExchange, initializeMarket, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateExchangeConfig, updateStockInstrument, withdrawCollateral, withdrawInsuranceFunds, withdrawProtocolFees, EXCHANGE_CONFIG_FIELD } from "./index";
 import { STOCKSTREAM_ACCOUNT_SIZE } from "./constants";
 
 const market = PublicKey.unique();
@@ -17,6 +17,39 @@ test("instruction constructors use canonical program id and exact account flags"
     { pubkey: market, isSigner: false, isWritable: true },
     { pubkey: authority, isSigner: true, isWritable: false },
   ]);
+});
+
+test("depositCollateral encodes exactly 6 accounts -- no separate seat-slot account", () => {
+  const vault = PublicKey.unique();
+  const vaultAuthority = PublicKey.unique();
+  const mint = PublicKey.unique();
+  const tokenProgram = PublicKey.unique();
+  const sourceOrDestination = PublicKey.unique();
+  const ix = depositCollateral({ market, authority, mint, tokenProgram, vault, vaultAuthority, seatIndex: 0, sourceOrDestination }, 400n);
+  expect(ix.data.length).toBe(11);
+  expect(ix.keys).toEqual([
+    { pubkey: market, isSigner: false, isWritable: true },
+    { pubkey: authority, isSigner: true, isWritable: false },
+    { pubkey: sourceOrDestination, isSigner: false, isWritable: true },
+    { pubkey: vault, isSigner: false, isWritable: true },
+    { pubkey: mint, isSigner: false, isWritable: false },
+    { pubkey: tokenProgram, isSigner: false, isWritable: false },
+  ]);
+});
+
+test("withdrawCollateral encodes 7 accounts including the derived vault authority", () => {
+  const vault = PublicKey.unique();
+  const mint = PublicKey.unique();
+  const tokenProgram = PublicKey.unique();
+  const sourceOrDestination = PublicKey.unique();
+  const ix = withdrawCollateral({ market, authority, mint, tokenProgram, vault, vaultAuthority: PublicKey.unique(), seatIndex: 0, sourceOrDestination }, 400n);
+  expect(ix.keys).toHaveLength(7);
+  expect(ix.keys[0]).toEqual({ pubkey: market, isSigner: false, isWritable: true });
+  expect(ix.keys[1]).toEqual({ pubkey: authority, isSigner: true, isWritable: false });
+  expect(ix.keys[2]).toEqual({ pubkey: sourceOrDestination, isSigner: false, isWritable: true });
+  expect(ix.keys[3]).toEqual({ pubkey: mint, isSigner: false, isWritable: false });
+  expect(ix.keys[4]).toEqual({ pubkey: vault, isSigner: false, isWritable: true });
+  expect(ix.keys[6]).toEqual({ pubkey: tokenProgram, isSigner: false, isWritable: false });
 });
 
 test("place order serializes little-endian fields and decodes", () => {
