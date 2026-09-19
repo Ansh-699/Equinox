@@ -113,7 +113,7 @@ fn leaf(key: u128, owner: u32) -> LeafNode {
         expires_at: u64::MAX,
         peg_limit: 0,
         client_order_id: owner as u64,
-        price_or_offset: owner as i64,
+        price_or_offset: owner as i64 + 1,
         sequence: owner as u64,
         flags: 0,
         _reserved: [0; 15],
@@ -199,11 +199,19 @@ fn v3_paged_book_preserves_global_handles_across_page_boundaries() {
         assert!(book.find(TreeKind::Fixed, key).is_ok());
     }
     assert_eq!(book.node_tag(256).unwrap(), 1);
+    let plan = book
+        .plan_crossing(TreeKind::Fixed, Side::Bid, 2_000, 1, None, 0)
+        .unwrap();
+    assert_eq!(plan.fill_count, 1);
+    assert_eq!(plan.fills[0].maker_handle, 0);
+    book.apply_match_plan(TreeKind::Fixed, &plan).unwrap();
+    assert!(book.apply_match_plan(TreeKind::Fixed, &plan).is_err());
+    assert!(book.find(TreeKind::Fixed, 0).is_err());
     let best = book.best(TreeKind::Fixed).unwrap().unwrap();
     let best_leaf = book.leaf(best).unwrap();
     assert_eq!(
         unsafe { core::ptr::addr_of!(best_leaf.key).read_unaligned() },
-        0
+        1u128 << 64
     );
     assert_eq!(
         unsafe { accounts[1].view.borrow_unchecked() }[60..64],

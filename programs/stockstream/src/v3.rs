@@ -265,6 +265,32 @@ pub struct PagedBookV3<'a> {
     pages: &'a mut [AccountView],
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct V3Fill {
+    pub maker_handle: u32,
+    pub maker_owner: u32,
+    pub key: u128,
+    pub price: u64,
+    pub quantity: u64,
+    pub maker_remaining: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct V3MatchPlan {
+    pub fills: [V3Fill; crate::book::MAX_FILLS_PER_INSTRUCTION],
+    pub fill_count: u8,
+    pub taker_remaining: u64,
+}
+
+const EMPTY_V3_FILL: V3Fill = V3Fill {
+    maker_handle: NONE,
+    maker_owner: 0,
+    key: 0,
+    price: 0,
+    quantity: 0,
+    maker_remaining: 0,
+};
+
 impl<'a> PagedBookV3<'a> {
     pub fn new(pages: &'a mut [AccountView]) -> Result<Self, ProgramError> {
         if pages.len() != V3_BOOK_PAGES_PER_SIDE {
@@ -670,6 +696,154 @@ impl<'a> PagedBookV3<'a> {
             }
         }
         Ok(None)
+    }
+
+    fn best_unselected(
+        &mut self,
+        tree: TreeKind,
+        selected: &[u32; crate::book::MAX_FILLS_PER_INSTRUCTION],
+        selected_len: usize,
+    ) -> Result<Option<u32>, ProgramError> {
+        let bump = self.meta_u32(V3_BOOK_BUMP_INDEX_OFFSET)? as usize;
+        let mut best: Option<(u128, u32)> = None;
+        for handle in 0..bump {
+            let handle = handle as u32;
+            if self.tag(handle)? != TAG_LEAF || selected[..selected_len].contains(&handle) {
+                continue;
+            }
+            let leaf = self.leaf(handle)?;
+            let key = unsafe { core::ptr::addr_of!(leaf.key).read_unaligned() };
+            if self.find(tree, key).ok() != Some(handle) {
+                continue;
+            }
+            if best.map(|(current, _)| key < current).unwrap_or(true) {
+                best = Some((key, handle));
+            }
+        }
+        Ok(best.map(|(_, handle)| handle))
+    }
+
+    fn effective_price(
+        leaf: &LeafNode,
+        tree: TreeKind,
+        oracle: Option<i64>,
+    ) -> Result<u64, ProgramError> {
+        let raw = unsafe { core::ptr::addr_of!(leaf.price_or_offset).read_unaligned() };
+        let value = match tree {
+            TreeKind::Fixed => raw,
+            TreeKind::OraclePegged => oracle
+                .ok_or_else(bundle_error)?
+                .checked_add(raw)
+                .ok_or_else(bundle_error)?,
+        };
+        if value <= 0 {
+            return Err(bundle_error());
+        }
+        Ok(value as u64)
+    }
+
+    /// Plans up to four crossing fills against this page-sharded book without
+    /// mutating it. The selected handles and expected remaining quantities are
+    /// carried into `apply_match_plan`, making stale-page races fail before a
+    /// partial mutation can be committed.
+    pub fn plan_crossing(
+        &mut self,
+        tree: TreeKind,
+        taker_side: crate::book::Side,
+        taker_price: i64,
+        taker_quantity: u64,
+        oracle: Option<i64>,
+        now: u64,
+    ) -> Result<V3MatchPlan, ProgramError> {
+        if taker_price <= 0 || taker_quantity == 0 {
+            return Err(bundle_error());
+        }
+        let mut plan = V3MatchPlan {
+            fills: [EMPTY_V3_FILL; crate::book::MAX_FILLS_PER_INSTRUCTION],
+            fill_count: 0,
+            taker_remaining: taker_quantity,
+        };
+        let mut selected = [NONE; crate::book::MAX_FILLS_PER_INSTRUCTION];
+        while plan.fill_count < crate::book::MAX_FILLS_PER_INSTRUCTION as u8
+            && plan.taker_remaining > 0
+        {
+            let index = plan.fill_count as usize;
+            let Some(handle) = self.best_unselected(tree, &selected, index)? else {
+                break;
+            };
+            let leaf = self.leaf(handle)?;
+            let expires = unsafe { core::ptr::addr_of!(leaf.expires_at).read_unaligned() };
+            if expires <= now {
+                selected[index] = handle;
+                continue;
+            }
+            let maker_side = if taker_side == crate::book::Side::Bid {
+                crate::book::Side::Ask
+            } else {
+                crate::book::Side::Bid
+            };
+            if leaf.side != maker_side as u8 {
+                selected[index] = handle;
+                continue;
+            }
+            let maker_price = Self::effective_price(&leaf, tree, oracle)?;
+            let crosses = if taker_side == crate::book::Side::Bid {
+                maker_price <= taker_price as u64
+            } else {
+                maker_price >= taker_price as u64
+            };
+            if !crosses {
+                break;
+            }
+            let maker_quantity = leaf.quantity;
+            let fill_quantity = maker_quantity.min(plan.taker_remaining);
+            let key = unsafe { core::ptr::addr_of!(leaf.key).read_unaligned() };
+            let owner = leaf.owner;
+            plan.fills[index] = V3Fill {
+                maker_handle: handle,
+                maker_owner: owner,
+                key,
+                price: maker_price,
+                quantity: fill_quantity,
+                maker_remaining: maker_quantity - fill_quantity,
+            };
+            selected[index] = handle;
+            plan.fill_count += 1;
+            plan.taker_remaining -= fill_quantity;
+            if fill_quantity < maker_quantity {
+                break;
+            }
+        }
+        Ok(plan)
+    }
+
+    /// Applies a previously planned set of maker updates only if every key,
+    /// owner and quantity still matches. A failed validation performs no
+    /// writes, preserving atomic rollback at the instruction boundary.
+    pub fn apply_match_plan(&mut self, tree: TreeKind, plan: &V3MatchPlan) -> ProgramResult {
+        for fill in plan.fills[..plan.fill_count as usize].iter() {
+            let current = self.leaf(fill.maker_handle)?;
+            let current_key = unsafe { core::ptr::addr_of!(current.key).read_unaligned() };
+            let current_owner = current.owner;
+            let current_quantity = current.quantity;
+            if current_key != fill.key
+                || current_owner != fill.maker_owner
+                || self.find(tree, fill.key)? != fill.maker_handle
+                || current_quantity != fill.quantity + fill.maker_remaining
+            {
+                return Err(bundle_error());
+            }
+        }
+        for fill in plan.fills[..plan.fill_count as usize].iter() {
+            if fill.maker_remaining == 0 {
+                self.remove(tree, fill.key)?;
+            } else {
+                let mut leaf = self.leaf(fill.maker_handle)?;
+                leaf.quantity = fill.maker_remaining;
+                self.put_leaf(fill.maker_handle, leaf)?;
+            }
+        }
+        Ok(())
     }
 
     pub fn first_expired(&mut self, tree: TreeKind, now: u64) -> Result<Option<u32>, ProgramError> {
