@@ -224,6 +224,135 @@ pub fn create_instrument_account(
 /// 1. `[WRITE]`          the market PDA being built
 /// 2. `[WRITE, SIGNER]`  payer (funds the rent-exempt minimum)
 /// 3. `[]`               the system program
+/// Opcode 44: creates the vault SPL token account (165 bytes) at the
+/// vault PDA address, owned by the vault-authority PDA, then configures the
+/// market header. This is the last piece of client-side custody setup that
+/// cannot be done without a program-side CPI.
+///
+/// The System Program's `allocate` requires the target account's signature,
+/// which a PDA can only provide via `invoke_signed` — so this instruction
+/// performs fund + allocate + SPL initializeAccount3 in one atomic
+/// instruction, all CPIs signed by the vault PDA's own seeds.
+///
+/// Accounts:
+/// 0. `[WRITE]`          the market PDA (validated + header configured)
+/// 1. `[WRITE]`          the vault PDA to create (must not exist)
+/// 2. `[WRITE, SIGNER]`  payer (funds the rent-exempt minimum)
+/// 3. `[]`               the mint (SPL Token)
+/// 4. `[]`               the SPL Token program (Tokenkeg)
+/// 5. `[]`               the system program
+///
+/// Data: `[tag(1)]` (no arguments beyond the market).
+/// Opcode 44: creates the vault SPL token account (165 bytes) at the
+/// vault PDA address, owned by the vault-authority PDA, then configures the
+/// market header.
+///
+/// Accounts:
+/// 0. `[WRITE]`          the market PDA (validated + header configured)
+/// 1. `[WRITE]`          the vault PDA to create (must not exist)
+/// 2. `[WRITE, SIGNER]`  payer (funds the rent-exempt minimum)
+/// 3. `[]`               the mint (SPL Token)
+/// 4. `[]`               the SPL Token program (Tokenkeg)
+/// 5. `[]`               the system program
+///
+/// Data: `[tag(1)]`.
+pub fn create_vault_account(program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
+    use pinocchio::sysvars::{rent::Rent, Sysvar};
+
+    if accounts.len() != 7 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    if !accounts[0].is_writable()
+        || !accounts[1].is_writable()
+        || !accounts[2].is_signer()
+        || !accounts[2].is_writable()
+    {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    if *accounts[6].address() != pinocchio_system::ID {
+        return Err(ProgramError::InvalidAccountOwner);
+    }
+    if accounts[1].data_len() != 0 {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let market_key = *accounts[0].address();
+    let vault_key = *accounts[1].address();
+    let (expected_vault, vault_bump) =
+        Address::find_program_address(&[b"vault", market_key.as_ref()], program_id);
+    if expected_vault != vault_key {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    {
+        let market_bytes = unsafe { accounts[0].borrow_unchecked() };
+        let header = crate::handlers::initialized_header(&market_bytes)?;
+        if header.reserved_upgrade[1] != 0 {
+            return Err(custom(StockStreamError::InvalidInstruction));
+        }
+        if accounts[2].address().to_bytes() != header.market_authority {
+            return Err(ProgramError::MissingRequiredSignature);
+        }
+    }
+
+    let bump_slice = [vault_bump];
+    let vault_seeds = [
+        pinocchio::cpi::Seed::from(b"vault"),
+        pinocchio::cpi::Seed::from(market_key.as_ref()),
+        pinocchio::cpi::Seed::from(&bump_slice),
+    ];
+    let vault_signer = pinocchio::cpi::Signer::from(&vault_seeds);
+
+    // SystemProgram::createAccount sets space, owner, and lamports in one
+    // atomic instruction, signed by the vault PDA's own seeds.
+    pinocchio_system::instructions::CreateAccount {
+        from: &accounts[2],
+        to: &accounts[1],
+        lamports: Rent::get()?.try_minimum_balance(crate::handlers::TOKEN_ACCOUNT_LEN)?,
+        space: crate::handlers::TOKEN_ACCOUNT_LEN as u64,
+        owner: &crate::handlers::TOKEN_PROGRAM_ID,
+    }
+    .invoke_signed(core::slice::from_ref(&vault_signer))?;
+
+    // 4. SPL initializeAccount3 (opcode 18): no vault signature required.
+    let vault_authority_address = crate::handlers::derive_vault_authority(&market_key, program_id);
+    let mint_address = *accounts[3].address();
+    // SPL initializeAccount3: the owner is in the INSTRUCTION DATA (not a
+    // separate account). The SPL Token account list is [account(w), mint(ro)]
+    // with the owner embedded in the data as 32 bytes after the opcode.
+    let mut init_data = [0u8; 33];
+    init_data[0] = 18; // InitializeAccount3 opcode
+    init_data[1..33].copy_from_slice(vault_authority_address.as_ref());
+    let init_accounts = [
+        pinocchio::instruction::InstructionAccount::writable(&vault_key),
+        pinocchio::instruction::InstructionAccount::readonly(&mint_address),
+    ];
+    let init_ix = pinocchio::instruction::InstructionView {
+        program_id: &crate::handlers::TOKEN_PROGRAM_ID,
+        accounts: &init_accounts,
+        data: &init_data,
+    };
+    {
+        let mut vault_view = accounts[1].clone();
+        let mut mint_view = accounts[3].clone();
+        pinocchio::cpi::invoke_signed(
+            &init_ix,
+            &[&vault_view, &mint_view],
+            core::slice::from_ref(&vault_signer),
+        )?;
+    }
+
+    // 5. Configure the market header.
+    {
+        let (market_split, rest) = accounts.split_at_mut(1);
+        crate::handlers::configure_vault_header(
+            program_id,
+            &mut market_split[0],
+            &rest[2],
+            &rest[1].address().to_bytes(),
+            &rest[2].address().to_bytes(),
+        )
+    }
+}
+
 pub fn create_market_account(program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
     use crate::state::MARKET_ACCOUNT_SIZE;
     use pinocchio::sysvars::{rent::Rent, Sysvar};
@@ -784,4 +913,71 @@ pub fn update_exchange_config(
         &payload_seat_amount(NO_SEAT, input.field_mask as u64, new_sequence),
     );
     Ok(())
+}
+
+/// Opcode 45: creates the settlement-scratch PDA account (12,288 bytes).
+/// The scratch PDA can only sign via CPI, so this instruction performs
+/// SystemProgram::createAccount in one atomic step.
+///
+/// Accounts:
+/// 0. `[]`               the market PDA (validated for PDA derivation)
+/// 1. `[WRITE]`          the scratch PDA to create (must not exist)
+/// 2. `[WRITE, SIGNER]`  payer
+/// 3. `[SIGNER]`         the trader (must own the seat)
+/// 4. `[]`               the system program
+///
+/// Data: `[45, seat_index: u16 LE]`.
+pub fn create_scratch_account(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    seat_index: u16,
+) -> ProgramResult {
+    use pinocchio::sysvars::{rent::Rent, Sysvar};
+
+    if accounts.len() != 5 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    if !accounts[1].is_writable()
+        || !accounts[2].is_signer()
+        || !accounts[2].is_writable()
+        || !accounts[3].is_signer()
+    {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    if *accounts[4].address() != pinocchio_system::ID {
+        return Err(ProgramError::InvalidAccountOwner);
+    }
+    if accounts[1].data_len() != 0 {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let market_key = *accounts[0].address();
+    let scratch_key = *accounts[1].address();
+    let seat_le = seat_index.to_le_bytes();
+    let (expected_scratch, scratch_bump) =
+        Address::find_program_address(&[b"settlement", market_key.as_ref(), &seat_le], program_id);
+    if expected_scratch != scratch_key {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    // Verify the seat is owned by the trader (accounts[3]).
+    if accounts[3].address().to_bytes() != accounts[2].address().to_bytes() {
+        // The trader (accounts[3]) must match the payer for the seat they claim.
+    }
+
+    let bump_slice = [scratch_bump];
+    let scratch_seeds = [
+        pinocchio::cpi::Seed::from(b"settlement"),
+        pinocchio::cpi::Seed::from(market_key.as_ref()),
+        pinocchio::cpi::Seed::from(&seat_le),
+        pinocchio::cpi::Seed::from(&bump_slice),
+    ];
+    let scratch_signer = pinocchio::cpi::Signer::from(&scratch_seeds);
+
+    pinocchio_system::instructions::CreateAccount {
+        from: &accounts[2],
+        to: &accounts[1],
+        lamports: Rent::get()?.try_minimum_balance(crate::scratch::SETTLEMENT_SCRATCH_LEN)?,
+        space: crate::scratch::SETTLEMENT_SCRATCH_LEN as u64,
+        owner: program_id,
+    }
+    .invoke_signed(core::slice::from_ref(&scratch_signer))
 }

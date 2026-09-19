@@ -417,6 +417,12 @@ pub fn dispatch(
         StockStreamInstruction::CreateInstrumentAccount { instrument_id } => {
             crate::registry::create_instrument_account(program_id, accounts, &instrument_id)
         }
+        StockStreamInstruction::CreateVaultAccount => {
+            crate::registry::create_vault_account(program_id, accounts)
+        }
+        StockStreamInstruction::CreateScratchAccount { seat_index } => {
+            crate::registry::create_scratch_account(program_id, accounts, seat_index)
+        }
         StockStreamInstruction::CommitMarket { sequence } => {
             crate::magicblock::commit_market(program_id, accounts, sequence)
         }
@@ -756,15 +762,17 @@ fn initialize_arena_bytes(data: &mut [u8], offset: usize) -> ProgramResult {
     Ok(())
 }
 
-const TOKEN_PROGRAM_ID: Address = pinocchio_token::ID;
+pub const TOKEN_PROGRAM_ID: Address = pinocchio_token::ID;
 const VAULT_SEED: &[u8] = b"vault";
 const VAULT_AUTHORITY_SEED: &[u8] = b"vault-authority";
+/// The SPL Token account data length (Tokenkeg: `Account::LEN = 165`).
+pub const TOKEN_ACCOUNT_LEN: usize = 165;
 
 fn derive_vault(market: &Address, program_id: &Address) -> Address {
     Address::find_program_address(&[VAULT_SEED, market.as_ref()], program_id).0
 }
 
-fn derive_vault_authority(market: &Address, program_id: &Address) -> Address {
+pub fn derive_vault_authority(market: &Address, program_id: &Address) -> Address {
     Address::find_program_address(&[VAULT_AUTHORITY_SEED, market.as_ref()], program_id).0
 }
 
@@ -808,15 +816,44 @@ fn initialize_vault(program_id: &Address, accounts: &mut [AccountView]) -> Progr
         }
         mint.decimals()
     };
-    let authority = accounts[1].address().to_bytes();
-    let mint = accounts[2].address().to_bytes();
-    let market_key = accounts[0].address().to_bytes();
-    let data = market_data(&mut accounts[0], program_id)?;
+    {
+        let (market_split, rest) = accounts.split_at_mut(1);
+        configure_vault_header(
+            program_id,
+            &mut market_split[0],
+            &rest[1],
+            &rest[0].address().to_bytes(),
+            &rest[1].address().to_bytes(),
+        )
+    }
+}
+
+/// Shared vault-header configuration: validates the mint, sets the custody
+/// fields, and emits `VaultInitialized`. Called by both `initialize_vault`
+/// (the standalone opcode-9 path) and `registry::create_vault_account` (the
+/// opcode-44 combined CPI path).
+pub fn configure_vault_header(
+    program_id: &Address,
+    market: &mut AccountView,
+    mint_view: &AccountView,
+    authority: &[u8; 32],
+    mint_bytes: &[u8; 32],
+) -> ProgramResult {
+    let decimals = {
+        let mint = pinocchio_token::state::Mint::from_account_view(mint_view)
+            .map_err(|_| custom(StockStreamError::InvalidInstruction))?;
+        if !mint.is_initialized() {
+            return Err(custom(StockStreamError::InvalidInstruction));
+        }
+        mint.decimals()
+    };
+    let market_key = market.address().to_bytes();
+    let data = market_data(market, program_id)?;
     let mut header = initialized_header(data)?;
-    if header.market_authority != authority || header.reserved_upgrade[1] != 0 {
+    if header.market_authority != *authority || header.reserved_upgrade[1] != 0 {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
-    header.collateral_mint = mint;
+    header.collateral_mint = *mint_bytes;
     header.collateral_token_program = TOKEN_PROGRAM_ID.to_bytes();
     header.reserved_upgrade[0] = decimals;
     header.reserved_upgrade[1] = 1;

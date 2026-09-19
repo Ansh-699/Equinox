@@ -15,7 +15,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:browser": "playwright test",
-    "test:browser:production": "playwright test --config=playwright.production.config.ts"
+    "test:browser:production": "playwright test --config=playwright.production.config.ts",
+    "generate:stockstream-abi": "GENERATE_MANIFEST=1 MANIFEST_OUTPUT=clients/stockstream/src/abi/layout.json cargo test -p stockstream --test abi_manifest -- generate_manifest",
+    "check:stockstream-abi": "diff <(GENERATE_MANIFEST=1 MANIFEST_OUTPUT=/tmp/abi-check.json cargo test -p stockstream --test abi_manifest -- generate_manifest 2>/dev/null && cat /tmp/abi-check.json) clients/stockstream/src/abi/layout.json && echo ABI-OK"
   },
   "dependencies": {
     "@magicblock-labs/ephemeral-rollups-kit": "0.17.0",
@@ -28,10 +30,11 @@
     "@solana-program/token": "0.9.0",
     "@solana/kit": "5.5.1",
     "@solana/spl-token": "0.4.14",
-    "@solana/web3.js": "1.98.4",
+    "@solana/web3.js": "^1.98.4",
     "@stripe/stripe-js": "^8.4.0",
     "bn.js": "5.2.2",
     "buffer": "6.0.3",
+    "ed25519-hd-key": "^2.0.0",
     "lucide-react": "1.46.0",
     "next": "16.3.5",
     "react": "19.3.0",

@@ -10,7 +10,9 @@ import { isWithdrawalDisplaySafe, reconcileMarketExecutionStatus } from './execu
 import { PrivateSessionRepository, publishSeatProjection, seatsAffectedByEvent } from './private-sessions';
 import { classifyKeeperConfiguration, startKeeperRuntime } from './keeper-config';
 import { resolveKeeperSigning } from './keeper-signer';
-import { relaySessionTransaction } from './session-relayer';
+import { verifyPrivyToken, verifySessionFromBytes, type PrivyVerifier } from './relay-auth';
+import { LocalKeypairSigner } from './signer';
+import { relaySessionTransaction, validateSessionTransaction } from './session-relayer';
 import { ProtocolKeeperOrchestrator, type OrchestratorRunSummary } from './keeper-orchestrator';
 
 export { MarketStream };
@@ -349,19 +351,63 @@ export default {
     // and submits through the domain the client picked. Never forwards a
     // transaction that failed validation.
     if (request.method === "POST" && url.pathname === "/v1/relay/session") {
-      if (!isAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
-      if (!await new ProtocolRepository(bindings(env).DB).allow('relay', 200, 60_000, Date.now()))
-        return json({ error: 'rate_limited' }, 429);
+      // Authoritative per-user Privy auth (replaces shared INGESTION_TOKEN).
+      const authHeader = request.headers.get("authorization");
+      if (!authHeader?.startsWith("Bearer ")) return json({ error: "unauthorized" }, 401);
+      const privyToken = authHeader.slice(7);
+      if (!env.PRIVY_APP_ID || !env.PRIVY_APP_SECRET) return json({ error: "privy_unconfigured" }, 503);
       const body = await request.json().catch(() => null) as {
         transactionBase64?: string;
         expectedProgramAddress?: string;
         sessionSignerAddress?: string;
+        ownerWallet?: string;
+        expectedMarket?: string;
+        expectedNonce?: number;
         domain?: string;
+        clientRequestId?: string;
       } | null;
-      if (!body?.transactionBase64 || !body.expectedProgramAddress || !body.sessionSignerAddress) {
+      if (!body?.transactionBase64 || !body.expectedProgramAddress || !body.sessionSignerAddress || !body.ownerWallet || !body.expectedMarket) {
         return json({ error: "invalid_request" }, 400);
       }
-      const relayerSigner = (globalThis as { __stockstreamRelayerSigner?: import('./signer').Signer }).__stockstreamRelayerSigner;
+      // 1-6: verify Privy identity (authoritative, fail-closed)
+      // Lazy Privy verification: @privy-io/node is loaded dynamically inside
+      // the verifier, keeping it out of the main Worker bundle.
+      const privyResult = await verifyPrivyToken(privyToken, env.PRIVY_APP_ID!, body.ownerWallet, {
+        verify: async (token: string) => {
+          const { PrivyClient } = await import("@privy-io/node");
+          const client = new PrivyClient({ appId: env.PRIVY_APP_ID!, appSecret: env.PRIVY_APP_SECRET! });
+          return client.utils().auth().verifyAccessToken(token);
+        },
+      });
+      if ("error" in privyResult) return json({ error: privyResult.error }, 401);
+      // Steps 7-16: authoritative session/seat/nonce/expiry verification via RPC
+      const rpcResponse = await fetch(env.SOLANA_RPC_URL!, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getAccountInfo", params: [body.expectedMarket, { encoding: "base64" }] }),
+      }).catch(() => null);
+      if (!rpcResponse) return json({ error: "rpc_unavailable" }, 502);
+      const marketData = await rpcResponse.json().catch(() => null) as { result?: { value?: { data?: [string, string] } } } | null;
+      const marketDataValue = marketData?.result?.value;
+      if (!marketDataValue) return json({ error: "market_not_found" }, 404);
+      const marketBytes = Uint8Array.from(atob(marketDataValue.data![0]), (c) => c.charCodeAt(0));
+      const chainCheck = verifySessionFromBytes({
+        marketBytes, ownerWallet: body.ownerWallet!,
+        sessionSignerAddress: body.sessionSignerAddress!, seatIndex: 0,
+        marketPda: body.expectedMarket!, programId: body.expectedProgramAddress!,
+        expectedNonce: body.expectedNonce ?? 1,
+      });
+      if (!chainCheck.ok) return json({ error: chainCheck.reason }, 403);
+      // Rate limits: per-IP, per-wallet, per-market
+      const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
+      if (!await new ProtocolRepository(bindings(env).DB).allow(`relay:${ip}`, 30, 60_000, Date.now()))
+        return json({ error: 'rate_limited' }, 429);
+      if (!await new ProtocolRepository(bindings(env).DB).allow(`relay:${body.ownerWallet}`, 60, 60_000, Date.now()))
+        return json({ error: 'rate_limited' }, 429);
+      if (!await new ProtocolRepository(bindings(env).DB).allow(`relay:${body.sessionSignerAddress}`, 30, 60_000, Date.now()))
+        return json({ error: 'rate_limited' }, 429);
+      const relayerSigner = env.RELAYER_KEYPAIR_JSON
+        ? new LocalKeypairSigner("relayer:fee-payer", env.RELAYER_KEYPAIR_JSON)
+        : null;
       if (!relayerSigner) return json({ error: "relayer_signer_unconfigured" }, 503);
       const transport = body.domain === "er"
         ? new MagicBlockErTransport(env.MAGIC_ROUTER_URL ?? env.MAGICBLOCK_RPC_URL ?? env.SOLANA_RPC_URL!, fetch)
@@ -378,6 +424,7 @@ export default {
       if ("error" in outcome) return json({ error: outcome.error }, 400);
       return json({ accepted: true, signature: outcome.signature }, 202);
     }
+
 
     if (parts[0] === "v1" && parts[1] === "markets" && parts.length === 4) {
       const symbol = parts[2].toUpperCase();
