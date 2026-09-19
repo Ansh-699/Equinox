@@ -21,6 +21,7 @@ export const OPCODE = {
   delegateClusterMember: 41, createMarketAccount: 42,
   createInstrumentAccount: 43, createVaultAccount: 44,
   createScratchAccount: 45, createV3Account: 46,
+  initializeV3Market: 47,
 } as const;
 
 /** Session action allowlist bits — must match `session::SESSION_ACTION_*`. */

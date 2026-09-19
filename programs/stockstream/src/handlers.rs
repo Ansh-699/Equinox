@@ -426,6 +426,9 @@ pub fn dispatch(
         StockStreamInstruction::CreateV3Account { kind, index } => {
             crate::registry::create_v3_account(program_id, accounts, kind, index)
         }
+        StockStreamInstruction::InitializeV3Market => {
+            crate::registry::initialize_v3_market(program_id, accounts)
+        }
         StockStreamInstruction::CommitMarket { sequence } => {
             crate::magicblock::commit_market(program_id, accounts, sequence)
         }
