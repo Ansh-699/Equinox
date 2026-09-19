@@ -240,17 +240,21 @@ async function stageDelegate() {
   // resume skip re-delegating the market specifically (which would
   // otherwise fail as already-delegated) while still finishing the loop.
   if (!state.marketDelegated) {
-    const marketInfo = await CONNECTION.getAccountInfo(market);
-    if (marketInfo && marketInfo.owner.equals(DELEGATION_PROGRAM)) {
-      save({ marketDelegated: true });
-    } else {
-      await send("delegate market", [new TransactionInstruction({
+    // Opcode 13 grows the delegation buffer incrementally (10,240 bytes
+    // max per instruction, same cap as the market's own opcode-42 growth
+    // -- magicblock.rs::ensure_buffer_ready), so this must be invoked
+    // repeatedly until the market account's owner actually becomes the
+    // Delegation Program.
+    for (;;) {
+      const marketInfo = await CONNECTION.getAccountInfo(market);
+      if (marketInfo && marketInfo.owner.equals(DELEGATION_PROGRAM)) break;
+      await send("delegate market (buffer growth or final)", [new TransactionInstruction({
         programId: PROGRAM_ID,
         keys: [wr(market), sg(authority.publicKey), ro(instrument), wsg(authority.publicKey), wr(buffer), wr(record), wr(metadata), ro(DELEGATION_PROGRAM), ro(SystemProgram.programId), ro(PROGRAM_ID)],
         data: Buffer.from([13, ...VALIDATOR.toBuffer()]),
       })], [authority]);
-      save({ marketDelegated: true });
     }
+    save({ marketDelegated: true });
   } else { log("market already delegated"); }
 
   const members = [[pk(state.sessionA), "sessionA"], [pk(state.sessionB), "sessionB"]];
@@ -297,8 +301,29 @@ function hotCluster(state) {
   return { market, scratch0, scratch1, sessionA: pk(state.sessionA), sessionB: pk(state.sessionB) };
 }
 
+/** The generic `devnet-router.magicblock.app` alias load-balances across
+ * multiple ephemeral validators and does NOT reliably route every RPC
+ * method to the SAME validator instance actually hosting a given market's
+ * delegated session -- confirmed empirically: `MagicContext` (a real,
+ * validator-provisioned system account every properly running ephemeral
+ * validator funds at startup, per `magicblock-api::fund_account`) read as
+ * `null` through the generic alias but returned real, populated data
+ * through the market's own delegation record `fqdn`. Every ER call after
+ * delegation must therefore target that specific fqdn, resolved once via
+ * `useErEndpointFor` and cached for the rest of the process. */
+let ER_ENDPOINT = ROUTER;
+async function useErEndpointFor(market) {
+  const res = await fetch(ROUTER, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getDelegationStatus", params: [market] }) });
+  const body = await res.json().catch(() => null);
+  const fqdn = body?.result?.fqdn;
+  if (!fqdn) throw new Error(`could not resolve this market's ER validator fqdn: ${JSON.stringify(body)}`);
+  ER_ENDPOINT = fqdn.replace(/\/$/, "");
+  log("ER endpoint resolved:", ER_ENDPOINT);
+  return ER_ENDPOINT;
+}
+
 async function routerCall(method, params) {
-  const res = await fetch(ROUTER, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
+  const res = await fetch(ER_ENDPOINT, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
   const body = await res.json().catch(() => null);
   if (!body) throw new Error(`${method}: router returned a non-JSON response`);
   if (body.error) throw new Error(`${method}: ${JSON.stringify(body.error)}`);
@@ -306,51 +331,136 @@ async function routerCall(method, params) {
   return body.result;
 }
 
-async function stageEr() {
-  const state = load();
-  if (!state.delegated) throw new Error("delegate first");
-  const cluster = hotCluster(state);
-  // The whole hot cluster, not just market+sessions: the ER's account-aware
-  // blockhash must reflect every account this stage's transactions will
-  // write to, and the order commit below writes the scratch PDAs too.
-  const clusterAddresses = [cluster.market, cluster.scratch0, cluster.scratch1, cluster.sessionA, cluster.sessionB].map((a) => a.toBase58());
-  const { blockhash: orderBlockhash } = await routerCall("getBlockhashForAccounts", [clusterAddresses]);
-  save({ erBlockhash: orderBlockhash });
+/** Reads an account's current bytes+owner through the ER router -- the
+ * authoritative live state for a delegated account, which can differ from
+ * L1's (stale, pre-commit) copy. */
+async function readErAccount(address) {
+  const result = await routerCall("getAccountInfo", [address.toBase58(), { encoding: "base64" }]);
+  if (!result?.value) return null;
+  return { data: Buffer.from(result.value.data[0], "base64"), owner: result.value.owner };
+}
 
-  // A real trading action inside the ER, not just a commit of unchanged
-  // state: a resting, non-crossing bid (price 1, far below any real ask)
-  // from seat 0's own settlement scratch, proving delegated execution
-  // actually mutates the book before it's ever committed back to L1.
-  const orderTx = new Transaction({ recentBlockhash: orderBlockhash, feePayer: authority.publicKey });
-  orderTx.add(new TransactionInstruction({
-    programId: PROGRAM_ID,
-    keys: [wr(cluster.market), sg(authority.publicKey), wr(cluster.scratch0)],
-    data: (() => {
-      const d = Buffer.alloc(54);
-      d[0] = 3; d[1] = 0; d[2] = 0; d[3] = 0; // PlaceOrder, bid, fixed tree, no flags
-      d.writeUInt16LE(0, 4); // seatIndex
-      d.writeBigUInt64LE(1n, 6); // quantity
-      d.writeBigInt64LE(1n, 14); // priceOrOffset
-      d.writeBigUInt64LE(0n, 22); // expiresAt (none)
-      d.writeBigInt64LE(0n, 30); // pegLimit (unused for a fixed-tree order)
-      d.writeBigUInt64LE(BigInt(Date.now()), 38); // clientOrderId
-      d.writeBigUInt64LE(0n, 46); // actionNonce (main-wallet action)
-      return d;
-    })(),
-  }));
-  orderTx.sign(authority);
-  const orderT0 = Date.now();
-  const orderSignature = await routerCall("sendTransaction", [orderTx.serialize().toString("base64"), { encoding: "base64" }]);
-  console.log(`ER order: sig=${orderSignature} submitMs=${Date.now() - orderT0}`);
-  save({ erOrderSignature: orderSignature });
+/** `TradingSession.next_expected_nonce` (offset 201, u64 LE) -- see
+ * clients/stockstream/src/abi/sessions.ts::decodeTradingSession, the
+ * canonical decoder this offset is taken from. */
+async function readSessionNonce(sessionAddress) {
+  const account = await readErAccount(sessionAddress);
+  if (!account) throw new Error(`session ${sessionAddress.toBase58()} not found in the ER`);
+  return account.data.readBigUInt64LE(201);
+}
 
-  // Re-fetch the blockhash for the commit -- the order above already
-  // consumed the previous one.
-  const { blockhash: commitBlockhash } = await routerCall("getBlockhashForAccounts", [clusterAddresses]);
-  const sequence = state.commitSequence ?? 1;
+function readU128LE(buf, offset) {
+  const lo = buf.readBigUInt64LE(offset);
+  const hi = buf.readBigUInt64LE(offset + 8);
+  return (hi << 64n) | lo;
+}
+function writeU128LE(buf, offset, value) {
+  buf.writeBigUInt64LE(value & 0xffffffffffffffffn, offset);
+  buf.writeBigUInt64LE(value >> 64n, offset + 8);
+}
+
+// PATRICIA arena layout -- clients/stockstream/src/abi/orderbook.ts is the
+// canonical source for every one of these offsets.
+const BID_ARENA_OFFSET = 512;
+const ASK_ARENA_OFFSET = 91_152;
+const ARENA_CAPACITY = 1024;
+const ARENA_NODES_OFFSET = 528;
+const ANY_NODE_SIZE = 88;
+const TAG_LEAF = 2;
+const LEAF_KEY_OFFSET = 8;
+const LEAF_QUANTITY_OFFSET = 24;
+const LEAF_CLIENT_ORDER_ID_OFFSET = 48;
+const LEAF_PRICE_OFFSET = 56;
+
+/** Linear-scans both arenas (1,024 slots each -- a test convenience, never
+ * how the on-chain program itself resolves a key) for the leaf carrying
+ * `clientOrderId`, returning its real tree `key` (needed for Cancel/Replace)
+ * plus quantity/price, or `null` if no resting leaf matches (cancelled,
+ * fully filled, or never existed). */
+function findLeafByClientOrderId(marketBytes, clientOrderId) {
+  for (const arenaOffset of [BID_ARENA_OFFSET, ASK_ARENA_OFFSET]) {
+    for (let i = 0; i < ARENA_CAPACITY; i++) {
+      const nodeOffset = arenaOffset + ARENA_NODES_OFFSET + i * ANY_NODE_SIZE;
+      if (marketBytes[nodeOffset] !== TAG_LEAF) continue;
+      if (marketBytes.readBigUInt64LE(nodeOffset + LEAF_CLIENT_ORDER_ID_OFFSET) !== clientOrderId) continue;
+      return {
+        key: readU128LE(marketBytes, nodeOffset + LEAF_KEY_OFFSET),
+        quantity: marketBytes.readBigUInt64LE(nodeOffset + LEAF_QUANTITY_OFFSET),
+        price: marketBytes.readBigInt64LE(nodeOffset + LEAF_PRICE_OFFSET),
+      };
+    }
+  }
+  return null;
+}
+
+/** `TraderSeat.available_collateral`/`base_position` (i128, LE) --
+ * TRADER_SEAT_OFFSET/SIZE and the field offsets within a seat are the same
+ * ones `workers/src/private-sessions.ts::SEAT_FIELD_OFFSETS` uses. */
+const TRADER_SEAT_OFFSET = 181_792;
+const TRADER_SEAT_SIZE = 256;
+function readI128LE(buf, offset) {
+  let value = 0n;
+  for (let i = 15; i >= 0; i -= 1) value = (value << 8n) | BigInt(buf[offset + i]);
+  const signBit = 1n << 127n;
+  return value >= signBit ? value - (signBit << 1n) : value;
+}
+function decodeSeat(marketBytes, seatIndex) {
+  const base = TRADER_SEAT_OFFSET + seatIndex * TRADER_SEAT_SIZE;
+  return {
+    availableCollateral: readI128LE(marketBytes, base + 40),
+    basePosition: readI128LE(marketBytes, base + 72),
+  };
+}
+
+function placeOrderData({ side, tree, flags, seatIndex, quantity, price, expiresAt, pegLimit, clientOrderId, actionNonce }) {
+  const d = Buffer.alloc(54);
+  d[0] = 3; d[1] = side; d[2] = tree; d[3] = flags;
+  d.writeUInt16LE(seatIndex, 4);
+  d.writeBigUInt64LE(quantity, 6);
+  d.writeBigInt64LE(price, 14);
+  d.writeBigUInt64LE(expiresAt ?? 0n, 22);
+  d.writeBigInt64LE(pegLimit ?? 0n, 30);
+  d.writeBigUInt64LE(clientOrderId, 38);
+  d.writeBigUInt64LE(actionNonce, 46);
+  return d;
+}
+function cancelOrderData({ seatIndex, orderKey, actionNonce }) {
+  const d = Buffer.alloc(27);
+  d[0] = 4;
+  d.writeUInt16LE(seatIndex, 1);
+  writeU128LE(d, 3, orderKey);
+  d.writeBigUInt64LE(actionNonce, 19);
+  return d;
+}
+function replaceOrderData(oldOrderKey, fields) {
+  const d = Buffer.alloc(70);
+  d[0] = 33;
+  writeU128LE(d, 1, oldOrderKey);
+  placeOrderData(fields).copy(d, 17, 1); // drop PlaceOrder's own opcode byte
+  return d;
+}
+
+/** Submits a session- or main-wallet-signed transaction through the ER,
+ * fetching a fresh account-aware blockhash for the whole hot cluster each
+ * time (an already-used ER blockhash cannot be replayed). Throws on any
+ * router or transaction error -- never silently swallowed. */
+async function sendEr(instruction, signers, clusterAddresses) {
+  const result = await routerCall("getBlockhashForAccounts", [clusterAddresses]);
+  // The generic router alias and a specific validator's own direct RPC
+  // return this call in different shapes (flat `{blockhash,...}` vs.
+  // standard-RPC-style `{context, value: {blockhash,...}}`) -- confirmed
+  // empirically, not assumed. Handle both.
+  const { blockhash } = result.value ?? result;
+  const tx = new Transaction({ recentBlockhash: blockhash, feePayer: authority.publicKey });
+  tx.add(instruction);
+  tx.sign(...signers);
   const t0 = Date.now();
-  const tx = new Transaction({ recentBlockhash: commitBlockhash, feePayer: authority.publicKey });
-  tx.add(new TransactionInstruction({
+  const signature = await routerCall("sendTransaction", [tx.serialize().toString("base64"), { encoding: "base64" }]);
+  return { signature, ms: Date.now() - t0 };
+}
+
+async function commitCluster(cluster, clusterAddresses, sequence) {
+  const instruction = new TransactionInstruction({
     programId: PROGRAM_ID,
     // Trailing cluster members after the fixed 5 (market, authority,
     // authority-as-payer, magic context, magic program): the scratch and
@@ -363,38 +473,245 @@ async function stageEr() {
       wr(cluster.scratch0), wr(cluster.scratch1), wr(cluster.sessionA), wr(cluster.sessionB),
     ],
     data: (() => { const d = Buffer.alloc(9); d[0] = 14; d.writeBigUInt64LE(BigInt(sequence), 1); return d; })(),
-  }));
-  tx.sign(authority);
-  const commitSignature = await routerCall("sendTransaction", [tx.serialize().toString("base64"), { encoding: "base64" }]);
-  console.log(`ER commit: sig=${commitSignature} submitMs=${Date.now() - t0}`);
+  });
+  const { signature, ms } = await sendEr(instruction, [authority], clusterAddresses);
+  console.log(`ER commit: sig=${signature} submitMs=${ms}`);
+  return signature;
+}
+
+async function stageEr() {
+  const state = load();
+  if (!state.delegated) throw new Error("delegate first");
+  await useErEndpointFor(state.market);
+  const cluster = hotCluster(state);
+  // The whole hot cluster, not just market+sessions: the ER's account-aware
+  // blockhash must reflect every account this stage's transactions will
+  // write to, and the commit below writes the scratch PDAs too.
+  const clusterAddresses = [cluster.market, cluster.scratch0, cluster.scratch1, cluster.sessionA, cluster.sessionB].map((a) => a.toBase58());
+  const sessionSignerA = traderKeypair("sessionSignerA");
+  const sessionSignerB = traderKeypair("sessionSignerB");
+
+  let nonceA = await readSessionNonce(cluster.sessionA);
+  let nonceB = await readSessionNonce(cluster.sessionB);
+  const evidence = {};
+
+  // stageSetup's InitializeMarket leaves the market in Paused mode (its own
+  // documented initial state) and never issued a ResumeMarket -- a real gap
+  // found only by actually trying to place an order and getting rejected.
+  // The market is delegated, so this write must go through the ER.
+  {
+    const bytes = (await readErAccount(cluster.market)).data;
+    if (bytes[11] !== 1 /* MarketMode::Open */) {
+      const ix = new TransactionInstruction({
+        programId: PROGRAM_ID,
+        keys: [wr(cluster.market), sg(authority.publicKey)],
+        data: Buffer.from([26]), // ResumeMarket
+      });
+      const { signature, ms } = await sendEr(ix, [authority], clusterAddresses);
+      console.log(`ER resume market: sig=${signature} submitMs=${ms}`);
+      evidence.resumeMarket = signature;
+    } else {
+      log("market already Open");
+    }
+  }
+
+  // Every order requires header.oracle_valid, which ONLY
+  // consume_oracle_update (a real, cryptographically-verified CPI into the
+  // live Pyth Lazer receiver program) can ever set -- there is no
+  // admin/test bypass in the program, by design. This environment has no
+  // Pyth Lazer API key (PYTH_PRO_API_KEY is unset everywhere, and an
+  // anonymous WSS connection to the documented Lazer endpoints is refused
+  // with HTTP 403 at the handshake -- confirmed empirically, not assumed).
+  // Real session-signed trading is therefore genuinely blocked on that
+  // missing credential; every stage below that doesn't need it (commit,
+  // undelegate, restore, reconciled withdrawal) still proceeds against the
+  // real market this session already delegated.
+  const oracleReady = (await readErAccount(cluster.market)).data[294] === 1;
+  if (!oracleReady) {
+    log("BLOCKED: header.oracle_valid is false and no Pyth Lazer credential is available in this environment -- skipping the place/cancel/replace/cross sequence. See the final report for the exact evidence (403 at the Lazer WSS handshake).");
+    save({ erSkippedTrading: "no_pyth_oracle_credential" });
+    const sequence = state.commitSequence ?? 1;
+    const commitSignature = await commitCluster(cluster, clusterAddresses, sequence);
+    save({ commitSignature, commitSequence: sequence });
+    return;
+  }
+
+  // 1. Non-crossing order: seat 0, session-signed, resting bid far below
+  // any real ask (price 1) -- proves a real session-signed trade executes
+  // inside the ER.
+  const coid1 = BigInt(Date.now());
+  {
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [wr(cluster.market), sg(sessionSignerA.publicKey), wr(cluster.scratch0), wr(cluster.sessionA)],
+      data: placeOrderData({ side: 0, tree: 0, flags: 0, seatIndex: 0, quantity: 1n, price: 1n, clientOrderId: coid1, actionNonce: nonceA }),
+    });
+    const { signature, ms } = await sendEr(ix, [authority, sessionSignerA], clusterAddresses);
+    console.log(`ER place (non-crossing, seat0): sig=${signature} submitMs=${ms}`);
+    evidence.placeNonCrossing = signature;
+    nonceA += 1n;
+  }
+  {
+    const bytes = (await readErAccount(cluster.market)).data;
+    const leaf = findLeafByClientOrderId(bytes, coid1);
+    if (!leaf || leaf.quantity !== 1n || leaf.price !== 1n) throw new Error(`non-crossing order not found resting as expected: ${JSON.stringify(leaf)}`);
+    log("non-crossing order confirmed resting:", leaf);
+  }
+
+  // 2. Cancel it.
+  {
+    const bytes = (await readErAccount(cluster.market)).data;
+    const leaf = findLeafByClientOrderId(bytes, coid1);
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [wr(cluster.market), sg(sessionSignerA.publicKey), wr(cluster.sessionA)],
+      data: cancelOrderData({ seatIndex: 0, orderKey: leaf.key, actionNonce: nonceA }),
+    });
+    const { signature, ms } = await sendEr(ix, [authority, sessionSignerA], clusterAddresses);
+    console.log(`ER cancel: sig=${signature} submitMs=${ms}`);
+    evidence.cancel = signature;
+    nonceA += 1n;
+  }
+  {
+    const bytes = (await readErAccount(cluster.market)).data;
+    if (findLeafByClientOrderId(bytes, coid1)) throw new Error("cancelled order is still resting");
+    log("cancel confirmed: order no longer resting");
+  }
+
+  // 3. Place another resting order, then replace it.
+  const coid2 = BigInt(Date.now() + 1);
+  {
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [wr(cluster.market), sg(sessionSignerA.publicKey), wr(cluster.scratch0), wr(cluster.sessionA)],
+      data: placeOrderData({ side: 0, tree: 0, flags: 0, seatIndex: 0, quantity: 1n, price: 2n, clientOrderId: coid2, actionNonce: nonceA }),
+    });
+    const { signature, ms } = await sendEr(ix, [authority, sessionSignerA], clusterAddresses);
+    console.log(`ER place (to be replaced): sig=${signature} submitMs=${ms}`);
+    evidence.placeBeforeReplace = signature;
+    nonceA += 1n;
+  }
+  const coid3 = BigInt(Date.now() + 2);
+  {
+    const bytes = (await readErAccount(cluster.market)).data;
+    const leaf = findLeafByClientOrderId(bytes, coid2);
+    if (!leaf) throw new Error("order to replace not found resting");
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [wr(cluster.market), sg(sessionSignerA.publicKey), wr(cluster.scratch0), wr(cluster.sessionA)],
+      data: replaceOrderData(leaf.key, { side: 0, tree: 0, flags: 0, seatIndex: 0, quantity: 1n, price: 3n, clientOrderId: coid3, actionNonce: nonceA }),
+    });
+    const { signature, ms } = await sendEr(ix, [authority, sessionSignerA], clusterAddresses);
+    console.log(`ER replace: sig=${signature} submitMs=${ms}`);
+    evidence.replace = signature;
+    nonceA += 1n;
+  }
+  {
+    const bytes = (await readErAccount(cluster.market)).data;
+    if (findLeafByClientOrderId(bytes, coid2)) throw new Error("replaced order's old key is still resting");
+    const leaf = findLeafByClientOrderId(bytes, coid3);
+    if (!leaf || leaf.price !== 3n) throw new Error(`replacement order not resting as expected: ${JSON.stringify(leaf)}`);
+    log("replace confirmed: old order gone, new order resting at price 3");
+  }
+
+  // 4. Crossing order: seat 1 (session B) sells into seat 0's resting bid
+  // at price 3 -- a real fill, not just a resting order.
+  const coid4 = BigInt(Date.now() + 3);
+  const beforeBytes = (await readErAccount(cluster.market)).data;
+  const before = decodeSeat(beforeBytes, 0);
+  const before1 = decodeSeat(beforeBytes, 1);
+  {
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [wr(cluster.market), sg(sessionSignerB.publicKey), wr(cluster.scratch1), wr(cluster.sessionB)],
+      data: placeOrderData({ side: 1, tree: 0, flags: 0, seatIndex: 1, quantity: 1n, price: 3n, clientOrderId: coid4, actionNonce: nonceB }),
+    });
+    const { signature, ms } = await sendEr(ix, [authority, sessionSignerB], clusterAddresses);
+    console.log(`ER place (crossing, seat1): sig=${signature} submitMs=${ms}`);
+    evidence.placeCrossing = signature;
+    nonceB += 1n;
+  }
+  {
+    const bytes = (await readErAccount(cluster.market)).data;
+    const after = decodeSeat(bytes, 0);
+    const after1 = decodeSeat(bytes, 1);
+    if (after.basePosition !== before.basePosition + 1n) throw new Error(`seat0 base_position did not increase by 1: ${before.basePosition} -> ${after.basePosition}`);
+    if (after1.basePosition !== before1.basePosition - 1n) throw new Error(`seat1 base_position did not decrease by 1: ${before1.basePosition} -> ${after1.basePosition}`);
+    if (findLeafByClientOrderId(bytes, coid3)) throw new Error("crossing order should have fully filled seat0's resting bid");
+    log(`crossing fill confirmed: seat0 ${before.basePosition}->${after.basePosition}, seat1 ${before1.basePosition}->${after1.basePosition}`);
+    evidence.seat0PositionAfterFill = after.basePosition.toString();
+    evidence.seat1PositionAfterFill = after1.basePosition.toString();
+  }
+
+  save({ erEvidence: evidence, erNonceA: nonceA.toString(), erNonceB: nonceB.toString() });
+
+  // 5. Commit the whole cluster.
+  const sequence = state.commitSequence ?? 1;
+  const commitSignature = await commitCluster(cluster, clusterAddresses, sequence);
   save({ commitSignature, commitSequence: sequence });
+
+  // 6. Confirm L1 finalization: the committed positions must now be
+  // readable from L1 itself, not just the ER.
+  const l1Market = await CONNECTION.getAccountInfo(cluster.market);
+  const l1Seat0 = decodeSeat(l1Market.data, 0);
+  const l1Seat1 = decodeSeat(l1Market.data, 1);
+  if (l1Seat0.basePosition.toString() !== evidence.seat0PositionAfterFill) {
+    throw new Error(`L1 did not finalize seat0's position: L1=${l1Seat0.basePosition} expected=${evidence.seat0PositionAfterFill}`);
+  }
+  if (l1Seat1.basePosition.toString() !== evidence.seat1PositionAfterFill) {
+    throw new Error(`L1 did not finalize seat1's position: L1=${l1Seat1.basePosition} expected=${evidence.seat1PositionAfterFill}`);
+  }
+  log(`L1 finalization confirmed: seat0=${l1Seat0.basePosition} seat1=${l1Seat1.basePosition}`);
+  save({ l1FinalizedSeat0Position: l1Seat0.basePosition.toString(), l1FinalizedSeat1Position: l1Seat1.basePosition.toString() });
 }
 
 async function stageUndelegate() {
   const state = load();
+  await useErEndpointFor(state.market);
   const cluster = hotCluster(state);
   const clusterAddresses = [cluster.market, cluster.scratch0, cluster.scratch1, cluster.sessionA, cluster.sessionB].map((a) => a.toBase58());
-  const { blockhash } = await routerCall("getBlockhashForAccounts", [clusterAddresses]);
   const sequence = (state.commitSequence ?? 1) + 1;
-  const t0 = Date.now();
-  const tx = new Transaction({ recentBlockhash: blockhash, feePayer: authority.publicKey });
-  tx.add(new TransactionInstruction({
+  const instruction = new TransactionInstruction({
     programId: PROGRAM_ID,
     keys: [
       wr(cluster.market), sg(authority.publicKey), wsg(authority.publicKey), wr(MAGIC_CONTEXT), ro(MAGIC_PROGRAM),
       wr(cluster.scratch0), wr(cluster.scratch1), wr(cluster.sessionA), wr(cluster.sessionB),
     ],
     data: (() => { const d = Buffer.alloc(9); d[0] = 15; d.writeBigUInt64LE(BigInt(sequence), 1); return d; })(),
-  }));
-  tx.sign(authority);
-  const signature = await routerCall("sendTransaction", [tx.serialize().toString("base64"), { encoding: "base64" }]);
-  console.log(`ER undelegate: sig=${signature} submitMs=${Date.now() - t0}`);
+  });
+  const { signature, ms } = await sendEr(instruction, [authority], clusterAddresses);
+  console.log(`ER commit-and-undelegate: sig=${signature} submitMs=${ms}`);
   save({ undelegateSignature: signature, undelegateSequence: sequence });
+}
+
+/** Waits for the Delegation Program's async external-undelegate callback
+ * to actually restore the market to StockStream ownership on L1 --
+ * `commit_and_undelegate`/`undelegate` only request undelegation; the real
+ * ownership handoff happens later, out of band, once the validator
+ * processes it. */
+async function stageRestore() {
+  const state = load();
+  const market = pk(must(state, "market"));
+  const deadline = Date.now() + 120_000;
+  for (;;) {
+    const info = await CONNECTION.getAccountInfo(market);
+    if (info && info.owner.equals(PROGRAM_ID)) {
+      log(`restored: L1 owner=${info.owner.toBase58()} delegationStatus=${info.data[329]} (3=Restored expected)`);
+      save({ restored: true });
+      return;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`market did not restore to StockStream ownership within 120s (owner=${info ? info.owner.toBase58() : "missing"})`);
+    }
+    log(`waiting for restore... current owner=${info ? info.owner.toBase58() : "missing"}`);
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
 }
 
 async function stageWithdraw() {
   const state = load();
   if (state.withdrawn) { log("already withdrawn:", state.withdrawn); return; }
+  if (!state.restored) throw new Error("restore first (market must be back under StockStream ownership before an L1 withdrawal)");
   const market = pk(state.market);
   const mint = pk(state.mint);
   const vault = PublicKey.findProgramAddressSync([Buffer.from("vault"), market.toBuffer()], PROGRAM_ID)[0];
@@ -402,6 +719,22 @@ async function stageWithdraw() {
   const header = await CONNECTION.getAccountInfo(market);
   console.log("L1 delegation status:", header.data[329], "(3=Restored expected)");
   console.log("L1 market owner:", header.owner.toBase58());
+
+  // Reconciled withdrawal: verify the vault's real token balance still
+  // matches the market's own ledger (collateral + fees + insurance - bad
+  // debt) after the whole delegate/trade/commit/undelegate round trip,
+  // before ever withdrawing against it.
+  await send("reconcile vault (op39)", [new TransactionInstruction({
+    programId: PROGRAM_ID,
+    keys: [wr(market), wr(vault), ro(mint), ro(TOKEN_PROGRAM)],
+    data: Buffer.from([39]),
+  })], [authority]);
+  const reconciledHeader = await CONNECTION.getAccountInfo(market);
+  // Offset 473: RESERVED_RECONCILIATION_STATUS_OFFSET, per the generated
+  // clients/stockstream/src/abi/layout.json (compiler-verified via
+  // offset_of!, never hand-guessed).
+  log("reconciliation status:", reconciledHeader.data[473], "(1=Reconciled expected)");
+
   const ata = await getOrCreateAssociatedTokenAccount(CONNECTION, authority, mint, traderB.publicKey);
   const before = Number((await getAccount(CONNECTION, ata.address)).amount);
   const { signature } = await send(`withdraw traderB`, [new TransactionInstruction({
@@ -414,23 +747,23 @@ async function stageWithdraw() {
   save({ withdrawn: signature });
 }
 
-const STAGES = { setup: stageSetup, custody: stageCustody, sessions: stageSessions, delegate: stageDelegate, status: stageStatus, er: stageEr, undelegate: stageUndelegate, withdraw: stageWithdraw };
+const STAGES = { setup: stageSetup, custody: stageCustody, sessions: stageSessions, delegate: stageDelegate, status: stageStatus, er: stageEr, undelegate: stageUndelegate, restore: stageRestore, withdraw: stageWithdraw };
 const nonFlag = process.argv.slice(2).filter(a => !a.startsWith("--"));
 const stageArg = nonFlag[0] ?? "plan";
 const dryRun = process.argv.includes("--dry-run");
 if (STAGES[stageArg] && !dryRun) { await STAGES[stageArg](); }
 else if (stageArg === "plan") { console.log(JSON.stringify({ dryRun, stages: Object.keys(STAGES) }, null, 2)); }
 else if (stageArg === "all") {
-  for (const stage of ["setup", "custody", "sessions", "delegate", "er", "undelegate", "withdraw"]) {
+  for (const stage of ["setup", "custody", "sessions", "delegate", "er", "undelegate", "restore", "withdraw"]) {
     const state = load();
     // Each stage's REAL completion marker, not a key literally named after
     // the stage (state never has one) -- the previous version's
     // `state[stage]` check was always false, so `all` silently re-ran
     // every already-completed stage from scratch on every resume.
-    const flags = { setup: state.market, custody: state.depositedB, sessions: state.sessionB, delegate: state.delegated, er: state.commitSignature, undelegate: state.undelegateSignature, withdraw: state.withdrawn };
+    const flags = { setup: state.market, custody: state.depositedB, sessions: state.sessionB, delegate: state.delegated, er: state.commitSignature, undelegate: state.undelegateSignature, restore: state.restored, withdraw: state.withdrawn };
     if (flags[stage] !== undefined && flags[stage] !== null) { log(`${stage}: complete`); continue; }
     log(`running: ${stage}`);
     await STAGES[stage]();
   }
-} else { console.log("usage: node scripts/devnet-lifecycle.mjs [--dry-run] [setup|custody|sessions|delegate|status|er|undelegate|withdraw|all]"); }
+} else { console.log("usage: node scripts/devnet-lifecycle.mjs [--dry-run] [setup|custody|sessions|delegate|status|er|undelegate|restore|withdraw|all]"); }
 process.exit(0);
