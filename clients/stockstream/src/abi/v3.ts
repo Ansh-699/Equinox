@@ -17,6 +17,7 @@ export const V3_SEATS_PER_SHARD = 32;
 export const V3_SEAT_SHARDS = 4;
 export const V3_EVENTS_PER_SHARD = 32;
 export const V3_EVENT_SHARDS = 4;
+export const V3_EXECUTION_BUNDLE_LEN = 17;
 
 export function deriveMarketCoreV3(instrument: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync([Buffer.from("market-v3"), instrument.toBuffer()], PROGRAM_KEY)[0];
