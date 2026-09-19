@@ -1,6 +1,6 @@
 /**
  * Canonical instruction opcodes and data encoders.
- * All 44 opcodes match `programs/stockstream/src/instruction.rs`.
+ * All currently assigned opcodes match `programs/stockstream/src/instruction.rs`.
  */
 export const OPCODE = {
   initializeMarket: 0, createTraderSeat: 1, closeTraderSeat: 2,
@@ -20,6 +20,7 @@ export const OPCODE = {
   reconcileVault: 39, updateExchangeConfig: 40,
   delegateClusterMember: 41, createMarketAccount: 42,
   createInstrumentAccount: 43, createVaultAccount: 44,
+  createScratchAccount: 45, createV3Account: 46,
 } as const;
 
 /** Session action allowlist bits — must match `session::SESSION_ACTION_*`. */

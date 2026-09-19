@@ -25,6 +25,9 @@ pub const CREATE_MARKET_ACCOUNT: u8 = 42;
 pub const CREATE_INSTRUMENT_ACCOUNT: u8 = 43;
 pub const CREATE_VAULT_ACCOUNT: u8 = 44;
 pub const CREATE_SCRATCH_ACCOUNT: u8 = 45;
+/// Creates (or grows) one bounded, independently-committable V3 account.
+/// Data: `[46, kind:u8, index:u8]`; see `v3::V3AccountKind`.
+pub const CREATE_V3_ACCOUNT: u8 = 46;
 pub const COMMIT_MARKET: u8 = 14;
 pub const COMMIT_AND_UNDELEGATE: u8 = 15;
 /// Reserved: the real external-undelegate callback uses the delegation
@@ -180,6 +183,12 @@ pub enum StockStreamInstruction {
     /// See `registry::create_scratch_account`.
     CreateScratchAccount {
         seat_index: u16,
+    },
+    /// Creates one V3 core/page/shard PDA. This is intentionally separate
+    /// from V2 market creation; a V3 account can never alias the monolith.
+    CreateV3Account {
+        kind: u8,
+        index: u8,
     },
     CommitMarket {
         sequence: u64,
@@ -402,6 +411,17 @@ impl StockStreamInstruction {
             Some(CREATE_SCRATCH_ACCOUNT) if data.len() == 3 => Ok(Self::CreateScratchAccount {
                 seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
             }),
+            Some(CREATE_V3_ACCOUNT)
+                if data.len() == 3
+                    && crate::v3::V3AccountKind::from_u8(data[1])
+                        .filter(|kind| data[2] <= kind.max_index())
+                        .is_some() =>
+            {
+                Ok(Self::CreateV3Account {
+                    kind: data[1],
+                    index: data[2],
+                })
+            }
             Some(CREATE_INSTRUMENT_ACCOUNT) if data.len() == 33 => {
                 Ok(Self::CreateInstrumentAccount {
                     instrument_id: data[1..33]
