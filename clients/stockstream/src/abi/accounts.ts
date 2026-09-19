@@ -55,7 +55,7 @@ export function decodeMarketHeader(bytes: Uint8Array): MarketHeaderView | null {
     quoteLotSize: view.getBigUint64(184, true),
     initialMarginBps: view.getUint16(192, true),
     maintenanceMarginBps: view.getUint16(194, true),
-    liquidationFeeBps: view.getUint16(194, true),
+    liquidationFeeBps: view.getUint16(196, true),
     makerFeeBps: view.getUint16(198, true),
     takerFeeBps: view.getUint16(200, true),
     maximumLeverage: view.getUint32(202, true),

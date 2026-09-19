@@ -2,8 +2,15 @@
  * Event discriminants and layout. Must match `events::EventKind` and
  * `events::encode_event` in the Rust program.
  */
-export const EVENT_HEADER_SIZE = 12;
-export const EVENT_PAYLOAD_SIZE = 88;
+/** `EventHeader` (`discriminator: u16, abi_version: u8, reserved: u8,
+ * sequence: u64, market: [u8; 32], timestamp: u64`) is 52 bytes, not 12 --
+ * this was wrong until the ABI parity generator was fixed to read the
+ * real Rust struct size instead of copying the previously-committed
+ * manifest back onto itself (its own "parity" test only ever checked the
+ * summed EVENT_SIZE, which 12+88 and 52+48 both equal 100, so the wrong
+ * split silently passed). */
+export const EVENT_HEADER_SIZE = 52;
+export const EVENT_PAYLOAD_SIZE = 48;
 export const EVENT_SIZE = EVENT_HEADER_SIZE + EVENT_PAYLOAD_SIZE;
 
 export const EVENT_KIND = {
