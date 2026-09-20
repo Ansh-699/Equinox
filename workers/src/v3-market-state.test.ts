@@ -44,7 +44,7 @@ describe("V3 worker shard aggregation", () => {
     const books = Array.from({ length: 2 * V3_BOOK_PAGES_PER_SIDE }, (_, value) => page(Math.floor(value / V3_BOOK_PAGES_PER_SIDE), value % V3_BOOK_PAGES_PER_SIDE));
     const seats = Array.from({ length: 4 }, (_, value) => shard(false, value));
     const events = Array.from({ length: 4 }, (_, value) => shard(true, value));
-    expect(aggregateV3Market(core(), books, seats, events, coreAddress)).toMatchObject({ completeBook: true, completeExecutionState: true, withdrawalReady: true });
+    expect(aggregateV3Market(core(), books, seats, events, coreAddress, 42)).toMatchObject({ asOfSlot: 42, completeBook: true, completeExecutionState: true, withdrawalReady: true });
     const aggregate = aggregateV3Market(core(), [leafPage(0, 0), ...books.slice(1)], seats, events, coreAddress)!;
     expect(aggregate.orderBook.bids[0]).toMatchObject({ tag: 2, side: 0, quantity: 5n });
     expect(aggregateV3Market(core(), [...books.slice(0, books.length - 1), page(1, 2)], seats, events, coreAddress)).toBeNull();
