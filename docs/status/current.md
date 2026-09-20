@@ -50,16 +50,16 @@ typechecks, Playwright fixture E2E, and the secret scan. It emits a
 machine-readable gate record (use
 `VERIFY_SUMMARY_PATH=docs/status/verify-latest.json npm run verify` to refresh
 the tracked copy); the latest continuation run finished with `VERIFY-OK` on
-source commit `0023b30` (recorded before the docs-only follow-up). The funding
-clamp correction is committed as `a89c313`; it makes persisted V3
-`mark_deviation_bps` control funding mark bounds, with a documented 500-bps
-fallback for legacy zero-config cores.
+source commit `d563f28`. The funding clamp correction is committed as
+`a89c313`; `d563f28` additionally enforces persisted V3 maximum open interest
+before mutation and session `max_open_orders` during canonical bundle
+authorization.
 
 Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives all 26 child PDAs from the supplied core and returns a bigint-safe aggregate. It is read-only and cannot claim live V3 state until a V3 core is deployed.
 
 Fresh current-HEAD regression evidence: `cargo test -p stockstream --test v3_bundle v3_cancel_all_releases_reserve_and_side_exposure_for_every_tree` passes after `cancel_all_v3` was corrected to decrement the owning seat's bid/ask exposure counters along with reserved margin and open-order count. This is local Pinocchio/LiteSVM-style evidence only; no Devnet account was mutated.
 
-- Rust (native + LiteSVM runtime): 242 passing, `cargo fmt --check` clean; fresh `NO_DNA=1 cargo test -p stockstream --tests` on the current checkout passed 242/242 across 29 suites. This includes `v3_funding_uses_configured_mark_deviation_clamp`, the repeated-partial-close regression, and the V3 liquidation ledger regression.
+- Rust (native + LiteSVM runtime): 243 passing, `cargo fmt --check` clean; fresh `NO_DNA=1 cargo test -p stockstream --tests` on the current checkout passed 243/243 across 29 suites. This includes configured mark-deviation, maximum-open-interest preflight, session open-order limits, repeated-partial-close, and V3 liquidation ledger regressions.
 - Workers (Miniflare/vitest): 354 passing (34 files; relayer risk/version/lifetime guards and typed V3 write-builder vectors included).
 - Frontend (vitest): 210 passing (33 files).
 - Frontend (Playwright fixture E2E): 54 passing, including V3 deposit, confirmed L1 seat creation, ER-owned seat-write blocking, session authorization, place/cancel/replace/reduce-only, commit-pending blocking and restored withdrawal; opt-in Devnet read-only E2E: 2 passing.
@@ -69,11 +69,11 @@ Fresh current-HEAD regression evidence: `cargo test -p stockstream --test v3_bun
 - ABI manifest parity: `ABI-OK`.
 - Client facade audit: `clients/stockstream/src/index.ts` is now a thin compatibility surface (122 lines); instruction construction and canonical decoders live in `clients/stockstream/src/abi/*`, with only the legacy PublicKey session mapping and unsigned preview retained in the facade.
 - V3 continuation: `bash scripts/verify.sh` finished `VERIFY-OK` after the
-  configured funding-mark clamp correction: Rust workspace tests (242),
+  configured funding-mark clamp and open-interest/session-limit corrections: Rust workspace tests (243),
   `cargo build-sbf`, ABI parity, 210 frontend tests, 354 Worker tests,
   Playwright 54/54, TypeScript, lint and secret scan all passed. This is a
   local build, not a live deployment. Current verified artifact SHA-256:
-  `1489886501334605f61cac051c104799aa2445295b552ba88331241e0eb57ee1`.
+  `e68d5782a1e96d96305a68137b2697641561b31fafd6cb8dcf5e5312934bf1db`.
 - Commit-limit correction (`6492c75`): `cargo test -p stockstream --test
   magicblock` (30), `--test v3_bundle` (7), root V3 ABI tests (6), Worker
   V3 state tests (4), both TypeScript checks, ABI parity, and a loadable SBF
