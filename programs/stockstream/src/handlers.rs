@@ -3380,7 +3380,10 @@ fn validate_settlement_plan(
             return Err(custom(StockStreamError::InvalidInstruction));
         }
         if action.remove {
-            removed_by_side[if leaf.side == Side::Bid as u8 { 0 } else { 1 }] += 1;
+            let side_index = if leaf.side == Side::Bid as u8 { 0 } else { 1 };
+            removed_by_side[side_index] = removed_by_side[side_index]
+                .checked_add(1)
+                .ok_or(custom(StockStreamError::ArithmeticOverflow))?;
         }
         index += 1;
     }
