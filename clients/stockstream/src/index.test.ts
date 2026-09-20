@@ -32,10 +32,10 @@ test("createV3Account validates the isolated PDA and preserves the program accou
     { pubkey: payer, isSigner: true, isWritable: true },
     { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
   ]);
-  const page = deriveBookPageV3(core, 1, 3);
+  const page = deriveBookPageV3(core, 0, 7);
   expect(Array.from(createV3Account({ parent: core, target: page, payer }, "book-page", 7).data)).toEqual([46, 1, 7]);
   expect(() => createV3Account({ parent: core, target: market, payer }, "book-page", 0)).toThrow(/derived/);
-  expect(() => createV3Account({ parent: core, target: page, payer }, "book-page", 8)).toThrow(/index/);
+  expect(() => createV3Account({ parent: core, target: page, payer }, "book-page", 18)).toThrow(/index/);
   const activation = initializeV3Market({ exchange: PublicKey.unique(), instrument, core, authority });
   expect(Array.from(activation.data)).toEqual([47]);
   expect(activation.keys.map(({ isSigner, isWritable }) => [isSigner, isWritable])).toEqual([[false, false], [false, false], [false, true], [true, false]]);
