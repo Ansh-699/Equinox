@@ -1,6 +1,6 @@
 # StockStream evidence matrix
 
-This matrix is scoped to current HEAD `0b31be4` (post-V3-cancellation-atomicity and funding-settlement fixes). “Fresh” means rerun on this checkout; live claims additionally require the cited Devnet artifact. The full local gate is `VERIFY_SUMMARY_PATH=/tmp/stockstream-verify-summary-20260921-funding.json NO_DNA=1 bash scripts/verify.sh` and the checked-in summary is `verify-latest.json`.
+This matrix is scoped to current HEAD `0a2e2b2` (post-V3-cancellation-atomicity and funding-settlement fixes). “Fresh” means rerun on this checkout; live claims additionally require the cited Devnet artifact. The full local gate is `VERIFY_SUMMARY_PATH=/tmp/stockstream-verify-summary-20260921-funding.json NO_DNA=1 bash scripts/verify.sh` and the checked-in summary is `verify-latest.json`.
 
 | Subsystem | Classification | Source and exact evidence | Fresh on current HEAD |
 |---|---|---|---|
