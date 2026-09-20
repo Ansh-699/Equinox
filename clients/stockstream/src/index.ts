@@ -224,7 +224,7 @@ export function replaceOrderV3(params: Omit<PlaceOrderParams, "market" | "author
   writeUnsigned(data, 1, checkedUnsigned(params.oldOrderKey, 128, "oldOrderKey"), 16);
   data[17] = params.side === "bid" ? 0 : params.side === "ask" ? 1 : 255;
   data[18] = (params.tree ?? "fixed") === "fixed" ? 0 : 1;
-  data[19] = (params.postOnly ? 1 : 0) | (params.immediateOrCancel ? 2 : 0) | (params.reduceOnly ? 4 : 0);
+  data[19] = (params.postOnly ? 1 : 0) | (params.immediateOrCancel ? 2 : 0) | (params.reduceOnly ? 4 : 0) | selfTradeBits(params.selfTradeBehavior);
   if (data[17] > 1) throw new RangeError("Invalid order side");
   writeUnsigned(data, 20, checkedUnsigned(params.seatIndex, 16, "seatIndex"), 2);
   writeUnsigned(data, 22, checkedUnsigned(params.quantity, 64, "quantity"), 8);
@@ -233,8 +233,8 @@ export function replaceOrderV3(params: Omit<PlaceOrderParams, "market" | "author
   writeSigned(data, 46, checkedSigned(params.pegLimit ?? 0, 64, "pegLimit"), 8);
   writeUnsigned(data, 54, checkedUnsigned(params.clientOrderId, 64, "clientOrderId"), 8);
   const actionNonce = params.actionNonce ?? 0;
-  if (actionNonce !== 0) throw new RangeError("V3 replacement currently requires a main-wallet action");
-  writeUnsigned(data, 62, 0n, 8);
+  if (!params.session && actionNonce !== 0) throw new RangeError("Main-wallet actions must use actionNonce zero");
+  writeUnsigned(data, 62, checkedUnsigned(actionNonce, 64, "actionNonce"), 8);
   return instruction(data, v3ExecutionMetas(params));
 }
 
