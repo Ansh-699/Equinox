@@ -79,13 +79,14 @@ Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives 
    `docs/status/magicblock-commit-simulation-20260919.json` reaches
    `ScheduleCommit` and reports that the 222,752-byte market is too large
    to be committed. The V2 monolith cannot fit the committor's `u16`
-   buffered state length; V3 avoids that boundary but is not deployed or
-   live-verified yet.
+   buffered state length. V3 avoids that boundary and is deployed with live
+   setup, delegation and bounded shard-commit evidence; core restoration is
+   blocked by the deployed DLP version mismatch recorded above.
 
-The V3 layout avoids the identified account-size boundary, but does not
-retrofit the preserved V2 market. It must be deployed and its full trading
-and five-account delegation/commit lifecycle verified separately before it
-can clear this blocker.
+The V3 layout avoids the identified account-size boundary and does not
+retrofit the preserved V2 market. Its full trading and five-account
+delegation/commit lifecycle still requires Pyth/Privy credentials and a
+compatible DLP restore path before this blocker can be cleared.
 
 ## Live evidence artifacts
 
@@ -93,7 +94,7 @@ can clear this blocker.
   transaction signature/slot from this session's Devnet lifecycle run.
 - Devnet program: `H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET`, upgrade
   authority `A5sV4PkkVM4gm3rejACvKFgxEMmj8ouGsffSKT5qYVc8`, currently
-  deployed bytes sha256 `15b23465feb416122cf9a5086c3d429c5c1a23fa100b80c863507952d5d0d86b`
+  deployed bytes sha256 `65597b7859515225b5393e80f8560a18a99049e9016353d60884e16eb8c1509f`
   (verified byte-identical to the local build after each deploy this
   session).
 - Live Worker: `https://stockstream-market-api.ansht.workers.dev`
