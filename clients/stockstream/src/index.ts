@@ -1,5 +1,5 @@
 import { PublicKey, SystemProgram } from "@solana/web3.js";
-import { STOCKSTREAM_PROGRAM_ID, STOCKSTREAM_TRADING_SESSION_SIZE } from "./constants";
+import { STOCKSTREAM_PROGRAM_ID } from "./constants";
 import { cancelAllV3, cancelOrderV3, closeV3TraderSeat, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, createV3Account, createV3TraderSeat, delegateV3Account, depositCollateralV3, initializeV3Market, placeOrderV3, replaceOrderV3, requestV3Undelegation, rollbackV3Undelegation, updateFundingV3, withdrawCollateralV3 } from "./abi/v3-instructions";
 import { authorizeTradingSession, closeTradingSession, deriveTradingSession, revokeTradingSession, updateTradingSessionLimits } from "./abi/session-instructions";
 import { createPerpMarket, initializeExchange, registerStockInstrument, suspendStockInstrument, transitionMarket, updateMarketRisk, updateStockInstrument } from "./abi/registry-instructions";
@@ -12,6 +12,7 @@ import { updateExchangeConfig } from "./abi/exchange-config-instructions";
 import { decodeDelegationPayload as decodeDelegationPayloadAbi, decodeFillPayload as decodeFillPayloadAbi, decodeFundingPayload as decodeFundingPayloadAbi, decodeLiquidationPayload as decodeLiquidationPayloadAbi, decodeOraclePayload as decodeOraclePayloadAbi, decodeOrderPayload as decodeOrderPayloadAbi, decodePositionPayload as decodePositionPayloadAbi, decodeReconciliationPayload as decodeReconciliationPayloadAbi, decodeRegistryPayload as decodeRegistryPayloadAbi, decodeSeatAmountPayload as decodeSeatAmountPayloadAbi, decodeSeatPayload as decodeSeatPayloadAbi, decodeSessionPayload as decodeSessionPayloadAbi, decodeStockStreamEvent as decodeStockStreamEventAbi } from "./abi/event-decoders";
 import { decodeBookMetadata as decodeBookMetadataAbi, decodeFillEvent as decodeFillEventAbi } from "./abi/legacy-decoders";
 import { EVENT_ABI_VERSION, EVENT_HEADER_SIZE, EVENT_KIND_NAMES, EVENT_PAYLOAD_SIZE, EVENT_SIZE, NO_SEAT } from "./abi/events";
+import { decodeTradingSession as decodeTradingSessionAbi, type TradingSessionView as TradingSessionAbiView } from "./abi/sessions";
 
 export { cancelAllV3, cancelOrderV3, closeV3TraderSeat, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, createV3Account, createV3TraderSeat, delegateV3Account, depositCollateralV3, initializeV3Market, placeOrderV3, replaceOrderV3, requestV3Undelegation, rollbackV3Undelegation, updateFundingV3, withdrawCollateralV3 } from "./abi/v3-instructions";
 export type { V3AccountKind, V3CommitAccounts, V3CreationAccounts, V3DelegationAccounts, V3DepositAccounts, V3ExecutionAccounts, V3FundingAccounts, V3InitializationAccounts, V3OracleAccounts, V3SeatAccounts, V3ShardCommitAccounts, V3UndelegationRecoveryAccounts, V3WithdrawAccounts } from "./abi/v3-instructions";
@@ -30,6 +31,7 @@ export type { ClusterMemberAccounts, CommitAccounts, DelegationAccounts } from "
 export { EXCHANGE_CONFIG_FIELD, updateExchangeConfig } from "./abi/exchange-config-instructions";
 export type { UpdateExchangeConfigFields } from "./abi/exchange-config-instructions";
 export { EVENT_ABI_VERSION, EVENT_HEADER_SIZE, EVENT_KIND_NAMES, EVENT_PAYLOAD_SIZE, EVENT_SIZE, NO_SEAT } from "./abi/events";
+export { TRADING_SESSION_DISCRIMINATOR, TRADING_SESSION_VERSION } from "./abi/sessions";
 
 export { STOCKSTREAM_PROGRAM_KEY } from "./abi/transaction";
 export type { AddressInput } from "./abi/transaction";
@@ -162,13 +164,6 @@ export function decodeFillEvent(data: Uint8Array): FillEventView {
   return decodeFillEventAbi(data);
 }
 
-function readSignedLE(data: Uint8Array, offset: number, bytes: number): bigint {
-  let value = 0n;
-  for (let i = bytes - 1; i >= 0; i -= 1) value = (value << 8n) | BigInt(data[offset + i]);
-  const signBit = 1n << BigInt(bytes * 8 - 1);
-  return value >= signBit ? value - (signBit << 1n) : value;
-}
-
 export interface TradingSessionView {
   discriminator: string;
   version: number;
@@ -192,33 +187,22 @@ export interface TradingSessionView {
   sessionGeneration: number;
 }
 
-/** Must match `session::TradingSession`'s packed byte layout exactly. */
+/**
+ * Compatibility facade for the canonical ABI decoder. The ABI module uses
+ * base58 strings for Worker portability; the legacy public client API keeps
+ * `PublicKey` fields and its strict-throw behavior for malformed accounts.
+ */
 export function decodeTradingSession(data: Uint8Array): TradingSessionView {
-  if (data.byteLength !== STOCKSTREAM_TRADING_SESSION_SIZE) throw new RangeError("Invalid TradingSession account size");
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  const discriminator = new TextDecoder().decode(data.slice(0, 8));
-  if (discriminator !== "STKSES02" || view.getUint16(8, true) !== 1) throw new RangeError("Invalid TradingSession header");
+  const decoded: TradingSessionAbiView | null = decodeTradingSessionAbi(data);
+  if (!decoded) throw new RangeError("Invalid TradingSession account");
   return {
-    discriminator,
-    version: view.getUint16(8, true),
-    initialized: view.getUint8(10) === 1,
-    revoked: view.getUint8(11) === 1,
-    owner: new PublicKey(data.slice(12, 44)),
-    sessionSigner: new PublicKey(data.slice(44, 76)),
-    targetProgram: new PublicKey(data.slice(76, 108)),
-    market: new PublicKey(data.slice(108, 140)),
-    traderSeatIndex: view.getUint16(140, true),
-    createdAt: view.getBigUint64(142, true),
-    expiresAt: view.getBigUint64(150, true),
-    actions: view.getUint8(158),
-    maxOrderNotional: view.getBigUint64(159, true),
-    maxCumulativeNotional: view.getBigUint64(167, true),
-    consumedCumulativeNotional: view.getBigUint64(175, true),
-    maxExposure: readSignedLE(data, 183, 16),
-    maxOpenOrders: view.getUint16(199, true),
-    nextExpectedNonce: view.getBigUint64(201, true),
-    lastActionTimestamp: view.getBigUint64(209, true),
-    sessionGeneration: view.getUint32(217, true),
+    ...decoded,
+    owner: new PublicKey(decoded.owner),
+    sessionSigner: new PublicKey(decoded.sessionSigner),
+    targetProgram: new PublicKey(decoded.targetProgram),
+    market: new PublicKey(decoded.market),
+    maxExposure: decoded.maximumExposure,
+    maxOpenOrders: decoded.maximumOpenOrders,
   };
 }
 

@@ -2,7 +2,7 @@ import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { expect, test } from "vitest";
 import { STOCKSTREAM_PROGRAM_ID } from "./constants";
 import { MAGICBLOCK_DELEGATION_PROGRAM_ID, MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID, STOCKSTREAM_PROGRAM_KEY, cancelAllV3, cancelOrderV3, placeOrderV3, replaceOrderV3, commitV3Shard, consumeOracleUpdateV3, updateFundingV3 } from "./index";
-import { authorizeTradingSession, cancelOrder, closeV3TraderSeat, commitMarket, delegateClusterMember, delegateV3Account, deriveClusterMemberPdas, createPerpMarket, createV3Account, createV3TraderSeat, decodeFillPayload, decodeInstruction, decodeMarketState, decodeSeatAmountPayload, decodeStockStreamEvent, delegateMarket, deriveTradingSession, depositCollateral, depositCollateralV3, EVENT_SIZE, initializeExchange, initializeMarket, initializeV3Market, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateExchangeConfig, updateStockInstrument, withdrawCollateral, withdrawCollateralV3, withdrawInsuranceFunds, withdrawProtocolFees, EXCHANGE_CONFIG_FIELD, requestV3Undelegation, rollbackV3Undelegation } from "./index";
+import { authorizeTradingSession, cancelOrder, closeV3TraderSeat, commitMarket, delegateClusterMember, delegateV3Account, deriveClusterMemberPdas, createPerpMarket, createV3Account, createV3TraderSeat, decodeFillPayload, decodeInstruction, decodeMarketState, decodeSeatAmountPayload, decodeStockStreamEvent, decodeTradingSession, delegateMarket, deriveTradingSession, depositCollateral, depositCollateralV3, EVENT_SIZE, initializeExchange, initializeMarket, initializeV3Market, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateExchangeConfig, updateStockInstrument, withdrawCollateral, withdrawCollateralV3, withdrawInsuranceFunds, withdrawProtocolFees, EXCHANGE_CONFIG_FIELD, requestV3Undelegation, rollbackV3Undelegation } from "./index";
 import { STOCKSTREAM_ACCOUNT_SIZE } from "./constants";
 import { deriveBookPageV3, deriveEventShardV3, deriveMarketCoreV3, deriveSeatShardV3 } from "./abi/v3";
 
@@ -193,6 +193,22 @@ test("transaction preview is unsigned and explicit about unavailable margin", ()
   expect(preview.programId).toBe(STOCKSTREAM_PROGRAM_ID);
   expect(preview.signers).toEqual([authority.toBase58()]);
   expect(preview.estimatedInternalMargin).toContain("verified oracle");
+});
+
+test("facade TradingSession decoder delegates to the canonical ABI layout", () => {
+  const owner = PublicKey.unique();
+  const bytes = new Uint8Array(256);
+  bytes.set(Buffer.from("STKSES02"));
+  new DataView(bytes.buffer).setUint16(8, 1, true);
+  bytes[10] = 1;
+  bytes.set(owner.toBytes(), 12);
+  new DataView(bytes.buffer).setBigUint64(201, 7n, true);
+  new DataView(bytes.buffer).setUint16(199, 3, true);
+  const decoded = decodeTradingSession(bytes);
+  expect(decoded.owner.equals(owner)).toBe(true);
+  expect(decoded.nextExpectedNonce).toBe(7n);
+  expect(decoded.maxOpenOrders).toBe(3);
+  expect(() => decodeTradingSession(bytes.subarray(0, 255))).toThrow(/Invalid TradingSession/);
 });
 
 test("integration constructors preserve discriminators, account order and signer flags", () => {
