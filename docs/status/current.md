@@ -90,14 +90,15 @@ Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives 
 ## Known external blockers (not fixable from this codebase alone)
 
 1. **Pyth Lazer equity entitlement** -- required for
-   any real oracle price, which gates every session-signed trade and the
-   market's own "Open" trading path. A local server-only test key is
-   server-only key can query the Pyth Pro catalog, which resolves
+  any real oracle price, which gates every session-signed trade and the
+  market's own "Open" trading path. A local server-only key can query the
+  Pyth Pro catalog, which resolves
    `Equity.US.AAPL/USD` as stable numeric Lazer ID `922`, with
    `fixed_rate@50ms` minimum. The configured key has no equity grant:
    all three authenticated streams reject 922 as `Not entitled`, so the
    smoke command safely submits nothing. The deterministic signed fixture
-   remains the only available oracle test input until that grant changes.
+  remains the only available oracle test input until that grant changes.
+  Probe output is preserved in `docs/status/pyth-privy-live-probe-20260920.json`.
 2. **Privy-linked test wallet and deployed relayer configuration** -- local
    server-only app credentials are configured, but a real Privy access token
    for a linked wallet matching a preserved trader is not present. The
