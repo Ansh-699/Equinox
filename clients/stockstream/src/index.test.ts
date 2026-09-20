@@ -156,6 +156,10 @@ test("V3 trading constructors use the complete 27-account bundle", () => {
   expect(cancelOrderV3(v3, 0, 1n).keys).toHaveLength(28);
   expect(cancelAllV3(v3, 0, 2).keys).toHaveLength(28);
   expect(replaceOrderV3({ ...v3, oldOrderKey: 1n, seatIndex: 0, side: "bid", quantity: 1n, priceOrOffset: 10n, clientOrderId: 2n }).keys).toHaveLength(28);
+  const sessionReplace = replaceOrderV3({ ...v3, session: PublicKey.unique(), oldOrderKey: 1n, seatIndex: 0, side: "bid", quantity: 1n, priceOrOffset: 10n, clientOrderId: 3n, actionNonce: 4n, selfTradeBehavior: "decrement-take" });
+  expect(sessionReplace.keys).toHaveLength(29);
+  expect(sessionReplace.data[19]).toBe(16);
+  expect(Array.from(sessionReplace.data.slice(62, 70))).toEqual([4, 0, 0, 0, 0, 0, 0, 0]);
 });
 
 test("V3 shard commit keeps the core outside the Magic intent", () => {
