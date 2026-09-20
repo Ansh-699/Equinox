@@ -51,7 +51,7 @@ typechecks, Playwright fixture E2E, and the secret scan. It emits a
 machine-readable gate record (use
 `VERIFY_SUMMARY_PATH=docs/status/verify-latest.json npm run verify` to refresh
 the tracked copy); the latest continuation run finished with `VERIFY-OK` on
-source commit `0078fbb` (documentation checkpoint `4da7582`). The funding clamp correction is committed as
+source commit `0078fbb` (documentation checkpoint `899cdc6`). The funding clamp correction is committed as
 `a89c313`; `d563f28` additionally enforces persisted V3 maximum open interest
 before mutation and session `max_open_orders` during canonical bundle
 authorization.
