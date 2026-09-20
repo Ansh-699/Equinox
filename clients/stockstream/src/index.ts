@@ -33,10 +33,8 @@ export { EVENT_ABI_VERSION, EVENT_HEADER_SIZE, EVENT_KIND_NAMES, EVENT_PAYLOAD_S
 
 export { STOCKSTREAM_PROGRAM_KEY } from "./abi/transaction";
 export type { AddressInput } from "./abi/transaction";
-export interface InstructionFixture {
-  name: string;
-  data: Uint8Array;
-}
+export { decodeInstruction } from "./abi/instructions";
+export type { InstructionFixture } from "./abi/instructions";
 
 /** Account tuple for opcode 46. `parent` is an instrument for `core`, and a V3 core otherwise. */
 
@@ -152,14 +150,6 @@ export function decodeReconciliationPayload(payload: Uint8Array) {
  * completion are idempotent. The builder validates the target PDA so a
  * client cannot accidentally point this isolated V3 flow at the V2 market.
  */
-export function decodeInstruction(data: Uint8Array): InstructionFixture {
-  if (data.length === 0) throw new RangeError("Empty instruction");
-  const names: Record<number, string> = { 0: "InitializeMarket", 1: "CreateTraderSeat", 2: "CloseTraderSeat", 3: "PlaceOrder", 4: "CancelOrder", 5: "CancelAll", 6: "UpdateFunding", 7: "Liquidate", 8: "InitializeSettlementScratch", 9: "InitializeVault", 10: "DepositCollateral", 11: "WithdrawCollateral", 12: "ConsumeOracleUpdate", 13: "DelegateMarket", 14: "CommitMarket", 15: "CommitAndUndelegate", 16: "UndelegationCallback", 17: "AuthorizeTradingSession", 18: "RevokeTradingSession", 19: "InitializeExchange", 20: "RegisterStockInstrument", 21: "CreatePerpMarket", 22: "UpdateStockInstrument", 23: "SuspendStockInstrument", 24: "UpdateMarketRisk", 25: "PauseMarket", 26: "ResumeMarket", 27: "SetCloseOnly", 28: "EnterCorporateAction", 29: "ResolveCorporateAction", 30: "CloseMarket", 31: "UpdateTradingSessionLimits", 32: "CloseTradingSession", 33: "ReplaceOrder", 34: "TransferToInsuranceFund", 35: "WithdrawProtocolFees", 36: "WithdrawInsuranceFunds", 37: "RecordBadDebt", 38: "ResolveBadDebt", 39: "ReconcileVault", 40: "UpdateExchangeConfig", 41: "DelegateClusterMember", 42: "CreateMarketAccount", 43: "CreateInstrumentAccount", 44: "CreateVaultAccount", 45: "CreateScratchAccount", 46: "CreateV3Account", 47: "InitializeV3Market", 48: "DelegateV3Account", 49: "CreateV3TraderSeat", 50: "CloseV3TraderSeat", 51: "RequestV3Undelegation", 52: "RollbackV3Undelegation", 53: "DepositCollateralV3", 54: "WithdrawCollateralV3" };
-  const name = names[data[0]];
-  if (!name) throw new RangeError("Unknown instruction");
-  return { name, data: data.slice() };
-}
-
 export interface MarketStateView {
   discriminator: string;
   version: number;
