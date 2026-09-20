@@ -2,7 +2,9 @@
 /**
  * Live Privy-linked-wallet relayer harness. It is intentionally inert unless
  * `--submit` is supplied: a successful relay consumes a TradingSession nonce
- * and may submit a transaction to Devnet.
+ * and may submit a transaction to Devnet. `--replay` repeats the identical
+ * signed transaction with a fresh request id and requires the second request
+ * to be rejected by the on-chain nonce check.
  *
  * Required server-only runtime values:
  *   PRIVY_ACCESS_TOKEN       fresh token from the linked-wallet browser flow
@@ -44,7 +46,13 @@ if (!linkedWallets.includes(expectedWallet)) {
 }
 console.log("Privy linked-wallet preflight passed (token and identity redacted)");
 
-if (!process.argv.includes("--submit")) {
+const submit = process.argv.includes("--submit");
+const replay = process.argv.includes("--replay");
+if (!submit) {
+  if (replay) {
+    console.error("--replay requires --submit");
+    process.exit(1);
+  }
   console.log("No relay submitted. Add --submit only for an approved nonce-consuming Devnet transaction.");
   process.exit(0);
 }
@@ -58,25 +66,37 @@ if (!url || !serviceToken || !transactionBase64 || !sessionSignerAddress || !exp
   console.error("--submit requires relayer URL/token, transaction, session signer, and expected market runtime values");
   process.exit(1);
 }
-const response = await fetch(new URL("/v1/relay/session", url), {
+const relayBody = () => JSON.stringify({
+  transactionBase64,
+  sessionSignerAddress,
+  ownerWallet: expectedWallet,
+  expectedMarket,
+  domain: process.env.RELAY_DOMAIN === "er" ? "er" : "l1",
+  clientRequestId: crypto.randomUUID(),
+});
+const relay = () => fetch(new URL("/v1/relay/session", url), {
   method: "POST",
   headers: {
     authorization: `Bearer ${token}`,
     "content-type": "application/json",
     "x-stockstream-relayer-service-token": serviceToken,
   },
-  body: JSON.stringify({
-    transactionBase64,
-    sessionSignerAddress,
-    ownerWallet: expectedWallet,
-    expectedMarket,
-    domain: process.env.RELAY_DOMAIN === "er" ? "er" : "l1",
-    clientRequestId: crypto.randomUUID(),
-  }),
+  body: relayBody(),
 });
+const response = await relay();
 const body = await response.json().catch(() => null);
 if (!response.ok || !body?.signature) {
   console.error(`Relay rejected: HTTP ${response.status}, code=${typeof body?.error === "string" ? body.error : "unknown"}`);
   process.exit(1);
 }
 console.log(`Relay accepted: signature=${body.signature}`);
+
+if (replay) {
+  const replayResponse = await relay();
+  const replayBody = await replayResponse.json().catch(() => null);
+  if (replayResponse.ok && replayBody?.signature) {
+    console.error("Replay unexpectedly accepted: nonce protection failed");
+    process.exit(1);
+  }
+  console.log(`Replay rejected as expected: HTTP ${replayResponse.status}, code=${typeof replayBody?.error === "string" ? replayBody.error : "unknown"}`);
+}
