@@ -603,15 +603,25 @@ pub fn initialize_v3_market(program_id: &Address, accounts: &mut [AccountView]) 
         return Err(ProgramError::IllegalOwner);
     }
     let authority = accounts[3].address().to_bytes();
-    let exchange = unsafe { accounts[0].borrow_unchecked() };
-    if exchange.len() != EXCHANGE_SIZE
-        || exchange[0..8] != EXCHANGE_DISCRIMINATOR
-        || exchange[8..10] != EXCHANGE_CONFIG_VERSION.to_le_bytes()
-        || exchange[10] != 1
-        || exchange[11..43] != authority
-    {
-        return Err(custom(StockStreamError::InvalidInstruction));
-    }
+    let (exchange_authority, collateral_mint) = {
+        let exchange = unsafe { accounts[0].borrow_unchecked() };
+        if exchange.len() != EXCHANGE_SIZE
+            || exchange[0..8] != EXCHANGE_DISCRIMINATOR
+            || exchange[8..10] != EXCHANGE_CONFIG_VERSION.to_le_bytes()
+            || exchange[10] != 1
+            || exchange[11..43] != authority
+        {
+            return Err(custom(StockStreamError::InvalidInstruction));
+        }
+        let authority: [u8; 32] = exchange[11..43]
+            .try_into()
+            .map_err(|_| custom(StockStreamError::InvalidInstruction))?;
+        let mint: [u8; 32] = exchange
+            [exchange_offset::COLLATERAL_MINT..exchange_offset::COLLATERAL_MINT + 32]
+            .try_into()
+            .map_err(|_| custom(StockStreamError::InvalidInstruction))?;
+        (authority, mint)
+    };
     let instrument = unsafe { accounts[1].borrow_unchecked() };
     if instrument.len() != INSTRUMENT_SIZE
         || instrument[0..8] != INSTRUMENT_DISCRIMINATOR
@@ -644,7 +654,9 @@ pub fn initialize_v3_market(program_id: &Address, accounts: &mut [AccountView]) 
         return Err(custom(StockStreamError::InvalidInstruction));
     }
     data[11] = 1; // Open; later V3 risk/oracle activation remains explicit.
-    data[44..76].copy_from_slice(&authority);
+    data[44..76].copy_from_slice(&exchange_authority);
+    data[76..108].copy_from_slice(&collateral_mint);
+    data[108..140].copy_from_slice(pinocchio_token::ID.as_ref());
     Ok(())
 }
 

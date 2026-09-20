@@ -1788,6 +1788,9 @@ pub fn commit_market(
     accounts: &mut [AccountView],
     sequence: u64,
 ) -> ProgramResult {
+    if is_v3_commit_accounts(accounts) {
+        return commit_v3_bundle(program_id, accounts, sequence, CommitKind::CommitOnly);
+    }
     commit_market_inner(program_id, accounts, sequence, CommitKind::CommitOnly)
 }
 
@@ -1796,12 +1799,151 @@ pub fn commit_and_undelegate_market(
     accounts: &mut [AccountView],
     sequence: u64,
 ) -> ProgramResult {
+    if is_v3_commit_accounts(accounts) {
+        return commit_v3_bundle(
+            program_id,
+            accounts,
+            sequence,
+            CommitKind::CommitAndUndelegate,
+        );
+    }
     commit_market_inner(
         program_id,
         accounts,
         sequence,
         CommitKind::CommitAndUndelegate,
     )
+}
+
+fn is_v3_commit_accounts(accounts: &[AccountView]) -> bool {
+    accounts.len() >= 5 + v3::V3_EXECUTION_BUNDLE_LEN - 1
+        && accounts[0].data_len() == v3::V3_MARKET_CORE_SIZE
+        && unsafe { accounts[0].borrow_unchecked() }[0..8] == v3::V3_MARKET_CORE_DISCRIMINATOR
+}
+
+/// Magic Program commit path for the complete V3 execution bundle.  The
+/// first five accounts retain the established commit ABI (`core, authority,
+/// payer, context, magic program`); the remaining 26 accounts are the V3
+/// pages/shards in canonical bundle order.  The CPI therefore commits all 27
+/// bounded accounts atomically without ever passing the V2 monolith.
+fn commit_v3_bundle(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    sequence: u64,
+    kind: CommitKind,
+) -> ProgramResult {
+    let expected_len = 5 + v3::V3_EXECUTION_BUNDLE_LEN - 1;
+    if accounts.len() != expected_len {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    if !accounts[1].is_signer() || !accounts[2].is_signer() || !accounts[2].is_writable() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    if *accounts[3].address() != MAGIC_CONTEXT_ID
+        || !accounts[3].is_writable()
+        || *accounts[4].address() != MAGIC_PROGRAM_ID
+    {
+        return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+    }
+    if sequence == 0 || accounts[0].address() == accounts[2].address() {
+        return Err(custom(StockStreamError::MagicBlockSequenceReplay));
+    }
+    let mut bundle: [AccountView; v3::V3_EXECUTION_BUNDLE_LEN] = core::array::from_fn(|index| {
+        if index == 0 {
+            accounts[0].clone()
+        } else {
+            accounts[4 + index].clone()
+        }
+    });
+    v3::validate_execution_bundle(program_id, &bundle, true)
+        .map_err(|_| custom(StockStreamError::MagicBlockInvalidAccount))?;
+    let authority = accounts[1].address().to_bytes();
+    {
+        let core = unsafe { bundle[0].borrow_unchecked() };
+        if core[v3::V3_CORE_MARKET_AUTHORITY_OFFSET..v3::V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
+            != authority
+            || core[v3::V3_CORE_DELEGATION_STATUS_OFFSET] != DelegationStatus::Delegated as u8
+            || core_u64(&core, v3::V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET)? != sequence
+        {
+            return Err(custom(StockStreamError::MagicBlockSequenceReplay));
+        }
+    }
+    let mut indices = [0u8; v3::V3_EXECUTION_BUNDLE_LEN];
+    for (offset, index) in indices.iter_mut().enumerate() {
+        *index = (2 + offset) as u8;
+    }
+    let mut data_buf = [0u8; SCHEDULE_DATA_MAX_LEN];
+    let data_len = encode_schedule_intent_bundle_data(
+        &indices,
+        matches!(kind, CommitKind::CommitAndUndelegate),
+        &mut data_buf,
+    )
+    .map_err(custom)?;
+    let commit_accounts: [InstructionAccount; MAX_COMMITTED_ACCOUNTS + 2] =
+        core::array::from_fn(|index| match index {
+            0 => InstructionAccount::writable_signer(accounts[2].address()),
+            1 => InstructionAccount::writable(accounts[3].address()),
+            _ => InstructionAccount::writable(bundle[index - 2].address()),
+        });
+    let commit_ix = InstructionView {
+        program_id: &MAGIC_PROGRAM_ID,
+        accounts: &commit_accounts[..v3::V3_EXECUTION_BUNDLE_LEN + 2],
+        data: &data_buf[..data_len],
+    };
+    let mut views: [&AccountView; MAX_COMMITTED_ACCOUNTS + 2] =
+        [&accounts[0]; MAX_COMMITTED_ACCOUNTS + 2];
+    views[0] = &accounts[2];
+    views[1] = &accounts[3];
+    for (index, account) in bundle.iter().enumerate() {
+        views[index + 2] = account;
+    }
+    invoke_signed_with_bounds::<{ MAX_COMMITTED_ACCOUNTS + 2 }, _>(
+        &commit_ix,
+        &views[..v3::V3_EXECUTION_BUNDLE_LEN + 2],
+        &[],
+    )?;
+    {
+        let core = unsafe { bundle[0].borrow_unchecked_mut() };
+        core[v3::V3_CORE_LAST_COMMITTED_SEQUENCE_OFFSET
+            ..v3::V3_CORE_LAST_COMMITTED_SEQUENCE_OFFSET + 8]
+            .copy_from_slice(&sequence.to_le_bytes());
+        if matches!(kind, CommitKind::CommitOnly) {
+            core[v3::V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET
+                ..v3::V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET + 8]
+                .copy_from_slice(&sequence.saturating_add(1).to_le_bytes());
+        } else {
+            core[v3::V3_CORE_DELEGATION_STATUS_OFFSET] = DelegationStatus::Undelegating as u8;
+        }
+    }
+    let mut validator = [0u8; 32];
+    validator.copy_from_slice(
+        &unsafe { bundle[0].borrow_unchecked() }
+            [v3::V3_CORE_VALIDATOR_OFFSET..v3::V3_CORE_VALIDATOR_OFFSET + 32],
+    );
+    let payload = crate::events::payload_delegation(&validator, sequence);
+    let (core_bundle, rest_bundle) = bundle.split_at_mut(1);
+    let (_, event_bundle) =
+        rest_bundle.split_at_mut((2 * v3::V3_BOOK_PAGES_PER_SIDE) + v3::V3_SEAT_SHARDS);
+    v3::append_event_record(
+        program_id,
+        &mut core_bundle[0],
+        &mut event_bundle[..v3::V3_EVENT_SHARDS],
+        if matches!(kind, CommitKind::CommitOnly) {
+            crate::events::EventKind::CommitRequested as u16
+        } else {
+            crate::events::EventKind::UndelegationRequested as u16
+        },
+        &payload,
+        event_timestamp(),
+    )
+}
+
+fn core_u64(bytes: &[u8], offset: usize) -> Result<u64, ProgramError> {
+    bytes
+        .get(offset..offset + 8)
+        .ok_or(ProgramError::InvalidAccountData)
+        .and_then(|raw| raw.try_into().map_err(|_| ProgramError::InvalidAccountData))
+        .map(u64::from_le_bytes)
 }
 
 // ---------------------------------------------------------------------
