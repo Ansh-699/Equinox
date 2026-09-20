@@ -26,6 +26,13 @@ struct TestAccount {
     view: AccountView,
 }
 
+impl TestAccount {
+    fn set_lamports(&mut self, lamports: u64) {
+        let raw = self._storage.as_mut_ptr() as *mut RuntimeAccount;
+        unsafe { (*raw).lamports = lamports };
+    }
+}
+
 #[test]
 fn registry_update_and_suspend_preserve_feed_configuration() {
     use stockstream::registry::{derive_instrument, EXCHANGE_SIZE, INSTRUMENT_SIZE};
@@ -183,13 +190,14 @@ fn trading_session_is_bound_to_the_owners_actual_seat_and_can_be_revoked() {
     // a System Program CPI, which is a no-op off the SBF target, so the test
     // account is pre-sized/pre-funded the way a successful CPI would leave
     // it and we assert on the surrounding validation/write logic instead.
-    let session = account(
+    let mut session = account(
         session_pda,
         Address::default(),
         TRADING_SESSION_SIZE,
         false,
         true,
     );
+    session.set_lamports(0);
     let mut authorize = vec![17];
     authorize.extend(0u16.to_le_bytes()); // seat_index
     authorize.extend(2u64.to_le_bytes()); // expires_at
