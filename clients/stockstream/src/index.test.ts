@@ -2,7 +2,7 @@ import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { expect, test } from "vitest";
 import { STOCKSTREAM_PROGRAM_ID } from "./constants";
 import { MAGICBLOCK_DELEGATION_PROGRAM_ID, MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID, STOCKSTREAM_PROGRAM_KEY, cancelAllV3, cancelOrderV3, placeOrderV3, replaceOrderV3, commitV3Shard } from "./index";
-import { authorizeTradingSession, cancelOrder, closeV3TraderSeat, commitMarket, delegateClusterMember, delegateV3Account, deriveClusterMemberPdas, createPerpMarket, createV3Account, createV3TraderSeat, decodeFillPayload, decodeInstruction, decodeMarketState, decodeSeatAmountPayload, decodeStockStreamEvent, delegateMarket, deriveTradingSession, depositCollateral, EVENT_SIZE, initializeExchange, initializeMarket, initializeV3Market, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateExchangeConfig, updateStockInstrument, withdrawCollateral, withdrawInsuranceFunds, withdrawProtocolFees, EXCHANGE_CONFIG_FIELD, requestV3Undelegation, rollbackV3Undelegation } from "./index";
+import { authorizeTradingSession, cancelOrder, closeV3TraderSeat, commitMarket, delegateClusterMember, delegateV3Account, deriveClusterMemberPdas, createPerpMarket, createV3Account, createV3TraderSeat, decodeFillPayload, decodeInstruction, decodeMarketState, decodeSeatAmountPayload, decodeStockStreamEvent, delegateMarket, deriveTradingSession, depositCollateral, depositCollateralV3, EVENT_SIZE, initializeExchange, initializeMarket, initializeV3Market, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateExchangeConfig, updateStockInstrument, withdrawCollateral, withdrawCollateralV3, withdrawInsuranceFunds, withdrawProtocolFees, EXCHANGE_CONFIG_FIELD, requestV3Undelegation, rollbackV3Undelegation } from "./index";
 import { STOCKSTREAM_ACCOUNT_SIZE } from "./constants";
 import { deriveBookPageV3, deriveEventShardV3, deriveMarketCoreV3, deriveSeatShardV3 } from "./abi/v3";
 
@@ -16,6 +16,20 @@ test("V3 recovery instructions preserve one-byte ABI", () => {
   expect(Array.from(rollbackV3Undelegation(keys).data)).toEqual([52]);
   expect(decodeInstruction(Uint8Array.of(51)).name).toBe("RequestV3Undelegation");
   expect(decodeInstruction(Uint8Array.of(52)).name).toBe("RollbackV3Undelegation");
+});
+
+test("V3 custody builders preserve explicit shard account order", () => {
+  const core = deriveMarketCoreV3(PublicKey.unique());
+  const seatShard = deriveSeatShardV3(core, 0);
+  const events = [0, 1, 2, 3].map((index) => deriveEventShardV3(core, index));
+  const custody = { core, seatShard, eventShards: events, authority, source: PublicKey.unique(), vault: PublicKey.unique(), mint: PublicKey.unique(), tokenProgram: PublicKey.unique() };
+  const deposit = depositCollateralV3(custody, 7, 10n);
+  expect(Array.from(deposit.data)).toEqual([53, 7, 0, 10, 0, 0, 0, 0, 0, 0, 0]);
+  expect(deposit.keys).toHaveLength(11);
+  const execution = { core, bookPages: Array.from({ length: 18 }, () => PublicKey.unique()), seatShards: Array.from({ length: 4 }, () => PublicKey.unique()), eventShards: events, authority, destination: PublicKey.unique(), mint: custody.mint, vault: custody.vault, vaultAuthority: PublicKey.unique(), tokenProgram: custody.tokenProgram };
+  const withdraw = withdrawCollateralV3(execution, 7, 11n);
+  expect(withdraw.data[0]).toBe(54);
+  expect(withdraw.keys).toHaveLength(33);
 });
 
 test("instruction constructors use canonical program id and exact account flags", () => {

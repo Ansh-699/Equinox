@@ -452,6 +452,12 @@ pub fn dispatch(
         StockStreamInstruction::RollbackV3Undelegation => {
             crate::magicblock::rollback_v3_undelegation(program_id, accounts)
         }
+        StockStreamInstruction::DepositCollateralV3 { seat_index, amount } => {
+            crate::v3::deposit_collateral_v3(program_id, accounts, seat_index, amount)
+        }
+        StockStreamInstruction::WithdrawCollateralV3 { seat_index, amount } => {
+            crate::v3::withdraw_collateral_v3(program_id, accounts, seat_index, amount)
+        }
         StockStreamInstruction::CommitMarket { sequence } => {
             crate::magicblock::commit_market(program_id, accounts, sequence)
         }
@@ -797,7 +803,7 @@ const VAULT_AUTHORITY_SEED: &[u8] = b"vault-authority";
 /// The SPL Token account data length (Tokenkeg: `Account::LEN = 165`).
 pub const TOKEN_ACCOUNT_LEN: usize = 165;
 
-fn derive_vault(market: &Address, program_id: &Address) -> Address {
+pub(crate) fn derive_vault(market: &Address, program_id: &Address) -> Address {
     Address::find_program_address(&[VAULT_SEED, market.as_ref()], program_id).0
 }
 

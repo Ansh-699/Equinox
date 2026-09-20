@@ -14,7 +14,12 @@ use core::{
     ptr,
 };
 
-use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
+use pinocchio::{
+    cpi::{Seed, Signer},
+    error::ProgramError,
+    AccountView, Address, ProgramResult,
+};
+use pinocchio_token::{instructions::Transfer, state::Account as TokenAccount};
 
 use crate::{
     book::{
@@ -1328,7 +1333,7 @@ fn validate_event_core(program_id: &Address, core: &AccountView) -> Result<Addre
         || bytes[8..10] != V3_LAYOUT_VERSION.to_le_bytes()
         || bytes[10] != 1
         || bytes[V3_CORE_MODE_OFFSET] != 1
-        || bytes[V3_CORE_DELEGATION_STATUS_OFFSET] > DelegationStatus::Delegated as u8
+        || bytes[V3_CORE_DELEGATION_STATUS_OFFSET] == DelegationStatus::Undelegating as u8
     {
         return Err(bundle_error());
     }
@@ -1360,7 +1365,7 @@ fn validate_seat_shard(
     Ok(())
 }
 
-fn read_shard_seat(bytes: &[u8], slot: usize) -> Result<TraderSeat, ProgramError> {
+pub(crate) fn read_shard_seat(bytes: &[u8], slot: usize) -> Result<TraderSeat, ProgramError> {
     if slot >= V3_SEATS_PER_SHARD {
         return Err(bundle_error());
     }
@@ -1380,7 +1385,7 @@ fn read_shard_seat(bytes: &[u8], slot: usize) -> Result<TraderSeat, ProgramError
     }
 }
 
-fn write_shard_seat(bytes: &mut [u8], slot: usize, seat: &TraderSeat) -> ProgramResult {
+pub(crate) fn write_shard_seat(bytes: &mut [u8], slot: usize, seat: &TraderSeat) -> ProgramResult {
     if slot >= V3_SEATS_PER_SHARD {
         return Err(bundle_error());
     }
@@ -1945,6 +1950,238 @@ pub fn place_order_v3(
         )?;
     }
     Ok(())
+}
+
+/// L1 V3 deposit. Accounts are `[core, seat_shard, event_shard[4],
+/// authority, source_token, vault, mint, token_program]`. Token vaults never
+/// enter the delegated execution bundle; only the seat ledger and durable
+/// event queue are updated here.
+pub fn deposit_collateral_v3(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    seat_index: u16,
+    amount: u64,
+) -> ProgramResult {
+    if accounts.len() != 11 || amount == 0 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    for index in 0..accounts.len() {
+        if accounts[..index]
+            .iter()
+            .any(|other| other.address() == accounts[index].address())
+        {
+            return Err(StockStreamError::CustodyViolation.into());
+        }
+    }
+    let core = &accounts[0];
+    let authority = &accounts[6];
+    if !authority.is_signer() || !accounts[0].is_writable() || !accounts[1].is_writable() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    if !core.owned_by(program_id) || unsafe { core.borrow_unchecked() }.len() != V3_MARKET_CORE_SIZE
+    {
+        return Err(StockStreamError::InvalidMarketLayout.into());
+    }
+    let (shard, slot) = (
+        (seat_index as usize) / V3_SEATS_PER_SHARD,
+        (seat_index as usize) % V3_SEATS_PER_SHARD,
+    );
+    if shard >= V3_SEAT_SHARDS {
+        return Err(StockStreamError::InvalidSeat.into());
+    }
+    let core_key = *core.address();
+    let core_bytes = unsafe { core.borrow_unchecked() };
+    if core_bytes[0..8] != V3_MARKET_CORE_DISCRIMINATOR
+        || core_bytes[8..10] != V3_LAYOUT_VERSION.to_le_bytes()
+        || core_bytes[V3_CORE_MODE_OFFSET] != 1
+        || matches!(
+            core_bytes[V3_CORE_DELEGATION_STATUS_OFFSET],
+            x if x == DelegationStatus::Delegated as u8
+                || x == DelegationStatus::Undelegating as u8
+        )
+        || core_bytes[V3_CORE_MARKET_AUTHORITY_OFFSET..V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
+            != authority.address().to_bytes()
+    {
+        return Err(StockStreamError::CustodyViolation.into());
+    }
+    validate_seat_shard(program_id, &accounts[1], &core_key, shard as u8)?;
+    if *accounts[8].address() != crate::handlers::derive_vault(&core_key, program_id)
+        || *accounts[10].address() != pinocchio_token::ID
+        || *accounts[9].address()
+            != Address::new_from_array(core_bytes[76..108].try_into().map_err(|_| bundle_error())?)
+    {
+        return Err(StockStreamError::CustodyViolation.into());
+    }
+    let vault_authority = crate::handlers::derive_vault_authority(&core_key, program_id);
+    {
+        let source = TokenAccount::from_account_view(&accounts[7])
+            .map_err(|_| StockStreamError::CustodyViolation)?;
+        let vault = TokenAccount::from_account_view(&accounts[8])
+            .map_err(|_| StockStreamError::CustodyViolation)?;
+        if *source.owner() != *authority.address()
+            || *source.mint() != *accounts[9].address()
+            || source.amount() < amount
+            || *vault.owner() != vault_authority
+            || *vault.mint() != *accounts[9].address()
+        {
+            return Err(StockStreamError::CustodyViolation.into());
+        }
+    }
+    let mut seat = read_shard_seat(unsafe { accounts[1].borrow_unchecked() }, slot)?;
+    if seat.occupancy != 1 || seat.trader != authority.address().to_bytes() {
+        return Err(StockStreamError::InvalidSeat.into());
+    }
+    seat.available_collateral = seat
+        .available_collateral
+        .checked_add(i128::from(amount))
+        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    Transfer::<&AccountView>::new(&accounts[7], &accounts[8], authority, amount)
+        .invoke_with_program(accounts[10].address())?;
+    write_shard_seat(unsafe { accounts[1].borrow_unchecked_mut() }, slot, &seat)?;
+    let mut core_copy = accounts[0].clone();
+    let mut event_copies = [
+        accounts[2].clone(),
+        accounts[3].clone(),
+        accounts[4].clone(),
+        accounts[5].clone(),
+    ];
+    let mut payload = [0u8; crate::events::EVENT_PAYLOAD_SIZE];
+    payload[0..2].copy_from_slice(&seat_index.to_le_bytes());
+    payload[2..10].copy_from_slice(&amount.to_le_bytes());
+    payload[10..18].copy_from_slice(&(seat.available_collateral.max(0) as u64).to_le_bytes());
+    append_event_record(
+        program_id,
+        &mut core_copy,
+        &mut event_copies,
+        crate::events::EventKind::CollateralDeposited as u16,
+        &payload,
+        crate::handlers::event_timestamp(),
+    )
+}
+
+/// L1 V3 withdrawal. The first 27 accounts are the complete execution
+/// bundle, followed by `[authority, destination, mint, vault, vault_authority,
+/// token_program]`. Requiring the full bundle makes restoration/finality a
+/// structural property of the transaction rather than a caller assertion.
+pub fn withdraw_collateral_v3(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    seat_index: u16,
+    amount: u64,
+) -> ProgramResult {
+    if accounts.len() != V3_EXECUTION_BUNDLE_LEN + 6 || amount == 0 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    for index in 0..accounts.len() {
+        if accounts[..index]
+            .iter()
+            .any(|other| other.address() == accounts[index].address())
+        {
+            return Err(StockStreamError::CustodyViolation.into());
+        }
+    }
+    validate_v3_withdrawal_readiness(program_id, &accounts[..V3_EXECUTION_BUNDLE_LEN])?;
+    let authority = &accounts[V3_EXECUTION_BUNDLE_LEN];
+    if !authority.is_signer() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    let core_key = *accounts[0].address();
+    let core_bytes = unsafe { accounts[0].borrow_unchecked() };
+    if core_bytes[V3_CORE_MARKET_AUTHORITY_OFFSET..V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
+        != authority.address().to_bytes()
+    {
+        return Err(StockStreamError::CustodyViolation.into());
+    }
+    let shard = (seat_index as usize) / V3_SEATS_PER_SHARD;
+    let slot = (seat_index as usize) % V3_SEATS_PER_SHARD;
+    if shard >= V3_SEAT_SHARDS {
+        return Err(StockStreamError::InvalidSeat.into());
+    }
+    let seat_account_index = 1 + (2 * V3_BOOK_PAGES_PER_SIDE) + shard;
+    let seat_account = accounts[seat_account_index].clone();
+    let mut seat = read_shard_seat(unsafe { seat_account.borrow_unchecked() }, slot)?;
+    if seat.occupancy != 1
+        || seat.trader != authority.address().to_bytes()
+        || seat.base_position != 0
+        || seat.open_order_count != 0
+        || seat.available_collateral < i128::from(amount)
+    {
+        return Err(StockStreamError::RiskViolation.into());
+    }
+    let mint = &accounts[V3_EXECUTION_BUNDLE_LEN + 2];
+    let vault = &accounts[V3_EXECUTION_BUNDLE_LEN + 3];
+    let vault_authority = &accounts[V3_EXECUTION_BUNDLE_LEN + 4];
+    let token_program = &accounts[V3_EXECUTION_BUNDLE_LEN + 5];
+    if *vault.address() != crate::handlers::derive_vault(&core_key, program_id)
+        || *vault_authority.address()
+            != crate::handlers::derive_vault_authority(&core_key, program_id)
+        || *token_program.address() != pinocchio_token::ID
+        || *mint.address()
+            != Address::new_from_array(core_bytes[76..108].try_into().map_err(|_| bundle_error())?)
+    {
+        return Err(StockStreamError::CustodyViolation.into());
+    }
+    {
+        let destination = TokenAccount::from_account_view(&accounts[V3_EXECUTION_BUNDLE_LEN + 1])
+            .map_err(|_| StockStreamError::CustodyViolation)?;
+        let vault_state = TokenAccount::from_account_view(vault)
+            .map_err(|_| StockStreamError::CustodyViolation)?;
+        if *destination.owner() != *authority.address()
+            || *destination.mint() != *mint.address()
+            || *vault_state.mint() != *mint.address()
+            || vault_state.amount() < amount
+        {
+            return Err(StockStreamError::CustodyViolation.into());
+        }
+    }
+    seat.available_collateral = seat
+        .available_collateral
+        .checked_sub(i128::from(amount))
+        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    let market_bytes = core_key.to_bytes();
+    let (derived_vault_authority, bump_value) =
+        Address::find_program_address(&[b"vault-authority", &market_bytes], program_id);
+    if derived_vault_authority != *vault_authority.address() {
+        return Err(StockStreamError::CustodyViolation.into());
+    }
+    let bump = [bump_value];
+    let seeds = [
+        Seed::from(b"vault-authority"),
+        Seed::from(&market_bytes),
+        Seed::from(&bump),
+    ];
+    let signer = [Signer::from(&seeds)];
+    Transfer::<&AccountView>::new(
+        vault,
+        &accounts[V3_EXECUTION_BUNDLE_LEN + 1],
+        vault_authority,
+        amount,
+    )
+    .invoke_signed_with_program(&signer, token_program.address())?;
+    write_shard_seat(
+        unsafe { accounts[seat_account_index].borrow_unchecked_mut() },
+        slot,
+        &seat,
+    )?;
+    let mut core_copy = accounts[0].clone();
+    let mut event_copies = [
+        accounts[23].clone(),
+        accounts[24].clone(),
+        accounts[25].clone(),
+        accounts[26].clone(),
+    ];
+    let mut payload = [0u8; crate::events::EVENT_PAYLOAD_SIZE];
+    payload[0..2].copy_from_slice(&seat_index.to_le_bytes());
+    payload[2..10].copy_from_slice(&amount.to_le_bytes());
+    payload[10..18].copy_from_slice(&(seat.available_collateral.max(0) as u64).to_le_bytes());
+    append_event_record(
+        program_id,
+        &mut core_copy,
+        &mut event_copies,
+        crate::events::EventKind::CollateralWithdrawn as u16,
+        &payload,
+        crate::handlers::event_timestamp(),
+    )
 }
 
 /// Cancels one V3 order by searching both canonical roots.  The owner is
