@@ -18,9 +18,9 @@ use stockstream::{
         append_event_record, cancel_all_v3, close_trader_seat, create_trader_seat,
         deposit_collateral_v3, derive_book_page_v3, derive_event_shard_v3, derive_market_core_v3,
         derive_seat_shard_v3, initialize_book_page_metadata, liquidate_v3, place_order_v3,
-        read_v3_risk_config, update_funding_v3, validate_execution_bundle,
+        read_v3_risk_config, update_funding_v3, update_v3_risk_config, validate_execution_bundle,
         validate_v3_session_actor, validate_v3_withdrawal_readiness, withdraw_collateral_v3,
-        PagedBookV3, V3_BOOK_PAGES_PER_SIDE, V3_BOOK_PAGE_SIZE,
+        PagedBookV3, V3RiskConfig, V3_BOOK_PAGES_PER_SIDE, V3_BOOK_PAGE_SIZE,
         V3_CORE_PROTOCOL_FEE_BALANCE_OFFSET, V3_CORE_VAULT_SURPLUS_OFFSET,
         V3_CORE_WITHDRAWAL_BUFFER_OFFSET, V3_EVENT_SHARD_SIZE, V3_EXECUTION_BUNDLE_LEN,
         V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
@@ -444,6 +444,52 @@ fn v3_risk_config_persists_surplus_and_withdrawal_buffer_in_core_reserve() {
     core[V3_CORE_WITHDRAWAL_BUFFER_OFFSET..V3_CORE_WITHDRAWAL_BUFFER_OFFSET + 16]
         .copy_from_slice(&(-1i128).to_le_bytes());
     assert!(read_v3_risk_config(&core).is_err());
+}
+
+#[test]
+fn v3_risk_update_writes_surplus_and_withdrawal_buffer_atomically() {
+    let mut accounts = bundle();
+    let authority = account(Address::new_from_array([88; 32]), 0, true);
+    unsafe {
+        accounts[0].view.borrow_unchecked_mut()[44..76]
+            .copy_from_slice(authority.view.address().as_ref());
+    }
+    let mut call = vec![accounts[0].view.clone(), authority.view.clone()];
+    update_v3_risk_config(
+        &ID,
+        &mut call,
+        V3RiskConfig {
+            initial_margin_bps: 2_000,
+            maintenance_margin_bps: 1_000,
+            liquidation_fee_bps: 50,
+            maker_fee_bps: 2,
+            taker_fee_bps: 5,
+            maximum_leverage: 5,
+            maximum_position: 0,
+            maximum_open_interest: 0,
+            mark_deviation_bps: 250,
+            vault_surplus: 400,
+            withdrawal_buffer: 25,
+        },
+    )
+    .unwrap();
+    let core = unsafe { accounts[0].view.borrow_unchecked() };
+    assert_eq!(
+        i128::from_le_bytes(
+            core[V3_CORE_VAULT_SURPLUS_OFFSET..V3_CORE_VAULT_SURPLUS_OFFSET + 16]
+                .try_into()
+                .unwrap()
+        ),
+        400
+    );
+    assert_eq!(
+        i128::from_le_bytes(
+            core[V3_CORE_WITHDRAWAL_BUFFER_OFFSET..V3_CORE_WITHDRAWAL_BUFFER_OFFSET + 16]
+                .try_into()
+                .unwrap()
+        ),
+        25
+    );
 }
 
 #[test]
