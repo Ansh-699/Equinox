@@ -50,7 +50,7 @@ typechecks, Playwright fixture E2E, and the secret scan. It emits a
 machine-readable gate record (use
 `VERIFY_SUMMARY_PATH=docs/status/verify-latest.json npm run verify` to refresh
 the tracked copy); the last tracked run finished with `VERIFY-OK` on commit
-`e8065fb`.
+`f605276`.
 
 Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives all 26 child PDAs from the supplied core and returns a bigint-safe aggregate. It is read-only and cannot claim live V3 state until a V3 core is deployed.
 
@@ -68,7 +68,7 @@ Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives 
   `cargo build-sbf`, ABI parity, 210 frontend tests, 351 Worker tests,
   Playwright 50/50, TypeScript, lint and secret scan all passed. This is a
   local build, not a live deployment. Current local artifact SHA-256:
-  `991e623e730ea0d4d7098b1bfb78a5dc5fad552646f5ca0f23a4f27463d53686`.
+  `cf9729db6cce7d29967aad52bf77f66f81a4b83010656734d00a1160d68e9f4b`.
 - Commit-limit correction (`6492c75`): `cargo test -p stockstream --test
   magicblock` (30), `--test v3_bundle` (7), root V3 ABI tests (6), Worker
   V3 state tests (4), both TypeScript checks, ABI parity, and a loadable SBF
