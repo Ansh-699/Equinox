@@ -15,7 +15,7 @@ import {
 import { DeterministicTestSigner } from "./signer";
 import { SolanaL1Transport } from "./chain-transports";
 import { cancelOrderInstruction, depositCollateralInstruction, meta, placeOrderInstruction } from "./transactions";
-import { coSignSessionTransaction, relaySessionTransaction, validateSessionTransaction } from "./session-relayer";
+import { coSignSessionTransaction, relaySessionTransaction, validateCanonicalV3Accounts, validateSessionTransaction } from "./session-relayer";
 
 const PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const MARKET = "SysvarRent111111111111111111111111111111111";
@@ -164,6 +164,42 @@ describe("validateSessionTransaction", () => {
     const result = await validateSessionTransaction({ transactionBase64: base64, expectedProgramAddress: PROGRAM, sessionSignerAddress: sessionAddress }, relayerAddress);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toMatch(/fee payer/);
+  });
+});
+
+describe("validateCanonicalV3Accounts", () => {
+  async function fixture() {
+    const signers = await Promise.all(Array.from({ length: 30 }, (_, index) => new DeterministicTestSigner(`v3-account-${index}`).publicKey()));
+    const addresses = signers.map((bytes) => getBase58Decoder().decode(bytes));
+    const feePayer = addresses[0];
+    const sessionSigner = addresses[1];
+    const expected = [...addresses.slice(2, 29), sessionSigner, addresses[29]];
+    const accountIndices = [...Array.from({ length: 27 }, (_, index) => index + 2), 1, 29];
+    return {
+      expectedAccounts: expected,
+      accountIndices,
+      staticAccounts: [feePayer, sessionSigner, ...addresses.slice(2)],
+      header: { numSignerAccounts: 2, numReadonlySignerAccounts: 1, numReadonlyNonSignerAccounts: 0 },
+    };
+  }
+
+  it("accepts the exact V3 core/page/seat/event/session bundle and privileges", async () => {
+    const value = await fixture();
+    expect(validateCanonicalV3Accounts(value)).toBeNull();
+  });
+
+  it("rejects reordered, substituted, duplicate, and privilege-mismatched bundles", async () => {
+    const value = await fixture();
+    const reordered = [...value.expectedAccounts];
+    [reordered[0], reordered[1]] = [reordered[1], reordered[0]];
+    expect(validateCanonicalV3Accounts({ ...value, expectedAccounts: reordered })).toMatch(/order_mismatch/);
+    const substituted = [...value.expectedAccounts];
+    substituted[4] = value.staticAccounts[0];
+    expect(validateCanonicalV3Accounts({ ...value, expectedAccounts: substituted })).toMatch(/order_mismatch|duplicate/);
+    const duplicate = [...value.accountIndices];
+    duplicate[3] = duplicate[2];
+    expect(validateCanonicalV3Accounts({ ...value, accountIndices: duplicate })).toMatch(/duplicate/);
+    expect(validateCanonicalV3Accounts({ ...value, header: { ...value.header, numReadonlyNonSignerAccounts: 1 } })).toMatch(/privilege_mismatch/);
   });
 });
 
