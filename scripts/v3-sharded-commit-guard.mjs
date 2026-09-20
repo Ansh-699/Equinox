@@ -20,3 +20,16 @@ export function validateV3CoreBytes(coreBytes) {
     throw new Error("resolved ER core is not a V3 MarketCore account");
   }
 }
+
+/** The core's expected-commit cursor is the linearization point for the
+ * sharded runner. Every child intent must observe the cursor for its own
+ * epoch; this prevents a resumed process from submitting into an interleaved
+ * or stale bundle after an operator/validator-side state change. */
+export function validateV3CommitEpoch(coreBytes, expectedSequence) {
+  validateV3CoreBytes(coreBytes);
+  if (!Number.isSafeInteger(expectedSequence) || expectedSequence < 0) {
+    throw new Error("invalid V3 commit epoch");
+  }
+  const actual = Number(coreBytes.readBigUInt64LE(198));
+  if (actual !== expectedSequence) throw new Error(`V3 commit epoch mismatch: expected ${expectedSequence}, observed ${actual}`);
+}

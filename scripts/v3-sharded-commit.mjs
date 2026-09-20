@@ -7,7 +7,7 @@
  */
 import fs from "node:fs";
 import { Keypair, PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
-import { validateCheckpoint, validateV3CoreBytes } from "./v3-sharded-commit-guard.mjs";
+import { validateCheckpoint, validateV3CommitEpoch, validateV3CoreBytes } from "./v3-sharded-commit-guard.mjs";
 
 const LIFECYCLE_STATE_PATH = process.env.V3_LIFECYCLE_STATE_PATH ?? "/tmp/opencode/v3-lifecycle-state.json";
 const state = JSON.parse(fs.readFileSync(LIFECYCLE_STATE_PATH, "utf8"));
@@ -71,11 +71,20 @@ if (!coreInfo) throw new Error("V3 core is not present on the resolved ER");
 const coreBytes = Buffer.from(coreInfo.data[0], "base64");
 validateV3CoreBytes(coreBytes);
 const firstSequence = Number(coreBytes.readBigUInt64LE(198));
+if (checkpoint.epoch === undefined) checkpoint.epoch = firstSequence - checkpoint.next;
+if (checkpoint.epoch !== firstSequence - checkpoint.next) {
+  throw new Error(`V3 sharded checkpoint epoch mismatch: checkpoint=${checkpoint.epoch} observed=${firstSequence} next=${checkpoint.next}`);
+}
 for (let index = checkpoint.next; index < children.length; index += 1) {
-  const result = await submit(children[index], firstSequence + index, undelegate);
-  checkpoint.events.push({ index, child: children[index].toBase58(), sequence: firstSequence + index, ...result });
+  const current = (await rpc("getAccountInfo", [core.toBase58(), { encoding: "base64" }])).value;
+  if (!current) throw new Error("V3 core disappeared during sharded commit");
+  const currentBytes = Buffer.from(current.data[0], "base64");
+  validateV3CommitEpoch(currentBytes, checkpoint.epoch + index);
+  const sequence = checkpoint.epoch + index;
+  const result = await submit(children[index], sequence, undelegate);
+  checkpoint.events.push({ index, child: children[index].toBase58(), sequence, ...result });
   checkpoint.next = index + 1; save(path, checkpoint); console.log(JSON.stringify(checkpoint.events.at(-1)));
 }
-const coreSequence = firstSequence + children.length;
+const coreSequence = checkpoint.epoch + children.length;
 const coreResult = await submit(core, coreSequence, undelegate);
 checkpoint.core = { sequence: coreSequence, ...coreResult }; checkpoint.complete = true; save(path, checkpoint); console.log(JSON.stringify(checkpoint.core));

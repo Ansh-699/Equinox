@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { validateCheckpoint, validateV3CoreBytes } from "./v3-sharded-commit-guard.mjs";
+import { validateCheckpoint, validateV3CommitEpoch, validateV3CoreBytes } from "./v3-sharded-commit-guard.mjs";
 
 const accounts = ["child-0", "child-1"].map((value) => ({ toBase58: () => value }));
 const valid = { version: 1, mode: "commit", next: 2, events: [
@@ -26,4 +26,10 @@ test("accepts and rejects the exact V3 core ABI", () => {
   assert.doesNotThrow(() => validateV3CoreBytes(bytes));
   assert.throws(() => validateV3CoreBytes(Buffer.alloc(4_096)), /not a V3/);
   assert.throws(() => validateV3CoreBytes(Buffer.alloc(4_095)), /not a V3/);
+});
+
+test("requires the core commit cursor to match the next shard epoch", () => {
+  const bytes = Buffer.alloc(4_096); Buffer.from("STKMK003").copy(bytes); bytes.writeUInt16LE(3, 8); bytes.writeBigUInt64LE(12n, 198);
+  assert.doesNotThrow(() => validateV3CommitEpoch(bytes, 12));
+  assert.throws(() => validateV3CommitEpoch(bytes, 11), /epoch mismatch/);
 });
