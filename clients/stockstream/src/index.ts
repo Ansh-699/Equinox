@@ -9,6 +9,7 @@ import type { PlaceOrderParams } from "./abi/order-instructions";
 import { consumeOracleUpdate } from "./abi/oracle-instructions";
 import { commitAndUndelegate, commitMarket, delegateClusterMember, delegateMarket, deriveClusterMemberPdas } from "./abi/magicblock-instructions";
 import { updateExchangeConfig } from "./abi/exchange-config-instructions";
+import { decodeDelegationPayload as decodeDelegationPayloadAbi, decodeFillPayload as decodeFillPayloadAbi, decodeFundingPayload as decodeFundingPayloadAbi, decodeLiquidationPayload as decodeLiquidationPayloadAbi, decodeOraclePayload as decodeOraclePayloadAbi, decodeOrderPayload as decodeOrderPayloadAbi, decodePositionPayload as decodePositionPayloadAbi, decodeReconciliationPayload as decodeReconciliationPayloadAbi, decodeRegistryPayload as decodeRegistryPayloadAbi, decodeSeatAmountPayload as decodeSeatAmountPayloadAbi, decodeSeatPayload as decodeSeatPayloadAbi, decodeSessionPayload as decodeSessionPayloadAbi, decodeStockStreamEvent as decodeStockStreamEventAbi } from "./abi/event-decoders";
 
 export { cancelAllV3, cancelOrderV3, closeV3TraderSeat, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, createV3Account, createV3TraderSeat, delegateV3Account, depositCollateralV3, initializeV3Market, placeOrderV3, replaceOrderV3, requestV3Undelegation, rollbackV3Undelegation, updateFundingV3, withdrawCollateralV3 } from "./abi/v3-instructions";
 export type { V3AccountKind, V3CommitAccounts, V3CreationAccounts, V3DelegationAccounts, V3DepositAccounts, V3ExecutionAccounts, V3FundingAccounts, V3InitializationAccounts, V3OracleAccounts, V3SeatAccounts, V3ShardCommitAccounts, V3UndelegationRecoveryAccounts, V3WithdrawAccounts } from "./abi/v3-instructions";
@@ -102,96 +103,56 @@ export interface StockStreamEvent {
  * be preserved (`kind` becomes `Unknown(<n>)`), not silently dropped.
  */
 export function decodeStockStreamEvent(logLine: string): StockStreamEvent | null {
-  const prefix = "Program data: ";
-  if (!logLine.startsWith(prefix)) return null;
-  let bytes: Buffer;
-  try { bytes = Buffer.from(logLine.slice(prefix.length).trim(), "base64"); } catch { return null; }
-  if (bytes.length !== EVENT_SIZE) return null;
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const discriminator = view.getUint16(0, true);
-  return {
-    discriminator,
-    kind: EVENT_KIND_NAMES[discriminator] ?? `Unknown(${discriminator})`,
-    abiVersion: bytes[2],
-    sequence: view.getBigUint64(4, true),
-    market: Buffer.from(bytes.subarray(12, 44)).toString("hex"),
-    timestamp: view.getBigUint64(44, true),
-    payload: bytes.subarray(EVENT_HEADER_SIZE, EVENT_SIZE),
-  };
+  return decodeStockStreamEventAbi(logLine);
 }
 
-function payloadView(payload: Uint8Array): DataView {
-  return new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
-}
 /** `events::payload_seat`. */
 export function decodeSeatPayload(payload: Uint8Array) {
-  return { seatIndex: payloadView(payload).getUint16(0, true) };
+  return decodeSeatPayloadAbi(payload);
 }
 /** `events::payload_seat_amount`. */
 export function decodeSeatAmountPayload(payload: Uint8Array) {
-  const view = payloadView(payload);
-  return { seatIndex: view.getUint16(0, true), amount: view.getBigUint64(2, true), balance: view.getBigUint64(10, true) };
+  return decodeSeatAmountPayloadAbi(payload);
 }
 /** `events::payload_order`. */
 export function decodeOrderPayload(payload: Uint8Array) {
-  const view = payloadView(payload);
-  return {
-    seatIndex: view.getUint16(0, true),
-    orderKey: (() => { let v = 0n; for (let i = 15; i >= 0; i -= 1) v = (v << 8n) | BigInt(payload[2 + i]); return v; })(),
-    side: payload[18],
-    price: view.getBigInt64(19, true),
-    quantity: view.getBigUint64(27, true),
-  };
+  return decodeOrderPayloadAbi(payload);
 }
 /** `events::payload_fill`. */
 export function decodeFillPayload(payload: Uint8Array) {
-  const view = payloadView(payload);
-  return {
-    makerSeat: view.getUint32(0, true), takerSeat: view.getUint32(4, true),
-    price: view.getBigInt64(8, true), quantity: view.getBigUint64(16, true), fillSequence: view.getBigUint64(24, true),
-  };
-}
-function readI128(payload: Uint8Array, offset: number): bigint {
-  let value = 0n;
-  for (let i = 15; i >= 0; i -= 1) value = (value << 8n) | BigInt(payload[offset + i]);
-  const signBit = 1n << 127n;
-  return value >= signBit ? value - (signBit << 1n) : value;
+  return decodeFillPayloadAbi(payload);
 }
 /** `events::payload_position`. */
 export function decodePositionPayload(payload: Uint8Array) {
-  return { seatIndex: payloadView(payload).getUint16(0, true), basePosition: readI128(payload, 2), quoteEntryValue: readI128(payload, 18) };
+  return decodePositionPayloadAbi(payload);
 }
 /** `events::payload_funding`. */
 export function decodeFundingPayload(payload: Uint8Array) {
-  return { seatIndex: payloadView(payload).getUint16(0, true), accumulator: readI128(payload, 2), payment: readI128(payload, 18) };
+  return decodeFundingPayloadAbi(payload);
 }
 /** `events::payload_liquidation`. */
 export function decodeLiquidationPayload(payload: Uint8Array) {
-  const view = payloadView(payload);
-  return { seatIndex: view.getUint16(0, true), quantity: view.getBigUint64(2, true), price: view.getBigInt64(10, true) };
+  return decodeLiquidationPayloadAbi(payload);
 }
 /** `events::payload_oracle`. */
 export function decodeOraclePayload(payload: Uint8Array) {
-  const view = payloadView(payload);
-  return { price: view.getBigInt64(0, true), exponent: view.getInt16(8, true), confidence: view.getBigInt64(10, true), session: view.getInt16(18, true) };
+  return decodeOraclePayloadAbi(payload);
 }
 /** `events::payload_delegation`. */
 export function decodeDelegationPayload(payload: Uint8Array) {
-  return { validator: Buffer.from(payload.subarray(0, 32)).toString("hex"), sequence: payloadView(payload).getBigUint64(32, true) };
+  return decodeDelegationPayloadAbi(payload);
 }
 /** `events::payload_session`. */
 export function decodeSessionPayload(payload: Uint8Array) {
-  const view = payloadView(payload);
-  return { seatIndex: view.getUint16(0, true), sessionSigner: Buffer.from(payload.subarray(2, 34)).toString("hex"), nonce: view.getBigUint64(34, true) };
+  return decodeSessionPayloadAbi(payload);
 }
 /** `events::payload_registry`. */
 export function decodeRegistryPayload(payload: Uint8Array) {
-  return { instrumentId: Buffer.from(payload.subarray(0, 32)).toString("hex") };
+  return decodeRegistryPayloadAbi(payload);
 }
 /** `events::payload_reconciliation`. */
 export function decodeReconciliationPayload(payload: Uint8Array) {
-  const view = payloadView(payload);
-  return { actual: view.getBigUint64(0, true), expected: view.getBigUint64(8, true), status: payload[16] };
+  return decodeReconciliationPayloadAbi(payload);
 }
 
 /**
