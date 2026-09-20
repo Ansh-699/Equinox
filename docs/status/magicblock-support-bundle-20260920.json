@@ -26,6 +26,24 @@
       "result": "InvalidAccountOwner (handler reached)"
     }
   },
+  "vendoredWireContract": {
+    "crate": "magicblock-delegation-program-api 3.1.0",
+    "sourceFiles": [
+      "~/.cargo/registry/src/*/magicblock-delegation-program-api-3.1.0/src/discriminator.rs",
+      "~/.cargo/registry/src/*/magicblock-delegation-program-api-3.1.0/src/instruction_builder/request_undelegation.rs"
+    ],
+    "requestUndelegationData": "u64 little-endian discriminator 26 => 1a00000000000000",
+    "accountsInOrder": [
+      { "role": "delegation_rent_payer", "signer": true, "writable": true },
+      { "role": "delegated_account", "signer": true, "writable": false },
+      { "role": "owner_program", "signer": false, "writable": false },
+      { "role": "undelegation_request_pda", "signer": false, "writable": true },
+      { "role": "delegation_record_pda", "signer": false, "writable": false },
+      { "role": "delegation_metadata_pda", "signer": false, "writable": true },
+      { "role": "system_program", "signer": false, "writable": false }
+    ],
+    "interpretation": "The deployed DLP rejects the published 3.1.0 request wire discriminator before account validation; request the deployed validator's exact discriminator and account schema rather than guessing."
+  },
   "fullBundleMinimalReproducer": {
     "command": "node scripts/magicblock-v3-commit-repro.mjs",
     "endpoint": "https://devnet-as.magicblock.app/",
