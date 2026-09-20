@@ -73,6 +73,20 @@ describe("V3 worker shard aggregation", () => {
     const events = Array.from({ length: 4 }, (_, value) => shard(true, value));
     expect(aggregateV3Market(core(), books, seats, events, coreAddress)?.orderBook.bids[0].tree).toBeUndefined();
   });
+  it("rejects missing and cyclic Patricia children instead of exposing partial leaves", () => {
+    const malformed = leafPage(0, 0); const view = new DataView(malformed.buffer);
+    malformed[64] = 1; // inner root
+    view.setUint32(44, 0, true); // fixed root -> handle zero
+    view.setUint32(60, 1, true); // one occupied node
+    view.setUint32(64 + 24, 1, true); // child handle is absent
+    view.setUint32(64 + 28, 0xffff_ffff, true);
+    const books = [malformed, ...Array.from({ length: 2 * V3_BOOK_PAGES_PER_SIDE - 1 }, (_, value) => page(Math.floor((value + 1) / V3_BOOK_PAGES_PER_SIDE), (value + 1) % V3_BOOK_PAGES_PER_SIDE))];
+    const seats = Array.from({ length: 4 }, (_, value) => shard(false, value));
+    const events = Array.from({ length: 4 }, (_, value) => shard(true, value));
+    expect(aggregateV3Market(core(), books, seats, events, coreAddress)).toBeNull();
+    view.setUint32(64 + 24, 0, true); // self-cycle
+    expect(aggregateV3Market(core(), books, seats, events, coreAddress)).toBeNull();
+  });
   it("decodes complete persisted event records", () => {
     const bytes = shard(true, 0);
     bytes[44] = 200; bytes[45] = 0;

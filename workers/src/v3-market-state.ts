@@ -149,30 +149,30 @@ function annotateBookTrees(pages: readonly V3BookPageState[]): boolean {
       // cannot identify which Patricia tree owns its leaves, so fail closed.
       return false;
     }
+    let valid = true;
     for (const [tree, root] of roots) {
       const seen = new Set<number>();
       const walk = (handle: number): void => {
-        if (handle === NONE_HANDLE || seen.has(handle)) return;
+        if (!valid || handle === NONE_HANDLE) return;
+        if (seen.has(handle)) { valid = false; return; }
         seen.add(handle);
         const node = byHandle.get(handle);
-        if (!node) return;
-        // A zero-filled fixture can expose both roots as handle zero. Keep
-        // the first valid attribution rather than letting the second walk
-        // relabel a leaf; real initialized pages use NONE for empty roots.
-        if (node.tree && node.tree !== tree) return;
+        if (!node || (node.tree && node.tree !== tree)) { valid = false; return; }
         node.tree = tree;
         if (node.tag !== 1) return;
         const page = Math.floor(handle / V3_BOOK_NODES_PER_PAGE);
         const slot = handle % V3_BOOK_NODES_PER_PAGE;
         const source = sidePages.find((candidate) => candidate.page === page);
-        if (!source) return;
+        if (!source) { valid = false; return; }
         const raw = source.nodeBytes.subarray(slot * V3_NODE_SIZE, (slot + 1) * V3_NODE_SIZE);
-        if (raw.length !== V3_NODE_SIZE) return;
+        if (raw.length !== V3_NODE_SIZE) { valid = false; return; }
         const view = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
         walk(view.getUint32(24, true));
         walk(view.getUint32(28, true));
       };
+      if (root !== NONE_HANDLE && !byHandle.has(root)) return false;
       walk(root);
+      if (!valid) return false;
     }
   }
   return true;
