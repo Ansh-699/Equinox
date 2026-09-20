@@ -528,6 +528,22 @@ fn v3_cancel_all_releases_reserve_and_side_exposure_for_every_tree() {
         )
         .unwrap();
     }
+    let before_failed_cancel_all_page = unsafe { accounts[1].view.borrow_unchecked().to_vec() };
+    unsafe {
+        accounts[V3_SEAT_START].view.borrow_unchecked_mut()[212..216]
+            .copy_from_slice(&0u32.to_le_bytes());
+    }
+    let mut rejected_cancel_all = views(&accounts);
+    rejected_cancel_all.push(owner.view.clone());
+    assert!(cancel_all_v3(&ID, &mut rejected_cancel_all, 0, 10, 0).is_err());
+    assert_eq!(
+        unsafe { accounts[1].view.borrow_unchecked() },
+        before_failed_cancel_all_page
+    );
+    unsafe {
+        accounts[V3_SEAT_START].view.borrow_unchecked_mut()[212..216]
+            .copy_from_slice(&2u32.to_le_bytes());
+    }
     // Existing pegged orders remain cancellable when the current oracle is
     // stale/temporarily invalid; the last stored price is used only to release
     // their reservation, never to admit a new pegged order.
