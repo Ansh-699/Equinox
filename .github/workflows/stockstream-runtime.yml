@@ -8,6 +8,9 @@ on:
       - "toolchain/**"
       - "scripts/install-stockstream-toolchain.sh"
       - "scripts/verify-sbf-artifact.py"
+      - "scripts/secret-scan.sh"
+      - "package.json"
+      - ".github/workflows/stockstream-runtime.yml"
 
 # The single authoritative toolchain pin lives in toolchain/stockstream-runtime.env
 # and is consumed by scripts/install-stockstream-toolchain.sh. Do not restate a
@@ -29,6 +32,9 @@ jobs:
           cargo check -p stockstream
           cargo test -p stockstream
           cargo test -p stockstream --release
+
+      - name: Secret scan (same root gate as local verification)
+        run: npm run check:secrets
 
       - name: Build the SBF artifact
         run: cargo build-sbf --manifest-path programs/stockstream/Cargo.toml --features bpf-entrypoint
