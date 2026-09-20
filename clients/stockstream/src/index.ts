@@ -3,9 +3,12 @@ import { STOCKSTREAM_ACCOUNT_SIZE, STOCKSTREAM_INSTRUCTION, STOCKSTREAM_PROGRAM_
 import { checkedSigned, checkedUnsigned, writeSigned, writeUnsigned } from "./abi/encoding";
 import { accountMeta, instruction, publicKey, STOCKSTREAM_PROGRAM_KEY, type AddressInput } from "./abi/transaction";
 import { cancelAllV3, cancelOrderV3, closeV3TraderSeat, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, createV3Account, createV3TraderSeat, delegateV3Account, depositCollateralV3, initializeV3Market, placeOrderV3, replaceOrderV3, requestV3Undelegation, rollbackV3Undelegation, updateFundingV3, withdrawCollateralV3 } from "./abi/v3-instructions";
+import { authorizeTradingSession, closeTradingSession, deriveTradingSession, revokeTradingSession, updateTradingSessionLimits } from "./abi/session-instructions";
 
 export { cancelAllV3, cancelOrderV3, closeV3TraderSeat, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, createV3Account, createV3TraderSeat, delegateV3Account, depositCollateralV3, initializeV3Market, placeOrderV3, replaceOrderV3, requestV3Undelegation, rollbackV3Undelegation, updateFundingV3, withdrawCollateralV3 } from "./abi/v3-instructions";
 export type { V3AccountKind, V3CommitAccounts, V3CreationAccounts, V3DelegationAccounts, V3DepositAccounts, V3ExecutionAccounts, V3FundingAccounts, V3InitializationAccounts, V3OracleAccounts, V3SeatAccounts, V3ShardCommitAccounts, V3UndelegationRecoveryAccounts, V3WithdrawAccounts } from "./abi/v3-instructions";
+export { SESSION_ACTION, authorizeTradingSession, closeTradingSession, deriveTradingSession, revokeTradingSession, updateTradingSessionLimits } from "./abi/session-instructions";
+export type { SessionControlAccounts, TradingSessionAccounts, TradingSessionPolicy } from "./abi/session-instructions";
 
 export { STOCKSTREAM_PROGRAM_KEY } from "./abi/transaction";
 export type { AddressInput } from "./abi/transaction";
@@ -598,88 +601,6 @@ export function commitAndUndelegate(accounts: CommitAccounts, sequence: bigint |
 // `EXTERNAL_UNDELEGATE_DISCRIMINATOR` wire format
 // (`[196, 28, 41, 206, 48, 37, 51, 167]`), never a transaction a client
 // constructs. See `programs/stockstream/src/magicblock.rs::external_undelegate`.
-/** Session action allowlist bits -- must match `session::SESSION_ACTION_*` exactly. */
-export const SESSION_ACTION = {
-  place: 1 << 0,
-  cancel: 1 << 1,
-  cancelAll: 1 << 2,
-  replace: 1 << 3,
-  /** Permits `PlaceOrder` only when the order carries the reduce-only flag. */
-  reduceOnlyClose: 1 << 4,
-} as const;
-
-/**
- * Canonical `TradingSession` PDA: `["trading_session", owner, market,
- * seat_index_le, session_signer]`. Must match
- * `session::derive_trading_session` in the Rust program exactly.
- */
-export function deriveTradingSession(owner: AddressInput, market: AddressInput, seatIndex: number, sessionSigner: AddressInput): PublicKey {
-  const seatIndexBytes = new Uint8Array(2);
-  new DataView(seatIndexBytes.buffer).setUint16(0, Number(checkedUnsigned(seatIndex, 16, "seatIndex")), true);
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("trading_session"), publicKey(owner).toBuffer(), publicKey(market).toBuffer(), Buffer.from(seatIndexBytes), publicKey(sessionSigner).toBuffer()],
-    STOCKSTREAM_PROGRAM_KEY,
-  )[0];
-}
-
-export interface TradingSessionAccounts extends InstructionAccounts { sessionSigner: AddressInput; payer: AddressInput; }
-export interface SessionControlAccounts extends InstructionAccounts { session: AddressInput; sessionSigner: AddressInput; }
-export interface TradingSessionPolicy { seatIndex: number; actions: number; maxOrderNotional: bigint | number; maxCumulativeNotional: bigint | number; maximumExposure: bigint | number; maximumOpenOrders: number; }
-
-function sessionLimitsInstruction(discriminator: number, accounts: [AddressInput, boolean, boolean][], expiresAt: bigint | number, policy: TradingSessionPolicy): TransactionInstruction {
-  if (!Number.isInteger(policy.seatIndex) || policy.seatIndex < 0 || policy.seatIndex > 0xffff || !Number.isInteger(policy.actions) || policy.actions <= 0 || policy.actions > 0xff || !Number.isInteger(policy.maximumOpenOrders) || policy.maximumOpenOrders <= 0 || policy.maximumOpenOrders > 0xffff) throw new RangeError("invalid trading session policy");
-  const maxOrder = checkedUnsigned(policy.maxOrderNotional, 64, "maxOrderNotional");
-  const maxCumulative = checkedUnsigned(policy.maxCumulativeNotional, 64, "maxCumulativeNotional");
-  const maximumExposure = BigInt(policy.maximumExposure);
-  if (maxOrder === 0n || maxCumulative < maxOrder || maximumExposure <= 0n || maximumExposure >= 2n ** 127n) throw new RangeError("invalid trading session limits");
-  const data = new Uint8Array(46); const view = new DataView(data.buffer);
-  data[0] = discriminator; view.setUint16(1, policy.seatIndex, true); writeUnsigned(data, 3, checkedUnsigned(expiresAt, 64, "expiresAt"), 8);
-  data[11] = policy.actions; writeUnsigned(data, 12, maxOrder, 8); writeUnsigned(data, 20, maxCumulative, 8); writeSigned(data, 28, maximumExposure, 16); view.setUint16(44, policy.maximumOpenOrders, true);
-  return instruction(data, accounts.map(([addr, isSigner, isWritable]) => accountMeta(addr, isSigner, isWritable)));
-}
-
-/**
- * Creates and initializes the canonical `TradingSession` PDA via a real
- * System Program CPI performed by the program itself (a PDA cannot sign a
- * top-level client transaction, so the client cannot pre-create this
- * account the way it could a keypair account). `next_expected_nonce`
- * always starts at `1`; there is no caller-supplied initial nonce.
- */
-export function authorizeTradingSession(accounts: TradingSessionAccounts, expiresAt: bigint | number, policy: TradingSessionPolicy): TransactionInstruction {
-  return sessionLimitsInstruction(
-    STOCKSTREAM_INSTRUCTION.authorizeTradingSession,
-    [
-      [accounts.market, false, true],
-      [accounts.payer, true, true],
-      [deriveTradingSession(accounts.authority, accounts.market, policy.seatIndex, accounts.sessionSigner), false, true],
-      [accounts.sessionSigner, false, false],
-      [SystemProgram.programId, false, false],
-    ],
-    expiresAt,
-    policy,
-  );
-}
-
-/** Never callable by the session signer itself -- only the owner (`accounts.authority`) may tighten or loosen limits, and a revoked session cannot be updated back to life. */
-export function updateTradingSessionLimits(accounts: SessionControlAccounts, expiresAt: bigint | number, policy: TradingSessionPolicy): TransactionInstruction {
-  return sessionLimitsInstruction(
-    STOCKSTREAM_INSTRUCTION.updateTradingSessionLimits,
-    [
-      [accounts.market, false, true],
-      [accounts.authority, true, false],
-      [accounts.session, false, true],
-      [accounts.sessionSigner, false, false],
-    ],
-    expiresAt,
-    policy,
-  );
-}
-
-export function revokeTradingSession(accounts: SessionControlAccounts, seatIndex: number): TransactionInstruction { const data = new Uint8Array(3); data[0] = STOCKSTREAM_INSTRUCTION.revokeTradingSession; new DataView(data.buffer).setUint16(1, Number(checkedUnsigned(seatIndex, 16, "seatIndex")), true); return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false), accountMeta(accounts.session, false, true), accountMeta(accounts.sessionSigner, false, false)]); }
-
-/** Reclaims the session PDA's rent to the owner. Only callable once the session is revoked or expired. */
-export function closeTradingSession(accounts: SessionControlAccounts, seatIndex: number): TransactionInstruction { const data = new Uint8Array(3); data[0] = STOCKSTREAM_INSTRUCTION.closeTradingSession; new DataView(data.buffer).setUint16(1, Number(checkedUnsigned(seatIndex, 16, "seatIndex")), true); return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, true), accountMeta(accounts.session, false, true), accountMeta(accounts.sessionSigner, false, false)]); }
-
 function identifierInstruction(discriminator: number, identifier: Uint8Array, accounts: AccountMeta[]): TransactionInstruction {
   if (identifier.length !== 32) throw new RangeError("identifier must be 32 bytes");
   const data = new Uint8Array(33); data[0] = discriminator; data.set(identifier, 1); return instruction(data, accounts);
