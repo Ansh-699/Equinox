@@ -33,3 +33,22 @@ export function validateV3CommitEpoch(coreBytes, expectedSequence) {
   const actual = Number(coreBytes.readBigUInt64LE(198));
   if (actual !== expectedSequence) throw new Error(`V3 commit epoch mismatch: expected ${expectedSequence}, observed ${actual}`);
 }
+
+/** Exercises the runner's durable checkpoint contract across every possible
+ * interruption point. This is intentionally pure: it models a process dying
+ * after child `crashAt - 1`, then reconstructing its next index and resuming
+ * the remaining children without replaying or reordering any child. */
+export function validateCrashResumeCoverage(accounts, mode = "commit") {
+  if (!Array.isArray(accounts) || accounts.length !== 26) throw new Error("V3 crash coverage requires all 26 children");
+  for (let crashAt = 0; crashAt <= accounts.length; crashAt += 1) {
+    const events = accounts.slice(0, crashAt).map((account, index) => ({ index, child: account.toBase58(), sequence: 100 + index }));
+    const interrupted = { version: 1, mode, next: crashAt, events, complete: false };
+    validateCheckpoint(interrupted, mode, accounts);
+    const resumedEvents = [...events];
+    for (let index = crashAt; index < accounts.length; index += 1) {
+      resumedEvents.push({ index, child: accounts[index].toBase58(), sequence: 100 + index });
+    }
+    validateCheckpoint({ version: 1, mode, next: accounts.length, events: resumedEvents, complete: true }, mode, accounts);
+  }
+  return true;
+}
