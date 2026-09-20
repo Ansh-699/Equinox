@@ -556,6 +556,31 @@ pub fn dispatch(
             maintenance_margin_bps,
             maximum_leverage,
         ),
+        StockStreamInstruction::UpdateV3Risk {
+            initial_margin_bps,
+            maintenance_margin_bps,
+            liquidation_fee_bps,
+            maker_fee_bps,
+            taker_fee_bps,
+            maximum_leverage,
+            maximum_position,
+            maximum_open_interest,
+            mark_deviation_bps,
+        } => crate::v3::update_v3_risk_config(
+            program_id,
+            accounts,
+            crate::v3::V3RiskConfig {
+                initial_margin_bps,
+                maintenance_margin_bps,
+                liquidation_fee_bps,
+                maker_fee_bps,
+                taker_fee_bps,
+                maximum_leverage,
+                maximum_position,
+                maximum_open_interest,
+                mark_deviation_bps,
+            },
+        ),
         StockStreamInstruction::TransitionMarket { mode, action } => {
             transition_market(program_id, accounts, mode, action)
         }
@@ -3556,6 +3581,9 @@ fn liquidate(
     seat_index: usize,
     max_quantity: u64,
 ) -> ProgramResult {
+    if accounts.len() >= crate::v3::V3_EXECUTION_BUNDLE_LEN + 1 {
+        return crate::v3::liquidate_v3(program_id, accounts, seat_index as u16, max_quantity);
+    }
     if accounts.len() < 2 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }

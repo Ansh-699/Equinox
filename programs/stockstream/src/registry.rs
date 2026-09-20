@@ -671,6 +671,7 @@ pub fn initialize_v3_market(program_id: &Address, accounts: &mut [AccountView]) 
     data[v3::V3_CORE_ORACLE_CHANNEL_OFFSET] = oracle_channel;
     data[v3::V3_CORE_ORACLE_EXPONENT_OFFSET..v3::V3_CORE_ORACLE_EXPONENT_OFFSET + 4]
         .copy_from_slice(&oracle_exponent.to_le_bytes());
+    v3::initialize_v3_risk_config(data)?;
     Ok(())
 }
 

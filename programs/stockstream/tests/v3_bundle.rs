@@ -228,7 +228,8 @@ fn v3_owner_place_reserves_collateral_and_writes_paged_book_and_event() {
     )
     .unwrap();
     let seat = unsafe { accounts[V3_SEAT_START].view.borrow_unchecked() };
-    assert_eq!(i128::from_le_bytes(seat[100..116].try_into().unwrap()), 50);
+    // V3 reserves configured initial margin, not the full notional.
+    assert_eq!(i128::from_le_bytes(seat[100..116].try_into().unwrap()), 10);
     assert_eq!(u32::from_le_bytes(seat[212..216].try_into().unwrap()), 1);
     let page = unsafe { accounts[1].view.borrow_unchecked() };
     assert_ne!(
@@ -623,6 +624,41 @@ fn v3_paged_book_preserves_global_handles_across_page_boundaries() {
         .expect("oracle-pegged root uses the same paged storage");
     assert!(book.find(TreeKind::OraclePegged, 7u128 << 64).is_ok());
     assert_eq!(book.node_tag(pegged).unwrap(), 2);
+}
+
+#[test]
+fn v3_cross_tree_matching_uses_executable_price_then_fifo_key() {
+    let accounts = bundle();
+    let mut pages = (1..=V3_BOOK_PAGES_PER_SIDE)
+        .map(|index| accounts[index].view.clone())
+        .collect::<Vec<_>>();
+    let mut book = PagedBookV3::new(&mut pages).unwrap();
+    let mut fixed = leaf(11u128 << 64, 11);
+    fixed.price_or_offset = 11;
+    book.insert(TreeKind::Fixed, fixed).unwrap();
+    let mut pegged = leaf(12u128 << 64, 12);
+    pegged.price_or_offset = 2;
+    pegged.peg_limit = 12;
+    book.insert(TreeKind::OraclePegged, pegged).unwrap();
+    let plan = book
+        .plan_crossing_cross_tree(
+            Side::Bid,
+            99,
+            stockstream::book::SelfTradeBehavior::AbortTransaction,
+            20,
+            2,
+            Some(10),
+            0,
+        )
+        .unwrap();
+    assert_eq!(plan.fill_count, 2);
+    assert_eq!(plan.fills[0].maker_tree, TreeKind::Fixed as u8);
+    assert_eq!(plan.fills[0].price, 11);
+    assert_eq!(plan.fills[1].maker_tree, TreeKind::OraclePegged as u8);
+    assert_eq!(plan.fills[1].price, 12);
+    book.apply_match_plan(TreeKind::Fixed, &plan).unwrap();
+    assert!(book.find(TreeKind::Fixed, fixed.key).is_err());
+    assert!(book.find(TreeKind::OraclePegged, pegged.key).is_err());
 }
 
 #[test]

@@ -79,6 +79,56 @@ pub const V3_CORE_VALIDATOR_OFFSET: usize = 214;
 pub const V3_CORE_ORACLE_FEED_ID_OFFSET: usize = 246;
 pub const V3_CORE_ORACLE_CHANNEL_OFFSET: usize = 250;
 pub const V3_CORE_ORACLE_EXPONENT_OFFSET: usize = 251;
+// Durable risk/economic configuration lives in the versioned core reserve;
+// keeping these offsets explicit preserves the 4,096-byte MagicBlock-safe
+// account size while making V3 economics independent of V2 arena offsets.
+pub const V3_CORE_INITIAL_MARGIN_BPS_OFFSET: usize = 218;
+pub const V3_CORE_MAINTENANCE_MARGIN_BPS_OFFSET: usize = 220;
+pub const V3_CORE_LIQUIDATION_FEE_BPS_OFFSET: usize = 222;
+pub const V3_CORE_MAKER_FEE_BPS_OFFSET: usize = 224;
+pub const V3_CORE_TAKER_FEE_BPS_OFFSET: usize = 226;
+pub const V3_CORE_MAXIMUM_LEVERAGE_OFFSET: usize = 228;
+pub const V3_CORE_MAXIMUM_POSITION_OFFSET: usize = 256;
+pub const V3_CORE_MAXIMUM_OPEN_INTEREST_OFFSET: usize = 272;
+pub const V3_CORE_CURRENT_OPEN_INTEREST_OFFSET: usize = 288;
+pub const V3_CORE_MARK_DEVIATION_BPS_OFFSET: usize = 304;
+pub const V3_CORE_PROTOCOL_FEE_BALANCE_OFFSET: usize = 306;
+pub const V3_CORE_INSURANCE_BALANCE_OFFSET: usize = 322;
+pub const V3_CORE_BAD_DEBT_OFFSET: usize = 338;
+pub const V3_CORE_VAULT_LIABILITY_OFFSET: usize = 354;
+pub const V3_CORE_RECONCILIATION_STATUS_OFFSET: usize = 370;
+pub const V3_CORE_RISK_CONFIG_VERSION_OFFSET: usize = 371;
+
+pub const V3_RISK_CONFIG_VERSION: u8 = 1;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct V3RiskConfig {
+    pub initial_margin_bps: u16,
+    pub maintenance_margin_bps: u16,
+    pub liquidation_fee_bps: u16,
+    pub maker_fee_bps: u16,
+    pub taker_fee_bps: u16,
+    pub maximum_leverage: u32,
+    pub maximum_position: i128,
+    pub maximum_open_interest: i128,
+    pub mark_deviation_bps: u16,
+}
+
+impl V3RiskConfig {
+    pub const fn defaults() -> Self {
+        Self {
+            initial_margin_bps: 2_000,
+            maintenance_margin_bps: 1_000,
+            liquidation_fee_bps: 50,
+            maker_fee_bps: 0,
+            taker_fee_bps: 5,
+            maximum_leverage: 5,
+            maximum_position: 0,
+            maximum_open_interest: 0,
+            mark_deviation_bps: 0,
+        }
+    }
+}
 
 /// `64 + 115 * 88 = 10,184`, safely below the scheduler's 10,240-byte
 /// per-account limit. Nine pages provide physical room for 1,035 nodes; the
@@ -345,6 +395,7 @@ pub struct PagedBookV3<'a> {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct V3Fill {
+    pub maker_tree: u8,
     pub maker_handle: u32,
     pub maker_owner: u32,
     pub key: u128,
@@ -355,6 +406,7 @@ pub struct V3Fill {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct V3SelfTradeCancellation {
+    pub maker_tree: u8,
     pub maker_handle: u32,
     pub maker_owner: u32,
     pub key: u128,
@@ -373,6 +425,7 @@ pub struct V3MatchPlan {
 }
 
 const EMPTY_V3_FILL: V3Fill = V3Fill {
+    maker_tree: 0,
     maker_handle: NONE,
     maker_owner: 0,
     key: 0,
@@ -381,6 +434,7 @@ const EMPTY_V3_FILL: V3Fill = V3Fill {
     maker_remaining: 0,
 };
 const EMPTY_V3_CANCELLATION: V3SelfTradeCancellation = V3SelfTradeCancellation {
+    maker_tree: 0,
     maker_handle: NONE,
     maker_owner: 0,
     key: 0,
@@ -884,6 +938,68 @@ impl<'a> PagedBookV3<'a> {
         Ok(best.map(|(_, handle)| handle))
     }
 
+    fn best_unselected_across(
+        &mut self,
+        trees: &[TreeKind],
+        side: Side,
+        oracle: Option<i64>,
+        now: u64,
+        selected_trees: &[u8; crate::book::MAX_FILLS_PER_INSTRUCTION],
+        selected: &[u32; crate::book::MAX_FILLS_PER_INSTRUCTION],
+        selected_len: usize,
+    ) -> Result<Option<(TreeKind, u32, u64)>, ProgramError> {
+        let bump = self.meta_u32(V3_BOOK_BUMP_INDEX_OFFSET)? as usize;
+        let mut best: Option<(u128, TreeKind, u32, u64)> = None;
+        for tree in trees {
+            for handle in 0..bump {
+                let handle = handle as u32;
+                if (0..selected_len)
+                    .any(|index| selected_trees[index] == *tree as u8 && selected[index] == handle)
+                    || self.tag(handle)? != TAG_LEAF
+                {
+                    continue;
+                }
+                let leaf = self.leaf(handle)?;
+                if self
+                    .find(*tree, unsafe {
+                        core::ptr::addr_of!(leaf.key).read_unaligned()
+                    })
+                    .ok()
+                    != Some(handle)
+                {
+                    continue;
+                }
+                let expires = unsafe { core::ptr::addr_of!(leaf.expires_at).read_unaligned() };
+                if leaf.quantity == 0 || expires <= now || leaf.side != side as u8 {
+                    continue;
+                }
+                let price = match *tree {
+                    TreeKind::Fixed => {
+                        let value =
+                            unsafe { core::ptr::addr_of!(leaf.price_or_offset).read_unaligned() };
+                        if value <= 0 {
+                            continue;
+                        }
+                        value as u64
+                    }
+                    TreeKind::OraclePegged => match crate::book::pegged_state(&leaf, oracle, now) {
+                        crate::book::PeggedState::Valid(value) => value as u64,
+                        crate::book::PeggedState::Invalid | crate::book::PeggedState::Skipped => {
+                            continue
+                        }
+                    },
+                };
+                let sequence = unsafe { core::ptr::addr_of!(leaf.sequence).read_unaligned() };
+                let key = crate::book::price_time_key(side, price as i64, sequence)
+                    .map_err(|_| bundle_error())?;
+                if best.map(|current| key < current.0).unwrap_or(true) {
+                    best = Some((key, *tree, handle, price));
+                }
+            }
+        }
+        Ok(best.map(|(_, tree, handle, price)| (tree, handle, price)))
+    }
+
     fn effective_price(
         leaf: &LeafNode,
         tree: TreeKind,
@@ -918,6 +1034,55 @@ impl<'a> PagedBookV3<'a> {
         oracle: Option<i64>,
         now: u64,
     ) -> Result<V3MatchPlan, ProgramError> {
+        self.plan_crossing_trees(
+            &[tree],
+            taker_side,
+            taker_owner,
+            self_trade_behavior,
+            taker_price,
+            taker_quantity,
+            oracle,
+            now,
+        )
+    }
+
+    /// Plans against both fixed and oracle-pegged roots. Candidates are
+    /// selected by executable price and a normalized price/time key so a
+    /// pegged maker cannot lose FIFO priority merely because its raw offset
+    /// lives in a different Patricia root.
+    pub fn plan_crossing_cross_tree(
+        &mut self,
+        taker_side: crate::book::Side,
+        taker_owner: u32,
+        self_trade_behavior: SelfTradeBehavior,
+        taker_price: i64,
+        taker_quantity: u64,
+        oracle: Option<i64>,
+        now: u64,
+    ) -> Result<V3MatchPlan, ProgramError> {
+        self.plan_crossing_trees(
+            &[TreeKind::Fixed, TreeKind::OraclePegged],
+            taker_side,
+            taker_owner,
+            self_trade_behavior,
+            taker_price,
+            taker_quantity,
+            oracle,
+            now,
+        )
+    }
+
+    fn plan_crossing_trees(
+        &mut self,
+        trees: &[TreeKind],
+        taker_side: crate::book::Side,
+        taker_owner: u32,
+        self_trade_behavior: SelfTradeBehavior,
+        taker_price: i64,
+        taker_quantity: u64,
+        oracle: Option<i64>,
+        now: u64,
+    ) -> Result<V3MatchPlan, ProgramError> {
         if taker_price <= 0 || taker_quantity == 0 {
             return Err(bundle_error());
         }
@@ -929,13 +1094,28 @@ impl<'a> PagedBookV3<'a> {
             cancellation_count: 0,
         };
         let mut selected = [NONE; crate::book::MAX_FILLS_PER_INSTRUCTION];
+        let mut selected_trees = [0u8; crate::book::MAX_FILLS_PER_INSTRUCTION];
         let mut selected_count = 0usize;
         while selected_count < crate::book::MAX_FILLS_PER_INSTRUCTION && plan.taker_remaining > 0 {
             let index = selected_count;
-            let Some(handle) = self.best_unselected(tree, &selected, index)? else {
+            let Some((maker_tree, handle, maker_price)) = self.best_unselected_across(
+                trees,
+                if taker_side == crate::book::Side::Bid {
+                    crate::book::Side::Ask
+                } else {
+                    crate::book::Side::Bid
+                },
+                oracle,
+                now,
+                &selected_trees,
+                &selected,
+                index,
+            )?
+            else {
                 break;
             };
             selected_count += 1;
+            selected_trees[index] = maker_tree as u8;
             let leaf = self.leaf(handle)?;
             let expires = unsafe { core::ptr::addr_of!(leaf.expires_at).read_unaligned() };
             if expires <= now {
@@ -951,7 +1131,6 @@ impl<'a> PagedBookV3<'a> {
                 selected[index] = handle;
                 continue;
             }
-            let maker_price = Self::effective_price(&leaf, tree, oracle)?;
             let crosses = if taker_side == crate::book::Side::Bid {
                 maker_price <= taker_price as u64
             } else {
@@ -980,6 +1159,7 @@ impl<'a> PagedBookV3<'a> {
                             return Err(StockStreamError::SelfTradeAborted.into());
                         }
                         plan.cancellations[count] = V3SelfTradeCancellation {
+                            maker_tree: maker_tree as u8,
                             maker_handle: handle,
                             maker_owner: owner,
                             key,
@@ -994,6 +1174,7 @@ impl<'a> PagedBookV3<'a> {
             }
             let fill_index = plan.fill_count as usize;
             plan.fills[fill_index] = V3Fill {
+                maker_tree: maker_tree as u8,
                 maker_handle: handle,
                 maker_owner: owner,
                 key,
@@ -1014,37 +1195,41 @@ impl<'a> PagedBookV3<'a> {
     /// Applies a previously planned set of maker updates only if every key,
     /// owner and quantity still matches. A failed validation performs no
     /// writes, preserving atomic rollback at the instruction boundary.
-    pub fn apply_match_plan(&mut self, tree: TreeKind, plan: &V3MatchPlan) -> ProgramResult {
+    pub fn apply_match_plan(&mut self, _tree: TreeKind, plan: &V3MatchPlan) -> ProgramResult {
         for cancel in plan.cancellations[..plan.cancellation_count as usize].iter() {
+            let cancel_tree = TreeKind::from_u8(cancel.maker_tree).ok_or_else(bundle_error)?;
             let current = self.leaf(cancel.maker_handle)?;
             let current_key = unsafe { core::ptr::addr_of!(current.key).read_unaligned() };
             if current_key != cancel.key
                 || current.owner != cancel.maker_owner
                 || current.quantity != cancel.quantity
-                || self.find(tree, cancel.key)? != cancel.maker_handle
+                || self.find(cancel_tree, cancel.key)? != cancel.maker_handle
             {
                 return Err(bundle_error());
             }
         }
         for fill in plan.fills[..plan.fill_count as usize].iter() {
+            let fill_tree = TreeKind::from_u8(fill.maker_tree).ok_or_else(bundle_error)?;
             let current = self.leaf(fill.maker_handle)?;
             let current_key = unsafe { core::ptr::addr_of!(current.key).read_unaligned() };
             let current_owner = current.owner;
             let current_quantity = current.quantity;
             if current_key != fill.key
                 || current_owner != fill.maker_owner
-                || self.find(tree, fill.key)? != fill.maker_handle
+                || self.find(fill_tree, fill.key)? != fill.maker_handle
                 || current_quantity != fill.quantity + fill.maker_remaining
             {
                 return Err(bundle_error());
             }
         }
         for cancel in plan.cancellations[..plan.cancellation_count as usize].iter() {
-            self.remove(tree, cancel.key)?;
+            let cancel_tree = TreeKind::from_u8(cancel.maker_tree).ok_or_else(bundle_error)?;
+            self.remove(cancel_tree, cancel.key)?;
         }
         for fill in plan.fills[..plan.fill_count as usize].iter() {
+            let fill_tree = TreeKind::from_u8(fill.maker_tree).ok_or_else(bundle_error)?;
             if fill.maker_remaining == 0 {
-                self.remove(tree, fill.key)?;
+                self.remove(fill_tree, fill.key)?;
             } else {
                 let mut leaf = self.leaf(fill.maker_handle)?;
                 leaf.quantity = fill.maker_remaining;
@@ -1323,6 +1508,17 @@ pub fn update_funding_v3(
 
 fn bundle_error() -> ProgramError {
     StockStreamError::InvalidInstruction.into()
+}
+
+fn v3_risk_error(error: crate::risk::RiskError) -> ProgramError {
+    match error {
+        crate::risk::RiskError::Overflow => StockStreamError::ArithmeticOverflow.into(),
+        crate::risk::RiskError::InvalidPrice => StockStreamError::InvalidInstruction.into(),
+        crate::risk::RiskError::NegativeCollateral
+        | crate::risk::RiskError::PositionLimit
+        | crate::risk::RiskError::OpenInterestLimit
+        | crate::risk::RiskError::Margin => StockStreamError::RiskViolation.into(),
+    }
 }
 
 /// Validates the exact account order required by future V3 trading handlers:
@@ -1803,6 +1999,205 @@ fn set_core_u64(bytes: &mut [u8], offset: usize, value: u64) -> ProgramResult {
     Ok(())
 }
 
+fn core_i128(bytes: &[u8], offset: usize) -> Result<i128, ProgramError> {
+    bytes
+        .get(offset..offset + 16)
+        .ok_or_else(bundle_error)
+        .and_then(|raw| raw.try_into().map_err(|_| bundle_error()))
+        .map(i128::from_le_bytes)
+}
+
+fn set_core_i128(bytes: &mut [u8], offset: usize, value: i128) -> ProgramResult {
+    let target = bytes
+        .get_mut(offset..offset + 16)
+        .ok_or_else(bundle_error)?;
+    target.copy_from_slice(&value.to_le_bytes());
+    Ok(())
+}
+
+pub fn read_v3_risk_config(bytes: &[u8]) -> Result<V3RiskConfig, ProgramError> {
+    if bytes.len() != V3_MARKET_CORE_SIZE {
+        return Err(bundle_error());
+    }
+    let configured = bytes[V3_CORE_RISK_CONFIG_VERSION_OFFSET] == V3_RISK_CONFIG_VERSION;
+    let defaults = V3RiskConfig::defaults();
+    let read_u16_or = |offset: usize, fallback: u16| {
+        let value = u16::from_le_bytes(
+            bytes[offset..offset + 2]
+                .try_into()
+                .unwrap_or(fallback.to_le_bytes()),
+        );
+        if configured && value != 0 {
+            value
+        } else {
+            fallback
+        }
+    };
+    let read_u32_or = |offset: usize, fallback: u32| {
+        let value = u32::from_le_bytes(
+            bytes[offset..offset + 4]
+                .try_into()
+                .unwrap_or(fallback.to_le_bytes()),
+        );
+        if configured && value != 0 {
+            value
+        } else {
+            fallback
+        }
+    };
+    let config = V3RiskConfig {
+        initial_margin_bps: read_u16_or(
+            V3_CORE_INITIAL_MARGIN_BPS_OFFSET,
+            defaults.initial_margin_bps,
+        ),
+        maintenance_margin_bps: read_u16_or(
+            V3_CORE_MAINTENANCE_MARGIN_BPS_OFFSET,
+            defaults.maintenance_margin_bps,
+        ),
+        liquidation_fee_bps: read_u16_or(
+            V3_CORE_LIQUIDATION_FEE_BPS_OFFSET,
+            defaults.liquidation_fee_bps,
+        ),
+        maker_fee_bps: read_u16_or(V3_CORE_MAKER_FEE_BPS_OFFSET, defaults.maker_fee_bps),
+        taker_fee_bps: read_u16_or(V3_CORE_TAKER_FEE_BPS_OFFSET, defaults.taker_fee_bps),
+        maximum_leverage: read_u32_or(V3_CORE_MAXIMUM_LEVERAGE_OFFSET, defaults.maximum_leverage),
+        maximum_position: if configured {
+            core_i128(bytes, V3_CORE_MAXIMUM_POSITION_OFFSET)?
+        } else {
+            defaults.maximum_position
+        },
+        maximum_open_interest: if configured {
+            core_i128(bytes, V3_CORE_MAXIMUM_OPEN_INTEREST_OFFSET)?
+        } else {
+            defaults.maximum_open_interest
+        },
+        mark_deviation_bps: if configured {
+            read_u16_or(
+                V3_CORE_MARK_DEVIATION_BPS_OFFSET,
+                defaults.mark_deviation_bps,
+            )
+        } else {
+            defaults.mark_deviation_bps
+        },
+    };
+    if config.initial_margin_bps == 0
+        || config.maintenance_margin_bps == 0
+        || config.maintenance_margin_bps > config.initial_margin_bps
+        || config.maximum_leverage == 0
+        || config.maker_fee_bps > 1_000
+        || config.taker_fee_bps > 1_000
+        || config.liquidation_fee_bps > 1_000
+        || config.mark_deviation_bps > 10_000
+        || config.maximum_position < 0
+        || config.maximum_open_interest < 0
+    {
+        return Err(StockStreamError::RiskViolation.into());
+    }
+    Ok(config)
+}
+
+pub fn initialize_v3_risk_config(bytes: &mut [u8]) -> ProgramResult {
+    if bytes.len() != V3_MARKET_CORE_SIZE {
+        return Err(bundle_error());
+    }
+    let config = V3RiskConfig::defaults();
+    bytes[V3_CORE_INITIAL_MARGIN_BPS_OFFSET..V3_CORE_INITIAL_MARGIN_BPS_OFFSET + 2]
+        .copy_from_slice(&config.initial_margin_bps.to_le_bytes());
+    bytes[V3_CORE_MAINTENANCE_MARGIN_BPS_OFFSET..V3_CORE_MAINTENANCE_MARGIN_BPS_OFFSET + 2]
+        .copy_from_slice(&config.maintenance_margin_bps.to_le_bytes());
+    bytes[V3_CORE_LIQUIDATION_FEE_BPS_OFFSET..V3_CORE_LIQUIDATION_FEE_BPS_OFFSET + 2]
+        .copy_from_slice(&config.liquidation_fee_bps.to_le_bytes());
+    bytes[V3_CORE_MAKER_FEE_BPS_OFFSET..V3_CORE_MAKER_FEE_BPS_OFFSET + 2]
+        .copy_from_slice(&config.maker_fee_bps.to_le_bytes());
+    bytes[V3_CORE_TAKER_FEE_BPS_OFFSET..V3_CORE_TAKER_FEE_BPS_OFFSET + 2]
+        .copy_from_slice(&config.taker_fee_bps.to_le_bytes());
+    bytes[V3_CORE_MAXIMUM_LEVERAGE_OFFSET..V3_CORE_MAXIMUM_LEVERAGE_OFFSET + 4]
+        .copy_from_slice(&config.maximum_leverage.to_le_bytes());
+    set_core_i128(
+        bytes,
+        V3_CORE_MAXIMUM_POSITION_OFFSET,
+        config.maximum_position,
+    )?;
+    set_core_i128(
+        bytes,
+        V3_CORE_MAXIMUM_OPEN_INTEREST_OFFSET,
+        config.maximum_open_interest,
+    )?;
+    set_core_i128(bytes, V3_CORE_CURRENT_OPEN_INTEREST_OFFSET, 0)?;
+    bytes[V3_CORE_MARK_DEVIATION_BPS_OFFSET..V3_CORE_MARK_DEVIATION_BPS_OFFSET + 2]
+        .copy_from_slice(&config.mark_deviation_bps.to_le_bytes());
+    set_core_i128(bytes, V3_CORE_PROTOCOL_FEE_BALANCE_OFFSET, 0)?;
+    set_core_i128(bytes, V3_CORE_INSURANCE_BALANCE_OFFSET, 0)?;
+    set_core_i128(bytes, V3_CORE_BAD_DEBT_OFFSET, 0)?;
+    set_core_i128(bytes, V3_CORE_VAULT_LIABILITY_OFFSET, 0)?;
+    bytes[V3_CORE_RECONCILIATION_STATUS_OFFSET] = 0;
+    bytes[V3_CORE_RISK_CONFIG_VERSION_OFFSET] = V3_RISK_CONFIG_VERSION;
+    Ok(())
+}
+
+/// Governance-authorized V3 risk update. The core is the only durable config
+/// authority for a sharded market; this instruction never interprets V2
+/// offsets and rejects malformed or unsafe values before any write.
+pub fn update_v3_risk_config(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    config: V3RiskConfig,
+) -> ProgramResult {
+    if accounts.len() < 2 || !accounts[1].is_signer() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    if !accounts[0].owned_by(program_id) || !accounts[0].is_writable() {
+        return Err(bundle_error());
+    }
+    let authority = accounts[1].address().to_bytes();
+    let mut core = unsafe { accounts[0].borrow_unchecked_mut() };
+    if core.len() != V3_MARKET_CORE_SIZE
+        || core[0..8] != V3_MARKET_CORE_DISCRIMINATOR
+        || core[8..10] != V3_LAYOUT_VERSION.to_le_bytes()
+        || core[10] != 1
+        || core[V3_CORE_MARKET_AUTHORITY_OFFSET..V3_CORE_MARKET_AUTHORITY_OFFSET + 32] != authority
+        || config.initial_margin_bps == 0
+        || config.maintenance_margin_bps == 0
+        || config.maintenance_margin_bps > config.initial_margin_bps
+        || config.liquidation_fee_bps > 1_000
+        || config.maker_fee_bps > 1_000
+        || config.taker_fee_bps > 1_000
+        || config.maximum_leverage == 0
+        || config.maximum_leverage > 100
+        || config.maximum_position < 0
+        || config.maximum_open_interest < 0
+        || config.mark_deviation_bps > 10_000
+    {
+        return Err(StockStreamError::RiskViolation.into());
+    }
+    core[V3_CORE_INITIAL_MARGIN_BPS_OFFSET..V3_CORE_INITIAL_MARGIN_BPS_OFFSET + 2]
+        .copy_from_slice(&config.initial_margin_bps.to_le_bytes());
+    core[V3_CORE_MAINTENANCE_MARGIN_BPS_OFFSET..V3_CORE_MAINTENANCE_MARGIN_BPS_OFFSET + 2]
+        .copy_from_slice(&config.maintenance_margin_bps.to_le_bytes());
+    core[V3_CORE_LIQUIDATION_FEE_BPS_OFFSET..V3_CORE_LIQUIDATION_FEE_BPS_OFFSET + 2]
+        .copy_from_slice(&config.liquidation_fee_bps.to_le_bytes());
+    core[V3_CORE_MAKER_FEE_BPS_OFFSET..V3_CORE_MAKER_FEE_BPS_OFFSET + 2]
+        .copy_from_slice(&config.maker_fee_bps.to_le_bytes());
+    core[V3_CORE_TAKER_FEE_BPS_OFFSET..V3_CORE_TAKER_FEE_BPS_OFFSET + 2]
+        .copy_from_slice(&config.taker_fee_bps.to_le_bytes());
+    core[V3_CORE_MAXIMUM_LEVERAGE_OFFSET..V3_CORE_MAXIMUM_LEVERAGE_OFFSET + 4]
+        .copy_from_slice(&config.maximum_leverage.to_le_bytes());
+    set_core_i128(
+        &mut core,
+        V3_CORE_MAXIMUM_POSITION_OFFSET,
+        config.maximum_position,
+    )?;
+    set_core_i128(
+        &mut core,
+        V3_CORE_MAXIMUM_OPEN_INTEREST_OFFSET,
+        config.maximum_open_interest,
+    )?;
+    core[V3_CORE_MARK_DEVIATION_BPS_OFFSET..V3_CORE_MARK_DEVIATION_BPS_OFFSET + 2]
+        .copy_from_slice(&config.mark_deviation_bps.to_le_bytes());
+    core[V3_CORE_RISK_CONFIG_VERSION_OFFSET] = V3_RISK_CONFIG_VERSION;
+    Ok(())
+}
+
 fn v3_trade_seat(
     accounts: &[AccountView],
     seat_index: u16,
@@ -1910,36 +2305,13 @@ fn write_v3_seat_shards(
     write_shard_seat(&mut bytes, slot, seat)
 }
 
-fn adjust_v3_position(
-    seat: &mut TraderSeat,
-    side: Side,
-    quantity: u64,
-    price: u64,
-) -> ProgramResult {
-    let signed = if side == Side::Bid {
-        i128::try_from(quantity).map_err(|_| StockStreamError::ArithmeticOverflow)?
-    } else {
-        -i128::try_from(quantity).map_err(|_| StockStreamError::ArithmeticOverflow)?
-    };
-    let value = signed
-        .checked_mul(i128::try_from(price).map_err(|_| StockStreamError::ArithmeticOverflow)?)
-        .ok_or(StockStreamError::ArithmeticOverflow)?;
-    seat.base_position = seat
-        .base_position
-        .checked_add(signed)
-        .ok_or(StockStreamError::ArithmeticOverflow)?;
-    seat.quote_entry_value = seat
-        .quote_entry_value
-        .checked_sub(value)
-        .ok_or(StockStreamError::ArithmeticOverflow)?;
-    Ok(())
-}
-
 fn settle_v3_fill(
+    core: &mut AccountView,
     seat_accounts: &mut [AccountView],
     taker_seat_index: u16,
     taker_side: Side,
     fill: V3Fill,
+    risk_config: V3RiskConfig,
 ) -> ProgramResult {
     if fill.maker_owner as usize >= V3_SEAT_SHARDS * V3_SEATS_PER_SHARD {
         return Err(StockStreamError::InvalidSeat.into());
@@ -1959,12 +2331,47 @@ fn settle_v3_fill(
     let notional = u128::from(fill.quantity)
         .checked_mul(u128::from(fill.price))
         .ok_or(StockStreamError::ArithmeticOverflow)?;
+    let funding_accumulator = core_i128(
+        unsafe { core.borrow_unchecked() },
+        V3_CORE_FUNDING_ACCUMULATOR_OFFSET,
+    )?;
     let mut maker = maker_before;
     let mut taker = taker_before;
-    adjust_v3_position(&mut maker, maker_side, fill.quantity, fill.price)?;
-    adjust_v3_position(&mut taker, taker_side, fill.quantity, fill.price)?;
-    let margin = i128::try_from(notional).map_err(|_| StockStreamError::ArithmeticOverflow)?;
-    maker.reserved_margin = maker.reserved_margin.saturating_sub(margin);
+    crate::risk::settle_funding(&mut maker, funding_accumulator).map_err(v3_risk_error)?;
+    crate::risk::settle_funding(&mut taker, funding_accumulator).map_err(v3_risk_error)?;
+    let maker_signed = if maker_side == Side::Bid {
+        i128::from(fill.quantity)
+    } else {
+        -i128::from(fill.quantity)
+    };
+    let taker_signed = if taker_side == Side::Bid {
+        i128::from(fill.quantity)
+    } else {
+        -i128::from(fill.quantity)
+    };
+    let maker_fee = crate::risk::apply_fill(
+        &mut maker,
+        maker_signed,
+        i128::from(fill.price),
+        risk_config.maker_fee_bps,
+    )
+    .map_err(v3_risk_error)?;
+    let taker_fee = crate::risk::apply_fill(
+        &mut taker,
+        taker_signed,
+        i128::from(fill.price),
+        risk_config.taker_fee_bps,
+    )
+    .map_err(v3_risk_error)?;
+    let margin = crate::risk::initial_margin(
+        i128::try_from(notional).map_err(|_| StockStreamError::ArithmeticOverflow)?,
+        risk_config.initial_margin_bps,
+    )
+    .map_err(v3_risk_error)?;
+    maker.reserved_margin = maker
+        .reserved_margin
+        .checked_sub(margin)
+        .ok_or(StockStreamError::RiskViolation)?;
     if fill.maker_remaining == 0 {
         maker.open_order_count = maker.open_order_count.saturating_sub(1);
     }
@@ -1977,8 +2384,62 @@ fn settle_v3_fill(
             .open_ask_exposure
             .saturating_sub(i128::from(fill.quantity));
     }
+    let mut core_bytes = unsafe { core.borrow_unchecked_mut() };
+    let protocol_balance = core_i128(&core_bytes, V3_CORE_PROTOCOL_FEE_BALANCE_OFFSET)?
+        .checked_add(maker_fee)
+        .and_then(|value| value.checked_add(taker_fee))
+        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    set_core_i128(
+        &mut core_bytes,
+        V3_CORE_PROTOCOL_FEE_BALANCE_OFFSET,
+        protocol_balance,
+    )?;
     write_v3_seat_shards(seat_accounts, maker_shard, maker_slot, &maker)?;
     write_v3_seat_shards(seat_accounts, taker_shard, taker_slot, &taker)
+}
+
+fn v3_order_reserve(
+    leaf: &LeafNode,
+    tree: TreeKind,
+    oracle: Option<i64>,
+    config: V3RiskConfig,
+) -> Result<i128, ProgramError> {
+    let price = match tree {
+        TreeKind::Fixed => leaf.price_or_offset,
+        TreeKind::OraclePegged => oracle
+            .ok_or(StockStreamError::OracleUnavailable)?
+            .checked_add(leaf.price_or_offset)
+            .ok_or(StockStreamError::ArithmeticOverflow)?,
+    };
+    if price <= 0 {
+        return Err(StockStreamError::InvalidInstruction.into());
+    }
+    let notional = i128::from(leaf.quantity)
+        .checked_mul(i128::from(price))
+        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    crate::risk::initial_margin(notional, config.initial_margin_bps).map_err(v3_risk_error)
+}
+
+fn recompute_v3_open_interest(seat_accounts: &[AccountView]) -> Result<i128, ProgramError> {
+    if seat_accounts.len() != V3_SEAT_SHARDS {
+        return Err(StockStreamError::InvalidSeat.into());
+    }
+    let mut total = 0i128;
+    for shard in seat_accounts {
+        for slot in 0..V3_SEATS_PER_SHARD {
+            let seat = read_shard_seat(unsafe { shard.borrow_unchecked() }, slot)?;
+            if seat.occupancy != 0 {
+                total = total
+                    .checked_add(
+                        seat.base_position
+                            .checked_abs()
+                            .ok_or(StockStreamError::ArithmeticOverflow)?,
+                    )
+                    .ok_or(StockStreamError::ArithmeticOverflow)?;
+            }
+        }
+    }
+    Ok(total)
 }
 
 /// Executes a delegated V3 place order against the canonical 27-account
@@ -1997,6 +2458,110 @@ pub fn place_order_v3(
         crate::session::SESSION_ACTION_PLACE,
         true,
     )
+}
+
+/// Liquidates a V3 seat against the verified oracle mark. The market
+/// authority is the scoped keeper authority for this compact path; all
+/// position/PnL/fee mutations use the same checked risk primitives as fills.
+pub fn liquidate_v3(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    seat_index: u16,
+    max_quantity: u64,
+) -> ProgramResult {
+    if accounts.len() != V3_EXECUTION_BUNDLE_LEN + 1 || max_quantity == 0 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    validate_execution_bundle(program_id, &accounts[..V3_EXECUTION_BUNDLE_LEN], true)?;
+    let signer = &accounts[V3_SIGNER_ACCOUNT_INDEX];
+    if !signer.is_signer() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    let (mark, funding, config) = {
+        let core = unsafe { accounts[0].borrow_unchecked() };
+        if core[V3_CORE_MARKET_AUTHORITY_OFFSET..V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
+            != signer.address().to_bytes()
+            || core[V3_CORE_ORACLE_VALID_OFFSET] != 1
+        {
+            return Err(StockStreamError::InvalidInstruction.into());
+        }
+        let mark = i64::from_le_bytes(
+            core[V3_CORE_ORACLE_PRICE_OFFSET..V3_CORE_ORACLE_PRICE_OFFSET + 8]
+                .try_into()
+                .map_err(|_| bundle_error())?,
+        );
+        if mark <= 0 {
+            return Err(StockStreamError::OracleUnavailable.into());
+        }
+        (
+            mark as i128,
+            core_i128(&core, V3_CORE_FUNDING_ACCUMULATOR_OFFSET)?,
+            read_v3_risk_config(&core)?,
+        )
+    };
+    let (seat_before, shard, slot) = v3_trade_seat(accounts, seat_index)?;
+    if !crate::risk::is_liquidatable(&seat_before, mark, config.maintenance_margin_bps)
+        .map_err(v3_risk_error)?
+    {
+        return Err(StockStreamError::RiskViolation.into());
+    }
+    let quantity = crate::risk::partial_liquidation_quantity(
+        &seat_before,
+        mark,
+        config.maintenance_margin_bps,
+    )
+    .map_err(v3_risk_error)?
+    .min(i128::from(max_quantity));
+    if quantity <= 0 {
+        return Err(StockStreamError::RiskViolation.into());
+    }
+    let signed = if seat_before.base_position > 0 {
+        -quantity
+    } else {
+        quantity
+    };
+    let mut seat = seat_before;
+    crate::risk::settle_funding(&mut seat, funding).map_err(v3_risk_error)?;
+    let fee = crate::risk::apply_fill(&mut seat, signed, mark, config.liquidation_fee_bps)
+        .map_err(v3_risk_error)?;
+    crate::risk::set_liquidation_state(&mut seat, mark, config.maintenance_margin_bps)
+        .map_err(v3_risk_error)?;
+    write_v3_seat_shards(
+        &mut accounts
+            [1 + (2 * V3_BOOK_PAGES_PER_SIDE)..1 + (2 * V3_BOOK_PAGES_PER_SIDE) + V3_SEAT_SHARDS],
+        shard,
+        slot,
+        &seat,
+    )?;
+    {
+        let mut core = unsafe { accounts[0].borrow_unchecked_mut() };
+        let insurance = core_i128(&core, V3_CORE_INSURANCE_BALANCE_OFFSET)?
+            .checked_add(fee)
+            .ok_or(StockStreamError::ArithmeticOverflow)?;
+        set_core_i128(&mut core, V3_CORE_INSURANCE_BALANCE_OFFSET, insurance)?;
+    }
+    let (core_accounts, rest) = accounts.split_at_mut(1);
+    let (book_accounts, rest) = rest.split_at_mut(2 * V3_BOOK_PAGES_PER_SIDE);
+    let (_seat_accounts, event_accounts) = rest.split_at_mut(V3_SEAT_SHARDS);
+    let _ = book_accounts;
+    let quantity_u64 = quantity as u64;
+    append_event_record(
+        program_id,
+        &mut core_accounts[0],
+        &mut event_accounts[..V3_EVENT_SHARDS],
+        crate::events::EventKind::LiquidationStarted as u16,
+        &crate::events::payload_liquidation(seat_index, quantity_u64, mark as i64),
+        crate::handlers::event_timestamp(),
+    )?;
+    append_event_record(
+        program_id,
+        &mut core_accounts[0],
+        &mut event_accounts[..V3_EVENT_SHARDS],
+        crate::events::EventKind::PositionChanged as u16,
+        &crate::events::payload_position(seat_index, seat.base_position, seat.quote_entry_value),
+        crate::handlers::event_timestamp(),
+    )?;
+    Ok(())
 }
 
 fn place_order_v3_with_action(
@@ -2028,6 +2593,7 @@ fn place_order_v3_with_action(
         return Err(StockStreamError::InvalidInstruction.into());
     }
     let core_snapshot = unsafe { accounts[0].borrow_unchecked() };
+    let risk_config = read_v3_risk_config(&core_snapshot)?;
     let oracle = if core_snapshot[V3_CORE_ORACLE_VALID_OFFSET] != 0 {
         Some(i64::from_le_bytes(
             core_snapshot[V3_CORE_ORACLE_PRICE_OFFSET..V3_CORE_ORACLE_PRICE_OFFSET + 8]
@@ -2060,11 +2626,31 @@ fn place_order_v3_with_action(
         .checked_add(signed)
         .ok_or(StockStreamError::ArithmeticOverflow)?
         .unsigned_abs();
+    if order.flags & 4 != 0
+        && (seat_snapshot.base_position == 0
+            || resulting_exposure >= seat_snapshot.base_position.unsigned_abs())
+    {
+        return Err(StockStreamError::RiskViolation.into());
+    }
     if resulting_exposure
         .checked_mul(u128::from(effective_price as u64))
         .ok_or(StockStreamError::ArithmeticOverflow)?
         > u128::try_from(seat_snapshot.available_collateral.max(0))
             .map_err(|_| StockStreamError::RiskViolation)?
+    {
+        return Err(StockStreamError::RiskViolation.into());
+    }
+    if risk_config.maximum_position > 0 && resulting_exposure > risk_config.maximum_position as u128
+    {
+        return Err(StockStreamError::RiskViolation.into());
+    }
+    let initial_requirement = crate::risk::initial_margin(notional, risk_config.initial_margin_bps)
+        .map_err(v3_risk_error)?;
+    if seat_snapshot
+        .available_collateral
+        .checked_sub(seat_snapshot.reserved_margin)
+        .ok_or(StockStreamError::RiskViolation)?
+        < initial_requirement
     {
         return Err(StockStreamError::RiskViolation.into());
     }
@@ -2122,8 +2708,7 @@ fn place_order_v3_with_action(
         &mut bid_book
     };
     let mut remaining = order.quantity;
-    let plan = opposite.plan_crossing(
-        tree,
+    let plan = opposite.plan_crossing_cross_tree(
         side,
         order.seat_index as u32,
         self_trade_behavior,
@@ -2132,13 +2717,18 @@ fn place_order_v3_with_action(
         oracle,
         now,
     )?;
+    if order.flags & 1 != 0 && (plan.fill_count != 0 || plan.cancellation_count != 0) {
+        return Err(StockStreamError::RiskViolation.into());
+    }
     opposite.apply_match_plan(tree, &plan)?;
     for cancel in plan.cancellations[..plan.cancellation_count as usize].iter() {
         let (seat, shard, slot) = v3_trade_seat_shards(seat_accounts, cancel.maker_owner as u16)?;
         let mut updated = seat;
-        let reserve = i128::from(cancel.quantity)
+        let reserve_notional = i128::from(cancel.quantity)
             .checked_mul(i128::from(cancel.price))
             .ok_or(StockStreamError::ArithmeticOverflow)?;
+        let reserve = crate::risk::initial_margin(reserve_notional, risk_config.initial_margin_bps)
+            .map_err(v3_risk_error)?;
         updated.reserved_margin = updated
             .reserved_margin
             .checked_sub(reserve)
@@ -2156,7 +2746,14 @@ fn place_order_v3_with_action(
         write_v3_seat_shards(seat_accounts, shard, slot, &updated)?;
     }
     for fill in plan.fills[..plan.fill_count as usize].iter() {
-        settle_v3_fill(seat_accounts, order.seat_index, side, *fill)?;
+        settle_v3_fill(
+            &mut core_accounts[0],
+            seat_accounts,
+            order.seat_index,
+            side,
+            *fill,
+            risk_config,
+        )?;
     }
     remaining = plan.taker_remaining;
     drop(bid_book);
@@ -2164,9 +2761,11 @@ fn place_order_v3_with_action(
     if remaining > 0 && order.flags & 2 == 0 {
         let mut resting = leaf;
         resting.quantity = remaining;
-        let reserve = i128::from(remaining)
+        let reserve_notional = i128::from(remaining)
             .checked_mul(i128::from(effective_price))
             .ok_or(StockStreamError::ArithmeticOverflow)?;
+        let reserve = crate::risk::initial_margin(reserve_notional, risk_config.initial_margin_bps)
+            .map_err(v3_risk_error)?;
         let (seat, shard, slot) = v3_trade_seat_shards(seat_accounts, order.seat_index)?;
         if seat
             .available_collateral
@@ -2207,6 +2806,13 @@ fn place_order_v3_with_action(
     }
     {
         let core = unsafe { core_accounts[0].borrow_unchecked_mut() };
+        let open_interest = recompute_v3_open_interest(seat_accounts)?;
+        if risk_config.maximum_open_interest > 0
+            && open_interest > risk_config.maximum_open_interest
+        {
+            return Err(StockStreamError::RiskViolation.into());
+        }
+        set_core_i128(core, V3_CORE_CURRENT_OPEN_INTEREST_OFFSET, open_interest)?;
         set_core_u64(core, V3_CORE_GLOBAL_ORDER_SEQUENCE_OFFSET, sequence)?;
     }
     let payload = crate::events::payload_order(
@@ -2423,15 +3029,32 @@ pub fn withdraw_collateral_v3(
     }
     let seat_account_index = 1 + (2 * V3_BOOK_PAGES_PER_SIDE) + shard;
     let seat_account = accounts[seat_account_index].clone();
-    let mut seat = read_shard_seat(unsafe { seat_account.borrow_unchecked() }, slot)?;
+    let seat = read_shard_seat(unsafe { seat_account.borrow_unchecked() }, slot)?;
     if seat.occupancy != 1
         || seat.trader != authority.address().to_bytes()
-        || seat.base_position != 0
         || seat.open_order_count != 0
-        || seat.available_collateral < i128::from(amount)
     {
         return Err(StockStreamError::RiskViolation.into());
     }
+    if core_bytes[V3_CORE_ORACLE_VALID_OFFSET] == 0 {
+        return Err(StockStreamError::RiskViolation.into());
+    }
+    let mark_price = i64::from_le_bytes(
+        core_bytes[V3_CORE_ORACLE_PRICE_OFFSET..V3_CORE_ORACLE_PRICE_OFFSET + 8]
+            .try_into()
+            .map_err(|_| bundle_error())?,
+    );
+    let funding_accumulator = core_i128(core_bytes, V3_CORE_FUNDING_ACCUMULATOR_OFFSET)?;
+    let risk_config = read_v3_risk_config(&core_bytes)?;
+    let mut seat = crate::risk::prepare_withdrawal(
+        &seat,
+        amount,
+        funding_accumulator,
+        i128::from(mark_price),
+        risk_config.maintenance_margin_bps,
+        crate::risk::DEFAULT_WITHDRAWAL_BUFFER,
+    )
+    .map_err(v3_risk_error)?;
     let mint = &accounts[V3_EXECUTION_BUNDLE_LEN + 2];
     let vault = &accounts[V3_EXECUTION_BUNDLE_LEN + 3];
     let vault_authority = &accounts[V3_EXECUTION_BUNDLE_LEN + 4];
@@ -2628,9 +3251,8 @@ fn cancel_order_v3_with_action(
     if reserve_price <= 0 {
         return Err(StockStreamError::InvalidInstruction.into());
     }
-    let reserve = i128::from(leaf.quantity)
-        .checked_mul(i128::from(reserve_price))
-        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    let config = read_v3_risk_config(unsafe { core_accounts[0].borrow_unchecked() })?;
+    let reserve = v3_order_reserve(&leaf, tree, oracle, config)?;
     let (seat, shard, slot) = v3_trade_seat_shards(seat_accounts, seat_index)?;
     let mut updated = seat;
     updated.reserved_margin = updated.reserved_margin.saturating_sub(reserve);
@@ -2745,9 +3367,21 @@ pub fn cancel_all_v3(
         let leaf = PagedBookV3::new(pages)?.cancel_owned_order(tree, key, seat_index as u32)?;
         let (seat, shard, slot) = v3_trade_seat_shards(seat_accounts, seat_index)?;
         let mut updated = seat;
-        updated.reserved_margin = updated.reserved_margin.saturating_sub(
-            i128::from(leaf.quantity) * i128::from(leaf.price_or_offset.unsigned_abs()),
-        );
+        let core_bytes = unsafe { core_accounts[0].borrow_unchecked() };
+        let oracle = if core_bytes[V3_CORE_ORACLE_VALID_OFFSET] == 0 {
+            None
+        } else {
+            Some(i64::from_le_bytes(
+                core_bytes[V3_CORE_ORACLE_PRICE_OFFSET..V3_CORE_ORACLE_PRICE_OFFSET + 8]
+                    .try_into()
+                    .map_err(|_| bundle_error())?,
+            ))
+        };
+        let config = read_v3_risk_config(&core_bytes)?;
+        updated.reserved_margin = updated
+            .reserved_margin
+            .checked_sub(v3_order_reserve(&leaf, tree, oracle, config)?)
+            .ok_or(StockStreamError::RiskViolation)?;
         updated.open_order_count = updated.open_order_count.saturating_sub(1);
         write_v3_seat_shards(seat_accounts, shard, slot, &updated)?;
         let payload = crate::events::payload_order(

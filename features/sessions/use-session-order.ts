@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { cancelAll, cancelOrder, placeOrder, replaceOrder, type PlaceOrderParams } from "@/clients/stockstream/src";
+import { cancelAll, cancelAllV3, cancelOrder, cancelOrderV3, placeOrder, placeOrderV3, replaceOrder, replaceOrderV3, type PlaceOrderParams, type V3ExecutionAccounts } from "@/clients/stockstream/src";
 import { buildSessionSignedTransaction, isSessionUsable, submitToRelayer, toKitInstruction, type SessionStatus } from "@/lib/session-trading";
 import { actionAllowed } from "@/lib/browser-session";
 import { readCsrfToken } from "@/lib/csrf";
@@ -70,7 +70,7 @@ export function useSessionOrder(
 ) {
   const [pending, setPending] = useState(false);
 
-  const relay = useCallback(async (instruction: ReturnType<typeof placeOrder>, actions: readonly SessionAction[], label: string) => {
+  const relay = useCallback(async (instruction: ReturnType<typeof placeOrder> | ReturnType<typeof placeOrderV3>, actions: readonly SessionAction[], label: string) => {
     const gate = evaluateSessionActionGate(session, actions, executionStatus);
     if (!gate.allowed) return onResult(gate.result);
     const { domain } = gate;
@@ -125,50 +125,37 @@ export function useSessionOrder(
 
   const placeSessionOrder = useCallback((params: Omit<PlaceOrderParams, "authority" | "session" | "actionNonce" | "market" | "seatIndex">) => {
     if (!session) { onResult(blocked("session_invalid")); return Promise.resolve(); }
-    const instruction = placeOrder({
-      ...params,
-      market: session.marketPda,
-      seatIndex: session.seatIndex,
-      authority: session.sessionSignerAddress,
-      session: session.sessionPda,
-      actionNonce: session.nextExpectedNonce,
-    });
+    const v3 = session.v3ExecutionAccounts as V3ExecutionAccounts | undefined;
+    const instruction = v3
+      ? placeOrderV3({ ...params, ...v3, core: v3.core, seatIndex: session.seatIndex, authority: session.sessionSignerAddress, session: session.sessionPda, actionNonce: session.nextExpectedNonce })
+      : placeOrder({ ...params, market: session.marketPda, seatIndex: session.seatIndex, authority: session.sessionSignerAddress, session: session.sessionPda, actionNonce: session.nextExpectedNonce });
     return relay(instruction, requiredActionBits("place", params.reduceOnly ?? false), params.reduceOnly ? "ReduceOnlyClose" : "PlaceOrder");
   }, [relay, session, onResult]);
 
   const cancelSessionOrder = useCallback((orderKey: bigint) => {
     if (!session) { onResult(blocked("session_invalid")); return Promise.resolve(); }
-    const instruction = cancelOrder(
-      { market: session.marketPda, authority: session.sessionSignerAddress, session: session.sessionPda },
-      session.seatIndex,
-      orderKey,
-      session.nextExpectedNonce,
-    );
+    const v3 = session.v3ExecutionAccounts as V3ExecutionAccounts | undefined;
+    const instruction = v3
+      ? cancelOrderV3({ ...v3, core: v3.core, authority: session.sessionSignerAddress, session: session.sessionPda }, session.seatIndex, orderKey, session.nextExpectedNonce)
+      : cancelOrder({ market: session.marketPda, authority: session.sessionSignerAddress, session: session.sessionPda }, session.seatIndex, orderKey, session.nextExpectedNonce);
     return relay(instruction, ["cancel"], "CancelOrder");
   }, [relay, session, onResult]);
 
   const replaceSessionOrder = useCallback((oldOrderKey: bigint, params: Omit<PlaceOrderParams, "authority" | "session" | "actionNonce" | "market" | "seatIndex">) => {
     if (!session) { onResult(blocked("session_invalid")); return Promise.resolve(); }
-    const instruction = replaceOrder({
-      ...params,
-      oldOrderKey,
-      market: session.marketPda,
-      seatIndex: session.seatIndex,
-      authority: session.sessionSignerAddress,
-      session: session.sessionPda,
-      actionNonce: session.nextExpectedNonce,
-    });
+    const v3 = session.v3ExecutionAccounts as V3ExecutionAccounts | undefined;
+    const instruction = v3
+      ? replaceOrderV3({ ...params, ...v3, core: v3.core, oldOrderKey, seatIndex: session.seatIndex, authority: session.sessionSignerAddress, session: session.sessionPda, actionNonce: session.nextExpectedNonce })
+      : replaceOrder({ ...params, oldOrderKey, market: session.marketPda, seatIndex: session.seatIndex, authority: session.sessionSignerAddress, session: session.sessionPda, actionNonce: session.nextExpectedNonce });
     return relay(instruction, requiredActionBits("replace", params.reduceOnly ?? false), "ReplaceOrder");
   }, [relay, session, onResult]);
 
   const cancelAllSessionOrders = useCallback((limit: number) => {
     if (!session) { onResult(blocked("session_invalid")); return Promise.resolve(); }
-    const instruction = cancelAll(
-      { market: session.marketPda, authority: session.sessionSignerAddress, session: session.sessionPda },
-      session.seatIndex,
-      limit,
-      session.nextExpectedNonce,
-    );
+    const v3 = session.v3ExecutionAccounts as V3ExecutionAccounts | undefined;
+    const instruction = v3
+      ? cancelAllV3({ ...v3, core: v3.core, authority: session.sessionSignerAddress, session: session.sessionPda }, session.seatIndex, limit, session.nextExpectedNonce)
+      : cancelAll({ market: session.marketPda, authority: session.sessionSignerAddress, session: session.sessionPda }, session.seatIndex, limit, session.nextExpectedNonce);
     return relay(instruction, ["cancelAll"], "CancelAll");
   }, [relay, session, onResult]);
 

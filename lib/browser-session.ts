@@ -141,6 +141,16 @@ export interface SessionStatus {
   nextExpectedNonce: bigint;
   /** Set once a revoke is observed on-chain. */
   revoked: boolean;
+  /** Present only after a V3 session readback. Its addresses are the
+   * canonical core/page/seat/event/session bundle used by V3 writes. */
+  v3ExecutionAccounts?: {
+    core: string;
+    bookPages: readonly string[];
+    seatShards: readonly string[];
+    eventShards: readonly string[];
+    authority: string;
+    session?: string;
+  };
 }
 
 /** `nowUnixSeconds` is a client-side estimate (wall-clock) for display
