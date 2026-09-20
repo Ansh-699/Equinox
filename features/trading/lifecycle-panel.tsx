@@ -4,6 +4,7 @@ import { Step } from "./primitives";
 
 export function LifecyclePanel({
   onSeatAndScratch,
+  seatActionLabel = "Construct seat + scratch",
   onDeposit,
   onWithdraw,
   withdrawDisabled,
@@ -13,6 +14,7 @@ export function LifecyclePanel({
   onReplaceOrder,
 }: {
   onSeatAndScratch: () => void;
+  seatActionLabel?: string;
   onDeposit: () => void;
   onWithdraw: () => void;
   withdrawDisabled: boolean;
@@ -34,7 +36,7 @@ export function LifecyclePanel({
           <Step complete={false} active={false} label="Commit ER state to L1" />
           <Step complete={false} active={false} label="Undelegate and unlock withdrawal" />
         </div>
-        <button className="lifecycle-action" onClick={onSeatAndScratch}><LockKeyhole size={17} /> Construct seat + scratch</button>
+        <button className="lifecycle-action" onClick={onSeatAndScratch}><LockKeyhole size={17} /> {seatActionLabel}</button>
         <div className="lifecycle-actions">
           <button onClick={onDeposit}>Deposit</button>
           <button onClick={onWithdraw} disabled={withdrawDisabled} title={withdrawDisabled ? "Withdrawals disabled by market lifecycle state" : undefined}>Withdraw</button>

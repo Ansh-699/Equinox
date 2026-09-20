@@ -273,6 +273,7 @@ export function TradingTerminal() {
           />
           <LifecyclePanel
             onSeatAndScratch={runLifecycle}
+            seatActionLabel={process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS ? "Create V3 seat" : undefined}
             onDeposit={() => {
               const accounts = resolveCustodyAccounts(auth.walletAddress, marketAddress, marketConfig);
               if (!accounts) { setNotice("Configure the market, collateral mint/vault addresses and sign in before depositing."); return; }
