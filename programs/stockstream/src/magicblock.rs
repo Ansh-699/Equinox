@@ -2013,11 +2013,9 @@ fn commit_v3_member(
     if core_bytes.len() != v3::V3_MARKET_CORE_SIZE
         || core_bytes[0..8] != v3::V3_MARKET_CORE_DISCRIMINATOR
         || core_bytes[8..10] != v3::V3_LAYOUT_VERSION.to_le_bytes()
-        || core_bytes[v3::V3_CORE_DELEGATION_STATUS_OFFSET]
-            != DelegationStatus::Delegated as u8
+        || core_bytes[v3::V3_CORE_DELEGATION_STATUS_OFFSET] != DelegationStatus::Delegated as u8
         || core_u64(core_bytes, v3::V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET)? != sequence
-        || core_bytes[v3::V3_CORE_MARKET_AUTHORITY_OFFSET
-            ..v3::V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
+        || core_bytes[v3::V3_CORE_MARKET_AUTHORITY_OFFSET..v3::V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
             != accounts[1].address().to_bytes()
     {
         return Err(custom(StockStreamError::MagicBlockSequenceReplay));
@@ -2031,20 +2029,13 @@ fn commit_v3_member(
         bytes[10] < 2
             && bytes[11] < v3::V3_BOOK_PAGES_PER_SIDE as u8
             && *accounts[0].address()
-                == v3::derive_book_page_v3(
-                    program_id,
-                    &core_key,
-                    bytes[10],
-                    bytes[11],
-                )
+                == v3::derive_book_page_v3(program_id, &core_key, bytes[10], bytes[11])
     } else if bytes[0..8] == v3::V3_SEAT_SHARD_DISCRIMINATOR {
         bytes[10] < v3::V3_SEAT_SHARDS as u8
-            && *accounts[0].address()
-                == v3::derive_seat_shard_v3(program_id, &core_key, bytes[10])
+            && *accounts[0].address() == v3::derive_seat_shard_v3(program_id, &core_key, bytes[10])
     } else if bytes[0..8] == v3::V3_EVENT_SHARD_DISCRIMINATOR {
         bytes[10] < v3::V3_EVENT_SHARDS as u8
-            && *accounts[0].address()
-                == v3::derive_event_shard_v3(program_id, &core_key, bytes[10])
+            && *accounts[0].address() == v3::derive_event_shard_v3(program_id, &core_key, bytes[10])
     } else {
         false
     };
@@ -2123,8 +2114,7 @@ fn commit_v3_core(
         if core_u64(bytes, v3::V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET)? != sequence {
             return Err(custom(StockStreamError::MagicBlockSequenceReplay));
         }
-        if bytes[v3::V3_CORE_MARKET_AUTHORITY_OFFSET
-            ..v3::V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
+        if bytes[v3::V3_CORE_MARKET_AUTHORITY_OFFSET..v3::V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
             != accounts[1].address().to_bytes()
         {
             return Err(custom(StockStreamError::MagicBlockSequenceReplay));
@@ -2224,10 +2214,8 @@ pub fn request_v3_undelegation(
     {
         return Err(custom(StockStreamError::MagicBlockInvalidAccount));
     }
-    let (_, bump) = Address::find_program_address(
-        &[v3::V3_MARKET_CORE_SEED, instrument.as_ref()],
-        program_id,
-    );
+    let (_, bump) =
+        Address::find_program_address(&[v3::V3_MARKET_CORE_SEED, instrument.as_ref()], program_id);
     let bump_slice = [bump];
     let seeds = [
         Seed::from(v3::V3_MARKET_CORE_SEED),
@@ -2244,9 +2232,19 @@ pub fn request_v3_undelegation(
         InstructionAccount::readonly(accounts[6].address()),
     ];
     let data = 26u64.to_le_bytes();
-    let ix = InstructionView { program_id: &DELEGATION_PROGRAM_ID, accounts: &cpi_accounts, data: &data };
+    let ix = InstructionView {
+        program_id: &DELEGATION_PROGRAM_ID,
+        accounts: &cpi_accounts,
+        data: &data,
+    };
     let views: [&AccountView; 7] = [
-        &accounts[0], &accounts[1], &accounts[2], &accounts[3], &accounts[4], &accounts[5], &accounts[6],
+        &accounts[0],
+        &accounts[1],
+        &accounts[2],
+        &accounts[3],
+        &accounts[4],
+        &accounts[5],
+        &accounts[6],
     ];
     invoke_signed_with_bounds::<7, _>(&ix, &views, &[Signer::from(&seeds)])
 }
@@ -2305,10 +2303,8 @@ pub fn rollback_v3_undelegation(
     {
         return Err(custom(StockStreamError::MagicBlockInvalidAccount));
     }
-    let (_, bump) = Address::find_program_address(
-        &[v3::V3_MARKET_CORE_SEED, instrument.as_ref()],
-        program_id,
-    );
+    let (_, bump) =
+        Address::find_program_address(&[v3::V3_MARKET_CORE_SEED, instrument.as_ref()], program_id);
     let bump_slice = [bump];
     let seeds = [
         Seed::from(v3::V3_MARKET_CORE_SEED),
@@ -2327,10 +2323,21 @@ pub fn rollback_v3_undelegation(
         InstructionAccount::writable(accounts[8].address()),
     ];
     let data = 27u64.to_le_bytes();
-    let ix = InstructionView { program_id: &DELEGATION_PROGRAM_ID, accounts: &cpi_accounts, data: &data };
+    let ix = InstructionView {
+        program_id: &DELEGATION_PROGRAM_ID,
+        accounts: &cpi_accounts,
+        data: &data,
+    };
     let views: [&AccountView; 9] = [
-        &accounts[0], &accounts[1], &accounts[2], &accounts[3], &accounts[4],
-        &accounts[5], &accounts[6], &accounts[7], &accounts[8],
+        &accounts[0],
+        &accounts[1],
+        &accounts[2],
+        &accounts[3],
+        &accounts[4],
+        &accounts[5],
+        &accounts[6],
+        &accounts[7],
+        &accounts[8],
     ];
     invoke_signed_with_bounds::<9, _>(&ix, &views, &[Signer::from(&seeds)])?;
     let restored = unsafe { accounts[0].borrow_unchecked_mut() };
