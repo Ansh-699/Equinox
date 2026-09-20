@@ -18,13 +18,13 @@ This matrix is scoped to the current checkout (`b93c1cf`). “Fresh” means rer
 | V3 PnL accounting | locally-tested | `programs/stockstream/src/risk.rs`; `cargo test -p stockstream --test state_risk repeated_partial_closes_preserve_fractional_entry_value` verifies proportional entry allocation across repeated partial closes | yes |
 | V3 fee accounting | locally-tested | `programs/stockstream/src/v3.rs`; `cargo test -p stockstream --test v3_bundle` | yes |
 | V3 funding accounting | locally-tested | `programs/stockstream/src/risk.rs`, `programs/stockstream/src/v3.rs`; `cargo test -p stockstream --test v3_bundle` | yes |
-| V3 open-interest accounting | locally-tested | `programs/stockstream/src/v3.rs`; `cargo test -p stockstream --test v3_bundle` | yes |
+| V3 open-interest accounting | locally-tested | `programs/stockstream/src/v3.rs`; commit `d563f28`; `NO_DNA=1 cargo test -p stockstream --tests`, including `v3_place_rejects_maximum_open_interest_before_mutation` | yes; current HEAD gate |
 | V3 liquidation | locally-tested | `programs/stockstream/src/v3.rs`, `programs/stockstream/src/handlers.rs`; `v3_liquidation_updates_open_interest_and_insurance_fee` verifies position reduction, open-interest reduction, insurance fee, and recognized bad debt | yes; no live liquidation |
 | Fixed/OraclePegged matching | locally-tested | `programs/stockstream/src/book.rs`, `programs/stockstream/src/v3.rs`; `cargo test -p stockstream --test order_book --test v3_bundle` | yes |
 | post-only | locally-tested | `programs/stockstream/src/book.rs`, `programs/stockstream/src/v3.rs`; `cargo test -p stockstream --test order_book` | yes |
 | IOC | locally-tested | `programs/stockstream/src/book.rs`; `cargo test -p stockstream --test order_book --test account_settlement` | yes |
 | reduce-only | locally-tested | `programs/stockstream/src/v3.rs`, `programs/stockstream/src/handlers.rs`; `cargo test -p stockstream --tests` | yes |
-| maximum-open-orders | locally-tested | `programs/stockstream/src/v3.rs`, `programs/stockstream/src/session.rs`; `cargo test -p stockstream --test trading_session` | yes |
+| maximum-open-orders | locally-tested | `programs/stockstream/src/v3.rs`, `programs/stockstream/src/session.rs`; commit `d563f28`; `NO_DNA=1 cargo test -p stockstream --tests`, including V3 session actor limit coverage | yes; current HEAD gate |
 | cancel accounting | locally-tested | `programs/stockstream/src/v3.rs`; fresh regression `v3_cancel_all_releases_reserve_and_side_exposure_for_every_tree` | yes |
 | cancel-all accounting | locally-tested | `programs/stockstream/src/v3.rs`; `cargo test -p stockstream --test v3_bundle v3_cancel_all_releases_reserve_and_side_exposure_for_every_tree` | yes |
 | replace accounting | locally-tested | `programs/stockstream/src/v3.rs`; `cargo test -p stockstream --test v3_bundle` | yes |
