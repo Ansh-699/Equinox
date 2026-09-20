@@ -29,6 +29,7 @@ export const OPCODE = {
   rollbackV3Undelegation: 52,
   depositCollateralV3: 53,
   withdrawCollateralV3: 54,
+  reconcileVaultV3: 55,
 } as const;
 
 /** Session action allowlist bits — must match `session::SESSION_ACTION_*`. */

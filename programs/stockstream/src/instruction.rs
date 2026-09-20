@@ -48,6 +48,10 @@ pub const ROLLBACK_V3_UNDELEGATION: u8 = 52;
 /// execution bundle so restoration/finality cannot be bypassed.
 pub const DEPOSIT_COLLATERAL_V3: u8 = 53;
 pub const WITHDRAW_COLLATERAL_V3: u8 = 54;
+/// Permissionless restored-core vault reconciliation against the V3 durable
+/// liability/fee ledgers. Data is `[55]`; accounts are the 27-account bundle
+/// followed by `[vault, mint, token_program]`.
+pub const RECONCILE_VAULT_V3: u8 = 55;
 pub const COMMIT_MARKET: u8 = 14;
 pub const COMMIT_AND_UNDELEGATE: u8 = 15;
 /// Reserved: the real external-undelegate callback uses the delegation
@@ -306,6 +310,7 @@ pub enum StockStreamInstruction {
         vault_surplus: i128,
         withdrawal_buffer: i128,
     },
+    ReconcileVaultV3,
     TransitionMarket {
         mode: u8,
         /// The specific opcode that produced this transition. Several of
@@ -641,6 +646,7 @@ impl StockStreamInstruction {
                     },
                 })
             }
+            Some(RECONCILE_VAULT_V3) if data.len() == 1 => Ok(Self::ReconcileVaultV3),
             Some(PAUSE_MARKET) if data.len() == 1 => Ok(Self::TransitionMarket {
                 mode: 0,
                 action: MarketTransitionAction::Pause,

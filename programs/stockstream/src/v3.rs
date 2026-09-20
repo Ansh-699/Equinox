@@ -30,7 +30,9 @@ use crate::{
     error::StockStreamError,
     instruction::{PlaceOrderData, StockStreamInstruction},
     session::{self, TradingSession},
-    state::{DelegationStatus, LiquidationState, TraderSeat, TRADER_SEAT_SIZE},
+    state::{
+        DelegationStatus, LiquidationState, ReconciliationStatus, TraderSeat, TRADER_SEAT_SIZE,
+    },
 };
 
 /// The V3 trading ABI places the complete execution bundle first, followed by
@@ -3504,6 +3506,106 @@ fn place_order_v3_with_action(
             )?;
         }
     }
+    Ok(())
+}
+
+/// Reconciles the restored V3 vault against its durable core ledgers. Accounts
+/// are the complete execution bundle followed by `[vault, mint, token_program]`.
+/// The operation is permissionless, but requires restored/core-owned state and
+/// records the result in the same event queue used by V3 custody writes.
+pub fn reconcile_vault_v3(program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
+    if accounts.len() != V3_EXECUTION_BUNDLE_LEN + 3 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    validate_execution_bundle(program_id, &accounts[..V3_EXECUTION_BUNDLE_LEN], false)?;
+    for index in V3_EXECUTION_BUNDLE_LEN..accounts.len() {
+        if accounts[..index]
+            .iter()
+            .any(|other| other.address() == accounts[index].address())
+        {
+            return Err(StockStreamError::CustodyViolation.into());
+        }
+    }
+    let core_key = *accounts[0].address();
+    let core_bytes = unsafe { accounts[0].borrow_unchecked() };
+    if !matches!(
+        core_bytes[V3_CORE_DELEGATION_STATUS_OFFSET],
+        x if x == DelegationStatus::NotDelegated as u8 || x == DelegationStatus::Restored as u8
+    ) || core_bytes[V3_CORE_COMMIT_PHASE_OFFSET] != V3_COMMIT_PHASE_IDLE
+        || *accounts[V3_EXECUTION_BUNDLE_LEN].address()
+            != crate::handlers::derive_vault(&core_key, program_id)
+        || *accounts[V3_EXECUTION_BUNDLE_LEN + 2].address() != pinocchio_token::ID
+        || *accounts[V3_EXECUTION_BUNDLE_LEN + 1].address()
+            != Address::new_from_array(core_bytes[76..108].try_into().map_err(|_| bundle_error())?)
+    {
+        return Err(StockStreamError::CustodyViolation.into());
+    }
+    let vault_authority = crate::handlers::derive_vault_authority(&core_key, program_id);
+    let vault = TokenAccount::from_account_view(&accounts[V3_EXECUTION_BUNDLE_LEN])
+        .map_err(|_| StockStreamError::CustodyViolation)?;
+    if *vault.owner() != vault_authority
+        || *vault.mint() != *accounts[V3_EXECUTION_BUNDLE_LEN + 1].address()
+    {
+        return Err(StockStreamError::CustodyViolation.into());
+    }
+    let liability = core_i128(core_bytes, V3_CORE_VAULT_LIABILITY_OFFSET)?;
+    let protocol = core_i128(core_bytes, V3_CORE_PROTOCOL_FEE_BALANCE_OFFSET)?;
+    let insurance = core_i128(core_bytes, V3_CORE_INSURANCE_BALANCE_OFFSET)?;
+    let bad_debt = core_i128(core_bytes, V3_CORE_BAD_DEBT_OFFSET)?;
+    let expected = liability
+        .checked_add(protocol)
+        .and_then(|value| value.checked_add(insurance))
+        .and_then(|value| value.checked_sub(bad_debt))
+        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    if expected < 0 {
+        return Err(StockStreamError::RiskViolation.into());
+    }
+    let actual = i128::from(vault.amount());
+    let (status, surplus, event_kind) = if actual == expected {
+        (
+            ReconciliationStatus::Reconciled,
+            0i128,
+            crate::events::EventKind::VaultReconciled,
+        )
+    } else if actual > expected {
+        (
+            ReconciliationStatus::SurplusDetected,
+            actual
+                .checked_sub(expected)
+                .ok_or(StockStreamError::ArithmeticOverflow)?,
+            crate::events::EventKind::VaultSurplusDetected,
+        )
+    } else {
+        (
+            ReconciliationStatus::DeficitDetected,
+            0,
+            crate::events::EventKind::VaultDeficitDetected,
+        )
+    };
+    let status_byte = status as u8;
+    let expected_u64 = u64::try_from(expected).map_err(|_| StockStreamError::ArithmeticOverflow)?;
+    let actual_u64 = u64::try_from(actual).map_err(|_| StockStreamError::ArithmeticOverflow)?;
+    let mut core_copy = accounts[0].clone();
+    let core = unsafe { core_copy.borrow_unchecked_mut() };
+    core[V3_CORE_RECONCILIATION_STATUS_OFFSET] = status_byte;
+    set_core_i128(&mut core[..], V3_CORE_VAULT_SURPLUS_OFFSET, surplus)?;
+    if status != ReconciliationStatus::Reconciled {
+        core[V3_CORE_MODE_OFFSET] = 0;
+    }
+    let mut event_copies = [
+        accounts[23].clone(),
+        accounts[24].clone(),
+        accounts[25].clone(),
+        accounts[26].clone(),
+    ];
+    append_event_record(
+        program_id,
+        &mut core_copy,
+        &mut event_copies,
+        event_kind as u16,
+        &crate::events::payload_reconciliation(actual_u64, expected_u64, status_byte),
+        crate::handlers::event_timestamp(),
+    )?;
     Ok(())
 }
 

@@ -187,6 +187,14 @@ fn v3_risk_update_extended_vector_decodes_surplus_and_buffer() {
 }
 
 #[test]
+fn v3_reconcile_vault_opcode_decodes_without_authority_payload() {
+    assert!(matches!(
+        StockStreamInstruction::decode(&[instruction::RECONCILE_VAULT_V3]),
+        Ok(StockStreamInstruction::ReconcileVaultV3)
+    ));
+}
+
+#[test]
 fn typescript_golden_instruction_vectors_decode_in_rust() {
     assert!(matches!(
         StockStreamInstruction::decode(&[0]),
