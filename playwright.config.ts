@@ -5,6 +5,10 @@ const MOCK_RELAYER_PORT = 4182;
 const MOCK_MARKET_API_PORT = 4183;
 const MOCK_RELAYER_TOKEN = "mock-relayer-token";
 const APP_PORT = 4173;
+// The fixture suite exercises the same V3 write branches as production. The
+// mock RPC serves valid V3 core/shard bytes for this deterministic address;
+// Devnet keeps its own separate opt-in configuration.
+const V3_CORE_ADDRESS = "47Mx7SZvt7EY6NydsA5krgrqvcDDR1H5BG5xTPDSnhso";
 
 export default defineConfig({
   testDir: "./tests/browser",
@@ -22,7 +26,7 @@ export default defineConfig({
       command: `node tests/browser/mock-rpc-server.mjs`,
       port: MOCK_RPC_PORT,
       reuseExistingServer: false,
-      env: { MOCK_RPC_PORT: String(MOCK_RPC_PORT) },
+        env: { MOCK_RPC_PORT: String(MOCK_RPC_PORT), MOCK_V3_CORE_ADDRESS: V3_CORE_ADDRESS },
     },
     {
       command: `node tests/browser/mock-relayer-server.mjs`,
@@ -67,6 +71,7 @@ export default defineConfig({
         NEXT_PUBLIC_STOCKSTREAM_VAULT: "2c1xQXN8stTMFgNg1SXg11xPNUJTFgnGrvTwrvpH77hm",
         NEXT_PUBLIC_STOCKSTREAM_VAULT_AUTHORITY: "GjBKKDieg7J8H73Yg9Zd2xwVD7htRqppmhAWwDcV4esK",
         NEXT_PUBLIC_STOCKSTREAM_RELAYER_ADDRESS: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
+        NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS: V3_CORE_ADDRESS,
         STOCKSTREAM_RELAYER_URL: `http://127.0.0.1:${MOCK_RELAYER_PORT}`,
         STOCKSTREAM_RELAYER_TOKEN: MOCK_RELAYER_TOKEN,
       },

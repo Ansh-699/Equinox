@@ -4,12 +4,30 @@
 // independently -- see that file's marketBytes()/sessionBytes() for the
 // same offsets with the same comments.
 import http from "node:http";
-import { VersionedTransaction } from "@solana/web3.js";
+import { PublicKey, VersionedTransaction } from "@solana/web3.js";
 
 const PROGRAM_ID = "H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET";
 const PORT = Number(process.env.MOCK_RPC_PORT ?? 4181);
+const V3_CORE = process.env.MOCK_V3_CORE_ADDRESS ?? "";
 const AUTHORIZE_TRADING_SESSION = 17;
 const REVOKE_TRADING_SESSION = 18;
+
+const programKey = new PublicKey(PROGRAM_ID);
+const v3CoreKey = V3_CORE ? new PublicKey(V3_CORE) : null;
+const v3Addresses = new Map();
+if (v3CoreKey) {
+  v3Addresses.set(v3CoreKey.toBase58(), "core");
+  for (let side = 0; side < 2; side += 1) for (let page = 0; page < 9; page += 1) {
+    const [address] = PublicKey.findProgramAddressSync([Buffer.from("book-page-v3"), v3CoreKey.toBuffer(), Buffer.from([side]), Buffer.from([page])], programKey);
+    v3Addresses.set(address.toBase58(), `book:${side}:${page}`);
+  }
+  for (let shard = 0; shard < 4; shard += 1) {
+    const [seat] = (await import("@solana/web3.js")).PublicKey.findProgramAddressSync([Buffer.from("seat-shard-v3"), v3CoreKey.toBuffer(), Buffer.from([shard])], programKey);
+    const [event] = (await import("@solana/web3.js")).PublicKey.findProgramAddressSync([Buffer.from("event-shard-v3"), v3CoreKey.toBuffer(), Buffer.from([shard])], programKey);
+    v3Addresses.set(seat.toBase58(), `seat:${shard}`);
+    v3Addresses.set(event.toBase58(), `event:${shard}`);
+  }
+}
 
 // Mutable in-memory state a test can steer via POST /control -- e.g. to
 // simulate a not-yet-occupied seat or a revoked session.
@@ -57,6 +75,70 @@ function marketBytes() {
     bytes[seatStart + 172] = 0; // liquidationState = Healthy
     bytes.writeBigUInt64LE(1n, seatStart + 176); // sequence
   }
+  return bytes;
+}
+
+function v3CoreBytes() {
+  const bytes = Buffer.alloc(4096);
+  bytes.write("STKMK003");
+  bytes.writeUInt16LE(3, 8);
+  bytes[10] = 1;
+  bytes[11] = 1;
+  Buffer.alloc(32, 2).copy(bytes, 12);
+  Buffer.alloc(32, 1).copy(bytes, 44);
+  bytes[180] = 1;
+  bytes.writeBigInt64LE(100n, 181);
+  bytes.writeBigUInt64LE(1_000_000n, 189);
+  bytes[197] = 0;
+  bytes.writeBigUInt64LE(1n, 198);
+  bytes.writeBigUInt64LE(1n, 206);
+  bytes.writeUInt16LE(1_000, 218);
+  bytes.writeUInt16LE(500, 220);
+  bytes.writeUInt16LE(50, 222);
+  bytes.writeUInt16LE(2, 224);
+  bytes.writeUInt16LE(4, 226);
+  bytes.writeUInt32LE(10, 228);
+  bytes.writeUInt16LE(1_000, 304);
+  bytes[370] = 0;
+  bytes[371] = 1;
+  bytes[372] = 0;
+  return bytes;
+}
+
+function v3BookBytes(side, page) {
+  const bytes = Buffer.alloc(10_184);
+  bytes.write("STKBK003");
+  bytes.writeUInt16LE(3, 8);
+  bytes[10] = side;
+  bytes[11] = page;
+  v3CoreKey.toBuffer().copy(bytes, 12);
+  return bytes;
+}
+
+function v3SeatBytes(shard) {
+  const bytes = Buffer.alloc(8_236);
+  bytes.write("STKST003");
+  bytes.writeUInt16LE(3, 8);
+  bytes[10] = shard;
+  bytes[11] = 0;
+  v3CoreKey.toBuffer().copy(bytes, 12);
+  if (state.seatOccupied && shard === 0) {
+    const base = 44;
+    bytes[base] = 1;
+    if (globalThis.__e2eOwnerBytes) globalThis.__e2eOwnerBytes.copy(bytes, base + 1);
+    writeI128LE(bytes, base + 40, state.seatAvailableCollateral);
+    bytes.writeBigUInt64LE(1n, base + 176);
+  }
+  return bytes;
+}
+
+function v3EventBytes(shard) {
+  const bytes = Buffer.alloc(3_244);
+  bytes.write("STKEV003");
+  bytes.writeUInt16LE(3, 8);
+  bytes[10] = shard;
+  bytes[11] = 0;
+  v3CoreKey.toBuffer().copy(bytes, 12);
   return bytes;
 }
 
@@ -109,7 +191,12 @@ function observeTransaction(base64) {
     const discriminator = data[0];
     if (discriminator === AUTHORIZE_TRADING_SESSION) {
       // accounts: [market, payer, sessionPda, sessionSigner, systemProgram]
-      const [market, payer, sessionPda, sessionSigner] = instruction.accountKeyIndexes.map((i) => keys[i]);
+      const indexes = instruction.accountKeyIndexes.map((i) => keys[i]);
+      // V3 authorization carries the full 27-account execution bundle before
+      // authority/session/system accounts; V2 retains its five-account tuple.
+      const [market, payer, sessionPda, sessionSigner] = indexes.length > 10
+        ? [indexes[0], indexes[indexes.length - 4], indexes[indexes.length - 3], indexes[indexes.length - 2]]
+        : indexes;
       sessions.set(sessionPda, {
         owner: publicKeyBytes(payer),
         sessionSigner: publicKeyBytes(sessionSigner),
@@ -226,6 +313,24 @@ const server = http.createServer((req, res) => {
         const entry = sessions.get(address);
         if (entry) {
           res.end(jsonRpcResult(id, { context: { slot: 1 }, value: { owner: PROGRAM_ID, executable: false, data: [sessionBytes(entry).toString("base64"), "base64"] } }));
+          return;
+        }
+        const kind = v3Addresses.get(address);
+        if (kind === "core") {
+          res.end(jsonRpcResult(id, { context: { slot: 1 }, value: { owner: PROGRAM_ID, executable: false, data: [v3CoreBytes().toString("base64"), "base64"] } }));
+          return;
+        }
+        if (kind?.startsWith("book:")) {
+          const [, side, page] = kind.split(":");
+          res.end(jsonRpcResult(id, { context: { slot: 1 }, value: { owner: PROGRAM_ID, executable: false, data: [v3BookBytes(Number(side), Number(page)).toString("base64"), "base64"] } }));
+          return;
+        }
+        if (kind?.startsWith("seat:")) {
+          res.end(jsonRpcResult(id, { context: { slot: 1 }, value: { owner: PROGRAM_ID, executable: false, data: [v3SeatBytes(Number(kind.slice(5))).toString("base64"), "base64"] } }));
+          return;
+        }
+        if (kind?.startsWith("event:")) {
+          res.end(jsonRpcResult(id, { context: { slot: 1 }, value: { owner: PROGRAM_ID, executable: false, data: [v3EventBytes(Number(kind.slice(6))).toString("base64"), "base64"] } }));
           return;
         }
         res.end(jsonRpcResult(id, { context: { slot: 1 }, value: { owner: PROGRAM_ID, executable: false, data: [marketBytes().toString("base64"), "base64"] } }));

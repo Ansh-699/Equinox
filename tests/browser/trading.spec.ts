@@ -3,6 +3,10 @@ import { test, expect, type Page } from "@playwright/test";
 const RELAYER_CONTROL_URL = `http://127.0.0.1:${process.env.MOCK_RELAYER_PORT ?? 4182}/control`;
 const MARKET_API_CONTROL_URL = `http://127.0.0.1:${process.env.MOCK_MARKET_API_PORT ?? 4183}/control`;
 
+async function setExecutionStatus(status: string) {
+  await fetch(MARKET_API_CONTROL_URL, { method: "POST", body: JSON.stringify({ status }) });
+}
+
 async function setRelayerMode(mode: string, resetNonce = false) {
   await fetch(RELAYER_CONTROL_URL, { method: "POST", body: JSON.stringify({ mode, resetNonce }) });
 }
@@ -141,6 +145,33 @@ test("withdrawal signs with the main wallet, never the session key", async ({ pa
   await page.goto("/");
   await login(page);
   const before = await promptCount(page);
+  await page.getByRole("button", { name: "Withdraw", exact: true }).click();
+  await expect(page.locator(".notice")).toContainText(/confirmed|finalized/, { timeout: 10_000 });
+  expect(await promptCount(page)).toBe(before + 1);
+});
+
+test("V3 lifecycle constructs the sharded seat action", async ({ page }) => {
+  await page.goto("/");
+  await login(page);
+  await page.getByRole("button", { name: "Construct seat + scratch" }).click();
+  await expect(page.locator(".notice")).toContainText("Constructed CreateV3TraderSeat");
+});
+
+test("V3 withdrawal stays blocked while a commit is pending", async ({ page }) => {
+  await page.goto("/");
+  await login(page);
+  await setExecutionStatus("commit_scheduled");
+  await expect(page.locator('.status-strip[aria-live="polite"]')).toContainText("commit pending", { timeout: 10_000 });
+  await expect(page.getByRole("button", { name: "Withdraw", exact: true })).toBeDisabled();
+});
+
+test("V3 restored state re-enables the withdrawal write path", async ({ page }) => {
+  await page.goto("/");
+  await login(page);
+  await setExecutionStatus("restored");
+  await page.waitForTimeout(5_500);
+  const before = await promptCount(page);
+  await expect(page.getByRole("button", { name: "Withdraw", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "Withdraw", exact: true }).click();
   await expect(page.locator(".notice")).toContainText(/confirmed|finalized/, { timeout: 10_000 });
   expect(await promptCount(page)).toBe(before + 1);
