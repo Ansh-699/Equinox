@@ -55,7 +55,9 @@ write changes (`c585022`, `f75c0da`, `8c17794`) do not change the Rust artifact.
 
 Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives all 26 child PDAs from the supplied core and returns a bigint-safe aggregate. It is read-only and cannot claim live V3 state until a V3 core is deployed.
 
-- Rust (native + LiteSVM runtime): 238 passing, `cargo fmt --check` clean.
+Fresh current-HEAD regression evidence: `cargo test -p stockstream --test v3_bundle v3_cancel_all_releases_reserve_and_side_exposure_for_every_tree` passes after `cancel_all_v3` was corrected to decrement the owning seat's bid/ask exposure counters along with reserved margin and open-order count. This is local Pinocchio/LiteSVM-style evidence only; no Devnet account was mutated.
+
+- Rust (native + LiteSVM runtime): 239 passing, `cargo fmt --check` clean; fresh `NO_DNA=1 cargo test -p stockstream --tests` on the current checkout passed 239/239 across 29 suites.
 - Workers (Miniflare/vitest): 353 passing (34 files; relayer risk/version/lifetime guards included).
 - Frontend (vitest): 210 passing (33 files).
 - Frontend (Playwright fixture E2E): 54 passing, including V3 deposit, confirmed L1 seat creation, ER-owned seat-write blocking, session authorization, place/cancel/replace/reduce-only, commit-pending blocking and restored withdrawal; opt-in Devnet read-only E2E: 2 passing.

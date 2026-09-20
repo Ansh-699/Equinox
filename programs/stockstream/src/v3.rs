@@ -3716,6 +3716,17 @@ pub fn cancel_all_v3(
             .checked_sub(v3_order_reserve(&leaf, tree, oracle, config)?)
             .ok_or(StockStreamError::RiskViolation)?;
         updated.open_order_count = updated.open_order_count.saturating_sub(1);
+        if leaf.side == Side::Bid as u8 {
+            updated.open_bid_exposure = updated
+                .open_bid_exposure
+                .checked_sub(i128::from(leaf.quantity))
+                .ok_or(StockStreamError::RiskViolation)?;
+        } else {
+            updated.open_ask_exposure = updated
+                .open_ask_exposure
+                .checked_sub(i128::from(leaf.quantity))
+                .ok_or(StockStreamError::RiskViolation)?;
+        }
         write_v3_seat_shards(seat_accounts, shard, slot, &updated)?;
         let payload = crate::events::payload_order(
             seat_index,
