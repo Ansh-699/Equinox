@@ -51,9 +51,11 @@ Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives 
   --features bpf-entrypoint` and `scripts/verify-sbf-artifact.py` passed.
   This is a local build, not a live deployment. Current V3-seat-lifecycle
   artifact SHA-256: `f4e86719bf75db3ee28b6623787c1ed6ee674eace8dc48d7c295afccc3531662`.
-- Commit-limit correction (uncommitted checkpoint): `cargo test -p stockstream
-  --test magicblock` (30), `--test v3_bundle` (7), root V3 ABI tests (6),
-  Worker V3 state tests (4), both TypeScript checks, and ABI parity pass.
+- Commit-limit correction (`6492c75`): `cargo test -p stockstream --test
+  magicblock` (30), `--test v3_bundle` (7), root V3 ABI tests (6), Worker
+  V3 state tests (4), both TypeScript checks, ABI parity, and a loadable SBF
+  build pass. Current local artifact SHA-256:
+  `30db974b2e714ead376fc4eb5c206c278508d816f1407922e02a3841cc4ac469`.
 
 ## Known external blockers (not fixable from this codebase alone)
 
@@ -65,6 +67,9 @@ Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives 
    `Equity.US.AAPL/USD` has not been supplied. The public Hermes catalog
    identifies the required feed hash and its `fixed_rate@50ms` minimum,
    but that hash is not a Lazer subscription ID.
+   On 2026-09-20, the local smoke command with the ignored credential file
+   (`node --env-file=.env.local scripts/pyth-live-smoke.mjs`) failed closed
+   before opening a socket because that numeric ID remains unset.
 2. **Privy-linked test wallet and deployed relayer configuration** -- local
    server-only app credentials are configured, but a real Privy access token
    for a linked wallet matching a preserved trader is not present. The
