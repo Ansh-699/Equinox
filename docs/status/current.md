@@ -19,7 +19,7 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 
 | Area | Status | Evidence |
 |---|---|---|
-| ABI authority/parity | Complete | `npm run check:stockstream-abi` -> `ABI-OK`; the canonical instruction builders, account decoders, event/legacy-book decoders, session/registry/custody/oracle/MagicBlock modules, and shared encoding/transaction primitives are authoritative under `clients/stockstream/src/abi/`. The compatibility surface in `clients/stockstream/src/index.ts` is now a 122-line re-export facade; its remaining `decodeTradingSession` PublicKey-shape adapter and unsigned `previewPlaceOrder` helper are compatibility APIs, not duplicate ABI authorities (`799017f`). Targeted facade/V3 tests pass: 32/32. |
+| ABI authority/parity | Complete | `npm run check:stockstream-abi` -> `ABI-OK`; the canonical instruction builders, account decoders, event/legacy-book decoders, session/registry/custody/oracle/MagicBlock modules, and shared encoding/transaction primitives are authoritative under `clients/stockstream/src/abi/`. The compatibility surface in `clients/stockstream/src/index.ts` is now a 122-line re-export facade; its remaining `decodeTradingSession` PublicKey-shape adapter and unsigned `previewPlaceOrder` helper are compatibility APIs, not duplicate ABI authorities (`799017f`). Targeted facade/V3 tests pass: 34/34, including exact MagicBlock V3 account-order and signer/writable-flag vectors. |
 | DepositCollateral account ABI | Complete | commit `8abc245`; 254+ Rust tests; live Devnet vault balance matched exactly (800,000 = 2x400,000 deposits) |
 | CreateVaultAccount account ABI | Complete | commit `54cd92b`; 8 new LiteSVM tests incl. a proven CPI-rollback case |
 | CreateScratchAccount (op45) | Complete | commit `00c4fb7`; 6 LiteSVM tests; live on Devnet |
@@ -46,7 +46,7 @@ Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives 
 
 - Rust (native + LiteSVM runtime): 290 passing, `cargo fmt --check` clean.
 - Workers (Miniflare/vitest): 348 passing (33 files).
-- Frontend (vitest): 203 passing.
+- Frontend (vitest): 205 passing.
 - Frontend (Playwright fixture E2E): 50 passing; opt-in Devnet read-only E2E: 2 passing.
 - Frontend (Playwright production smoke): 6 passing.
 - `tsc --noEmit` clean on both the frontend and workers packages.
