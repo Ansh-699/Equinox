@@ -1,0 +1,29 @@
+{
+  "asOf": "2026-09-21",
+  "network": "devnet",
+  "program": "H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET",
+  "programData": "GCLwk9aFz8cz4etHv4cibqSwaKBa2ubQUgPRhRiHqTP2",
+  "upgrade": {
+    "signature": "4La3hXgViTtJ3uFrnRHZXmdwbGyDWitQXJj4Czfg2T69hqXBg1wiHQZtcfsLAyhR9DtFjU5htt9ZXN7cTk2xc9MS",
+    "slot": 501407453,
+    "transactionError": null,
+    "commitment": "finalized"
+  },
+  "programAccount": {
+    "owner": "BPFLoaderUpgradeab1e11111111111111111111111",
+    "executable": true,
+    "programData": "GCLwk9aFz8cz4etHv4cibqSwaKBa2ubQUgPRhRiHqTP2"
+  },
+  "programDataAccount": {
+    "owner": "BPFLoaderUpgradeab1e11111111111111111111111",
+    "upgradeAuthority": "none",
+    "lastDeployedSlot": 501407453,
+    "elfLength": 451024,
+    "sha256": "24ee8e881c9909fb56b89571756f01e080e4c64758a8a2af176f98adc97a4bc7"
+  },
+  "commands": [
+    "solana program show --url https://api.devnet.solana.com H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET",
+    "solana program dump --url https://api.devnet.solana.com H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET /tmp/stockstream-deployed-current.so"
+  ],
+  "mutations": "read-only verification; no transaction submitted"
+}
