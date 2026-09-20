@@ -25,6 +25,7 @@ import {
   recordBadDebtInstruction,
   replaceOrderInstruction,
   replaceOrderV3Instruction,
+  reconcileVaultV3Instruction,
   sessionKeeperBuilder,
   setComputeUnitLimitInstruction,
   setComputeUnitPriceInstruction,
@@ -198,6 +199,12 @@ describe("StockStream transaction construction (@solana/kit)", () => {
     }, 0, 1n);
     expect(withdraw.data![0]).toBe(OPCODE.withdrawCollateralV3);
     expect(withdraw.accounts).toHaveLength(33);
+    const reconcile = reconcileVaultV3Instruction(PROGRAM, {
+      core: writable, bookPages: v3.bookPages, seatShards: v3.seatShards, eventShards: v3.eventShards,
+      vault: writable, mint: readonly, tokenProgram: readonly,
+    });
+    expect(reconcile.data![0]).toBe(OPCODE.reconcileVaultV3);
+    expect(reconcile.accounts).toHaveLength(30);
     expect(() => withdrawCollateralV3Instruction(PROGRAM, { ...v3, session: readonly, destination: writable, mint: readonly, vault: writable, vaultAuthority: readonly, tokenProgram: readonly }, 0, 1n)).toThrow("session PDA");
   });
 
