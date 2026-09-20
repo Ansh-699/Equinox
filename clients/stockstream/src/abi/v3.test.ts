@@ -8,6 +8,11 @@ import {
   decodeV3BookPage, decodeV3MarketCore,
   decodeV3EventShard, decodeV3SeatShard,
 } from "./v3";
+import { commitMarketV3, commitV3Shard } from "./v3-instructions";
+
+function key(seed: number): PublicKey {
+  return new PublicKey(Uint8Array.from({ length: 32 }, (_, index) => (seed + index) & 0xff));
+}
 
 describe("V3 sharded ABI", () => {
   const instrument = new PublicKey("11111111111111111111111111111111");
@@ -25,6 +30,41 @@ describe("V3 sharded ABI", () => {
     expect(v3AccountIsCommittable(10_241)).toBe(false);
     expect(v3AccountIsCommittable(-1)).toBe(false);
     expect(v3AccountIsCommittable(10_240.5)).toBe(false);
+  });
+
+  it("pins the V3 full-commit account order and signer/writable flags", () => {
+    const accounts = {
+      core: key(1),
+      bookPages: Array.from({ length: 18 }, (_, index) => key(10 + index)),
+      seatShards: Array.from({ length: 4 }, (_, index) => key(40 + index)),
+      eventShards: Array.from({ length: 4 }, (_, index) => key(50 + index)),
+      authority: key(60), payer: key(61), magicContext: key(62), magicProgram: key(63),
+    };
+    const ix = commitMarketV3(accounts, 0x0102030405060708n);
+    expect([...ix.data]).toEqual([14, 8, 7, 6, 5, 4, 3, 2, 1]);
+    expect(ix.keys.map(({ pubkey, isSigner, isWritable }) => ({ pubkey: pubkey.toBase58(), isSigner, isWritable }))).toEqual([
+      { pubkey: accounts.core.toBase58(), isSigner: false, isWritable: true },
+      { pubkey: accounts.authority.toBase58(), isSigner: true, isWritable: false },
+      { pubkey: accounts.payer.toBase58(), isSigner: true, isWritable: true },
+      { pubkey: accounts.magicContext.toBase58(), isSigner: false, isWritable: true },
+      { pubkey: accounts.magicProgram.toBase58(), isSigner: false, isWritable: false },
+      ...[...accounts.bookPages, ...accounts.seatShards, ...accounts.eventShards]
+        .map((pubkey) => ({ pubkey: pubkey.toBase58(), isSigner: false, isWritable: true })),
+    ]);
+  });
+
+  it("pins the bounded shard commit context and flags", () => {
+    const accounts = { shard: key(70), core: key(71), authority: key(72), payer: key(73), magicContext: key(74), magicProgram: key(75) };
+    const ix = commitV3Shard(accounts, 9n, true);
+    expect([...ix.data]).toEqual([15, 9, 0, 0, 0, 0, 0, 0, 0]);
+    expect(ix.keys.map(({ pubkey, isSigner, isWritable }) => ({ pubkey: pubkey.toBase58(), isSigner, isWritable }))).toEqual([
+      { pubkey: accounts.shard.toBase58(), isSigner: false, isWritable: true },
+      { pubkey: accounts.authority.toBase58(), isSigner: true, isWritable: false },
+      { pubkey: accounts.payer.toBase58(), isSigner: true, isWritable: true },
+      { pubkey: accounts.magicContext.toBase58(), isSigner: false, isWritable: true },
+      { pubkey: accounts.magicProgram.toBase58(), isSigner: false, isWritable: false },
+      { pubkey: accounts.core.toBase58(), isSigner: false, isWritable: true },
+    ]);
   });
 
   it("derives distinct page and shard PDAs from the V3 core", () => {
