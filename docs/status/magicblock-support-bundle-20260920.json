@@ -5,9 +5,11 @@
   "core": "47Mx7SZvt7EY6NydsA5krgrqvcDDR1H5BG5xTPDSnhso",
   "stockstreamProgram": "H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET",
   "deployedStockstreamUpgrade": {
-    "signature": "4La3hXgViTtJ3uFrnRHZXmdwbGyDWitQXjJ4Czfg2T69hqXBg1wiHQZtcfsLAyhR9DtFjU5htt9ZXN7cTk2xc9MS",
+    "signature": "4La3hXgViTtJ3uFrnRHZXmdwbGyDWitQXJj4Czfg2T69hqXBg1wiHQZtcfsLAyhR9DtFjU5htt9ZXN7cTk2xc9MS",
     "slot": 501407453,
-    "sha256": "034b3088…15c0aa"
+    "upgradeAuthority": "none",
+    "elfLength": 451024,
+    "sha256": "24ee8e881c9909fb56b89571756f01e080e4c64758a8a2af176f98adc97a4bc7"
   },
   "deployedDlp": {
     "program": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh",
