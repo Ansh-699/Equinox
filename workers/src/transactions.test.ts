@@ -200,6 +200,21 @@ describe("StockStream transaction construction (@solana/kit)", () => {
     expect(withdraw.accounts).toHaveLength(33);
     expect(() => withdrawCollateralV3Instruction(PROGRAM, { ...v3, session: readonly, destination: writable, mint: readonly, vault: writable, vaultAuthority: readonly, tokenProgram: readonly }, 0, 1n)).toThrow("session PDA");
   });
+
+  it("rejects nonzero action nonces for main-wallet V3 builders", () => {
+    const writable = meta(MARKET, AccountRole.WRITABLE);
+    const v3: V3ExecutionAccountMetas = {
+      core: writable,
+      bookPages: Array.from({ length: 18 }, () => writable),
+      seatShards: Array.from({ length: 4 }, () => writable),
+      eventShards: Array.from({ length: 4 }, () => writable),
+      authority: meta(OTHER, AccountRole.READONLY_SIGNER),
+    };
+    expect(() => placeOrderV3Instruction(PROGRAM, v3, { side: "bid", seatIndex: 0, quantity: 1n, priceOrOffset: 10n, clientOrderId: 1n, actionNonce: 1n })).toThrow("actionNonce zero");
+    expect(() => cancelOrderV3Instruction(PROGRAM, v3, 0, 1n, 1n)).toThrow("actionNonce zero");
+    expect(() => cancelAllV3Instruction(PROGRAM, v3, 0, 8, 1n)).toThrow("actionNonce zero");
+    expect(() => replaceOrderV3Instruction(PROGRAM, v3, 1n, { side: "bid", seatIndex: 0, quantity: 1n, priceOrOffset: 10n, clientOrderId: 2n, actionNonce: 1n })).toThrow("actionNonce zero");
+  });
 });
 
 function withAmount(discriminator: number, authority: ReturnType<typeof meta>, amount: bigint) {
