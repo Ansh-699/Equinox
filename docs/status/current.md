@@ -7,7 +7,7 @@ a comparable amount of ground is covered.
 
 Takeover baseline (2026-09-20): requested base `ee3c5f6` resolves to
 `ee3c5f60c025d46d032deb33ca07dcaa1e89a634`; the current branch is its
-descendant at `086f0b067d3a2250d93a9b15007a93ce4af845a0`. The tracked working
+descendant at `06965ee4e4e7fce68cb3a8b198fe5d3610af073e`. The tracked working
 tree was clean before verification; only the pre-existing untracked
 `.deepseek/` directory remains. Re-run evidence is recorded in
 `docs/status/takeover-baseline-20260920.json`.
@@ -38,7 +38,7 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 | Frontend production build | Complete | `npm run build` exit 0; `next start` serves real HTTP 200; production smoke suite 6/6 |
 | Opt-in Devnet browser E2E | Complete (read-only, live) | `npm run test:browser:devnet` runs `playwright.devnet.config.ts` against the real Devnet RPC, deployed Worker and V3 core configuration; 2/2 pass. It verifies app boot, Devnet/AAPL configuration, server-secret non-disclosure and the live Worker V3 404 contract. Signing/relay is intentionally not claimed because Pyth/Privy remain externally blocked. |
 | Repository cleanup / doc classification | Complete | `docs/status/document-classification.md` classifies every `docs/*.md` file as canonical specification, operational runbook/release gate, historical research, or navigation map; this file remains the authoritative implementation snapshot. |
-| `clients/stockstream/src/index.ts` facade reduction | In progress | commits `7fba664`, `309a475`, `bc917d9`, `8f981f8`, `ddf3776`, `ac88ed9`, `04dbf8f`, `9576c85`, and `cc799d7` remove duplicated opcode/state authorities, correct V3 session-replace encoding, and extract V3 order/cancel/funding/oracle/commit/recovery/custody/account-creation/initialization/delegation/session builders into `abi/v3-instructions.ts` and `abi/session-instructions.ts`; `abi/encoding.ts` and `abi/transaction.ts` own shared integer, public-key, account-meta, and transaction primitives. Legacy V2 and registry encoders remain in the facade and require further parity-tested extraction. |
+| `clients/stockstream/src/index.ts` facade reduction | In progress | commits `7fba664`, `309a475`, `bc917d9`, `8f981f8`, `ddf3776`, `ac88ed9`, `04dbf8f`, `9576c85`, `cc799d7`, and `06965ee` remove duplicated opcode/state authorities, correct V3 session-replace encoding, and extract V3 order/cancel/funding/oracle/commit/recovery/custody/account-creation/initialization/delegation/session/registry builders into `abi/v3-instructions.ts`, `abi/session-instructions.ts`, and `abi/registry-instructions.ts`; `abi/encoding.ts` and `abi/transaction.ts` own shared integer, public-key, account-meta, and transaction primitives. Legacy V2 execution/custody encoders remain in the facade and require further parity-tested extraction. |
 
 ## Test counts (latest rerun; scope is stated explicitly)
 
