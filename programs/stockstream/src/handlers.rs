@@ -2095,6 +2095,12 @@ fn authorize_trading_session(
         // must reclaim it first.
         return Err(custom(StockStreamError::InvalidTradingSession));
     }
+    if accounts[2].lamports() != 0 {
+        // A system-owned, pre-funded PDA cannot be passed to CreateAccount.
+        // Reject it explicitly instead of relying on the system program's
+        // opaque failure and leaving callers with an ambiguous session state.
+        return Err(custom(StockStreamError::InvalidTradingSession));
+    }
     let bump_slice = [bump];
     let seat_index_bytes = seat_index.to_le_bytes();
     let seeds = [
