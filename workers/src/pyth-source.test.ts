@@ -12,15 +12,16 @@ const update = (overrides: Partial<PythSignedUpdate> = {}): PythSignedUpdate => 
 
 describe("pythSourceHealth", () => {
   it("is configuration_blocked with no API key", () => {
-    expect(pythSourceHealth({ endpoints: ["a", "b", "c"], feedId: "x", minChannel: "fixed_rate@200ms" })).toBe("configuration_blocked");
+    expect(pythSourceHealth({ endpoints: ["a", "b", "c"], feedId: "922", minChannel: "fixed_rate@200ms" })).toBe("configuration_blocked");
   });
 
   it("is configuration_blocked with fewer than three endpoints even with a key", () => {
-    expect(pythSourceHealth({ apiKey: "k", endpoints: ["a", "b"], feedId: "x", minChannel: "fixed_rate@200ms" })).toBe("configuration_blocked");
+    expect(pythSourceHealth({ apiKey: "k", endpoints: ["a", "b"], feedId: "922", minChannel: "fixed_rate@200ms" })).toBe("configuration_blocked");
   });
 
-  it("is ready with a key and three endpoints", () => {
-    expect(pythSourceHealth({ apiKey: "k", endpoints: ["a", "b", "c"], feedId: "x", minChannel: "fixed_rate@200ms" })).toBe("ready");
+  it("requires a catalog-derived positive numeric feed ID", () => {
+    expect(pythSourceHealth({ apiKey: "k", endpoints: ["a", "b", "c"], feedId: "Equity.US.AAPL/USD", minChannel: "fixed_rate@200ms" })).toBe("configuration_blocked");
+    expect(pythSourceHealth({ apiKey: "k", endpoints: ["a", "b", "c"], feedId: "922", minChannel: "fixed_rate@50ms" })).toBe("ready");
   });
 });
 
@@ -58,7 +59,7 @@ describe("reconcileEndpointUpdates", () => {
 describe("createPythUpdateSource", () => {
   it("never polls and returns null when configuration_blocked (no API key)", async () => {
     let polled = false;
-    const source = createPythUpdateSource({ endpoints: ["a", "b", "c"], feedId: "x", minChannel: "fixed_rate@200ms" }, async () => {
+    const source = createPythUpdateSource({ endpoints: ["a", "b", "c"], feedId: "922", minChannel: "fixed_rate@200ms" }, async () => {
       polled = true;
       return [update()];
     });
@@ -67,7 +68,7 @@ describe("createPythUpdateSource", () => {
   });
 
   it("returns the accepted update when configured and endpoints agree", async () => {
-    const source = createPythUpdateSource({ apiKey: "k", endpoints: ["a", "b", "c"], feedId: "x", minChannel: "fixed_rate@200ms" }, async () => [
+    const source = createPythUpdateSource({ apiKey: "k", endpoints: ["a", "b", "c"], feedId: "922", minChannel: "fixed_rate@200ms" }, async () => [
       update({ timestamp: 200 }),
     ]);
     const result = await source.fetchSignedUpdate(100, "");
@@ -76,7 +77,7 @@ describe("createPythUpdateSource", () => {
   });
 
   it("returns null on conflicting payloads rather than picking one arbitrarily", async () => {
-    const source = createPythUpdateSource({ apiKey: "k", endpoints: ["a", "b", "c"], feedId: "x", minChannel: "fixed_rate@200ms" }, async () => [
+    const source = createPythUpdateSource({ apiKey: "k", endpoints: ["a", "b", "c"], feedId: "922", minChannel: "fixed_rate@200ms" }, async () => [
       update({ timestamp: 200, payloadHash: "a" }),
       update({ timestamp: 200, payloadHash: "b" }),
     ]);

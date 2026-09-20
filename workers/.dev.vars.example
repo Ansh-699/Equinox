@@ -5,3 +5,8 @@ INGESTION_TOKEN=replace-with-a-local-development-token
 # STOCKSTREAM_RELAYER_TOKEN. Never a substitute for the per-user Privy
 # check that same route also performs.
 RELAYER_SERVICE_TOKEN=replace-with-a-local-development-token
+# Pyth Pro IDs are numeric catalog IDs, not Hermes hashes. Keep these
+# server-only and set them only after scripts/pyth-catalog-discovery.mjs
+# returns an entitled risk feed.
+PYTH_PRO_FEED_ID=
+PYTH_PRO_MIN_CHANNEL=

@@ -28,7 +28,12 @@ if (!rawFeedId || !/^\d+$/.test(rawFeedId)) {
   process.exit(1);
 }
 const feedId = Number(rawFeedId);
-console.log(`connecting to ${endpoints.length} endpoints, feed ${feedId}...`);
+const channel = process.env.PYTH_PRO_MIN_CHANNEL ?? "fixed_rate@200ms";
+if (!new Set(["real_time", "fixed_rate@50ms", "fixed_rate@200ms", "fixed_rate@1000ms"]).has(channel)) {
+  console.error("PYTH_PRO_MIN_CHANNEL must be a documented Pyth Pro channel");
+  process.exit(1);
+}
+console.log(`connecting to ${endpoints.length} endpoints, feed ${feedId}, channel ${channel}...`);
 
 const sockets = [];
 let accepted = null;
@@ -44,7 +49,7 @@ for (const [i, url] of endpoints.entries()) {
       priceFeedIds: [feedId],
       properties: ["price", "exponent", "confidence", "marketSession", "feedUpdateTimestamp"],
       formats: ["solana"],
-      channel: "fixed_rate@200ms",
+      channel,
       ignoreInvalidFeeds: false,
     }));
   });

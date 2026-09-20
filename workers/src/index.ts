@@ -15,10 +15,9 @@ import { LocalKeypairSigner } from './signer';
 import { relaySessionTransaction, validateSessionTransaction } from './session-relayer';
 import { ProtocolKeeperOrchestrator, type OrchestratorRunSummary } from './keeper-orchestrator';
 import { STOCKSTREAM_PROGRAM_ID } from '../../clients/stockstream/src/constants';
-import { deriveBookPageV3, deriveEventShardV3, deriveSeatShardV3, V3_BOOK_PAGES_PER_SIDE } from '../../clients/stockstream/src/abi/v3';
-import { PublicKey } from '@solana/web3.js';
+import { deriveBookPageV3, deriveEventShardV3, deriveSeatShardV3, V3_BOOK_PAGES_PER_SIDE } from './v3-pdas';
 import { fetchAuthoritativeV3Market, type V3MarketAggregate } from './v3-market-state';
-import { getBase58Decoder } from '@solana/kit';
+import { address, getBase58Decoder } from '@solana/kit';
 
 export { MarketStream };
 
@@ -57,15 +56,17 @@ export async function fetchV3MarketSnapshot(
   fetcher: typeof fetch = fetch,
 ): Promise<V3MarketAggregate | null> {
   if (!env.SOLANA_RPC_URL) return null;
-  let core: PublicKey;
-  try { core = new PublicKey(coreAddress); } catch { return null; }
+  try { address(coreAddress); } catch { return null; }
   const transport = domain === 'er'
     ? new MagicBlockErTransport(env.MAGICBLOCK_RPC_URL ?? env.SOLANA_RPC_URL, fetcher)
     : new SolanaL1Transport(env.SOLANA_RPC_URL, fetcher);
-  const bookPages = Array.from({ length: 2 * V3_BOOK_PAGES_PER_SIDE }, (_, flat) => deriveBookPageV3(core, Math.floor(flat / V3_BOOK_PAGES_PER_SIDE), flat % V3_BOOK_PAGES_PER_SIDE).toBase58());
-  const seatShards = Array.from({ length: 4 }, (_, shard) => deriveSeatShardV3(core, shard).toBase58());
-  const eventShards = Array.from({ length: 4 }, (_, shard) => deriveEventShardV3(core, shard).toBase58());
-  return fetchAuthoritativeV3Market(transport, { core: core.toBase58(), bookPages, seatShards, eventShards });
+  const bookPages = await Promise.all(Array.from(
+    { length: 2 * V3_BOOK_PAGES_PER_SIDE },
+    (_, flat) => deriveBookPageV3(coreAddress, Math.floor(flat / V3_BOOK_PAGES_PER_SIDE), flat % V3_BOOK_PAGES_PER_SIDE),
+  ));
+  const seatShards = await Promise.all(Array.from({ length: 4 }, (_, shard) => deriveSeatShardV3(coreAddress, shard)));
+  const eventShards = await Promise.all(Array.from({ length: 4 }, (_, shard) => deriveEventShardV3(coreAddress, shard)));
+  return fetchAuthoritativeV3Market(transport, { core: coreAddress, bookPages, seatShards, eventShards });
 }
 
 function isAuthorized(request: Request, env: Env): boolean {

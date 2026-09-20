@@ -14,12 +14,13 @@ describe("classifyKeeperConfiguration", () => {
     expect(classifyKeeperConfiguration({ MAGIC_ROUTER_URL: "https://router.test" } as Env).magicRouter).toBe("ready");
   });
 
-  it("reports pyth ready only with a key AND the full three-endpoint redundancy; signer only with validated material", () => {
+  it("reports pyth ready only with a key, numeric feed ID, and the full three-endpoint redundancy; signer only with validated material", () => {
     // Key present but no endpoints configured -> falls back to the three
     // documented defaults, which with a key IS the documented ready state.
-    const health = classifyKeeperConfiguration({ PYTH_PRO_API_KEY: "k" } as Env);
+    const health = classifyKeeperConfiguration({ PYTH_PRO_API_KEY: "k", PYTH_PRO_FEED_ID: "922" } as unknown as Env);
     expect(health.pyth).toBe("ready");
     expect(health.signer).toBe("configuration_blocked");
+    expect(classifyKeeperConfiguration({ PYTH_PRO_API_KEY: "k", PYTH_PRO_FEED_ID: "Equity.US.AAPL/USD" } as unknown as Env).pyth).toBe("configuration_blocked");
     // No key at all stays blocked.
     expect(classifyKeeperConfiguration({} as Env).pyth).toBe("configuration_blocked");
   });

@@ -73,8 +73,8 @@ export function classifyKeeperConfiguration(env: Env): KeeperConfigHealth {
   const pythConfig: PythProClientConfig = {
     apiKey: env.PYTH_PRO_API_KEY,
     endpoints: endpoints.length > 0 ? endpoints : DEFAULT_PYTH_PRO_ENDPOINTS,
-    feedId: "0",
-    minChannel: "fixed_rate@200ms",
+    feedId: env.PYTH_PRO_FEED_ID ?? "",
+    minChannel: env.PYTH_PRO_MIN_CHANNEL ?? "fixed_rate@200ms",
   };
   return {
     pyth: pythSourceHealth(pythConfig),
@@ -158,8 +158,8 @@ export async function buildOrchestratorDeps(
     const config: PythProClientConfig = {
       apiKey: env.PYTH_PRO_API_KEY,
       endpoints: endpoints.length > 0 ? endpoints : [...DEFAULT_PYTH_PRO_ENDPOINTS],
-      feedId: "0",
-      minChannel: "fixed_rate@200ms",
+      feedId: env.PYTH_PRO_FEED_ID ?? "",
+      minChannel: env.PYTH_PRO_MIN_CHANNEL ?? "fixed_rate@200ms",
     };
     if (pythSourceHealth(config) === "ready") {
       pythSource = createLivePythUpdateSource(config, options.pythPool);
