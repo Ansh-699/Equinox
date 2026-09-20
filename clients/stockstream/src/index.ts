@@ -6,6 +6,7 @@ export const STOCKSTREAM_PROGRAM_KEY = new PublicKey(STOCKSTREAM_PROGRAM_ID);
 export type AddressInput = PublicKey | string;
 export type Side = "bid" | "ask";
 export type OrderTree = "fixed" | "oracle-pegged";
+export type SelfTradeBehavior = "abort" | "cancel-provide" | "decrement-take";
 
 export interface InstructionAccounts {
   market: AddressInput;
@@ -28,6 +29,8 @@ export interface PlaceOrderParams extends InstructionAccounts {
   postOnly?: boolean;
   immediateOrCancel?: boolean;
   reduceOnly?: boolean;
+  /** Self-trade prevention mode, encoded in flags bits 3-4. */
+  selfTradeBehavior?: SelfTradeBehavior;
   /** Program-owned TradingSession account when authority is a scoped signer. */
   session?: AddressInput;
 }
@@ -128,6 +131,10 @@ function writeSigned(data: Uint8Array, offset: number, value: bigint, bytes: num
   writeUnsigned(data, offset, value < 0n ? (1n << BigInt(bytes * 8)) + value : value, bytes);
 }
 
+function selfTradeBits(value: SelfTradeBehavior = "abort"): number {
+  return value === "abort" ? 0 : value === "cancel-provide" ? 1 << 3 : value === "decrement-take" ? 2 << 3 : (() => { throw new RangeError("Invalid self-trade behavior"); })();
+}
+
 function accountMeta(address: AddressInput, isSigner: boolean, isWritable: boolean): AccountMeta {
   return { pubkey: publicKey(address), isSigner, isWritable };
 }
@@ -176,7 +183,7 @@ export function placeOrder(params: PlaceOrderParams): TransactionInstruction {
   data[0] = STOCKSTREAM_INSTRUCTION.placeOrder;
   data[1] = params.side === "bid" ? 0 : params.side === "ask" ? 1 : 255;
   data[2] = (params.tree ?? "fixed") === "fixed" ? 0 : 1;
-  data[3] = (params.postOnly ? 1 : 0) | (params.immediateOrCancel ? 2 : 0) | (params.reduceOnly ? 4 : 0);
+  data[3] = (params.postOnly ? 1 : 0) | (params.immediateOrCancel ? 2 : 0) | (params.reduceOnly ? 4 : 0) | selfTradeBits(params.selfTradeBehavior);
   if (data[1] > 1) throw new RangeError("Invalid order side");
   writeUnsigned(data, 4, checkedUnsigned(params.seatIndex, 16, "seatIndex"), 2);
   writeUnsigned(data, 6, checkedUnsigned(params.quantity, 64, "quantity"), 8);
@@ -200,7 +207,7 @@ export function placeOrderV3(params: Omit<PlaceOrderParams, "market" | "authorit
   data[0] = STOCKSTREAM_INSTRUCTION.placeOrder;
   data[1] = params.side === "bid" ? 0 : params.side === "ask" ? 1 : 255;
   data[2] = (params.tree ?? "fixed") === "fixed" ? 0 : 1;
-  data[3] = (params.postOnly ? 1 : 0) | (params.immediateOrCancel ? 2 : 0) | (params.reduceOnly ? 4 : 0);
+  data[3] = (params.postOnly ? 1 : 0) | (params.immediateOrCancel ? 2 : 0) | (params.reduceOnly ? 4 : 0) | selfTradeBits(params.selfTradeBehavior);
   if (data[1] > 1) throw new RangeError("Invalid order side");
   writeUnsigned(data, 4, checkedUnsigned(params.seatIndex, 16, "seatIndex"), 2);
   writeUnsigned(data, 6, checkedUnsigned(params.quantity, 64, "quantity"), 8);
@@ -228,7 +235,7 @@ export function replaceOrder(params: PlaceOrderParams & { oldOrderKey: bigint })
   writeUnsigned(data, 1, checkedUnsigned(params.oldOrderKey, 128, "oldOrderKey"), 16);
   data[17] = params.side === "bid" ? 0 : params.side === "ask" ? 1 : 255;
   data[18] = (params.tree ?? "fixed") === "fixed" ? 0 : 1;
-  data[19] = (params.postOnly ? 1 : 0) | (params.immediateOrCancel ? 2 : 0) | (params.reduceOnly ? 4 : 0);
+  data[19] = (params.postOnly ? 1 : 0) | (params.immediateOrCancel ? 2 : 0) | (params.reduceOnly ? 4 : 0) | selfTradeBits(params.selfTradeBehavior);
   if (data[17] > 1) throw new RangeError("Invalid order side");
   writeUnsigned(data, 20, checkedUnsigned(params.seatIndex, 16, "seatIndex"), 2);
   writeUnsigned(data, 22, checkedUnsigned(params.quantity, 64, "quantity"), 8);
