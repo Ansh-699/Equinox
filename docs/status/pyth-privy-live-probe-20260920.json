@@ -1,0 +1,19 @@
+{
+  "date": "2026-09-20",
+  "runtime": "ignored .env.local loaded with node --env-file; secret values omitted",
+  "pyth": {
+    "catalogCommand": "node --env-file=.env.local scripts/pyth-catalog-discovery.mjs AAPL",
+    "catalogResult": "authenticated; Equity.US.AAPL/USD=922, Equity.Index.AAPL/USD=3191; fixed_rate@50ms",
+    "streamCommands": [
+      "node --env-file=.env.local scripts/pyth-live-smoke.mjs",
+      "env PYTH_PRO_FEED_ID=3191 timeout 20s node --env-file=.env.local scripts/pyth-live-smoke.mjs"
+    ],
+    "streamResult": "both numeric feeds rejected on all 3 endpoints with Not entitled; 0/3 subscribed; no payload submitted"
+  },
+  "privy": {
+    "command": "node --env-file=.env.local scripts/privy-relay-live.mjs",
+    "result": "preflight did not run: runtime lacks PRIVY_ACCESS_TOKEN, PRIVY_EXPECTED_WALLET, and app id; no relay request or transaction submitted",
+    "submitReplay": "not attempted"
+  },
+  "safety": "No credentials, signed payloads, private keys, or transaction signatures are stored in this evidence."
+}
