@@ -2425,16 +2425,32 @@ pub fn read_v3_risk_config(bytes: &[u8]) -> Result<V3RiskConfig, ProgramError> {
             defaults.mark_deviation_bps
         },
     };
+    // These durable ledgers are part of the same economic configuration
+    // boundary.  They must never be interpreted as signed debt/credit values
+    // by the trading paths: a malformed core would otherwise make a negative
+    // fee or insurance balance look like spendable risk capacity.
+    let current_open_interest = core_i128(bytes, V3_CORE_CURRENT_OPEN_INTEREST_OFFSET)?;
+    let protocol_fee_balance = core_i128(bytes, V3_CORE_PROTOCOL_FEE_BALANCE_OFFSET)?;
+    let insurance_balance = core_i128(bytes, V3_CORE_INSURANCE_BALANCE_OFFSET)?;
+    let bad_debt = core_i128(bytes, V3_CORE_BAD_DEBT_OFFSET)?;
+    let vault_liability = core_i128(bytes, V3_CORE_VAULT_LIABILITY_OFFSET)?;
     if config.initial_margin_bps == 0
         || config.maintenance_margin_bps == 0
         || config.maintenance_margin_bps > config.initial_margin_bps
         || config.maximum_leverage == 0
+        || config.maximum_leverage > 100
         || config.maker_fee_bps > 1_000
         || config.taker_fee_bps > 1_000
         || config.liquidation_fee_bps > 1_000
         || config.mark_deviation_bps > 10_000
         || config.maximum_position < 0
         || config.maximum_open_interest < 0
+        || current_open_interest < 0
+        || protocol_fee_balance < 0
+        || insurance_balance < 0
+        || bad_debt < 0
+        || vault_liability < 0
+        || bytes[V3_CORE_RECONCILIATION_STATUS_OFFSET] > 3
     {
         return Err(StockStreamError::RiskViolation.into());
     }
