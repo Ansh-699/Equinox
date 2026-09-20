@@ -33,7 +33,11 @@ export interface PythProClientConfig {
 /** Never throws; never returns "ready" without both a key and at least the
  * three-endpoint redundancy the Pyth docs require (docs/pyth-ops.md §1). */
 export function pythSourceHealth(config: PythProClientConfig): PythSourceHealth {
-  if (!config.apiKey || config.endpoints.length < 3) return "configuration_blocked";
+  // A feed name or a Hermes hash is not a valid Pyth Pro subscription ID.
+  // Keep the Worker fail-closed until catalog discovery supplied the numeric
+  // Lazer ID that the authenticated subscription actually accepts.
+  if (!config.apiKey || config.endpoints.length < 3 || !/^\d+$/.test(config.feedId) || Number(config.feedId) <= 0)
+    return "configuration_blocked";
   return "ready";
 }
 

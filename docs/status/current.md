@@ -24,8 +24,8 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 | MagicBlock commit / undelegate / restore / withdraw | Blocked (root-caused) | Read-only live ER simulation rejects the 222,752-byte market itself as "too large to be committed". Account ordering, flags, owners, IDs, and CPI bytes are accepted first; the single-PDA market layout cannot fit the validator's base-layer commit path. See `docs/status/magicblock-commit-simulation-20260919.json` and `scripts/magicblock-commit-repro.mjs`. |
 | V3 committable account lifecycle | Source-complete layout; locally tested; not deployed or live-verified | The current MagicBlock scheduler source enforces `MAX_PERMITTED_DATA_INCREASE = 10,240`; V3 therefore uses 10,184-byte pages (115 nodes/page, 9 pages/side), not the superseded 22,592-byte/four-page design. The complete execution bundle is core + 18 book + 4 seat + 4 event = 27 accounts. Opcode 46 creates/resumes these distinct PDAs; 47 activates a core; 48 delegates bounded core/page/shard accounts; 49/50 create/close sharded seats. `PagedBookV3` retains 1,024 logical slots per side and 32-bit global handles. The new 27-index schedule intent has a golden-vector test against the pinned Magic API, and Rust/TypeScript/Worker ABI parity pass. A Devnet simulation of a 10,184-byte V3 page and a 27-account intent remains required before this can be called live-verified. |
 | V3 bootstrap lifecycle runner | Source complete; dry-run tested; not executed on Devnet | `scripts/v3-devnet-lifecycle.mjs` uses `/tmp/opencode/v3-lifecycle-state.json`, refuses the preserved V2 market address, and only sends a fresh core plus 18 book/4 seat/4 event PDAs when `--execute` is explicit. It does not claim unsupported V3 custody/trading/commit stages. |
-| Session-signed trading (place/cancel/replace/cross) | Blocked live; locally tested | requires `header.oracle_valid`, which only a real Pyth Lazer-verified price can set; no entitled AAPL Lazer ID is available. `cargo test -p stockstream --test trading_session` passes 26 tests, including nonce consumption, replay rejection and replace rollback/time-priority behavior; those tests do not constitute a Privy-relayer or Devnet trade. |
-| Pyth AAPL/USD live integration | Blocked (credential entitlement/configuration); locally tested | an installed test key authenticates but all three endpoints reject the inherited hard-coded Lazer ID 33 as an unentitled crypto-spot feed. `scripts/pyth-live-smoke.mjs` now refuses any default and requires the catalog-verified, entitled numeric Lazer ID for `Equity.US.AAPL/USD`; on-chain `consume_oracle_update` has no admin/test bypass by design. `cargo test -p stockstream --test pyth_oracle` passes 19 tests, including stale input and closed/halted/corporate-action close-only behavior. |
+| Session-signed trading (place/cancel/replace/cross) | Blocked live; locally tested | requires `header.oracle_valid`, which only a real Pyth Lazer-verified price can set; catalog ID 922 is known but the installed key lacks its equity entitlement. `cargo test -p stockstream --test trading_session` passes 26 tests, including nonce consumption, replay rejection and replace rollback/time-priority behavior; those tests do not constitute a Privy-relayer or Devnet trade. |
+| Pyth AAPL/USD live integration | Blocked only by entitlement; catalog/runtime configured and locally tested | `scripts/pyth-catalog-discovery.mjs` authenticated to the official catalog and resolved stable `Equity.US.AAPL/USD` to numeric Lazer ID `922`, minimum channel `fixed_rate@50ms`; ignored server-only runtime files now carry those non-secret settings. All three authenticated stream endpoints reject ID 922 with `Not entitled`, so no signed payload is submitted. Worker health now requires a positive numeric catalog ID rather than reporting ready for a key alone. `cargo test -p stockstream --test pyth_oracle` passes 19 tests, including stale input and closed/halted/corporate-action close-only behavior. |
 | Privy live verification | Blocked (user/relayer prerequisites) | local server-only app credentials are configured, but no real Privy access token for a wallet linked to either preserved Devnet trader is available, and the deployed Worker lacks both Privy and relayer-key secrets. The wallet-linkage, session/seat/nonce checks remain unit- and live-auth-gate-tested; live success, nonce consumption, and replay rejection are not claimed. |
 | Frontend fixture E2E (Playwright) | Complete | 50/50 pass; 2 real bugs found and fixed (stale mock-relayer auth contract, a WS-connection race in oracle-safety.spec.ts) |
 | Frontend production build | Complete | `npm run build` exit 0; `next start` serves real HTTP 200; production smoke suite 6/6 |
@@ -59,17 +59,15 @@ Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives 
 
 ## Known external blockers (not fixable from this codebase alone)
 
-1. **Pyth Lazer equity entitlement and numeric feed ID** -- required for
+1. **Pyth Lazer equity entitlement** -- required for
    any real oracle price, which gates every session-signed trade and the
    market's own "Open" trading path. A local server-only test key is
-   installed but does not entitle the inherited feed ID 33 (the provider
-   reports crypto-spot); the authorized numeric Lazer ID for
-   `Equity.US.AAPL/USD` has not been supplied. The public Hermes catalog
-   identifies the required feed hash and its `fixed_rate@50ms` minimum,
-   but that hash is not a Lazer subscription ID.
-   On 2026-09-20, the local smoke command with the ignored credential file
-   (`node --env-file=.env.local scripts/pyth-live-smoke.mjs`) failed closed
-   before opening a socket because that numeric ID remains unset.
+   server-only key can query the Pyth Pro catalog, which resolves
+   `Equity.US.AAPL/USD` as stable numeric Lazer ID `922`, with
+   `fixed_rate@50ms` minimum. The configured key has no equity grant:
+   all three authenticated streams reject 922 as `Not entitled`, so the
+   smoke command safely submits nothing. The deterministic signed fixture
+   remains the only available oracle test input until that grant changes.
 2. **Privy-linked test wallet and deployed relayer configuration** -- local
    server-only app credentials are configured, but a real Privy access token
    for a linked wallet matching a preserved trader is not present. The
