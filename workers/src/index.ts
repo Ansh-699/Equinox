@@ -66,7 +66,7 @@ export async function fetchV3MarketSnapshot(
   ));
   const seatShards = await Promise.all(Array.from({ length: 4 }, (_, shard) => deriveSeatShardV3(coreAddress, shard)));
   const eventShards = await Promise.all(Array.from({ length: 4 }, (_, shard) => deriveEventShardV3(coreAddress, shard)));
-  return fetchAuthoritativeV3Market(transport, { core: coreAddress, bookPages, seatShards, eventShards });
+  return fetchAuthoritativeV3Market(transport, { core: coreAddress, bookPages, seatShards, eventShards }).catch(() => null);
 }
 
 function isAuthorized(request: Request, env: Env): boolean {
