@@ -33,7 +33,7 @@ This matrix is scoped to the current checkout (`b93c1cf`). “Fresh” means rer
 | relayer 27-account validation | locally-tested | `workers/src/session-relayer.ts`, `clients/stockstream/src/abi/v3.ts`; Worker tests in `verify-latest.json` | yes |
 | frontend V3 order writes | locally-tested | `features/sessions/use-session-order.ts`, `clients/stockstream/src/abi/`; `npm test`, Playwright fixture E2E 54/54 | yes; not live-signed |
 | frontend V3 custody writes | locally-tested | `features/collateral/`, `clients/stockstream/src/abi/`; `npm test`, Playwright fixture E2E 54/54 | yes; Devnet custody preserved/not attempted |
-| Worker V3 writes | incomplete | `workers/src/transactions.ts`, `workers/src/session-relayer.ts`; read/validation paths tested, live secret-backed write deployment not verified | yes (scope check) |
+| Worker V3 writes | locally-tested | `workers/src/transactions.ts` now exposes typed V3 order/cancel/replace wrappers plus opcode-53/54 custody builders; `workers/src/transactions.test.ts` verifies the 28-account execution shape, 11-account deposit shape, 33-account withdrawal shape, and session-PDA rejection. Live secret-backed write deployment remains unverified. | yes |
 | Pyth live ingestion | externally-blocked | `scripts/pyth-catalog-discovery.mjs`, `scripts/pyth-live-smoke.mjs`; `docs/status/external-blocker-probe-20260921.json` | yes (entitlement rejection) |
 | Privy live relay | externally-blocked | `scripts/privy-relay-live.mjs`; `docs/status/external-blocker-probe-20260921.json` | yes (preflight only; no token/relay) |
 | Devnet custody | externally-blocked | `programs/stockstream/src/v3.rs`; withdrawal requires restored/reconciled core; MagicBlock restore is blocked | yes (guarded, no mutation) |

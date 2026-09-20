@@ -7,19 +7,24 @@ import {
   authorizeTradingSessionInstruction,
   base64ToBytes,
   cancelAllInstruction,
+  cancelAllV3Instruction,
+  cancelOrderV3Instruction,
   cleanupKeeperBuilder,
   commitMarketInstruction,
   consumeOracleUpdateInstruction,
   delegateMarketInstruction,
   depositCollateralInstruction,
+  depositCollateralV3Instruction,
   fundingKeeperBuilder,
   initializeVaultInstruction,
   liquidationKeeperBuilder,
   meta,
   placeOrderInstruction,
+  placeOrderV3Instruction,
   reconcileVaultInstruction,
   recordBadDebtInstruction,
   replaceOrderInstruction,
+  replaceOrderV3Instruction,
   sessionKeeperBuilder,
   setComputeUnitLimitInstruction,
   setComputeUnitPriceInstruction,
@@ -27,8 +32,10 @@ import {
   transitionMarketInstruction,
   updateFundingInstruction,
   withdrawCollateralInstruction,
+  withdrawCollateralV3Instruction,
   withdrawProtocolFeesInstruction,
   type KeeperTransactionContext,
+  type V3ExecutionAccountMetas,
 } from "./transactions";
 
 // Valid 32-byte base58 addresses (the program id is irrelevant to encoding).
@@ -164,6 +171,34 @@ describe("StockStream transaction construction (@solana/kit)", () => {
     expect(place.data!.length).toBe(54);
     expect(place.data![1]).toBe(1); // ask
     expect(place.data![3]).toBe(4); // reduce-only flag bit
+  });
+
+  it("requires the canonical V3 bundle and emits V3 custody opcodes", () => {
+    const writable = meta(MARKET, AccountRole.WRITABLE);
+    const readonly = meta(OTHER);
+    const v3: V3ExecutionAccountMetas = {
+      core: writable,
+      bookPages: Array.from({ length: 18 }, () => writable),
+      seatShards: Array.from({ length: 4 }, () => writable),
+      eventShards: Array.from({ length: 4 }, () => writable),
+      authority: meta(OTHER, AccountRole.READONLY_SIGNER),
+    };
+    expect(placeOrderV3Instruction(PROGRAM, v3, { side: "bid", seatIndex: 0, quantity: 1n, priceOrOffset: 10n, clientOrderId: 1n }).accounts).toHaveLength(28);
+    expect(cancelOrderV3Instruction(PROGRAM, v3, 0, 1n).accounts).toHaveLength(28);
+    expect(cancelAllV3Instruction(PROGRAM, v3, 0, 8).accounts).toHaveLength(28);
+    expect(replaceOrderV3Instruction(PROGRAM, v3, 1n, { side: "bid", seatIndex: 0, quantity: 1n, priceOrOffset: 10n, clientOrderId: 2n }).accounts).toHaveLength(28);
+    const deposit = depositCollateralV3Instruction(PROGRAM, {
+      core: writable, seatShard: writable, eventShards: Array.from({ length: 4 }, () => writable),
+      authority: meta(OTHER, AccountRole.READONLY_SIGNER), source: writable, vault: writable, mint: readonly, tokenProgram: readonly,
+    }, 0, 1n);
+    expect(deposit.data![0]).toBe(53);
+    expect(deposit.accounts).toHaveLength(11);
+    const withdraw = withdrawCollateralV3Instruction(PROGRAM, {
+      ...v3, destination: writable, mint: readonly, vault: writable, vaultAuthority: readonly, tokenProgram: readonly,
+    }, 0, 1n);
+    expect(withdraw.data![0]).toBe(54);
+    expect(withdraw.accounts).toHaveLength(33);
+    expect(() => withdrawCollateralV3Instruction(PROGRAM, { ...v3, session: readonly, destination: writable, mint: readonly, vault: writable, vaultAuthority: readonly, tokenProgram: readonly }, 0, 1n)).toThrow("session PDA");
   });
 });
 
