@@ -184,7 +184,7 @@ const V3_TAG_FREE: u8 = 3;
 const V3_TAG_LAST_FREE: u8 = 4;
 
 /// Wire-stable account kinds for V3 creation and bundle validation. `BookPage`
-/// uses a flattened index (`side * 4 + page`) so callers cannot supply an
+/// uses a flattened index (`side * V3_BOOK_PAGES_PER_SIDE + page`) so callers cannot supply an
 /// ambiguous side/page pair.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
