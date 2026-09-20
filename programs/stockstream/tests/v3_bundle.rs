@@ -268,9 +268,15 @@ fn v3_cancel_all_releases_reserve_and_side_exposure_for_every_tree() {
     unsafe {
         accounts[V3_SEAT_START].view.borrow_unchecked_mut()[84..100]
             .copy_from_slice(&1_000_000i128.to_le_bytes());
-        accounts[0].view.borrow_unchecked_mut()[197] = 1;
+        let core = accounts[0].view.borrow_unchecked_mut();
+        core[180] = 1;
+        core[181..189].copy_from_slice(&100i64.to_le_bytes());
+        core[197] = 1;
     }
-    for (price, quantity) in [(10i64, 5u64), (11, 3)] {
+    for (tree, price_or_offset, quantity) in [
+        (TreeKind::Fixed, 10i64, 5u64),
+        (TreeKind::OraclePegged, -89i64, 3u64),
+    ] {
         let mut trade_accounts = views(&accounts);
         trade_accounts.push(owner.view.clone());
         place_order_v3(
@@ -278,14 +284,14 @@ fn v3_cancel_all_releases_reserve_and_side_exposure_for_every_tree() {
             &mut trade_accounts,
             PlaceOrderData {
                 side: Side::Bid as u8,
-                tree: TreeKind::Fixed as u8,
+                tree: tree as u8,
                 flags: 0,
                 seat_index: 0,
                 quantity,
-                price_or_offset: price,
+                price_or_offset,
                 expires_at: u64::MAX,
                 peg_limit: 0,
-                client_order_id: price as u64,
+                client_order_id: quantity,
                 action_nonce: 0,
             },
         )
