@@ -89,8 +89,8 @@ export function ActivityView() {
             groups every event into. Detail is the fully-decoded, verified event kind name (e.g.
             &quot;MarketPaused&quot;, &quot;OrderPlaced&quot;) when the underlying event carried one --
             shown as &quot;details unavailable&quot; otherwise, never guessed. Neither column decodes the
-            event&apos;s own category-specific payload body, which has no verified byte layout yet
-            (blocked on the main-agent ABI handoff). Deposits and withdrawals from this session are shown
+            event&apos;s own category-specific payload body, which has no verified byte layout in the
+            canonical event ABI yet. Deposits and withdrawals from this session are shown
             above instead, since those are tracked locally.
           </p>
         </section>
