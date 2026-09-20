@@ -150,11 +150,20 @@ test("withdrawal signs with the main wallet, never the session key", async ({ pa
   expect(await promptCount(page)).toBe(before + 1);
 });
 
-test("V3 lifecycle constructs the sharded seat action", async ({ page }) => {
+test("V3 lifecycle submits the sharded seat action through L1", async ({ page }) => {
   await page.goto("/");
   await login(page);
   await page.getByRole("button", { name: "Construct seat + scratch" }).click();
-  await expect(page.locator(".notice")).toContainText("Constructed CreateV3TraderSeat");
+  await expect(page.locator(".notice")).toContainText(/CreateV3TraderSeat confirmed — signature [1-9A-HJ-NP-Za-km-z]+…[1-9A-HJ-NP-Za-km-z]+\./);
+});
+
+test("V3 seat creation is refused while the bundle is ER-owned", async ({ page }) => {
+  await page.goto("/");
+  await login(page);
+  await setExecutionStatus("er_active");
+  await expect(page.locator('.status-strip[aria-live="polite"]')).not.toContainText("not delegated", { timeout: 10_000 });
+  await page.getByRole("button", { name: "Construct seat + scratch" }).click();
+  await expect(page.locator(".notice")).toContainText("CreateV3TraderSeat blocked: the V3 bundle is not currently L1-owned.");
 });
 
 test("V3 withdrawal stays blocked while a commit is pending", async ({ page }) => {
