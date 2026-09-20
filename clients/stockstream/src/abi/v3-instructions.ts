@@ -2,7 +2,7 @@ import { PublicKey, SystemProgram, TransactionInstruction, type AccountMeta } fr
 import { OPCODE } from "./instructions";
 import { checkedSigned, checkedUnsigned, writeSigned, writeUnsigned } from "./encoding";
 import { accountMeta, instruction, publicKey, STOCKSTREAM_PROGRAM_KEY, type AddressInput } from "./transaction";
-import { V3_BOOK_PAGES_PER_SIDE } from "./v3";
+import { deriveBookPageV3, deriveEventShardV3, deriveMarketCoreV3, deriveSeatShardV3, V3_BOOK_PAGES_PER_SIDE } from "./v3";
 
 export type V3OrderSide = "bid" | "ask";
 export type V3OrderTree = "fixed" | "oracle-pegged";
@@ -70,6 +70,10 @@ export interface V3UndelegationRecoveryAccounts {
 export interface V3SeatAccounts { core: AddressInput; seatShards: readonly AddressInput[]; eventShards: readonly AddressInput[]; trader: AddressInput; }
 export interface V3DepositAccounts { core: AddressInput; seatShard: AddressInput; eventShards: readonly AddressInput[]; authority: AddressInput; source: AddressInput; vault: AddressInput; mint: AddressInput; tokenProgram: AddressInput; }
 export interface V3WithdrawAccounts extends V3ExecutionAccounts { destination: AddressInput; mint: AddressInput; vault: AddressInput; vaultAuthority: AddressInput; tokenProgram: AddressInput; }
+export type V3AccountKind = "core" | "book-page" | "seat-shard" | "event-shard";
+export interface V3CreationAccounts { parent: AddressInput; target: AddressInput; payer: AddressInput; }
+export interface V3InitializationAccounts { exchange: AddressInput; instrument: AddressInput; core: AddressInput; authority: AddressInput; }
+export interface V3DelegationAccounts extends V3CreationAccounts { authority: AddressInput; }
 
 const MAGICBLOCK_DELEGATION_PROGRAM_ID = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
 
@@ -248,4 +252,47 @@ export function withdrawCollateralV3(accounts: V3WithdrawAccounts, seatIndex: nu
   return instruction(v3AmountData(OPCODE.withdrawCollateralV3, seatIndex, amount), [
     ...metas, accountMeta(accounts.destination, false, true), accountMeta(accounts.mint, false, false),
     accountMeta(accounts.vault, false, true), accountMeta(accounts.vaultAuthority, false, false), accountMeta(accounts.tokenProgram, false, false)]);
+}
+
+function v3KindAndIndex(kind: V3AccountKind, index: number): [number, number] {
+  const kindAndIndex: Record<V3AccountKind, [number, number]> = {
+    core: [0, 0], "book-page": [1, index], "seat-shard": [2, index], "event-shard": [3, index],
+  };
+  const result = kindAndIndex[kind];
+  const max = result[0] === 1 ? 2 * V3_BOOK_PAGES_PER_SIDE - 1 : result[0] === 0 ? 0 : 3;
+  if (!Number.isInteger(result[1]) || result[1] < 0 || result[1] > max) throw new RangeError("invalid V3 account index");
+  return result;
+}
+
+function expectedV3Account(parent: PublicKey, kindByte: number, index: number): PublicKey {
+  return kindByte === 0 ? deriveMarketCoreV3(parent)
+    : kindByte === 1 ? deriveBookPageV3(parent, Math.floor(index / V3_BOOK_PAGES_PER_SIDE), index % V3_BOOK_PAGES_PER_SIDE)
+      : kindByte === 2 ? deriveSeatShardV3(parent, index) : deriveEventShardV3(parent, index);
+}
+
+export function createV3Account(accounts: V3CreationAccounts, kind: V3AccountKind, index = 0): TransactionInstruction {
+  const parent = publicKey(accounts.parent); const target = publicKey(accounts.target);
+  const [kindByte, flattenedIndex] = v3KindAndIndex(kind, index);
+  if (!target.equals(expectedV3Account(parent, kindByte, flattenedIndex))) throw new RangeError("target is not the derived V3 account PDA");
+  return instruction(Uint8Array.of(OPCODE.createV3Account, kindByte, flattenedIndex), [
+    accountMeta(parent, false, false), accountMeta(target, false, true), accountMeta(accounts.payer, true, true), accountMeta(SystemProgram.programId, false, false)]);
+}
+
+export function initializeV3Market(accounts: V3InitializationAccounts): TransactionInstruction {
+  const instrument = publicKey(accounts.instrument);
+  if (!publicKey(accounts.core).equals(deriveMarketCoreV3(instrument))) throw new RangeError("core is not the derived V3 market PDA");
+  return instruction(Uint8Array.of(OPCODE.initializeV3Market), [
+    accountMeta(accounts.exchange, false, false), accountMeta(instrument, false, false), accountMeta(accounts.core, false, true), accountMeta(accounts.authority, true, false)]);
+}
+
+export function delegateV3Account(accounts: V3DelegationAccounts, kind: V3AccountKind, validator: AddressInput, index = 0): TransactionInstruction {
+  const parent = publicKey(accounts.parent); const target = publicKey(accounts.target); const validatorKey = publicKey(validator);
+  const [kindByte, flattenedIndex] = v3KindAndIndex(kind, index);
+  if (!target.equals(expectedV3Account(parent, kindByte, flattenedIndex))) throw new RangeError("target is not the derived V3 account PDA");
+  const [buffer] = PublicKey.findProgramAddressSync([Buffer.from("buffer"), target.toBuffer()], STOCKSTREAM_PROGRAM_KEY);
+  const [record] = PublicKey.findProgramAddressSync([Buffer.from("delegation"), target.toBuffer()], MAGICBLOCK_DELEGATION_PROGRAM_ID);
+  const [metadata] = PublicKey.findProgramAddressSync([Buffer.from("delegation-metadata"), target.toBuffer()], MAGICBLOCK_DELEGATION_PROGRAM_ID);
+  const data = new Uint8Array(35); data[0] = OPCODE.delegateV3Account; data[1] = kindByte; data[2] = flattenedIndex; data.set(validatorKey.toBytes(), 3);
+  return instruction(data, [accountMeta(parent, false, false), accountMeta(target, false, true), accountMeta(accounts.authority, true, false), accountMeta(accounts.payer, true, true),
+    accountMeta(buffer, false, true), accountMeta(record, false, true), accountMeta(metadata, false, true), accountMeta(MAGICBLOCK_DELEGATION_PROGRAM_ID, false, false), accountMeta(SystemProgram.programId, false, false), accountMeta(STOCKSTREAM_PROGRAM_KEY, false, false)]);
 }
