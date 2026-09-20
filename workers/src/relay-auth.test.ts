@@ -140,6 +140,25 @@ describe("requiredSessionActions", () => {
 });
 
 describe("verifyTradingSession", () => {
+  it("accepts V3 only with an explicit core and seat-shard projection", () => {
+    const core = {
+      kind: "v3" as const, instrument: MARKET, marketAuthority: OWNER, mode: 1,
+      oracleValid: true, lastVerifiedOraclePrice: 100n, lastVerifiedOracleTimestamp: 1n,
+      oracleFeedId: 922, oracleChannel: 0, oracleExponent: -2, delegationStatus: 0,
+      expectedCommitSequence: 0n, lastCommittedSequence: 0n, validator: OWNER,
+    };
+    const seat = {
+      shard: 0, slot: 0, trader: OWNER, availableCollateral: 1n, reservedMargin: 0n,
+      basePosition: 0n, quoteEntryValue: 0n, realizedPnl: 0n, openBidExposure: 0n,
+      openAskExposure: 0n, openOrderCount: 0, liquidationState: 0, sequence: 1n,
+    };
+    expect(verifyTradingSession(baseInput({ marketBytes: new Uint8Array(4096), v3: { core, seat } }))).toEqual({ ok: true });
+  });
+
+  it("fails closed instead of applying V2 offsets to a V3 core", () => {
+    expect(verifyTradingSession(baseInput({ marketBytes: new Uint8Array(4096) }))).toEqual({ ok: false, reason: "v3_context_required" });
+  });
+
   it("accepts a fully valid chain", () => {
     expect(verifyTradingSession(baseInput())).toEqual({ ok: true });
   });

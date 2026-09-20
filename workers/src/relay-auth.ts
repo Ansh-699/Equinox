@@ -1,4 +1,5 @@
 import { address, getBase58Decoder, getBase58Encoder, getProgramDerivedAddress } from "@solana/kit";
+import type { V3CoreState, V3SeatPositionState } from "./v3-market-state";
 
 /**
  * Authoritative session-relay authentication.
@@ -138,6 +139,10 @@ export interface VerifyTradingSessionInput {
    * needed to compute the reduce-only-only allowance; `0` otherwise. */
   placeOrderFlags: number;
   now: Date;
+  /** V3 replaces the V2 monolithic arena with a validated core + seat
+   * shard. When present, this is the only seat source accepted; omitting it
+   * for a V3 core fails closed rather than interpreting V3 bytes as V2. */
+  v3?: { core: V3CoreState; seat: V3SeatPositionState | null };
 }
 
 /** Full authoritative chain: market sanity, seat ownership, and a real
@@ -146,17 +151,29 @@ export interface VerifyTradingSessionInput {
  * inferred from the caller's own claims. */
 export function verifyTradingSession(input: VerifyTradingSessionInput): { ok: true } | { ok: false; reason: string } {
   const market = input.marketBytes;
-  if (market.length !== MARKET_ACCOUNT_SIZE) return { ok: false, reason: "market_wrong_size" };
-  if (market[10] !== 1) return { ok: false, reason: "market_not_initialized" };
-  if (market[11] !== 1) return { ok: false, reason: "market_not_open" };
-  if (market[294] !== 1) return { ok: false, reason: "oracle_not_valid" };
+  if (input.v3) {
+    const { core, seat } = input.v3;
+    if (market.length !== 4_096 || core.kind !== "v3") return { ok: false, reason: "v3_core_wrong_size" };
+    if (core.mode !== 1 && core.mode !== 2 && core.mode !== 3) return { ok: false, reason: "market_not_open" };
+    if (!core.oracleValid) return { ok: false, reason: "oracle_not_valid" };
+    if (!seat) return { ok: false, reason: "seat_not_occupied" };
+    if (seat.slot !== input.seatIndex || seat.trader !== input.ownerWallet) return { ok: false, reason: "seat_owner_mismatch" };
+  } else if (market.length === 4_096) {
+    return { ok: false, reason: "v3_context_required" };
+  }
+  if (!input.v3 && market.length !== MARKET_ACCOUNT_SIZE) return { ok: false, reason: "market_wrong_size" };
+  if (!input.v3 && market[10] !== 1) return { ok: false, reason: "market_not_initialized" };
+  if (!input.v3 && market[11] !== 1) return { ok: false, reason: "market_not_open" };
+  if (!input.v3 && market[294] !== 1) return { ok: false, reason: "oracle_not_valid" };
 
   if (!Number.isInteger(input.seatIndex) || input.seatIndex < 0) return { ok: false, reason: "seat_index_invalid" };
-  const seatBase = TRADER_SEAT_OFFSET + input.seatIndex * TRADER_SEAT_SIZE;
-  if (seatBase + TRADER_SEAT_SIZE > market.length) return { ok: false, reason: "seat_out_of_bounds" };
-  if (market[seatBase] !== 1) return { ok: false, reason: "seat_not_occupied" };
-  const seatTrader = getBase58Decoder().decode(market.subarray(seatBase + 1, seatBase + 33));
-  if (seatTrader !== input.ownerWallet) return { ok: false, reason: "seat_owner_mismatch" };
+  if (!input.v3) {
+    const seatBase = TRADER_SEAT_OFFSET + input.seatIndex * TRADER_SEAT_SIZE;
+    if (seatBase + TRADER_SEAT_SIZE > market.length) return { ok: false, reason: "seat_out_of_bounds" };
+    if (market[seatBase] !== 1) return { ok: false, reason: "seat_not_occupied" };
+    const seatTrader = getBase58Decoder().decode(market.subarray(seatBase + 1, seatBase + 33));
+    if (seatTrader !== input.ownerWallet) return { ok: false, reason: "seat_owner_mismatch" };
+  }
 
   if (!input.sessionBytes || input.sessionAccountOwner !== input.programId) {
     return { ok: false, reason: "session_not_found" };
