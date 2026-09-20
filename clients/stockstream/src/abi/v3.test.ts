@@ -20,8 +20,11 @@ describe("V3 sharded ABI", () => {
       expect(size).toBeLessThan(V3_COMMIT_ACCOUNT_SAFE_MAX);
       expect(size).toBeLessThan(V3_COMMIT_ACCOUNT_HARD_MAX);
     }
+    expect(v3AccountIsCommittable(V3_COMMIT_ACCOUNT_SAFE_MAX)).toBe(true);
     expect(v3AccountIsCommittable(222_752)).toBe(false);
     expect(v3AccountIsCommittable(10_241)).toBe(false);
+    expect(v3AccountIsCommittable(-1)).toBe(false);
+    expect(v3AccountIsCommittable(10_240.5)).toBe(false);
   });
 
   it("derives distinct page and shard PDAs from the V3 core", () => {
