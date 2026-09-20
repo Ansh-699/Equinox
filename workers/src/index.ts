@@ -467,7 +467,7 @@ export default {
       // opcode/seatIndex/actionNonce below are extracted from the real,
       // cryptographically-signed instruction bytes -- not client claims.
       const shapeCheck = await validateSessionTransaction(
-        { transactionBase64: body.transactionBase64, expectedProgramAddress: STOCKSTREAM_PROGRAM_ID, sessionSignerAddress: body.sessionSignerAddress, expectedMarket: body.expectedMarket, ownerWallet: body.ownerWallet, expectedDomain: body.domain === "er" ? "er" : "l1", recentBlockhashValid: async (blockhash) => (await transport.isBlockhashValid(blockhash, "confirmed")).value },
+        { transactionBase64: body.transactionBase64, expectedProgramAddress: STOCKSTREAM_PROGRAM_ID, sessionSignerAddress: body.sessionSignerAddress, expectedMarket: body.expectedMarket, ownerWallet: body.ownerWallet, recentBlockhashValid: async (blockhash) => (await transport.isBlockhashValid(blockhash, "confirmed")).value },
         relayerAddress,
       );
       if (!shapeCheck.ok) return json({ error: shapeCheck.reason }, 400);
