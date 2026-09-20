@@ -38,6 +38,9 @@ export interface V3CoreState {
   oracleValid: boolean;
   lastVerifiedOraclePrice: bigint;
   lastVerifiedOracleTimestamp: bigint;
+  oracleFeedId: number;
+  oracleChannel: number;
+  oracleExponent: number;
   delegationStatus: number;
   expectedCommitSequence: bigint;
   lastCommittedSequence: bigint;
@@ -57,6 +60,7 @@ export function decodeV3Core(bytes: Uint8Array): V3CoreState | null {
     oracleValid: bytes[180] === 1,
     lastVerifiedOraclePrice: view.getBigInt64(181, true),
     lastVerifiedOracleTimestamp: view.getBigUint64(189, true),
+    oracleFeedId: view.getUint32(246, true), oracleChannel: bytes[250], oracleExponent: view.getInt32(251, true),
     delegationStatus: bytes[197],
     expectedCommitSequence: view.getBigUint64(198, true),
     lastCommittedSequence: view.getBigUint64(206, true),

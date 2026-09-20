@@ -622,17 +622,26 @@ pub fn initialize_v3_market(program_id: &Address, accounts: &mut [AccountView]) 
             .map_err(|_| custom(StockStreamError::InvalidInstruction))?;
         (authority, mint)
     };
-    let instrument = unsafe { accounts[1].borrow_unchecked() };
-    if instrument.len() != INSTRUMENT_SIZE
-        || instrument[0..8] != INSTRUMENT_DISCRIMINATOR
-        || instrument[10] != 1
-        || instrument[111] != 0
-    {
-        return Err(custom(StockStreamError::InvalidInstruction));
-    }
-    let id: [u8; 32] = instrument[11..43]
-        .try_into()
-        .map_err(|_| custom(StockStreamError::InvalidInstruction))?;
+    let (id, oracle_feed_id, oracle_channel, oracle_exponent) = {
+        let instrument = unsafe { accounts[1].borrow_unchecked() };
+        if instrument.len() != INSTRUMENT_SIZE
+            || instrument[0..8] != INSTRUMENT_DISCRIMINATOR
+            || instrument[10] != 1
+            || instrument[111] != 0
+        {
+            return Err(custom(StockStreamError::InvalidInstruction));
+        }
+        let id: [u8; 32] = instrument[11..43]
+            .try_into()
+            .map_err(|_| custom(StockStreamError::InvalidInstruction))?;
+        let feed_id = u32::from_le_bytes(instrument[75..79].try_into().unwrap());
+        let channel = instrument[79];
+        let exponent = i32::from_le_bytes(instrument[107..111].try_into().unwrap());
+        if feed_id == 0 || !(1..=4).contains(&channel) || !(-12..=0).contains(&exponent) {
+            return Err(custom(StockStreamError::OracleUnavailable));
+        }
+        (id, feed_id, channel, exponent)
+    };
     if *accounts[1].address() != derive_instrument(program_id, accounts[0].address(), &id)
         || *accounts[2].address() != v3::derive_market_core_v3(program_id, accounts[1].address())
     {
@@ -657,6 +666,11 @@ pub fn initialize_v3_market(program_id: &Address, accounts: &mut [AccountView]) 
     data[44..76].copy_from_slice(&exchange_authority);
     data[76..108].copy_from_slice(&collateral_mint);
     data[108..140].copy_from_slice(pinocchio_token::ID.as_ref());
+    data[v3::V3_CORE_ORACLE_FEED_ID_OFFSET..v3::V3_CORE_ORACLE_FEED_ID_OFFSET + 4]
+        .copy_from_slice(&oracle_feed_id.to_le_bytes());
+    data[v3::V3_CORE_ORACLE_CHANNEL_OFFSET] = oracle_channel;
+    data[v3::V3_CORE_ORACLE_EXPONENT_OFFSET..v3::V3_CORE_ORACLE_EXPONENT_OFFSET + 4]
+        .copy_from_slice(&oracle_exponent.to_le_bytes());
     Ok(())
 }
 

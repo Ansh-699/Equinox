@@ -9,7 +9,7 @@ const u16 = (bytes: Uint8Array, at: number, value: number) => new DataView(bytes
 
 function core(): Uint8Array {
   const bytes = new Uint8Array(V3_CORE_SIZE); write(bytes, "STKMK003"); u16(bytes, 8, 3); bytes[10] = 1; bytes[11] = 1;
-  bytes[12] = 1; bytes[44] = 2; bytes[180] = 1; bytes[197] = 3; return bytes;
+  bytes[12] = 1; bytes[44] = 2; bytes[180] = 1; bytes[197] = 3; new DataView(bytes.buffer).setUint32(246, 922, true); bytes[250] = 1; new DataView(bytes.buffer).setInt32(251, -6, true); return bytes;
 }
 function page(side: number, index: number): Uint8Array {
   const bytes = new Uint8Array(V3_BOOK_PAGE_SIZE); write(bytes, "STKBK003"); u16(bytes, 8, 3); bytes[10] = side; bytes[11] = index; bytes.set(new Uint8Array(32).fill(7), 12);
@@ -26,7 +26,7 @@ function shard(event: boolean, index: number): Uint8Array {
 
 describe("V3 worker shard aggregation", () => {
   it("decodes exact core and page ABI offsets", () => {
-    expect(decodeV3Core(core())?.delegationStatus).toBe(3);
+    expect(decodeV3Core(core())).toMatchObject({ delegationStatus: 3, oracleFeedId: 922, oracleChannel: 1, oracleExponent: -6 });
     expect(decodeV3BookPage(page(1, 3))).toMatchObject({ side: 1, page: 3, core: coreAddress });
     expect(decodeV3Core(new Uint8Array(V3_CORE_SIZE))).toBeNull();
     const globalPage = page(0, 0); new DataView(globalPage.buffer).setUint32(60, 1_024, true);

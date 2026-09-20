@@ -51,6 +51,7 @@ function key(bytes: Uint8Array, offset: number): PublicKey { return new PublicKe
 export interface V3MarketCoreView {
   instrument: PublicKey; marketAuthority: PublicKey; mode: number;
   oracleValid: boolean; lastVerifiedOraclePrice: bigint; lastVerifiedOracleTimestamp: bigint;
+  oracleFeedId: number; oracleChannel: number; oracleExponent: number;
   delegationStatus: number; expectedCommitSequence: bigint; lastCommittedSequence: bigint; validator: PublicKey;
 }
 export function decodeV3MarketCore(bytes: Uint8Array): V3MarketCoreView {
@@ -59,6 +60,7 @@ export function decodeV3MarketCore(bytes: Uint8Array): V3MarketCoreView {
   return {
     mode: bytes[11], instrument: key(bytes, 12), marketAuthority: key(bytes, 44), oracleValid: bytes[180] === 1,
     lastVerifiedOraclePrice: view.getBigInt64(181, true), lastVerifiedOracleTimestamp: view.getBigUint64(189, true),
+    oracleFeedId: view.getUint32(246, true), oracleChannel: bytes[250], oracleExponent: view.getInt32(251, true),
     delegationStatus: bytes[197], expectedCommitSequence: view.getBigUint64(198, true),
     lastCommittedSequence: view.getBigUint64(206, true), validator: key(bytes, 214),
   };
