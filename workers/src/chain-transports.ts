@@ -220,6 +220,10 @@ class TransactionTransport extends JsonRpcTransport {
   blockHeight(commitment: 'confirmed' | 'finalized' = 'finalized') {
     return this.call<number>('getBlockHeight', [{ commitment }]);
   }
+
+  isBlockhashValid(blockhash: string, commitment: 'confirmed' | 'finalized' = 'finalized') {
+    return this.call<{ context: { slot: number }; value: boolean }>('isBlockhashValid', [blockhash, { commitment }]);
+  }
 }
 
 export class SolanaL1Transport extends TransactionTransport {
