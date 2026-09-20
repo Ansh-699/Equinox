@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getBase58Decoder } from "@solana/kit";
-import { aggregateV3Market, decodeV3BookPage, decodeV3Core, decodeV3EventShard, decodeV3SeatShard, executableV3Mark, V3_BOOK_PAGE_SIZE, V3_BOOK_PAGES_PER_SIDE, V3_CORE_SIZE, V3_EVENT_SHARD_SIZE, V3_SEAT_SHARD_SIZE } from "./v3-market-state";
+import { aggregateV3Market, decodeV3BookPage, decodeV3Core, decodeV3EventShard, decodeV3SeatShard, executableV3Mark, fetchAuthoritativeV3Market, V3_BOOK_PAGE_SIZE, V3_BOOK_PAGES_PER_SIDE, V3_CORE_SIZE, V3_EVENT_SHARD_SIZE, V3_SEAT_SHARD_SIZE } from "./v3-market-state";
 
 const decoder = getBase58Decoder();
 const coreAddress = decoder.decode(new Uint8Array(32).fill(7));
@@ -25,6 +25,12 @@ function shard(event: boolean, index: number): Uint8Array {
 }
 
 describe("V3 worker shard aggregation", () => {
+  it("rejects a correctly-shaped shard owned by a foreign program", async () => {
+    const bytes = [core(), ...Array.from({ length: 18 }, (_, value) => page(Math.floor(value / 9), value % 9)), ...Array.from({ length: 4 }, (_, value) => shard(false, value)), ...Array.from({ length: 4 }, (_, value) => shard(true, value))];
+    const transport = { multipleAccounts: async () => ({ context: { slot: 1 }, value: bytes.map((data, index) => ({ data: [btoa(String.fromCharCode(...data)), "base64"] as [string, string], owner: index === 0 ? "foreign-program" : "H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET", lamports: 1 })) }) } as never;
+    expect(await fetchAuthoritativeV3Market(transport, { core: coreAddress, bookPages: Array.from({ length: 18 }, (_, i) => `page-${i}`), seatShards: Array.from({ length: 4 }, (_, i) => `seat-${i}`), eventShards: Array.from({ length: 4 }, (_, i) => `event-${i}`) })).toBeNull();
+  });
+
   it("decodes exact core and page ABI offsets", () => {
     expect(decodeV3Core(core())).toMatchObject({ delegationStatus: 3, oracleFeedId: 922, oracleChannel: 1, oracleExponent: -6 });
     expect(decodeV3BookPage(page(1, 3))).toMatchObject({ side: 1, page: 3, core: coreAddress });
