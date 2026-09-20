@@ -58,7 +58,7 @@ test("open orders panel honestly reports unavailable -- no mock orders are ever 
   await page.goto("/");
   const panel = page.locator(".open-orders-panel");
   await expect(panel.locator("h2")).toHaveText("Open orders");
-  await expect(panel).toContainText("canonical order-book layout manifest", { timeout: 10_000 });
+  await expect(panel).toContainText("complete V3 shard aggregate", { timeout: 10_000 });
   await expect(panel.locator("table")).toHaveCount(0);
 });
 
