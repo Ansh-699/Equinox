@@ -37,7 +37,7 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 | Frontend fixture E2E (Playwright) | Complete | 50/50 pass; 2 real bugs found and fixed (stale mock-relayer auth contract, a WS-connection race in oracle-safety.spec.ts) |
 | Frontend production build | Complete | `npm run build` exit 0; `next start` serves real HTTP 200; production smoke suite 6/6 |
 | Opt-in Devnet browser E2E | Complete (read-only, live) | `npm run test:browser:devnet` runs `playwright.devnet.config.ts` against the real Devnet RPC, deployed Worker and V3 core configuration; 2/2 pass. It verifies app boot, Devnet/AAPL configuration, server-secret non-disclosure and the live Worker V3 404 contract. Signing/relay is intentionally not claimed because Pyth/Privy remain externally blocked. |
-| Repository cleanup / doc classification | Partial | this file added; the ~35 other `docs/*.md` files not yet individually classified (canonical/runbook/historical/obsolete) |
+| Repository cleanup / doc classification | Complete | `docs/status/document-classification.md` classifies every `docs/*.md` file as canonical specification, operational runbook/release gate, historical research, or navigation map; this file remains the authoritative implementation snapshot. |
 | `clients/stockstream/src/index.ts` facade reduction | Started, partial | commit `7fba664` removes the duplicated public opcode table in favour of the ABI authority. Instruction encoders and account-meta construction remain in the legacy facade and need incremental, parity-tested extraction. |
 
 ## Test counts (latest rerun; scope is stated explicitly)
