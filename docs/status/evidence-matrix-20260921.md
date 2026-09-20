@@ -1,6 +1,6 @@
 # StockStream evidence matrix
 
-This matrix is scoped to current HEAD `34bf104` (post-V3-cancellation-atomicity, funding-settlement, liquidation-preflight, cancel-all-preflight, and replacement-preflight fixes). “Fresh” means rerun on this checkout; live claims additionally require the cited Devnet artifact. The full local gate is `VERIFY_SUMMARY_PATH=/tmp/stockstream-verify-summary-20260921-funding.json NO_DNA=1 bash scripts/verify.sh` from the preceding source checkpoint; the checked-in summary is `verify-latest.json`. The focused Rust suite and SBF build were rerun after the source fixes.
+This matrix is scoped to current HEAD `e7aa6f3` (post-V3-cancellation-atomicity, funding-settlement, liquidation-preflight, cancel-all-preflight, replacement-preflight, and available-margin fixes). “Fresh” means rerun on this checkout; live claims additionally require the cited Devnet artifact. The full local gate is `VERIFY_SUMMARY_PATH=/tmp/stockstream-verify-summary-20260921-funding.json NO_DNA=1 bash scripts/verify.sh` from the preceding source checkpoint; the checked-in summary is `verify-latest.json`. The focused Rust suite and SBF build were rerun after the source fixes.
 
 | Subsystem | Classification | Source and exact evidence | Fresh on current HEAD |
 |---|---|---|---|
@@ -13,7 +13,7 @@ This matrix is scoped to current HEAD `34bf104` (post-V3-cancellation-atomicity,
 | V3 core commit | externally-blocked | `scripts/magicblock-commit-repro.mjs`; `docs/status/external-blocker-probe-20260921.json`; validator rejects the monolithic/core path | yes (probe evidence is current) |
 | V3 undelegation | externally-blocked | `scripts/magicblock-dlp-discriminator-repro.mjs`; `docs/status/magicblock-support-bundle-20260920.json` | yes |
 | V3 restoration | externally-blocked | `programs/stockstream/src/v3.rs`; `docs/status/v3-recovery-evidence-20260920.json`; DLP callback remains pending | no (live state preserved) |
-| V3 risk configuration | locally-tested | `programs/stockstream/src/v3.rs`; `cargo test -p stockstream --tests` (risk-update vectors and bundle tests) | yes |
+| V3 risk configuration | locally-tested | `programs/stockstream/src/v3.rs`; `cargo test -p stockstream --tests` (risk-update vectors, available-margin guard, and bundle tests) | yes |
 | V3 fill accounting | locally-tested | `programs/stockstream/src/risk.rs`, `programs/stockstream/src/v3.rs`; `cargo test -p stockstream --tests` | yes |
 | V3 PnL accounting | locally-tested | `programs/stockstream/src/risk.rs`; `cargo test -p stockstream --test state_risk repeated_partial_closes_preserve_fractional_entry_value` verifies proportional entry allocation across repeated partial closes | yes |
 | V3 fee accounting | locally-tested | `programs/stockstream/src/v3.rs`; `cargo test -p stockstream --test v3_bundle` | yes |
