@@ -1198,6 +1198,89 @@ fn v3_cross_tree_matching_uses_executable_price_then_fifo_key() {
 }
 
 #[test]
+fn v3_cross_tree_matching_covers_both_taker_sides_and_peg_states() {
+    // Bid taker: fixed and valid pegged asks are eligible; invalid and
+    // expired makers must be ignored without disturbing price priority.
+    let accounts = bundle();
+    let mut ask_pages = (1..=V3_BOOK_PAGES_PER_SIDE)
+        .map(|index| accounts[index].view.clone())
+        .collect::<Vec<_>>();
+    let mut asks = PagedBookV3::new(&mut ask_pages).unwrap();
+    let mut fixed_ask = leaf(11u128 << 64, 11);
+    fixed_ask.price_or_offset = 11;
+    asks.insert(TreeKind::Fixed, fixed_ask).unwrap();
+    let mut valid_pegged_ask = leaf(12u128 << 64, 12);
+    valid_pegged_ask.price_or_offset = 2;
+    valid_pegged_ask.peg_limit = 12;
+    asks.insert(TreeKind::OraclePegged, valid_pegged_ask)
+        .unwrap();
+    let mut invalid_pegged_ask = leaf(13u128 << 64, 13);
+    invalid_pegged_ask.price_or_offset = 5;
+    invalid_pegged_ask.peg_limit = 110;
+    asks.insert(TreeKind::OraclePegged, invalid_pegged_ask)
+        .unwrap();
+    asks.insert(TreeKind::Fixed, expiring_leaf(14u128 << 64, 14, 1))
+        .unwrap();
+    let bid_plan = asks
+        .plan_crossing_cross_tree(
+            Side::Bid,
+            99,
+            stockstream::book::SelfTradeBehavior::AbortTransaction,
+            20,
+            2,
+            Some(10),
+            1,
+        )
+        .unwrap();
+    assert_eq!(bid_plan.fill_count, 2);
+    assert_eq!(bid_plan.fills[0].price, 11);
+    assert_eq!(bid_plan.fills[0].maker_tree, TreeKind::Fixed as u8);
+    assert_eq!(bid_plan.fills[1].price, 12);
+    assert_eq!(bid_plan.fills[1].maker_tree, TreeKind::OraclePegged as u8);
+
+    // Ask taker: a better valid pegged bid must outrank a worse fixed bid;
+    // an invalid pegged bid remains skipped even though its raw offset is
+    // numerically attractive.
+    let accounts = bundle();
+    let mut bid_pages = (1..=V3_BOOK_PAGES_PER_SIDE)
+        .map(|index| accounts[index].view.clone())
+        .collect::<Vec<_>>();
+    let mut bids = PagedBookV3::new(&mut bid_pages).unwrap();
+    let mut fixed_bid = leaf(21u128 << 64, 21);
+    fixed_bid.side = Side::Bid as u8;
+    fixed_bid.price_or_offset = 95;
+    bids.insert(TreeKind::Fixed, fixed_bid).unwrap();
+    let mut valid_pegged_bid = leaf(22u128 << 64, 22);
+    valid_pegged_bid.side = Side::Bid as u8;
+    valid_pegged_bid.price_or_offset = 5;
+    valid_pegged_bid.peg_limit = 105;
+    bids.insert(TreeKind::OraclePegged, valid_pegged_bid)
+        .unwrap();
+    let mut invalid_pegged_bid = leaf(23u128 << 64, 23);
+    invalid_pegged_bid.side = Side::Bid as u8;
+    invalid_pegged_bid.price_or_offset = 20;
+    invalid_pegged_bid.peg_limit = 110;
+    bids.insert(TreeKind::OraclePegged, invalid_pegged_bid)
+        .unwrap();
+    let ask_plan = bids
+        .plan_crossing_cross_tree(
+            Side::Ask,
+            199,
+            stockstream::book::SelfTradeBehavior::AbortTransaction,
+            90,
+            2,
+            Some(100),
+            0,
+        )
+        .unwrap();
+    assert_eq!(ask_plan.fill_count, 2);
+    assert_eq!(ask_plan.fills[0].price, 105);
+    assert_eq!(ask_plan.fills[0].maker_tree, TreeKind::OraclePegged as u8);
+    assert_eq!(ask_plan.fills[1].price, 95);
+    assert_eq!(ask_plan.fills[1].maker_tree, TreeKind::Fixed as u8);
+}
+
+#[test]
 fn v3_self_trade_policies_apply_on_paged_books() {
     let accounts = bundle();
     let mut pages = (1..=V3_BOOK_PAGES_PER_SIDE)
