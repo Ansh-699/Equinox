@@ -62,6 +62,13 @@ describe("fundingTickDecision", () => {
     expect(decision.input?.computeNextAccumulator()).toBe(1_000n); // mark==index baseline -> zero delta
   });
 
+  it("uses a supplied validated V3 mark while retaining the index fallback", () => {
+    const premium = fundingTickDecision(market(), "open", policy, now, 102_000n);
+    expect(premium.input?.computeNextAccumulator()).toBe(1_000n + (50n * 1_000_000n) / 10_000n);
+    const discount = fundingTickDecision(market(), "open", policy, now, 98_000n);
+    expect(discount.input?.computeNextAccumulator()).toBe(1_000n - (50n * 1_000_000n) / 10_000n);
+  });
+
   it("refuses to settle funding on a stale/invalid oracle", () => {
     const decision = fundingTickDecision(market({ oracleValid: false }), "open", policy, now);
     expect(decision.eligible).toBe(false);

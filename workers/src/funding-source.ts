@@ -11,13 +11,10 @@ import type { MarketState } from "./market-state";
  * deterministically from authoritative on-chain state (never an arbitrary
  * HTTP rate, never a UI projection).
  *
- * ponytail: no independent order-book-implied mark price reader exists yet
- * in this Worker (it would mean decoding the arena/book region, not just
- * the header) -- `markPrice` therefore defaults to `indexPrice`
- * (`lastVerifiedOraclePrice`), which is a defensible, documented zero-
- * premium baseline (funding only ever accrues if a real divergence source
- * is supplied), not a hidden approximation. Upgrade path: pass a real mark
- * price (best bid/ask mid) once the book-decode exists.
+ * The optional `markPrice` argument is supplied by the validated V3 shard
+ * aggregate when available. It intentionally falls back to the verified
+ * index price for legacy/V2 callers, preserving a zero-premium baseline
+ * rather than inventing a mark from untrusted bytes.
  */
 
 export interface FundingPolicy {
@@ -57,7 +54,7 @@ export interface FundingTickDecision {
  * oracle, allowed market mode, and (redundantly with the tick's own check,
  * defense in depth) the configured interval having elapsed. Never reads
  * anything but the authoritative decoded market header. */
-export function fundingTickDecision(market: MarketState, mode: FundingMode, policy: FundingPolicy, now: number): FundingTickDecision {
+export function fundingTickDecision(market: MarketState, mode: FundingMode, policy: FundingPolicy, now: number, markPrice = market.lastVerifiedOraclePrice): FundingTickDecision {
   if (mode === "paused") return { eligible: false, reason: "market mode does not permit funding settlement (paused/emergency)" };
   if (!market.oracleValid) return { eligible: false, reason: "oracle not verified; refusing to settle funding on stale/invalid state" };
   const elapsedMs = now - Number(market.lastFundingTimestamp) * 1000;
@@ -70,7 +67,7 @@ export function fundingTickDecision(market: MarketState, mode: FundingMode, poli
       oracleTimestamp: Number(market.lastVerifiedOracleTimestamp),
       lastFundingTimestamp: Number(market.lastFundingTimestamp),
       fundingIntervalMs: policy.intervalMs,
-      computeNextAccumulator: () => market.fundingAccumulator + computeCappedFundingDelta(market.lastVerifiedOraclePrice, market.lastVerifiedOraclePrice, policy),
+      computeNextAccumulator: () => market.fundingAccumulator + computeCappedFundingDelta(market.lastVerifiedOraclePrice, markPrice, policy),
       now,
     },
   };
