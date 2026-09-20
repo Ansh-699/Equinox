@@ -56,6 +56,7 @@ async function ensureV3Account(label, parent, target, kind, index, size, payer) 
   for (;;) {
     const existing = await connection.getAccountInfo(target, "confirmed");
     if (existing?.owner.equals(PROGRAM) && existing.data.length === size) return;
+    if (existing?.owner.equals(PROGRAM)) throw new Error(`${label}: existing StockStream account has size ${existing.data.length}, expected ${size}; refusing to recreate or overwrite it`);
     if (existing && !existing.owner.equals(SystemProgram.programId) && !existing.owner.equals(PROGRAM)) throw new Error(`${label}: target occupied by foreign owner`);
     await send(`${label} create/resume`, [ix(46, [ro(parent), wr(target), wsg(payer.publicKey), ro(SystemProgram.programId)], [kind, index])], [payer]);
   }
