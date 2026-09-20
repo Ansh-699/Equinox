@@ -25,10 +25,11 @@ describe("evaluateWithdrawGate", () => {
   it("blocks on a reconciliation error status regardless of withdrawalSafe", () => {
     expect(evaluateWithdrawGate(display("reconciliation_error"), 0).allowed).toBe(false);
   });
-  it("blocks on a reconciliation deficit (2) or recovery-required (3) status even when otherwise safe", () => {
+  it("blocks every non-reconciled status even when lifecycle state is otherwise safe", () => {
     expect(evaluateWithdrawGate(display("l1_only"), 2).allowed).toBe(false);
     expect(evaluateWithdrawGate(display("l1_only"), 3).allowed).toBe(false);
+    expect(evaluateWithdrawGate(display("l1_only"), 1).allowed).toBe(false);
+    expect(evaluateWithdrawGate(display("l1_only"), 4).allowed).toBe(false);
     expect(evaluateWithdrawGate(display("l1_only"), 0).allowed).toBe(true);
-    expect(evaluateWithdrawGate(display("l1_only"), 1).allowed).toBe(true); // SurplusDetected is not a deficit
   });
 });
