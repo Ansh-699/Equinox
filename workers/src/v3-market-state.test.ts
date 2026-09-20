@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getBase58Decoder } from "@solana/kit";
-import { aggregateV3Market, decodeV3BookPage, decodeV3Core, decodeV3EventShard, decodeV3SeatShard, V3_BOOK_PAGE_SIZE, V3_BOOK_PAGES_PER_SIDE, V3_CORE_SIZE, V3_EVENT_SHARD_SIZE, V3_SEAT_SHARD_SIZE } from "./v3-market-state";
+import { aggregateV3Market, decodeV3BookPage, decodeV3Core, decodeV3EventShard, decodeV3SeatShard, executableV3Mark, V3_BOOK_PAGE_SIZE, V3_BOOK_PAGES_PER_SIDE, V3_CORE_SIZE, V3_EVENT_SHARD_SIZE, V3_SEAT_SHARD_SIZE } from "./v3-market-state";
 
 const decoder = getBase58Decoder();
 const coreAddress = decoder.decode(new Uint8Array(32).fill(7));
@@ -79,5 +79,15 @@ describe("V3 worker shard aggregation", () => {
     const bytes = shard(false, 2); const base = 44; bytes[base] = 1; bytes.fill(8, base + 1, base + 33);
     const view = new DataView(bytes.buffer); view.setBigUint64(base + 72, 5n, true); view.setUint32(base + 168, 2, true);
     expect(decodeV3SeatShard(bytes)?.positions[0]).toMatchObject({ shard: 2, slot: 0, basePosition: 5n, openOrderCount: 2 });
+  });
+  it("computes an executable mark from paged V3 Patricia leaves, not V2 offsets", () => {
+    const coreBytes = core(); const coreView = new DataView(coreBytes.buffer); coreView.setBigInt64(181, 100n, true); coreView.setBigUint64(189, 50n, true);
+    const bid = leafPage(0, 0); const ask = leafPage(1, 0); const bidView = new DataView(bid.buffer); const askView = new DataView(ask.buffer);
+    bidView.setUint32(44, 0, true); askView.setUint32(44, 0, true); bidView.setBigInt64(64 + 56, 99n, true); askView.setBigInt64(64 + 56, 101n, true); bidView.setBigUint64(64 + 32, 100n, true); askView.setBigUint64(64 + 32, 100n, true);
+    const books = [bid, ...Array.from({ length: V3_BOOK_PAGES_PER_SIDE - 1 }, (_, value) => page(0, value + 1)), ask, ...Array.from({ length: V3_BOOK_PAGES_PER_SIDE - 1 }, (_, value) => page(1, value + 1))];
+    const seats = Array.from({ length: 4 }, (_, value) => shard(false, value)); const events = Array.from({ length: 4 }, (_, value) => shard(true, value));
+    const aggregate = aggregateV3Market(coreBytes, books, seats, events, coreAddress)!;
+    expect(executableV3Mark(aggregate, 50n)).toEqual({ price: 100, source: 1 });
+    expect(executableV3Mark(aggregate, 101n)).toEqual({ price: 100, source: 0 });
   });
 });

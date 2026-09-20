@@ -252,6 +252,47 @@ export interface V3MarketAggregate {
   positions: readonly V3SeatPositionState[];
 }
 
+export const V3_MARK_SOURCE = { Index: 0, BookMid: 1, BookOneSided: 2 } as const;
+export interface V3MarkQuote { price: number; source: (typeof V3_MARK_SOURCE)[keyof typeof V3_MARK_SOURCE]; }
+const V3_DEFAULT_MAX_MARK_DEVIATION_BPS = 500;
+
+/** Computes the deterministic mark from the already validated V3 aggregate.
+ * This intentionally consumes decoded page nodes and Patricia tree labels;
+ * it never reads V2 arena offsets. */
+export function executableV3Mark(aggregate: Pick<V3MarketAggregate, "core" | "orderBook">, now: bigint = BigInt(Math.floor(Date.now() / 1000))): V3MarkQuote | null {
+  const { core } = aggregate;
+  if (core.mode !== 1 && core.mode !== 2 && core.mode !== 3) return null;
+  if (!core.oracleValid || core.lastVerifiedOraclePrice <= 0n) return null;
+  const oracle = Number(core.lastVerifiedOraclePrice);
+  const bestSide = (bid: boolean): number | null => {
+    let best: number | null = null;
+    for (const node of [...aggregate.orderBook.bids, ...aggregate.orderBook.asks]) {
+      if (node.tag !== 2 || node.side === undefined || node.quantity === undefined || node.expiresAt === undefined || node.priceOrOffset === undefined || node.tree === undefined) continue;
+      if ((node.side === 0) !== bid || node.quantity === 0n || node.expiresAt <= now) continue;
+      let price: bigint | null = node.priceOrOffset;
+      if (node.tree === "oracle-pegged") {
+        if (node.pegLimit === undefined || node.pegLimit <= 0n) price = null;
+        else {
+          const evaluated = core.lastVerifiedOraclePrice + node.priceOrOffset;
+          price = bid ? evaluated <= node.pegLimit ? evaluated : null : evaluated >= node.pegLimit ? evaluated : null;
+        }
+      }
+      if (price === null || price <= 0n || price > BigInt(Number.MAX_SAFE_INTEGER)) continue;
+      const numeric = Number(price);
+      best = best === null ? numeric : bid ? Math.max(best, numeric) : Math.min(best, numeric);
+    }
+    return best;
+  };
+  const bid = bestSide(true); const ask = bestSide(false);
+  if (bid === null && ask === null) return { price: oracle, source: V3_MARK_SOURCE.Index };
+  const clamp = (value: number) => {
+    const deviation = Math.floor((oracle * V3_DEFAULT_MAX_MARK_DEVIATION_BPS) / 10_000);
+    return Math.min(Math.max(value, Math.max(1, oracle - deviation)), oracle + deviation);
+  };
+  if (bid !== null && ask !== null) return ask > bid ? { price: clamp(Math.floor((bid + ask) / 2)), source: V3_MARK_SOURCE.BookMid } : { price: oracle, source: V3_MARK_SOURCE.Index };
+  return { price: clamp(bid ?? ask!), source: V3_MARK_SOURCE.BookOneSided };
+}
+
 /** Rejects duplicates, cross-market substitution, malformed bytes, and
  * incomplete collections. It aggregates only proven shard relationships. */
 export function aggregateV3Market(
