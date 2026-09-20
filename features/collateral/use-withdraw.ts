@@ -16,14 +16,14 @@ export interface WithdrawGate {
   reason?: string;
 }
 
-const RECONCILIATION_DEFICIT_STATUSES = new Set([2, 3]); // DeficitDetected, RecoveryRequired -- see MarketStateView.reconciliationStatus
+const RECONCILIATION_SAFE_STATUS = 0; // Reconciled -- matches validate_v3_withdrawal_readiness
 
 /** Pure, unit-testable gate mirroring the spec's exact disable list: the
  * market must be withdrawal-safe per the indexer's own authoritative flag
  * (l1_only/commit_finalized/restored -- covers delegating/delegated/
  * commit-pending/undelegating/restoration-pending as "not safe" in one
- * check, since that IS what the flag means) and must not be in a
- * reconciliation deficit. This is a DISPLAY gate only: the on-chain
+ * check, since that IS what the flag means) and must have a confirmed
+ * reconciled vault. This is a DISPLAY gate only: the on-chain
  * program's own l1_withdrawals_allowed() is the real boundary and can
  * still reject a withdrawal this gate would have allowed if state changed
  * between the read and the submission. */
@@ -31,8 +31,8 @@ export function evaluateWithdrawGate(execution: ExecutionDisplayState | null, re
   if (!execution) return { allowed: false, reason: "Execution status unavailable" };
   if (execution.degraded) return { allowed: false, reason: "Execution status reconciliation error" };
   if (!execution.withdrawalSafe) return { allowed: false, reason: "Market is delegating, delegated, committing, undelegating, or awaiting restoration" };
-  if (reconciliationStatus !== null && RECONCILIATION_DEFICIT_STATUSES.has(reconciliationStatus)) {
-    return { allowed: false, reason: "Vault reconciliation deficit detected" };
+  if (reconciliationStatus !== null && reconciliationStatus !== RECONCILIATION_SAFE_STATUS) {
+    return { allowed: false, reason: "Vault reconciliation is not confirmed" };
   }
   return { allowed: true };
 }
