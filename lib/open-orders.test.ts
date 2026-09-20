@@ -18,6 +18,7 @@ describe("createV3OpenOrdersAdapter", () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: true,
       json: async () => ({
+        asOfSlot: 42,
         completeExecutionState: true,
         core: { lastVerifiedOraclePrice: "1000" },
         orderBook: {
@@ -27,7 +28,7 @@ describe("createV3OpenOrdersAdapter", () => {
       }),
     })));
     const result = await createV3OpenOrdersAdapter({ marketApiUrl: "https://api.example", core: "core" }).fetchOpenOrders({ marketPda: "ignored", seatIndex: 0 });
-    expect(result).toMatchObject({ status: "ready" });
+    expect(result).toMatchObject({ status: "ready", asOfSlot: 42 });
     if (result.status !== "ready") return;
     expect(result.orders).toEqual([
       expect.objectContaining({ side: "bid", tree: "fixed", price: (2n ** 64n - 1n) - 100n, postOnly: true, expiresAt: null }),

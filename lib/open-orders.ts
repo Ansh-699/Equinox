@@ -48,6 +48,7 @@ interface V3OrderNode {
   tree?: "fixed" | "oracle-pegged";
 }
 interface V3AggregateResponse {
+  asOfSlot?: number | null;
   core?: { lastVerifiedOraclePrice?: string };
   completeExecutionState?: boolean;
   orderBook?: { bids?: readonly V3OrderNode[]; asks?: readonly V3OrderNode[] };
@@ -107,7 +108,7 @@ export function createV3OpenOrdersAdapter(input: {
           expiresAt: expires === 2n ** 64n - 1n ? null : expires,
         });
       }
-      return { status: "ready", orders, asOfSlot: null };
+      return { status: "ready", orders, asOfSlot: typeof aggregate.asOfSlot === "number" ? aggregate.asOfSlot : null };
     },
   };
 }

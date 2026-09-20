@@ -240,6 +240,8 @@ export function decodeV3EventShard(bytes: Uint8Array): V3EventShardState | null 
 }
 
 export interface V3MarketAggregate {
+  /** Finalized RPC context slot for the atomic 27-account read. */
+  asOfSlot: number | null;
   core: V3CoreState;
   bookPages: readonly V3BookPageState[];
   seatShards: readonly V3SeatShardState[];
@@ -303,6 +305,7 @@ export function aggregateV3Market(
   seatBytes: readonly Uint8Array[],
   eventBytes: readonly Uint8Array[],
   coreAddress: string,
+  asOfSlot: number | null = null,
 ): V3MarketAggregate | null {
   const core = decodeV3Core(coreBytes);
   if (!core) return null;
@@ -325,6 +328,7 @@ export function aggregateV3Market(
   if (!annotateBookTrees(bookPages)) return null;
   const leaves = bookPages.flatMap((page) => page.nodes).filter((node) => node.tag === 2);
   const aggregate: V3MarketAggregate = {
+    asOfSlot,
     core, bookPages, seatShards, eventShards, completeBook, completeExecutionState,
     withdrawalReady: completeExecutionState && core.delegationStatus === 3,
     orderBook: {
@@ -369,6 +373,6 @@ export async function fetchAuthoritativeV3Market(
   const values = response.value.map((account) => account?.data ? base64ToBytes(account.data[0]) : null);
   if (values.some((value) => value === null)) return null;
   return aggregateV3Market(
-    values[0]!, values.slice(1, 1 + bookPageCount) as Uint8Array[], values.slice(1 + bookPageCount, 5 + bookPageCount) as Uint8Array[], values.slice(5 + bookPageCount, 9 + bookPageCount) as Uint8Array[], addresses.core,
+    values[0]!, values.slice(1, 1 + bookPageCount) as Uint8Array[], values.slice(1 + bookPageCount, 5 + bookPageCount) as Uint8Array[], values.slice(5 + bookPageCount, 9 + bookPageCount) as Uint8Array[], addresses.core, response.context.slot,
   );
 }
