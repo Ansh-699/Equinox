@@ -73,6 +73,11 @@ export interface V3ExecutionAccounts {
   authority: AddressInput;
   session?: AddressInput;
 }
+export interface V3CommitAccounts extends V3ExecutionAccounts {
+  payer: AddressInput;
+  magicContext: AddressInput;
+  magicProgram: AddressInput;
+}
 
 function publicKey(value: AddressInput): PublicKey {
   if (value instanceof PublicKey) return value;
@@ -265,6 +270,26 @@ export function cancelAllV3(accounts: V3ExecutionAccounts, seatIndex: number, ma
   data[3] = Number(checkedUnsigned(maxCancellations, 8, "maxCancellations"));
   writeUnsigned(data, 4, checkedUnsigned(actionNonce, 64, "actionNonce"), 8);
   return instruction(data, v3ExecutionMetas(accounts));
+}
+
+function v3CommitMetas(accounts: V3CommitAccounts): AccountMeta[] {
+  if (accounts.bookPages.length !== 2 * V3_BOOK_PAGES_PER_SIDE || accounts.seatShards.length !== 4 || accounts.eventShards.length !== 4) {
+    throw new RangeError("V3 commit requires the complete execution bundle");
+  }
+  return [
+    accountMeta(accounts.core, false, true), accountMeta(accounts.authority, true, false),
+    accountMeta(accounts.payer, true, true), accountMeta(accounts.magicContext, false, true),
+    accountMeta(accounts.magicProgram, false, false),
+    ...accounts.bookPages.map((address) => accountMeta(address, false, true)),
+    ...accounts.seatShards.map((address) => accountMeta(address, false, true)),
+    ...accounts.eventShards.map((address) => accountMeta(address, false, true)),
+  ];
+}
+
+export function commitMarketV3(accounts: V3CommitAccounts, sequence: bigint | number, undelegate = false): TransactionInstruction {
+  const data = new Uint8Array(9); data[0] = undelegate ? STOCKSTREAM_INSTRUCTION.commitAndUndelegate : STOCKSTREAM_INSTRUCTION.commitMarket;
+  writeUnsigned(data, 1, checkedUnsigned(sequence, 64, "sequence"), 8);
+  return instruction(data, v3CommitMetas(accounts));
 }
 
 export function updateFunding(accounts: InstructionAccounts, accumulator: bigint, timestamp: bigint | number): TransactionInstruction {
