@@ -24,5 +24,16 @@
     "unitsConsumed": 14550,
     "stateMutation": false
   },
+  "deployedDlpVersionProbe": {
+    "program": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh",
+    "programData": "Ew1j4p6jU82qmLFLJe2SVp5ZKoNokMP6J1Bf5LaZ6GyE",
+    "lastDeployedSlot": 458511904,
+    "probeCommand": "node --input-type=module <direct DLP simulate with discriminator bytes>",
+    "requestDiscriminatorBytes": "1a00000000000000",
+    "requestResult": "InvalidInstructionData; Failed to read and parse discriminator",
+    "delegateDiscriminatorBytes": "0000000000000000",
+    "delegateResult": "InvalidAccountOwner (handler reached), proving discriminator 0 is supported",
+    "conclusion": "live DLP does not recognize RequestUndelegation=26 from the vendored 3.1.0 API; timeout request/rollback cannot be used until the validator DLP is upgraded"
+  },
   "rollback": { "attempted": false, "reason": "request discriminator was rejected by the live DLP; wait/rollback would be unsafe without a compatible DLP wire contract" }
 }
