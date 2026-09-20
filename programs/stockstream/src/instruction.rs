@@ -43,6 +43,11 @@ pub const CLOSE_V3_TRADER_SEAT: u8 = 50;
 /// the request expiry to roll back safely through the delegation program.
 pub const REQUEST_V3_UNDELEGATION: u8 = 51;
 pub const ROLLBACK_V3_UNDELEGATION: u8 = 52;
+/// L1 custody against the sharded V3 state. Deposit uses one seat shard and
+/// the four event shards; withdrawal additionally requires the complete
+/// execution bundle so restoration/finality cannot be bypassed.
+pub const DEPOSIT_COLLATERAL_V3: u8 = 53;
+pub const WITHDRAW_COLLATERAL_V3: u8 = 54;
 pub const COMMIT_MARKET: u8 = 14;
 pub const COMMIT_AND_UNDELEGATE: u8 = 15;
 /// Reserved: the real external-undelegate callback uses the delegation
@@ -221,6 +226,14 @@ pub enum StockStreamInstruction {
     },
     RequestV3Undelegation,
     RollbackV3Undelegation,
+    DepositCollateralV3 {
+        seat_index: u16,
+        amount: u64,
+    },
+    WithdrawCollateralV3 {
+        seat_index: u16,
+        amount: u64,
+    },
     CommitMarket {
         sequence: u64,
     },
@@ -480,6 +493,14 @@ impl StockStreamInstruction {
             }),
             Some(CREATE_V3_TRADER_SEAT) if data.len() == 3 => Ok(Self::CreateV3TraderSeat {
                 seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+            }),
+            Some(DEPOSIT_COLLATERAL_V3) if data.len() == 11 => Ok(Self::DepositCollateralV3 {
+                seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+                amount: read_u64(data, 3).ok_or(ProgramError::InvalidInstructionData)?,
+            }),
+            Some(WITHDRAW_COLLATERAL_V3) if data.len() == 11 => Ok(Self::WithdrawCollateralV3 {
+                seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+                amount: read_u64(data, 3).ok_or(ProgramError::InvalidInstructionData)?,
             }),
             Some(CLOSE_V3_TRADER_SEAT) if data.len() == 3 => Ok(Self::CloseV3TraderSeat {
                 seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,

@@ -132,6 +132,25 @@ fn production_instruction_decoder_covers_integration_variants() {
         StockStreamInstruction::decode(&[14, 1, 0, 0, 0, 0, 0, 0, 0]),
         Ok(StockStreamInstruction::CommitMarket { sequence: 1 })
     ));
+    let mut v3_custody = [0u8; 11];
+    v3_custody[0] = 53;
+    v3_custody[1..3].copy_from_slice(&7u16.to_le_bytes());
+    v3_custody[3..11].copy_from_slice(&9u64.to_le_bytes());
+    assert!(matches!(
+        StockStreamInstruction::decode(&v3_custody),
+        Ok(StockStreamInstruction::DepositCollateralV3 {
+            seat_index: 7,
+            amount: 9
+        })
+    ));
+    v3_custody[0] = 54;
+    assert!(matches!(
+        StockStreamInstruction::decode(&v3_custody),
+        Ok(StockStreamInstruction::WithdrawCollateralV3 {
+            seat_index: 7,
+            amount: 9
+        })
+    ));
     let mut session = [0u8; 46];
     session[0] = 17;
     session[1..3].copy_from_slice(&2u16.to_le_bytes());

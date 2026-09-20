@@ -4,6 +4,7 @@ use core::{mem::size_of, ptr};
 
 use pinocchio::{
     account::{AccountView, RuntimeAccount, NOT_BORROWED},
+    error::ProgramError,
     Address,
 };
 use stockstream::{
@@ -11,12 +12,12 @@ use stockstream::{
     instruction::PlaceOrderData,
     session::{self, TradingSession, SESSION_ACTION_PLACE, TRADING_SESSION_SIZE},
     v3::{
-        append_event_record, close_trader_seat, create_trader_seat, derive_book_page_v3,
-        derive_event_shard_v3, derive_market_core_v3, derive_seat_shard_v3,
+        append_event_record, close_trader_seat, create_trader_seat, deposit_collateral_v3,
+        derive_book_page_v3, derive_event_shard_v3, derive_market_core_v3, derive_seat_shard_v3,
         initialize_book_page_metadata, place_order_v3, validate_execution_bundle,
-        validate_v3_session_actor, validate_v3_withdrawal_readiness, PagedBookV3,
-        V3_BOOK_PAGES_PER_SIDE, V3_BOOK_PAGE_SIZE, V3_EVENT_SHARD_SIZE, V3_EXECUTION_BUNDLE_LEN,
-        V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
+        validate_v3_session_actor, validate_v3_withdrawal_readiness, withdraw_collateral_v3,
+        PagedBookV3, V3_BOOK_PAGES_PER_SIDE, V3_BOOK_PAGE_SIZE, V3_EVENT_SHARD_SIZE,
+        V3_EXECUTION_BUNDLE_LEN, V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
     },
     ID,
 };
@@ -514,4 +515,17 @@ fn v3_withdrawal_requires_restored_and_reconciled_full_bundle() {
         accounts[0].view.borrow_unchecked_mut()[206] = 6;
     }
     assert!(validate_v3_withdrawal_readiness(&ID, &views(&accounts)).is_err());
+}
+
+#[test]
+fn v3_custody_requires_explicit_account_shapes() {
+    let mut empty: Vec<AccountView> = Vec::new();
+    assert_eq!(
+        deposit_collateral_v3(&ID, &mut empty, 0, 1),
+        Err(ProgramError::NotEnoughAccountKeys)
+    );
+    assert_eq!(
+        withdraw_collateral_v3(&ID, &mut empty, 0, 1),
+        Err(ProgramError::NotEnoughAccountKeys)
+    );
 }
