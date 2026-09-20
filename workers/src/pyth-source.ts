@@ -43,8 +43,8 @@ export function pythSourceHealth(config: PythProClientConfig): PythSourceHealth 
 
 /**
  * Multi-endpoint agreement logic (docs/pyth-ops.md §5c), independent of any
- * live connection: given whatever updates the (currently unimplemented)
- * live subscriptions observed for a feed in one polling/dedup window,
+ * live connection: given whatever updates the live subscriptions observed
+ * for a feed in one polling/dedup window,
  * decides what -- if anything -- is safe to submit on-chain.
  *
  * - Two or more endpoints reporting the *same* (feedId, timestamp,

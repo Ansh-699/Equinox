@@ -48,10 +48,8 @@ export type KeeperHealthState =
   | "unhealthy";
 
 export interface KeeperConfigHealth {
-  /** Credential presence only -- see `pyth-source.ts`'s module doc: the
-   * live wss://pyth-lazer-* subscription itself is not implemented, so
-   * this can never report better than `configuration_blocked` yet even
-   * with a key configured. */
+  /** Credential and endpoint presence; entitlement is verified only when
+   * the live pool successfully subscribes to the configured feed. */
   pyth: KeeperHealthState;
   /** No keeper-signing secret binding exists in this deployment's `Env`
    * yet (`signer.ts::createProductionSigner` requires one) -- submission
@@ -112,11 +110,9 @@ function buildersFor(authority: string) {
   return (marketPda: string): OrchestratorBuilders => {
     const context: KeeperTransactionContext = { programAddress: STOCKSTREAM_PROGRAM_ID, market: marketPda, authority };
     return {
-      // The Ed25519 pre-instruction is only meaningful once a real signed
-      // Pyth message exists to verify (pythSource is always null today --
-      // see pyth-source.ts) -- this placeholder is never actually
-      // submitted, since runPythKeeperTick is never invoked without a
-      // pythSource.
+      // The Ed25519 pre-instruction is meaningful only once the live Pyth
+      // pool produces a signed update. This builder remains inert unless
+      // the orchestrator has a healthy pythSource and signer.
       pyth: pythKeeperBuilder({ ...context, oracleAccounts: [meta(authority)], ed25519Instruction: reconcileVaultInstruction(STOCKSTREAM_PROGRAM_ID, [meta(authority)]) }),
       commit: magicBlockCommitKeeperBuilder(context),
       funding: fundingKeeperBuilder(context),
