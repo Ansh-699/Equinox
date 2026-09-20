@@ -7,6 +7,7 @@
  */
 import fs from "node:fs";
 import { Keypair, PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
+import { validateCheckpoint, validateV3CoreBytes } from "./v3-sharded-commit-guard.mjs";
 
 const state = JSON.parse(fs.readFileSync("/tmp/opencode/v3-lifecycle-state.json", "utf8"));
 const authority = Keypair.fromSecretKey(new Uint8Array(JSON.parse(fs.readFileSync(`${process.env.HOME}/.config/solana/id.json`, "utf8"))));
@@ -28,22 +29,6 @@ async function rpc(method, params) {
 
 function save(path, value) { fs.writeFileSync(path, JSON.stringify(value, null, 2), { mode: 0o600 }); }
 function load(path, initial) { return fs.existsSync(path) ? JSON.parse(fs.readFileSync(path, "utf8")) : initial; }
-
-function validateCheckpoint(checkpoint, mode, accounts) {
-  if (!checkpoint || checkpoint.version !== 1 || !Number.isInteger(checkpoint.next) || checkpoint.next < 0 || checkpoint.next > accounts.length) {
-    throw new Error("invalid V3 sharded checkpoint header");
-  }
-  if (!Array.isArray(checkpoint.events) || checkpoint.events.length !== checkpoint.next) {
-    throw new Error("V3 sharded checkpoint event count does not match next index");
-  }
-  checkpoint.events.forEach((event, index) => {
-    if (event.index !== index || event.child !== accounts[index].toBase58() || !Number.isSafeInteger(event.sequence) || event.sequence < 0) {
-      throw new Error(`V3 sharded checkpoint mismatch at child ${index}`);
-    }
-  });
-  if (checkpoint.complete && checkpoint.next !== accounts.length) throw new Error("complete V3 sharded checkpoint has unfinished children");
-  if (checkpoint.mode && checkpoint.mode !== mode) throw new Error("V3 sharded checkpoint mode mismatch");
-}
 
 async function submit(account, sequence, undelegate) {
   const blockhashResult = await rpc("getBlockhashForAccounts", [[account.toBase58(), core.toBase58()]]);
@@ -83,9 +68,7 @@ if (checkpoint.complete) {
 const coreInfo = (await rpc("getAccountInfo", [core.toBase58(), { encoding: "base64" }])).value;
 if (!coreInfo) throw new Error("V3 core is not present on the resolved ER");
 const coreBytes = Buffer.from(coreInfo.data[0], "base64");
-if (coreBytes.length !== 4_096 || coreBytes.subarray(0, 8).toString() !== "STKMK003" || coreBytes.readUInt16LE(8) !== 3) {
-  throw new Error("resolved ER core is not a V3 MarketCore account");
-}
+validateV3CoreBytes(coreBytes);
 const firstSequence = Number(coreBytes.readBigUInt64LE(198));
 for (let index = checkpoint.next; index < children.length; index += 1) {
   const result = await submit(children[index], firstSequence + index, undelegate);
