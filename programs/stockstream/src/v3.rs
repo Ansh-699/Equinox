@@ -2792,6 +2792,34 @@ fn v3_order_reserve(
     crate::risk::initial_margin(notional, config.initial_margin_bps).map_err(v3_risk_error)
 }
 
+/// Enforces the configured maximum leverage against the post-order position
+/// at the same mark used by the admission checks.  The check is deliberately
+/// performed on a settled seat copy, before any book, seat, event, or session
+/// mutation.  `available_collateral` remains the withdrawable token claim;
+/// equity is the correct health denominator for leverage.
+fn enforce_v3_leverage(
+    seat: &TraderSeat,
+    resulting_exposure: u128,
+    mark_price: i64,
+    maximum_leverage: u32,
+) -> ProgramResult {
+    if mark_price <= 0 || maximum_leverage == 0 {
+        return Err(StockStreamError::RiskViolation.into());
+    }
+    let projected_notional = i128::try_from(resulting_exposure)
+        .map_err(|_| StockStreamError::ArithmeticOverflow)?
+        .checked_mul(i128::from(mark_price))
+        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    let equity = crate::risk::equity(seat, i128::from(mark_price)).map_err(v3_risk_error)?;
+    let capacity = equity
+        .checked_mul(i128::from(maximum_leverage))
+        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    if equity < 0 || projected_notional > capacity {
+        return Err(StockStreamError::RiskViolation.into());
+    }
+    Ok(())
+}
+
 /// Returns the last stored oracle price for reserve accounting. Cancellation
 /// must remain available during a stale/temporarily invalid oracle window; the
 /// validity flag gates new pegged orders, while the stored price lets existing
@@ -3137,14 +3165,6 @@ fn place_order_v3_with_action(
             return Err(StockStreamError::RiskViolation.into());
         }
     }
-    if resulting_exposure
-        .checked_mul(u128::from(effective_price as u64))
-        .ok_or(StockStreamError::ArithmeticOverflow)?
-        > u128::try_from(seat_snapshot.available_collateral.max(0))
-            .map_err(|_| StockStreamError::RiskViolation)?
-    {
-        return Err(StockStreamError::RiskViolation.into());
-    }
     if risk_config.maximum_position > 0 && resulting_exposure > risk_config.maximum_position as u128
     {
         return Err(StockStreamError::RiskViolation.into());
@@ -3152,6 +3172,12 @@ fn place_order_v3_with_action(
     let initial_requirement = crate::risk::initial_margin(notional, risk_config.initial_margin_bps)
         .map_err(v3_risk_error)?;
     let margin_mark = oracle.unwrap_or(effective_price);
+    enforce_v3_leverage(
+        &seat_snapshot,
+        resulting_exposure,
+        margin_mark,
+        risk_config.maximum_leverage,
+    )?;
     if crate::risk::available_margin(
         &seat_snapshot,
         i128::from(margin_mark),
@@ -4114,20 +4140,18 @@ fn preflight_replace_order_v3(
             return Err(StockStreamError::RiskViolation.into());
         }
     }
-    if resulting_exposure
-        .checked_mul(u128::try_from(effective_price).map_err(|_| StockStreamError::RiskViolation)?)
-        .ok_or(StockStreamError::ArithmeticOverflow)?
-        > u128::try_from(adjusted.available_collateral.max(0))
-            .map_err(|_| StockStreamError::RiskViolation)?
-    {
-        return Err(StockStreamError::RiskViolation.into());
-    }
     if config.maximum_position > 0 && resulting_exposure > config.maximum_position as u128 {
         return Err(StockStreamError::RiskViolation.into());
     }
     let initial_requirement =
         crate::risk::initial_margin(notional, config.initial_margin_bps).map_err(v3_risk_error)?;
     let margin_mark = oracle.unwrap_or(effective_price);
+    enforce_v3_leverage(
+        &adjusted,
+        resulting_exposure,
+        margin_mark,
+        config.maximum_leverage,
+    )?;
     if crate::risk::available_margin(
         &adjusted,
         i128::from(margin_mark),
