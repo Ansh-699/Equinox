@@ -51,7 +51,7 @@ typechecks, Playwright fixture E2E, and the secret scan. It emits a
 machine-readable gate record (use
 `VERIFY_SUMMARY_PATH=docs/status/verify-latest.json npm run verify` to refresh
 the tracked copy); the latest continuation run finished with `VERIFY-OK` on
-source commit `15d1a0c`. The funding clamp correction is committed as
+source commit `23edb3d`. The funding clamp correction is committed as
 `a89c313`; `d563f28` additionally enforces persisted V3 maximum open interest
 before mutation and session `max_open_orders` during canonical bundle
 authorization.
@@ -68,6 +68,7 @@ Fresh current-HEAD regression evidence: `cargo test -p stockstream --test v3_bun
 - `tsc --noEmit` clean on both the frontend and workers packages.
 - `eslint .` clean.
 - ABI manifest parity: `ABI-OK`.
+- Fresh full gate on current HEAD: `VERIFY_SUMMARY_PATH=/tmp/stockstream-verify-summary-20260921-current.json NO_DNA=1 bash scripts/verify.sh` finished `VERIFY-OK`; Rust 245, frontend 210, Worker 354, Playwright fixture 54/54, SBF artifact verification, ABI parity, typechecks, lint, and secret scan all passed. Current local artifact SHA-256 is `dd5363e82672b8d315c31f6da70a9e851751275a3b05d1c86616b9e217fa4a46`; it is not deployed.
 - Client facade audit: `clients/stockstream/src/index.ts` is now a thin compatibility surface (122 lines); instruction construction and canonical decoders live in `clients/stockstream/src/abi/*`, with only the legacy PublicKey session mapping and unsigned preview retained in the facade.
 - V3 continuation: `bash scripts/verify.sh` finished `VERIFY-OK` after the
   configured funding-mark clamp and open-interest/session-limit corrections: Rust workspace tests (243),
