@@ -3,6 +3,9 @@ import { STOCKSTREAM_ACCOUNT_SIZE, STOCKSTREAM_INSTRUCTION, STOCKSTREAM_PROGRAM_
 import { deriveBookPageV3, deriveEventShardV3, deriveMarketCoreV3, deriveSeatShardV3, V3_BOOK_PAGES_PER_SIDE } from "./abi/v3";
 import { checkedSigned, checkedUnsigned, writeSigned, writeUnsigned } from "./abi/encoding";
 import { accountMeta, instruction, publicKey, STOCKSTREAM_PROGRAM_KEY, type AddressInput } from "./abi/transaction";
+import { cancelAllV3, cancelOrderV3, placeOrderV3, replaceOrderV3, updateFundingV3 } from "./abi/v3-instructions";
+
+export { cancelAllV3, cancelOrderV3, placeOrderV3, replaceOrderV3, updateFundingV3 } from "./abi/v3-instructions";
 
 export { STOCKSTREAM_PROGRAM_KEY } from "./abi/transaction";
 export type { AddressInput } from "./abi/transaction";
@@ -167,28 +170,6 @@ export function placeOrder(params: PlaceOrderParams): TransactionInstruction {
   return instruction(data, accounts);
 }
 
-/** Builds the same PlaceOrder wire bytes against the canonical V3 execution
- * bundle. The V3 account order is core, 18 pages, 4 seat shards, 4 event
- * shards, signer, optional session; no V2 settlement scratch is accepted. */
-export function placeOrderV3(params: Omit<PlaceOrderParams, "market" | "authority" | "settlementScratch"> & V3ExecutionAccounts): TransactionInstruction {
-  const data = new Uint8Array(54);
-  data[0] = STOCKSTREAM_INSTRUCTION.placeOrder;
-  data[1] = params.side === "bid" ? 0 : params.side === "ask" ? 1 : 255;
-  data[2] = (params.tree ?? "fixed") === "fixed" ? 0 : 1;
-  data[3] = (params.postOnly ? 1 : 0) | (params.immediateOrCancel ? 2 : 0) | (params.reduceOnly ? 4 : 0) | selfTradeBits(params.selfTradeBehavior);
-  if (data[1] > 1) throw new RangeError("Invalid order side");
-  writeUnsigned(data, 4, checkedUnsigned(params.seatIndex, 16, "seatIndex"), 2);
-  writeUnsigned(data, 6, checkedUnsigned(params.quantity, 64, "quantity"), 8);
-  writeSigned(data, 14, checkedSigned(params.priceOrOffset, 64, "priceOrOffset"), 8);
-  writeUnsigned(data, 22, checkedUnsigned(params.expiresAt ?? 0, 64, "expiresAt"), 8);
-  writeSigned(data, 30, checkedSigned(params.pegLimit ?? 0, 64, "pegLimit"), 8);
-  writeUnsigned(data, 38, checkedUnsigned(params.clientOrderId, 64, "clientOrderId"), 8);
-  const actionNonce = params.actionNonce ?? 0;
-  if (!params.session && actionNonce !== 0) throw new RangeError("Main-wallet actions must use actionNonce zero");
-  writeUnsigned(data, 46, checkedUnsigned(actionNonce, 64, "actionNonce"), 8);
-  return instruction(data, v3ExecutionMetas(params));
-}
-
 /**
  * Atomically cancels `oldOrderKey` and places a new order in its place. The
  * new order always receives a fresh sequence number, so a replacement
@@ -219,53 +200,16 @@ export function replaceOrder(params: PlaceOrderParams & { oldOrderKey: bigint })
   return instruction(data, accounts);
 }
 
-export function replaceOrderV3(params: Omit<PlaceOrderParams, "market" | "authority" | "settlementScratch"> & V3ExecutionAccounts & { oldOrderKey: bigint }): TransactionInstruction {
-  const data = new Uint8Array(70); data[0] = STOCKSTREAM_INSTRUCTION.replaceOrder;
-  writeUnsigned(data, 1, checkedUnsigned(params.oldOrderKey, 128, "oldOrderKey"), 16);
-  data[17] = params.side === "bid" ? 0 : params.side === "ask" ? 1 : 255;
-  data[18] = (params.tree ?? "fixed") === "fixed" ? 0 : 1;
-  data[19] = (params.postOnly ? 1 : 0) | (params.immediateOrCancel ? 2 : 0) | (params.reduceOnly ? 4 : 0) | selfTradeBits(params.selfTradeBehavior);
-  if (data[17] > 1) throw new RangeError("Invalid order side");
-  writeUnsigned(data, 20, checkedUnsigned(params.seatIndex, 16, "seatIndex"), 2);
-  writeUnsigned(data, 22, checkedUnsigned(params.quantity, 64, "quantity"), 8);
-  writeSigned(data, 30, checkedSigned(params.priceOrOffset, 64, "priceOrOffset"), 8);
-  writeUnsigned(data, 38, checkedUnsigned(params.expiresAt ?? 0, 64, "expiresAt"), 8);
-  writeSigned(data, 46, checkedSigned(params.pegLimit ?? 0, 64, "pegLimit"), 8);
-  writeUnsigned(data, 54, checkedUnsigned(params.clientOrderId, 64, "clientOrderId"), 8);
-  const actionNonce = params.actionNonce ?? 0;
-  if (!params.session && actionNonce !== 0) throw new RangeError("Main-wallet actions must use actionNonce zero");
-  writeUnsigned(data, 62, checkedUnsigned(actionNonce, 64, "actionNonce"), 8);
-  return instruction(data, v3ExecutionMetas(params));
-}
-
 export function cancelOrder(accounts: SessionAuthorizedAccounts, seatIndex: number, orderKey: bigint, actionNonce: bigint | number = 0): TransactionInstruction {
   if (!accounts.session && actionNonce !== 0) throw new RangeError("Main-wallet actions must use actionNonce zero");
   const data = new Uint8Array(27); data[0] = STOCKSTREAM_INSTRUCTION.cancelOrder; writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2); writeUnsigned(data, 3, checkedUnsigned(orderKey, 128, "orderKey"), 16); writeUnsigned(data, 19, checkedUnsigned(actionNonce, 64, "actionNonce"), 8);
   const metas = [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]; if (accounts.session) metas.push(accountMeta(accounts.session, false, true)); return instruction(data, metas);
 }
 
-export function cancelOrderV3(accounts: V3ExecutionAccounts, seatIndex: number, orderKey: bigint, actionNonce: bigint | number = 0): TransactionInstruction {
-  if (!accounts.session && actionNonce !== 0) throw new RangeError("Main-wallet actions must use actionNonce zero");
-  const data = new Uint8Array(27); data[0] = STOCKSTREAM_INSTRUCTION.cancelOrder;
-  writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2);
-  writeUnsigned(data, 3, checkedUnsigned(orderKey, 128, "orderKey"), 16);
-  writeUnsigned(data, 19, checkedUnsigned(actionNonce, 64, "actionNonce"), 8);
-  return instruction(data, v3ExecutionMetas(accounts));
-}
-
 export function cancelAll(accounts: SessionAuthorizedAccounts, seatIndex: number, maxCancellations: number, actionNonce: bigint | number = 0): TransactionInstruction {
   if (!accounts.session && actionNonce !== 0) throw new RangeError("Main-wallet actions must use actionNonce zero");
   const data = new Uint8Array(12); data[0] = STOCKSTREAM_INSTRUCTION.cancelAll; writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2); data[3] = Number(checkedUnsigned(maxCancellations, 8, "maxCancellations")); writeUnsigned(data, 4, checkedUnsigned(actionNonce, 64, "actionNonce"), 8);
   const metas = [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]; if (accounts.session) metas.push(accountMeta(accounts.session, false, true)); return instruction(data, metas);
-}
-
-export function cancelAllV3(accounts: V3ExecutionAccounts, seatIndex: number, maxCancellations: number, actionNonce: bigint | number = 0): TransactionInstruction {
-  if (!accounts.session && actionNonce !== 0) throw new RangeError("Main-wallet actions must use actionNonce zero");
-  const data = new Uint8Array(12); data[0] = STOCKSTREAM_INSTRUCTION.cancelAll;
-  writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2);
-  data[3] = Number(checkedUnsigned(maxCancellations, 8, "maxCancellations"));
-  writeUnsigned(data, 4, checkedUnsigned(actionNonce, 64, "actionNonce"), 8);
-  return instruction(data, v3ExecutionMetas(accounts));
 }
 
 function v3CommitMetas(accounts: V3CommitAccounts): AccountMeta[] {
@@ -323,17 +267,6 @@ export function rollbackV3Undelegation(accounts: V3UndelegationRecoveryAccounts)
 export function updateFunding(accounts: InstructionAccounts, accumulator: bigint, timestamp: bigint | number): TransactionInstruction {
   const data = new Uint8Array(25); data[0] = STOCKSTREAM_INSTRUCTION.updateFunding; writeSigned(data, 1, checkedSigned(accumulator, 128, "accumulator"), 16); writeUnsigned(data, 17, checkedUnsigned(timestamp, 64, "timestamp"), 8);
   return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]);
-}
-
-/** Builds the V3 funding update over the complete bounded execution bundle. */
-export function updateFundingV3(accounts: V3FundingAccounts, accumulator: bigint, timestamp: bigint | number): TransactionInstruction {
-  if (accounts.bookPages.length !== 18 || accounts.seatShards.length !== 4 || accounts.eventShards.length !== 4) throw new RangeError("V3 funding requires the canonical 27-account execution bundle");
-  const data = new Uint8Array(25); data[0] = STOCKSTREAM_INSTRUCTION.updateFunding; writeSigned(data, 1, checkedSigned(accumulator, 128, "accumulator"), 16); writeUnsigned(data, 17, checkedUnsigned(timestamp, 64, "timestamp"), 8);
-  return instruction(data, [accountMeta(accounts.core, false, true),
-    ...accounts.bookPages.map((page) => accountMeta(page, false, true)),
-    ...accounts.seatShards.map((shard) => accountMeta(shard, false, true)),
-    ...accounts.eventShards.map((shard) => accountMeta(shard, false, true)),
-    accountMeta(accounts.authority, true, false)]);
 }
 
 export function liquidate(accounts: InstructionAccounts, seatIndex: number, maxQuantity: bigint | number): TransactionInstruction {
