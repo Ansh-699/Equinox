@@ -46,12 +46,13 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 `npm run verify` (introduced in `43ec308`) is the repository verification gate and
 produces the counts below from the current checkout; it runs Rust formatting,
 workspace tests, the SBF artifact verifier, ABI parity, frontend/Worker tests and
-typechecks, Playwright fixture E2E, and the secret scan. The last complete run
-finished with `VERIFY-OK` on the current checkout after `e1aeef2`.
+typechecks, Playwright fixture E2E, and the secret scan. It also writes the
+machine-readable gate record at `docs/status/verify-latest.json`; the last run
+finished with `VERIFY-OK` on commit `92db34a`.
 
 Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives all 26 child PDAs from the supplied core and returns a bigint-safe aggregate. It is read-only and cannot claim live V3 state until a V3 core is deployed.
 
-- Rust (native + LiteSVM runtime): 290 passing, `cargo fmt --check` clean.
+- Rust (native + LiteSVM runtime): 237 passing, `cargo fmt --check` clean.
 - Workers (Miniflare/vitest): 351 passing (33 files; relayer risk/version/lifetime guards included).
 - Frontend (vitest): 210 passing (33 files).
 - Frontend (Playwright fixture E2E): 53 passing, including V3 deposit, seat creation, session authorization, place/cancel/replace/reduce-only, commit-pending blocking and restored withdrawal; opt-in Devnet read-only E2E: 2 passing.
