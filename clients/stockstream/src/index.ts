@@ -1,12 +1,11 @@
 import { PublicKey, SystemProgram, TransactionInstruction, type AccountMeta } from "@solana/web3.js";
 import { STOCKSTREAM_ACCOUNT_SIZE, STOCKSTREAM_INSTRUCTION, STOCKSTREAM_PROGRAM_ID, STOCKSTREAM_TRADING_SESSION_SIZE } from "./constants";
-import { deriveBookPageV3, deriveEventShardV3, deriveMarketCoreV3, deriveSeatShardV3, V3_BOOK_PAGES_PER_SIDE } from "./abi/v3";
 import { checkedSigned, checkedUnsigned, writeSigned, writeUnsigned } from "./abi/encoding";
 import { accountMeta, instruction, publicKey, STOCKSTREAM_PROGRAM_KEY, type AddressInput } from "./abi/transaction";
-import { cancelAllV3, cancelOrderV3, closeV3TraderSeat, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, createV3TraderSeat, depositCollateralV3, placeOrderV3, replaceOrderV3, requestV3Undelegation, rollbackV3Undelegation, updateFundingV3, withdrawCollateralV3 } from "./abi/v3-instructions";
+import { cancelAllV3, cancelOrderV3, closeV3TraderSeat, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, createV3Account, createV3TraderSeat, delegateV3Account, depositCollateralV3, initializeV3Market, placeOrderV3, replaceOrderV3, requestV3Undelegation, rollbackV3Undelegation, updateFundingV3, withdrawCollateralV3 } from "./abi/v3-instructions";
 
-export { cancelAllV3, cancelOrderV3, closeV3TraderSeat, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, createV3TraderSeat, depositCollateralV3, placeOrderV3, replaceOrderV3, requestV3Undelegation, rollbackV3Undelegation, updateFundingV3, withdrawCollateralV3 } from "./abi/v3-instructions";
-export type { V3CommitAccounts, V3DepositAccounts, V3ExecutionAccounts, V3FundingAccounts, V3OracleAccounts, V3SeatAccounts, V3ShardCommitAccounts, V3UndelegationRecoveryAccounts, V3WithdrawAccounts } from "./abi/v3-instructions";
+export { cancelAllV3, cancelOrderV3, closeV3TraderSeat, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, createV3Account, createV3TraderSeat, delegateV3Account, depositCollateralV3, initializeV3Market, placeOrderV3, replaceOrderV3, requestV3Undelegation, rollbackV3Undelegation, updateFundingV3, withdrawCollateralV3 } from "./abi/v3-instructions";
+export type { V3AccountKind, V3CommitAccounts, V3CreationAccounts, V3DelegationAccounts, V3DepositAccounts, V3ExecutionAccounts, V3FundingAccounts, V3InitializationAccounts, V3OracleAccounts, V3SeatAccounts, V3ShardCommitAccounts, V3UndelegationRecoveryAccounts, V3WithdrawAccounts } from "./abi/v3-instructions";
 
 export { STOCKSTREAM_PROGRAM_KEY } from "./abi/transaction";
 export type { AddressInput } from "./abi/transaction";
@@ -69,10 +68,6 @@ export interface RegistryAccounts { exchange: AddressInput; authority: AddressIn
 export interface InstrumentAccounts { exchange: AddressInput; instrument: AddressInput; authority: AddressInput; }
 export interface PerpMarketAccounts { instrument: AddressInput; market: AddressInput; authority: AddressInput; }
 /** Account tuple for opcode 46. `parent` is an instrument for `core`, and a V3 core otherwise. */
-export interface V3CreationAccounts { parent: AddressInput; target: AddressInput; payer: AddressInput; }
-export type V3AccountKind = "core" | "book-page" | "seat-shard" | "event-shard";
-export interface V3InitializationAccounts { exchange: AddressInput; instrument: AddressInput; core: AddressInput; authority: AddressInput; }
-export interface V3DelegationAccounts extends V3CreationAccounts { authority: AddressInput; }
 
 function selfTradeBits(value: SelfTradeBehavior = "abort"): number {
   return value === "abort" ? 0 : value === "cancel-provide" ? 1 << 3 : value === "decrement-take" ? 2 << 3 : (() => { throw new RangeError("Invalid self-trade behavior"); })();
@@ -698,65 +693,6 @@ export function createPerpMarket(accounts: PerpMarketAccounts, instrumentId: Uin
  * completion are idempotent. The builder validates the target PDA so a
  * client cannot accidentally point this isolated V3 flow at the V2 market.
  */
-export function createV3Account(accounts: V3CreationAccounts, kind: V3AccountKind, index = 0): TransactionInstruction {
-  const parent = publicKey(accounts.parent);
-  const target = publicKey(accounts.target);
-  const kindAndIndex: Record<V3AccountKind, [number, number]> = {
-    core: [0, 0],
-    "book-page": [1, index],
-    "seat-shard": [2, index],
-    "event-shard": [3, index],
-  };
-  const [kindByte, flattenedIndex] = kindAndIndex[kind];
-  if (!Number.isInteger(flattenedIndex) || flattenedIndex < 0 || flattenedIndex > (kindByte === 1 ? 2 * V3_BOOK_PAGES_PER_SIDE - 1 : kindByte === 0 ? 0 : 3)) throw new RangeError("invalid V3 account index");
-  const expected = kindByte === 0 ? deriveMarketCoreV3(parent)
-    : kindByte === 1 ? deriveBookPageV3(parent, Math.floor(flattenedIndex / V3_BOOK_PAGES_PER_SIDE), flattenedIndex % V3_BOOK_PAGES_PER_SIDE)
-      : kindByte === 2 ? deriveSeatShardV3(parent, flattenedIndex)
-        : deriveEventShardV3(parent, flattenedIndex);
-  if (!target.equals(expected)) throw new RangeError("target is not the derived V3 account PDA");
-  return instruction(Uint8Array.of(STOCKSTREAM_INSTRUCTION.createV3Account, kindByte, flattenedIndex), [
-    accountMeta(parent, false, false), accountMeta(target, false, true),
-    accountMeta(accounts.payer, true, true), accountMeta(SystemProgram.programId, false, false),
-  ]);
-}
-/** Activates a structural V3 core under the immutable exchange listing authority. */
-export function initializeV3Market(accounts: V3InitializationAccounts): TransactionInstruction {
-  const instrument = publicKey(accounts.instrument);
-  if (!publicKey(accounts.core).equals(deriveMarketCoreV3(instrument))) throw new RangeError("core is not the derived V3 market PDA");
-  return instruction(Uint8Array.of(STOCKSTREAM_INSTRUCTION.initializeV3Market), [
-    accountMeta(accounts.exchange, false, false), accountMeta(instrument, false, false),
-    accountMeta(accounts.core, false, true), accountMeta(accounts.authority, true, false),
-  ]);
-}
-/**
- * Delegates one V3 account through the real Delegation Program. Delegate the
- * activated core first; then delegate pages/shards using that core as parent.
- * Book pages may need repeated calls while their individual delegate buffer
- * grows, exactly as the on-chain instruction documents.
- */
-export function delegateV3Account(accounts: V3DelegationAccounts, kind: V3AccountKind, validator: AddressInput, index = 0): TransactionInstruction {
-  const parent = publicKey(accounts.parent);
-  const target = publicKey(accounts.target);
-  const validatorKey = publicKey(validator);
-  const kindAndIndex: Record<V3AccountKind, [number, number]> = {
-    core: [0, 0], "book-page": [1, index], "seat-shard": [2, index], "event-shard": [3, index],
-  };
-  const [kindByte, flattenedIndex] = kindAndIndex[kind];
-  if (!Number.isInteger(flattenedIndex) || flattenedIndex < 0 || flattenedIndex > (kindByte === 1 ? 2 * V3_BOOK_PAGES_PER_SIDE - 1 : kindByte === 0 ? 0 : 3)) throw new RangeError("invalid V3 account index");
-  const expected = kindByte === 0 ? deriveMarketCoreV3(parent)
-    : kindByte === 1 ? deriveBookPageV3(parent, Math.floor(flattenedIndex / V3_BOOK_PAGES_PER_SIDE), flattenedIndex % V3_BOOK_PAGES_PER_SIDE)
-      : kindByte === 2 ? deriveSeatShardV3(parent, flattenedIndex) : deriveEventShardV3(parent, flattenedIndex);
-  if (!target.equals(expected)) throw new RangeError("target is not the derived V3 account PDA");
-  const [buffer] = PublicKey.findProgramAddressSync([Buffer.from("buffer"), target.toBuffer()], STOCKSTREAM_PROGRAM_KEY);
-  const [record] = PublicKey.findProgramAddressSync([Buffer.from("delegation"), target.toBuffer()], MAGICBLOCK_DELEGATION_PROGRAM_ID);
-  const [metadata] = PublicKey.findProgramAddressSync([Buffer.from("delegation-metadata"), target.toBuffer()], MAGICBLOCK_DELEGATION_PROGRAM_ID);
-  const data = new Uint8Array(35); data[0] = STOCKSTREAM_INSTRUCTION.delegateV3Account; data[1] = kindByte; data[2] = flattenedIndex; data.set(validatorKey.toBytes(), 3);
-  return instruction(data, [
-    accountMeta(parent, false, false), accountMeta(target, false, true), accountMeta(accounts.authority, true, false), accountMeta(accounts.payer, true, true),
-    accountMeta(buffer, false, true), accountMeta(record, false, true), accountMeta(metadata, false, true),
-    accountMeta(MAGICBLOCK_DELEGATION_PROGRAM_ID, false, false), accountMeta(SystemProgram.programId, false, false), accountMeta(STOCKSTREAM_PROGRAM_KEY, false, false),
-  ]);
-}
 export function updateStockInstrument(accounts: InstrumentAccounts, instrumentId: Uint8Array, pythFeedId: number, oracleChannel: number, priceExponent: number): TransactionInstruction { if (!Number.isInteger(pythFeedId) || pythFeedId <= 0 || pythFeedId > 0xffff_ffff) throw new RangeError("pythFeedId must be a non-zero u32"); if (!Number.isInteger(oracleChannel) || oracleChannel < 1 || oracleChannel > 4) throw new RangeError("oracleChannel must be between 1 and 4"); const data = new Uint8Array(42); const view = new DataView(data.buffer); data[0] = STOCKSTREAM_INSTRUCTION.updateStockInstrument; data.set(instrumentId, 1); view.setUint32(33, pythFeedId, true); data[37] = oracleChannel; view.setInt32(38, priceExponent, true); return instruction(data, [accountMeta(accounts.exchange, false, false), accountMeta(accounts.instrument, false, true), accountMeta(accounts.authority, true, false)]); }
 export function suspendStockInstrument(accounts: InstrumentAccounts, instrumentId: Uint8Array): TransactionInstruction { return identifierInstruction(STOCKSTREAM_INSTRUCTION.suspendStockInstrument, instrumentId, [accountMeta(accounts.exchange, false, false), accountMeta(accounts.instrument, false, true), accountMeta(accounts.authority, true, false)]); }
 export function updateMarketRisk(accounts: InstructionAccounts, initial: number, maintenance: number, leverage: number): TransactionInstruction { const data = new Uint8Array(9); data[0] = STOCKSTREAM_INSTRUCTION.updateMarketRisk; const view = new DataView(data.buffer); view.setUint16(1, initial, true); view.setUint16(3, maintenance, true); view.setUint32(5, leverage, true); return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]); }
