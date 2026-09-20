@@ -1806,7 +1806,9 @@ pub fn validate_v3_session_actor(
     }
     if notional < 0
         || notional as u128 > session_state.max_order_notional as u128
-        || (notional as u128).saturating_add(session_state.consumed_cumulative_notional as u128)
+        || (notional as u128)
+            .checked_add(session_state.consumed_cumulative_notional as u128)
+            .ok_or(StockStreamError::ArithmeticOverflow)?
             > session_state.max_cumulative_notional as u128
         || resulting_exposure > session_state.max_exposure as u128
         || resulting_open_orders > u32::from(session_state.max_open_orders)
@@ -3393,15 +3395,20 @@ fn place_order_v3_with_action(
             .reserved_margin
             .checked_sub(reserve)
             .ok_or(StockStreamError::RiskViolation)?;
-        updated.open_order_count = updated.open_order_count.saturating_sub(1);
+        updated.open_order_count = updated
+            .open_order_count
+            .checked_sub(1)
+            .ok_or(StockStreamError::RiskViolation)?;
         if cancel.side == Side::Bid as u8 {
             updated.open_bid_exposure = updated
                 .open_bid_exposure
-                .saturating_sub(i128::from(cancel.quantity));
+                .checked_sub(i128::from(cancel.quantity))
+                .ok_or(StockStreamError::RiskViolation)?;
         } else {
             updated.open_ask_exposure = updated
                 .open_ask_exposure
-                .saturating_sub(i128::from(cancel.quantity));
+                .checked_sub(i128::from(cancel.quantity))
+                .ok_or(StockStreamError::RiskViolation)?;
         }
         write_v3_seat_shards(seat_accounts, shard, slot, &updated)?;
     }
