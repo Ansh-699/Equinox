@@ -2903,13 +2903,18 @@ pub fn liquidate_v3(
         )
     };
     let (seat_before, shard, slot) = v3_trade_seat(accounts, seat_index)?;
-    if !crate::risk::is_liquidatable(&seat_before, mark, config.maintenance_margin_bps)
+    // Funding is part of the liquidation health check. Settle it on a copy
+    // before evaluating maintenance margin so a stale accumulator cannot let
+    // an under-margined seat escape liquidation (or liquidate a healthy one).
+    let mut settled_seat = seat_before;
+    crate::risk::settle_funding(&mut settled_seat, funding).map_err(v3_risk_error)?;
+    if !crate::risk::is_liquidatable(&settled_seat, mark, config.maintenance_margin_bps)
         .map_err(v3_risk_error)?
     {
         return Err(StockStreamError::RiskViolation.into());
     }
     let quantity = crate::risk::partial_liquidation_quantity(
-        &seat_before,
+        &settled_seat,
         mark,
         config.maintenance_margin_bps,
     )
@@ -2923,8 +2928,7 @@ pub fn liquidate_v3(
     } else {
         quantity
     };
-    let mut seat = seat_before;
-    crate::risk::settle_funding(&mut seat, funding).map_err(v3_risk_error)?;
+    let mut seat = settled_seat;
     let fee = crate::risk::apply_fill(&mut seat, signed, mark, config.liquidation_fee_bps)
         .map_err(v3_risk_error)?;
     crate::risk::set_liquidation_state(&mut seat, mark, config.maintenance_margin_bps)

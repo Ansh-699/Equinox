@@ -418,9 +418,11 @@ fn v3_liquidation_updates_open_interest_and_insurance_fee() {
         core[44..76].copy_from_slice(authority.view.address().as_ref());
         core[180] = 1;
         core[181..189].copy_from_slice(&100i64.to_le_bytes());
+        core[156..172].copy_from_slice(&100_000i128.to_le_bytes());
         core[197] = 1;
         core[288..304].copy_from_slice(&10i128.to_le_bytes());
         let seat = accounts[V3_SEAT_START].view.borrow_unchecked_mut();
+        seat[84..100].copy_from_slice(&1i128.to_le_bytes());
         seat[116..132].copy_from_slice(&10i128.to_le_bytes());
         seat[132..148].copy_from_slice(&1_000i128.to_le_bytes());
     }
@@ -429,6 +431,11 @@ fn v3_liquidation_updates_open_interest_and_insurance_fee() {
     liquidate_v3(&ID, &mut liquidation_accounts, 0, 5).unwrap();
     let seat = unsafe { accounts[V3_SEAT_START].view.borrow_unchecked() };
     assert_eq!(i128::from_le_bytes(seat[116..132].try_into().unwrap()), 5);
+    assert_eq!(i128::from_le_bytes(seat[148..164].try_into().unwrap()), -3);
+    assert_eq!(
+        i128::from_le_bytes(seat[164..180].try_into().unwrap()),
+        100_000
+    );
     let core = unsafe { accounts[0].view.borrow_unchecked() };
     assert_eq!(i128::from_le_bytes(core[288..304].try_into().unwrap()), 5);
     assert_eq!(i128::from_le_bytes(core[322..338].try_into().unwrap()), 2);
