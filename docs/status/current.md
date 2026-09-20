@@ -82,6 +82,12 @@ Fresh current-HEAD regression evidence: `cargo test -p stockstream --test v3_bun
   regression proves funding can make an otherwise healthy seat liquidatable
   and is applied exactly once. `NO_DNA=1 cargo build-sbf` also passes. This is
   local evidence only; the changed artifact is not deployed.
+- Fresh V3 reduce-only regression: `NO_DNA=1 cargo test -p stockstream --test
+  v3_bundle v3_reduce_only_rejects_an_oversized_direction_flip_before_mutation`
+  passes after the canonical V3 place path rejects a reduce-only quantity that
+  exceeds the current position; this prevents a direction flip before any
+  page, seat, event, or sequence mutation. The full Rust suite remains
+  243/243 and `NO_DNA=1 cargo build-sbf` passes; this artifact is not deployed.
 - Commit-limit correction (`6492c75`): `cargo test -p stockstream --test
   magicblock` (30), `--test v3_bundle` (7), root V3 ABI tests (6), Worker
   V3 state tests (4), both TypeScript checks, ABI parity, and a loadable SBF
