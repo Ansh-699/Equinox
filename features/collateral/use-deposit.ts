@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { depositCollateral, type CustodyAccounts } from "@/clients/stockstream/src";
+import { depositCollateral, depositCollateralV3 } from "@/clients/stockstream/src";
+import type { ResolvedCustodyAccounts } from "./custody-accounts";
 import type { TransactionPreview } from "@/lib/execution-boundary";
 import { RpcFailure } from "@/lib/rpc-transport";
 import { recordSignature } from "@/lib/last-signature";
@@ -11,10 +12,10 @@ export function useDeposit(protocol: StockStreamProtocol | null) {
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const submitDeposit = useCallback(async (accounts: CustodyAccounts, amount: bigint) => {
+  const submitDeposit = useCallback(async (accounts: ResolvedCustodyAccounts, amount: bigint) => {
     if (!protocol) { setNotice("Deposit blocked: connect a wallet capable of signing on Devnet."); return; }
     if (amount <= 0n) { setNotice("Deposit blocked: enter a positive amount."); return; }
-    const instruction = depositCollateral(accounts, amount);
+    const instruction = accounts.v3 ? depositCollateralV3(accounts.v3.deposit, accounts.seatIndex, amount) : depositCollateral(accounts, amount);
     const preview: TransactionPreview = {
       instruction: "DepositCollateral",
       programId: instruction.programId.toBase58(),

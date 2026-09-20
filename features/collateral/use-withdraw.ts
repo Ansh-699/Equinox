@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { withdrawCollateral, type CustodyAccounts } from "@/clients/stockstream/src";
+import { withdrawCollateral, withdrawCollateralV3 } from "@/clients/stockstream/src";
+import type { ResolvedCustodyAccounts } from "./custody-accounts";
 import type { TransactionPreview } from "@/lib/execution-boundary";
 import { RpcFailure } from "@/lib/rpc-transport";
 import { recordSignature } from "@/lib/last-signature";
@@ -40,7 +41,7 @@ export function useWithdraw(protocol: StockStreamProtocol | null) {
   const [notice, setNotice] = useState<string | null>(null);
 
   const submitWithdraw = useCallback(async (
-    accounts: CustodyAccounts,
+    accounts: ResolvedCustodyAccounts,
     amount: bigint,
     gate: WithdrawGate,
     seat: TraderSeatView | null,
@@ -52,7 +53,7 @@ export function useWithdraw(protocol: StockStreamProtocol | null) {
       setNotice(`Withdraw blocked: ${amount} exceeds available collateral (${seat.availableCollateral}). This is a display check only -- the program remains authoritative.`);
       return;
     }
-    const instruction = withdrawCollateral(accounts, amount);
+    const instruction = accounts.v3 ? withdrawCollateralV3(accounts.v3.withdraw, accounts.seatIndex, amount) : withdrawCollateral(accounts, amount);
     const preview: TransactionPreview = {
       instruction: "WithdrawCollateral",
       programId: instruction.programId.toBase58(),
