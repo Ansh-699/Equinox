@@ -6,6 +6,7 @@ import { cancelAllV3, cancelOrderV3, closeV3TraderSeat, commitMarketV3, commitV3
 import { authorizeTradingSession, closeTradingSession, deriveTradingSession, revokeTradingSession, updateTradingSessionLimits } from "./abi/session-instructions";
 import { createPerpMarket, initializeExchange, registerStockInstrument, suspendStockInstrument, transitionMarket, updateMarketRisk, updateStockInstrument } from "./abi/registry-instructions";
 import type { RegistryAccounts } from "./abi/registry-instructions";
+import { depositCollateral, initializeVault, reconcileVault, recordBadDebt, resolveBadDebt, transferToInsuranceFund, withdrawCollateral, withdrawInsuranceFunds, withdrawProtocolFees } from "./abi/custody-instructions";
 
 export { cancelAllV3, cancelOrderV3, closeV3TraderSeat, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, createV3Account, createV3TraderSeat, delegateV3Account, depositCollateralV3, initializeV3Market, placeOrderV3, replaceOrderV3, requestV3Undelegation, rollbackV3Undelegation, updateFundingV3, withdrawCollateralV3 } from "./abi/v3-instructions";
 export type { V3AccountKind, V3CommitAccounts, V3CreationAccounts, V3DelegationAccounts, V3DepositAccounts, V3ExecutionAccounts, V3FundingAccounts, V3InitializationAccounts, V3OracleAccounts, V3SeatAccounts, V3ShardCommitAccounts, V3UndelegationRecoveryAccounts, V3WithdrawAccounts } from "./abi/v3-instructions";
@@ -13,6 +14,8 @@ export { SESSION_ACTION, authorizeTradingSession, closeTradingSession, deriveTra
 export type { SessionControlAccounts, TradingSessionAccounts, TradingSessionPolicy } from "./abi/session-instructions";
 export { createPerpMarket, initializeExchange, registerStockInstrument, suspendStockInstrument, transitionMarket, updateMarketRisk, updateStockInstrument } from "./abi/registry-instructions";
 export type { InstrumentAccounts, MarketAuthorityAccounts, MarketTransition, PerpMarketAccounts, RegistryAccounts } from "./abi/registry-instructions";
+export { depositCollateral, initializeVault, reconcileVault, recordBadDebt, resolveBadDebt, transferToInsuranceFund, withdrawCollateral, withdrawInsuranceFunds, withdrawProtocolFees } from "./abi/custody-instructions";
+export type { BadDebtAccounts, CustodyAccounts, InsuranceTransferAccounts, LedgerWithdrawalAccounts, ReconcileAccounts, VaultAccounts } from "./abi/custody-instructions";
 
 export { STOCKSTREAM_PROGRAM_KEY } from "./abi/transaction";
 export type { AddressInput } from "./abi/transaction";
@@ -53,14 +56,6 @@ export interface InstructionFixture {
 }
 export interface SessionAuthorizedAccounts extends InstructionAccounts { session?: AddressInput; }
 
-export interface VaultAccounts { market: AddressInput; authority: AddressInput; mint: AddressInput; tokenProgram: AddressInput; vault: AddressInput; vaultAuthority: AddressInput; }
-export interface CustodyAccounts extends VaultAccounts { seatIndex: number; sourceOrDestination: AddressInput; }
-export interface InsuranceTransferAccounts { market: AddressInput; authority: AddressInput; }
-/** `authority` is the market authority for `withdrawProtocolFees`, the market's `emergencyAuthority` for `withdrawInsuranceFunds`. */
-export interface LedgerWithdrawalAccounts { market: AddressInput; authority: AddressInput; vault: AddressInput; vaultAuthority: AddressInput; destination: AddressInput; mint: AddressInput; tokenProgram: AddressInput; }
-/** `authority` must be the market's `emergencyAuthority`. */
-export interface BadDebtAccounts { market: AddressInput; authority: AddressInput; }
-export interface ReconcileAccounts { market: AddressInput; vault: AddressInput; mint: AddressInput; tokenProgram: AddressInput; }
 export interface DelegationAccounts { market: AddressInput; authority: AddressInput; instrument: AddressInput; payer: AddressInput; clusterAccounts?: AddressInput[]; }
 export interface CommitAccounts { market: AddressInput; authority: AddressInput; payer: AddressInput; clusterAccounts?: AddressInput[]; }
 export interface ClusterMemberAccounts { market: AddressInput; authority: AddressInput; member: AddressInput; payer: AddressInput; }
@@ -169,71 +164,6 @@ export function updateFunding(accounts: InstructionAccounts, accumulator: bigint
 export function liquidate(accounts: InstructionAccounts, seatIndex: number, maxQuantity: bigint | number): TransactionInstruction {
   const data = new Uint8Array(11); data[0] = STOCKSTREAM_INSTRUCTION.liquidate; writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2); writeUnsigned(data, 3, checkedUnsigned(maxQuantity, 64, "maxQuantity"), 8);
   return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]);
-}
-
-export function initializeVault(accounts: VaultAccounts): TransactionInstruction {
-  return instruction(Uint8Array.of(STOCKSTREAM_INSTRUCTION.initializeVault), [
-    accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false), accountMeta(accounts.mint, false, false),
-    accountMeta(accounts.tokenProgram, false, false), accountMeta(accounts.vault, false, true), accountMeta(accounts.vaultAuthority, false, false),
-  ]);
-}
-
-function amountInstruction(discriminator: number, accounts: CustodyAccounts, amount: bigint | number): TransactionInstruction {
-  const data = new Uint8Array(11); data[0] = discriminator; writeUnsigned(data, 1, checkedUnsigned(accounts.seatIndex, 16, "seatIndex"), 2); writeUnsigned(data, 3, checkedUnsigned(amount, 64, "amount"), 8);
-  // 6 accounts, not 7: the seat lives inside the market account itself, so a
-  // separate "seat slot" account is never read by the deposit handler.
-  return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false), accountMeta(accounts.sourceOrDestination, false, true), accountMeta(accounts.vault, false, true), accountMeta(accounts.mint, false, false), accountMeta(accounts.tokenProgram, false, false)]);
-}
-export function depositCollateral(accounts: CustodyAccounts, amount: bigint | number) { return amountInstruction(STOCKSTREAM_INSTRUCTION.depositCollateral, accounts, amount); }
-export function withdrawCollateral(accounts: CustodyAccounts, amount: bigint | number) {
-  const result = amountInstruction(STOCKSTREAM_INSTRUCTION.withdrawCollateral, accounts, amount);
-  const vaultAuthority = PublicKey.findProgramAddressSync([Buffer.from('vault-authority'), new PublicKey(accounts.market).toBuffer()], new PublicKey(STOCKSTREAM_PROGRAM_ID))[0];
-  result.keys = [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false),
-    accountMeta(accounts.sourceOrDestination, false, true), accountMeta(accounts.mint, false, false),
-    accountMeta(accounts.vault, false, true), accountMeta(vaultAuthority, false, false), accountMeta(accounts.tokenProgram, false, false)];
-  return result;
-}
-
-/** Internal ledger reassignment (protocol fees -> insurance fund); no token CPI. Market-authority-signed. */
-export function transferToInsuranceFund(accounts: InsuranceTransferAccounts, amount: bigint | number): TransactionInstruction {
-  const data = new Uint8Array(9); data[0] = STOCKSTREAM_INSTRUCTION.transferToInsuranceFund; writeUnsigned(data, 1, checkedUnsigned(amount, 64, "amount"), 8);
-  return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]);
-}
-
-function ledgerWithdrawal(discriminator: number, accounts: LedgerWithdrawalAccounts, amount: bigint | number): TransactionInstruction {
-  const data = new Uint8Array(9); data[0] = discriminator; writeUnsigned(data, 1, checkedUnsigned(amount, 64, "amount"), 8);
-  return instruction(data, [
-    accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false),
-    accountMeta(accounts.vault, false, true), accountMeta(accounts.vaultAuthority, false, false),
-    accountMeta(accounts.destination, false, true), accountMeta(accounts.mint, false, false),
-    accountMeta(accounts.tokenProgram, false, false),
-  ]);
-}
-/** Pays `amount` out of the protocol fee ledger via a real vault-authority-signed SPL transfer. Market-authority-signed. */
-export function withdrawProtocolFees(accounts: LedgerWithdrawalAccounts, amount: bigint | number): TransactionInstruction {
-  return ledgerWithdrawal(STOCKSTREAM_INSTRUCTION.withdrawProtocolFees, accounts, amount);
-}
-/** Pays `amount` out of the insurance fund ledger via a real vault-authority-signed SPL transfer. Emergency-authority-signed. */
-export function withdrawInsuranceFunds(accounts: LedgerWithdrawalAccounts, amount: bigint | number): TransactionInstruction {
-  return ledgerWithdrawal(STOCKSTREAM_INSTRUCTION.withdrawInsuranceFunds, accounts, amount);
-}
-
-/** Formally recognizes `amount` of a bankrupt seat's negative equity as unrecoverable bad debt. Emergency-authority-signed. */
-export function recordBadDebt(accounts: BadDebtAccounts, seatIndex: number, amount: bigint | number): TransactionInstruction {
-  const data = new Uint8Array(11); data[0] = STOCKSTREAM_INSTRUCTION.recordBadDebt; writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2); writeUnsigned(data, 3, checkedUnsigned(amount, 64, "amount"), 8);
-  return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]);
-}
-/** Pays `amount` of recognized bad debt down from the insurance fund ledger. Emergency-authority-signed. */
-export function resolveBadDebt(accounts: BadDebtAccounts, amount: bigint | number): TransactionInstruction {
-  const data = new Uint8Array(9); data[0] = STOCKSTREAM_INSTRUCTION.resolveBadDebt; writeUnsigned(data, 1, checkedUnsigned(amount, 64, "amount"), 8);
-  return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]);
-}
-/** Permissionless: recomputes the vault's actual balance against trader collateral + fee/insurance ledgers - recognized bad debt, and records the result. */
-export function reconcileVault(accounts: ReconcileAccounts): TransactionInstruction {
-  return instruction(Uint8Array.of(STOCKSTREAM_INSTRUCTION.reconcileVault), [
-    accountMeta(accounts.market, false, true), accountMeta(accounts.vault, false, false),
-    accountMeta(accounts.mint, false, false), accountMeta(accounts.tokenProgram, false, false),
-  ]);
 }
 
 /** Mirrors `programs/stockstream/src/instruction.rs::exchange_config_field`
