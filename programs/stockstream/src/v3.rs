@@ -739,6 +739,33 @@ impl<'a> PagedBookV3<'a> {
         self.remove(tree, key)
     }
 
+    /// Inserts one already-authorized resting order into the page-sharded
+    /// book.  The caller must derive the key with `OrderInput::leaf`; this
+    /// wrapper deliberately accepts the canonical `LeafNode` rather than
+    /// exposing page selection or raw handles to an instruction caller.
+    pub fn insert_resting_order(
+        &mut self,
+        tree: TreeKind,
+        leaf: LeafNode,
+    ) -> Result<u32, ProgramError> {
+        if leaf.tag != TAG_LEAF || leaf.quantity == 0 || leaf.side > 1 {
+            return Err(bundle_error());
+        }
+        self.insert(tree, leaf)
+    }
+
+    /// Cancels only an order owned by the supplied V3 seat.  Returning the
+    /// removed leaf lets the settlement layer apply the seat's reserved
+    /// margin/open-order deltas atomically before committing the event.
+    pub fn cancel_owned_order(
+        &mut self,
+        tree: TreeKind,
+        key: u128,
+        owner: u32,
+    ) -> Result<LeafNode, ProgramError> {
+        self.remove_owned(tree, key, owner)
+    }
+
     pub fn best(&mut self, tree: TreeKind) -> Result<Option<u32>, ProgramError> {
         let mut current = self.root(tree)?;
         while current != NONE {
