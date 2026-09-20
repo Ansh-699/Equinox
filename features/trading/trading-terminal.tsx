@@ -6,7 +6,7 @@ import { TopBar } from "@/components/layout/top-bar";
 import { ExecutionStatusBanner, ProtocolStatusStrip } from "@/components/layout/status-strip";
 import { useAppAuth } from "@/components/app-providers";
 import { isSessionUsable } from "@/lib/session-trading";
-import { createTraderSeat, initializeSettlementScratch, initializeVault, previewPlaceOrder } from "@/clients/stockstream/src";
+import { createTraderSeat, createV3TraderSeat, deriveV3ExecutionAccounts, initializeSettlementScratch, initializeVault, previewPlaceOrder } from "@/clients/stockstream/src";
 import { marketForSymbol } from "@/lib/markets";
 import { useWithdraw, evaluateWithdrawGate } from "@/features/collateral/use-withdraw";
 import { useDeposit } from "@/features/collateral/use-deposit";
@@ -149,6 +149,13 @@ export function TradingTerminal() {
   function runLifecycle() {
     if (!auth.walletAddress || !marketAddress) { setNotice("Configure the market address and sign in before constructing lifecycle actions."); return; }
     try {
+      const v3Core = process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS;
+      if (v3Core) {
+        const execution = deriveV3ExecutionAccounts(v3Core, auth.walletAddress);
+        const seat = createV3TraderSeat({ core: v3Core, seatShards: execution.seatShards, eventShards: execution.eventShards, trader: auth.walletAddress }, 0);
+        setNotice(`Constructed CreateV3TraderSeat (${seat.keys.length} account metas). Signing is disabled until the configured L1 transport is available.`);
+        return;
+      }
       const seat = createTraderSeat({ market: marketAddress, authority: auth.walletAddress }, 0);
       const scratchAddress = process.env.NEXT_PUBLIC_STOCKSTREAM_SETTLEMENT_SCRATCH_ADDRESS ?? marketConfig.scratchPda(0);
       const scratch = scratchAddress ? initializeSettlementScratch({ market: marketAddress, authority: auth.walletAddress, settlementScratch: scratchAddress }, 0) : null;
