@@ -12,6 +12,9 @@
 export const EVENT_HEADER_SIZE = 52;
 export const EVENT_PAYLOAD_SIZE = 48;
 export const EVENT_SIZE = EVENT_HEADER_SIZE + EVENT_PAYLOAD_SIZE;
+export const EVENT_ABI_VERSION = 1;
+/** Market-level event sentinel, matching `events::NO_SEAT`. */
+export const NO_SEAT = 0xffff;
 
 export const EVENT_KIND = {
   ExchangeInitialized: 100, ExchangeConfigUpdated: 101, StockInstrumentRegistered: 102,
