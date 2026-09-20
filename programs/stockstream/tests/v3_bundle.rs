@@ -16,10 +16,11 @@ use stockstream::{
     v3::{
         append_event_record, cancel_all_v3, close_trader_seat, create_trader_seat,
         deposit_collateral_v3, derive_book_page_v3, derive_event_shard_v3, derive_market_core_v3,
-        derive_seat_shard_v3, initialize_book_page_metadata, place_order_v3, update_funding_v3,
-        validate_execution_bundle, validate_v3_session_actor, validate_v3_withdrawal_readiness,
-        withdraw_collateral_v3, PagedBookV3, V3_BOOK_PAGES_PER_SIDE, V3_BOOK_PAGE_SIZE,
-        V3_EVENT_SHARD_SIZE, V3_EXECUTION_BUNDLE_LEN, V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
+        derive_seat_shard_v3, initialize_book_page_metadata, liquidate_v3, place_order_v3,
+        update_funding_v3, validate_execution_bundle, validate_v3_session_actor,
+        validate_v3_withdrawal_readiness, withdraw_collateral_v3, PagedBookV3,
+        V3_BOOK_PAGES_PER_SIDE, V3_BOOK_PAGE_SIZE, V3_EVENT_SHARD_SIZE, V3_EXECUTION_BUNDLE_LEN,
+        V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
     },
     ID,
 };
@@ -304,6 +305,45 @@ fn v3_cancel_all_releases_reserve_and_side_exposure_for_every_tree() {
     assert_eq!(i128::from_le_bytes(seat[100..116].try_into().unwrap()), 0);
     assert_eq!(i128::from_le_bytes(seat[180..196].try_into().unwrap()), 0);
     assert_eq!(u32::from_le_bytes(seat[212..216].try_into().unwrap()), 0);
+}
+
+#[test]
+fn v3_liquidation_updates_open_interest_and_insurance_fee() {
+    let mut accounts = bundle();
+    let authority = account(Address::new_from_array([48; 32]), 0, true);
+    let mut seat_call = vec![
+        accounts[0].view.clone(),
+        accounts[V3_SEAT_START].view.clone(),
+        accounts[V3_SEAT_START + 1].view.clone(),
+        accounts[V3_SEAT_START + 2].view.clone(),
+        accounts[V3_SEAT_START + 3].view.clone(),
+        accounts[V3_EVENT_START].view.clone(),
+        accounts[V3_EVENT_START + 1].view.clone(),
+        accounts[V3_EVENT_START + 2].view.clone(),
+        accounts[V3_EVENT_START + 3].view.clone(),
+        authority.view.clone(),
+    ];
+    create_trader_seat(&ID, &mut seat_call, 0).unwrap();
+    unsafe {
+        let core = accounts[0].view.borrow_unchecked_mut();
+        core[44..76].copy_from_slice(authority.view.address().as_ref());
+        core[180] = 1;
+        core[181..189].copy_from_slice(&100i64.to_le_bytes());
+        core[197] = 1;
+        core[288..304].copy_from_slice(&10i128.to_le_bytes());
+        let seat = accounts[V3_SEAT_START].view.borrow_unchecked_mut();
+        seat[116..132].copy_from_slice(&10i128.to_le_bytes());
+        seat[132..148].copy_from_slice(&1_000i128.to_le_bytes());
+    }
+    let mut liquidation_accounts = views(&accounts);
+    liquidation_accounts.push(authority.view.clone());
+    liquidate_v3(&ID, &mut liquidation_accounts, 0, 5).unwrap();
+    let seat = unsafe { accounts[V3_SEAT_START].view.borrow_unchecked() };
+    assert_eq!(i128::from_le_bytes(seat[116..132].try_into().unwrap()), 5);
+    let core = unsafe { accounts[0].view.borrow_unchecked() };
+    assert_eq!(i128::from_le_bytes(core[288..304].try_into().unwrap()), 5);
+    assert_eq!(i128::from_le_bytes(core[322..338].try_into().unwrap()), 2);
+    assert_eq!(i128::from_le_bytes(core[338..354].try_into().unwrap()), 2);
 }
 
 #[test]
