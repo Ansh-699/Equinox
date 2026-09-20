@@ -198,7 +198,7 @@ export function decodeV3BookPage(bytes: Uint8Array): V3BookPageState | null {
 
 export interface V3SeatPositionState {
   shard: number; slot: number; trader: string; availableCollateral: bigint; reservedMargin: bigint;
-  basePosition: bigint; quoteEntryValue: bigint; realizedPnl: bigint; openBidExposure: bigint;
+  basePosition: bigint; quoteEntryValue: bigint; realizedPnl: bigint; lastFundingAccumulator: bigint; openBidExposure: bigint;
   openAskExposure: bigint; openOrderCount: number; liquidationState: number; sequence: bigint;
 }
 function signed128(view: DataView, offset: number): bigint {
@@ -210,7 +210,7 @@ function decodeSeat(bytes: Uint8Array, shard: number, slot: number): V3SeatPosit
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   return {
     shard, slot, trader: address(bytes, 1), availableCollateral: signed128(view, 40), reservedMargin: signed128(view, 56),
-    basePosition: signed128(view, 72), quoteEntryValue: signed128(view, 88), realizedPnl: signed128(view, 104),
+    basePosition: signed128(view, 72), quoteEntryValue: signed128(view, 88), realizedPnl: signed128(view, 104), lastFundingAccumulator: signed128(view, 120),
     openBidExposure: signed128(view, 136), openAskExposure: signed128(view, 152), openOrderCount: view.getUint32(168, true),
     liquidationState: bytes[172], sequence: view.getBigUint64(176, true),
   };

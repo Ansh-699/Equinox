@@ -27,7 +27,7 @@ export function PortfolioView() {
   const marketConfig = marketForSymbol(marketSymbol);
   const marketAddress = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_ADDRESS ?? marketConfig.marketPda;
   const protocol = useStockStreamProtocol(auth.authenticated ? marketAddress : null);
-  const position = usePosition(protocol?.rpc ?? null, marketAddress, 0);
+  const position = usePosition(protocol?.rpc ?? null, marketAddress, 0, { marketApiUrl, core: process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS });
   const executionStatus = useExecutionStatus(marketApiUrl, marketSymbol);
   const deposit = useDeposit(protocol);
   const withdraw = useWithdraw(protocol);
