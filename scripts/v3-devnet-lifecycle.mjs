@@ -99,6 +99,28 @@ async function setup() {
 }
 function plan() {
   const state = load(); assertFresh(state);
-  console.log(JSON.stringify({ version: 3, execute, statePath: STATE_PATH, protectedV2Market: PRESERVED_V2_MARKET, stages: { setup: "complete on Devnet: fresh core + 18 pages + 4 seat shards + 4 event shards", delegation: "complete on Devnet: all 27 accounts delegated to MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57", commit: "complete through one-account shard intents; full 27-account intent remains rejected with Magic error 0xa0000002", undelegation: "source runner: node scripts/v3-sharded-commit.mjs undelegate; restore depends on external callback", custody: "source complete: op53 deposit and op54 full-bundle restored/reconciled flat-seat withdrawal; live submit waits for restore", trading: "source handlers exist for place/cancel/cancel-all and main-wallet replace; live blocked until oracle/session-replace completion" }, state }, null, 2));
+  const readCheckpoint = (path) => {
+    try { return fs.existsSync(path) ? JSON.parse(fs.readFileSync(path, "utf8")) : null; } catch { return null; }
+  };
+  const delegation = readCheckpoint("/tmp/opencode/v3-delegation-state.json");
+  const commit = readCheckpoint("/tmp/opencode/v3-sharded-commit-state.json");
+  const setupComplete = state.setupComplete === true
+    && state.core && state.v3Accounts
+    && state.v3Accounts.bookPages?.length === 18
+    && state.v3Accounts.seatShards?.length === 4
+    && state.v3Accounts.eventShards?.length === 4;
+  const delegated = delegation?.complete === true || state.delegationComplete === true;
+  const committed = commit?.complete === true;
+  console.log(JSON.stringify({
+    version: 3, execute, statePath: STATE_PATH, protectedV2Market: PRESERVED_V2_MARKET,
+    stages: {
+      setup: setupComplete ? "complete: fresh core + 18 pages + 4 seat shards + 4 event shards" : "pending: run --execute setup (existing accounts are resumed, never recreated)",
+      delegation: delegated ? "complete: checkpoint proves all 27 accounts delegated" : "pending: delegation checkpoint is absent or incomplete",
+      commit: committed ? "complete: sharded commit checkpoint finalized" : "blocked/pending: commit checkpoint incomplete; full 27-account intent remains rejected with Magic error 0xa0000002",
+      undelegation: committed ? "available: node scripts/v3-sharded-commit.mjs undelegate; restore still depends on external callback" : "blocked: commit/finality checkpoint required before undelegation",
+      custody: "source complete: op53 deposit and op54 full-bundle restored/reconciled flat-seat withdrawal; live submit waits for restore",
+      trading: "source handlers exist for place/cancel/cancel-all and main-wallet replace; live blocked until oracle/session-replace completion",
+    }, state,
+  }, null, 2));
 }
 if (stage === "plan") plan(); else if (stage === "setup") await setup(); else throw new Error("usage: node scripts/v3-devnet-lifecycle.mjs [--execute] [plan|setup]");
