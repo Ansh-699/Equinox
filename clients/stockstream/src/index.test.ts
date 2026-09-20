@@ -54,13 +54,14 @@ test("V3 funding builder uses the canonical 27-account execution bundle", () => 
   expect(ix.keys[27]).toMatchObject({ pubkey: authority, isSigner: true, isWritable: false });
 });
 
-test("V3 risk update uses the versioned 49-byte payload", () => {
+test("V3 risk update uses the versioned 81-byte payload", () => {
   const ix = updateV3Risk({ market, authority }, {
     initialMarginBps: 2_000, maintenanceMarginBps: 1_000, liquidationFeeBps: 50,
     makerFeeBps: 2, takerFeeBps: 5, maximumLeverage: 5,
     maximumPosition: 100n, maximumOpenInterest: 1_000n, markDeviationBps: 250,
+    vaultSurplus: 400n, withdrawalBuffer: 25n,
   });
-  expect(ix.data).toHaveLength(49);
+  expect(ix.data).toHaveLength(81);
   expect(ix.data[0]).toBe(24);
   expect(ix.keys).toHaveLength(2);
 });

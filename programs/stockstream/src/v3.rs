@@ -107,6 +107,12 @@ pub const V3_CORE_SNAPSHOT_CHILD_COUNT_OFFSET: usize = 384;
 pub const V3_CORE_CHILD_RECORDS_OFFSET: usize = 392;
 pub const V3_CORE_CHILD_RECORD_SIZE: usize = 48; // epoch + sequence + 32-byte digest
 pub const V3_CHILD_COUNT: usize = V3_EXECUTION_BUNDLE_LEN - 1;
+/// The child-record table occupies bytes 392..1640.  These two fields live
+/// immediately after it so they remain inside the fixed 4,096-byte core
+/// reserve without colliding with commit metadata.
+pub const V3_CORE_VAULT_SURPLUS_OFFSET: usize =
+    V3_CORE_CHILD_RECORDS_OFFSET + (V3_CHILD_COUNT * V3_CORE_CHILD_RECORD_SIZE);
+pub const V3_CORE_WITHDRAWAL_BUFFER_OFFSET: usize = V3_CORE_VAULT_SURPLUS_OFFSET + 16;
 pub const V3_COMMIT_PHASE_IDLE: u8 = 0;
 pub const V3_COMMIT_PHASE_SNAPSHOT: u8 = 1;
 pub const V3_COMMIT_PHASE_UNDELEGATING: u8 = 2;
@@ -124,6 +130,8 @@ pub struct V3RiskConfig {
     pub maximum_position: i128,
     pub maximum_open_interest: i128,
     pub mark_deviation_bps: u16,
+    pub vault_surplus: i128,
+    pub withdrawal_buffer: i128,
 }
 
 impl V3RiskConfig {
@@ -138,6 +146,8 @@ impl V3RiskConfig {
             maximum_position: 0,
             maximum_open_interest: 0,
             mark_deviation_bps: 0,
+            vault_surplus: 0,
+            withdrawal_buffer: 0,
         }
     }
 }
@@ -2424,6 +2434,8 @@ pub fn read_v3_risk_config(bytes: &[u8]) -> Result<V3RiskConfig, ProgramError> {
         } else {
             defaults.mark_deviation_bps
         },
+        vault_surplus: core_i128(bytes, V3_CORE_VAULT_SURPLUS_OFFSET)?,
+        withdrawal_buffer: core_i128(bytes, V3_CORE_WITHDRAWAL_BUFFER_OFFSET)?,
     };
     // These durable ledgers are part of the same economic configuration
     // boundary.  They must never be interpreted as signed debt/credit values
@@ -2450,6 +2462,8 @@ pub fn read_v3_risk_config(bytes: &[u8]) -> Result<V3RiskConfig, ProgramError> {
         || insurance_balance < 0
         || bad_debt < 0
         || vault_liability < 0
+        || config.vault_surplus < 0
+        || config.withdrawal_buffer < 0
         || bytes[V3_CORE_RECONCILIATION_STATUS_OFFSET] > 3
     {
         return Err(StockStreamError::RiskViolation.into());
@@ -2491,6 +2505,8 @@ pub fn initialize_v3_risk_config(bytes: &mut [u8]) -> ProgramResult {
     set_core_i128(bytes, V3_CORE_INSURANCE_BALANCE_OFFSET, 0)?;
     set_core_i128(bytes, V3_CORE_BAD_DEBT_OFFSET, 0)?;
     set_core_i128(bytes, V3_CORE_VAULT_LIABILITY_OFFSET, 0)?;
+    set_core_i128(bytes, V3_CORE_VAULT_SURPLUS_OFFSET, 0)?;
+    set_core_i128(bytes, V3_CORE_WITHDRAWAL_BUFFER_OFFSET, 0)?;
     bytes[V3_CORE_RECONCILIATION_STATUS_OFFSET] = 0;
     bytes[V3_CORE_RISK_CONFIG_VERSION_OFFSET] = V3_RISK_CONFIG_VERSION;
     Ok(())
@@ -2532,6 +2548,8 @@ pub fn update_v3_risk_config(
         || (config.maximum_open_interest > 0
             && current_open_interest > config.maximum_open_interest)
         || config.mark_deviation_bps > 10_000
+        || config.vault_surplus < 0
+        || config.withdrawal_buffer < 0
     {
         return Err(StockStreamError::RiskViolation.into());
     }
@@ -2559,6 +2577,16 @@ pub fn update_v3_risk_config(
     )?;
     core[V3_CORE_MARK_DEVIATION_BPS_OFFSET..V3_CORE_MARK_DEVIATION_BPS_OFFSET + 2]
         .copy_from_slice(&config.mark_deviation_bps.to_le_bytes());
+    set_core_i128(
+        &mut core,
+        V3_CORE_VAULT_SURPLUS_OFFSET,
+        config.vault_surplus,
+    )?;
+    set_core_i128(
+        &mut core,
+        V3_CORE_WITHDRAWAL_BUFFER_OFFSET,
+        config.withdrawal_buffer,
+    )?;
     core[V3_CORE_RISK_CONFIG_VERSION_OFFSET] = V3_RISK_CONFIG_VERSION;
     Ok(())
 }
@@ -3559,6 +3587,10 @@ pub fn deposit_collateral_v3(
     if seat.occupancy != 1 || seat.trader != authority.address().to_bytes() {
         return Err(StockStreamError::InvalidSeat.into());
     }
+    let vault_liability = core_i128(core_bytes, V3_CORE_VAULT_LIABILITY_OFFSET)?;
+    let updated_vault_liability = vault_liability
+        .checked_add(i128::from(amount))
+        .ok_or(StockStreamError::ArithmeticOverflow)?;
     seat.available_collateral = seat
         .available_collateral
         .checked_add(i128::from(amount))
@@ -3567,6 +3599,11 @@ pub fn deposit_collateral_v3(
         .invoke_with_program(accounts[10].address())?;
     write_shard_seat(unsafe { accounts[1].borrow_unchecked_mut() }, slot, &seat)?;
     let mut core_copy = accounts[0].clone();
+    set_core_i128(
+        unsafe { core_copy.borrow_unchecked_mut() },
+        V3_CORE_VAULT_LIABILITY_OFFSET,
+        updated_vault_liability,
+    )?;
     let mut event_copies = [
         accounts[2].clone(),
         accounts[3].clone(),
@@ -3643,6 +3680,10 @@ pub fn withdraw_collateral_v3(
             .map_err(|_| bundle_error())?,
     );
     let funding_accumulator = core_i128(core_bytes, V3_CORE_FUNDING_ACCUMULATOR_OFFSET)?;
+    let vault_liability = core_i128(core_bytes, V3_CORE_VAULT_LIABILITY_OFFSET)?;
+    let updated_vault_liability = vault_liability
+        .checked_sub(i128::from(amount))
+        .ok_or(StockStreamError::RiskViolation)?;
     let risk_config = read_v3_risk_config(&core_bytes)?;
     let mut seat = crate::risk::prepare_withdrawal(
         &seat,
@@ -3650,7 +3691,7 @@ pub fn withdraw_collateral_v3(
         funding_accumulator,
         i128::from(mark_price),
         risk_config.maintenance_margin_bps,
-        crate::risk::DEFAULT_WITHDRAWAL_BUFFER,
+        risk_config.withdrawal_buffer,
     )
     .map_err(v3_risk_error)?;
     let mint = &accounts[V3_EXECUTION_BUNDLE_LEN + 2];
@@ -3709,6 +3750,11 @@ pub fn withdraw_collateral_v3(
         &seat,
     )?;
     let mut core_copy = accounts[0].clone();
+    set_core_i128(
+        unsafe { core_copy.borrow_unchecked_mut() },
+        V3_CORE_VAULT_LIABILITY_OFFSET,
+        updated_vault_liability,
+    )?;
     let mut event_copies = [
         accounts[23].clone(),
         accounts[24].clone(),

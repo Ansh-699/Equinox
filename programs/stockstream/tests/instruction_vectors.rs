@@ -155,6 +155,33 @@ fn v3_risk_update_vector_decodes_all_persisted_fields() {
             maximum_position: 100,
             maximum_open_interest: 1_000,
             mark_deviation_bps: 250,
+            vault_surplus: 0,
+            withdrawal_buffer: 0,
+        })
+    ));
+}
+
+#[test]
+fn v3_risk_update_extended_vector_decodes_surplus_and_buffer() {
+    let mut data = vec![instruction::UPDATE_MARKET_RISK];
+    data.extend_from_slice(&2_000u16.to_le_bytes());
+    data.extend_from_slice(&1_000u16.to_le_bytes());
+    data.extend_from_slice(&50u16.to_le_bytes());
+    data.extend_from_slice(&2u16.to_le_bytes());
+    data.extend_from_slice(&5u16.to_le_bytes());
+    data.extend_from_slice(&5u32.to_le_bytes());
+    data.extend_from_slice(&100i128.to_le_bytes());
+    data.extend_from_slice(&1_000i128.to_le_bytes());
+    data.extend_from_slice(&250u16.to_le_bytes());
+    data.extend_from_slice(&400i128.to_le_bytes());
+    data.extend_from_slice(&25i128.to_le_bytes());
+    assert_eq!(data.len(), 81);
+    assert!(matches!(
+        StockStreamInstruction::decode(&data),
+        Ok(StockStreamInstruction::UpdateV3Risk {
+            vault_surplus: 400,
+            withdrawal_buffer: 25,
+            ..
         })
     ));
 }

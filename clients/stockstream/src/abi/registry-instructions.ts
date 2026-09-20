@@ -47,18 +47,21 @@ export interface V3RiskUpdate {
   initialMarginBps: number; maintenanceMarginBps: number; liquidationFeeBps: number;
   makerFeeBps: number; takerFeeBps: number; maximumLeverage: number;
   maximumPosition: bigint; maximumOpenInterest: bigint; markDeviationBps: number;
+  vaultSurplus: bigint; withdrawalBuffer: bigint;
 }
 
-/** V3 uses the same risk opcode with a versioned 49-byte payload and a
+/** V3 uses the same risk opcode with a versioned 81-byte payload and a
  * `[core, authority]` account pair. The legacy 9-byte builder above remains
  * V2-only and is intentionally not widened. */
 export function updateV3Risk(accounts: MarketAuthorityAccounts, values: V3RiskUpdate): TransactionInstruction {
-  const data = new Uint8Array(49); const view = new DataView(data.buffer); data[0] = OPCODE.updateMarketRisk;
+  const data = new Uint8Array(81); const view = new DataView(data.buffer); data[0] = OPCODE.updateMarketRisk;
   view.setUint16(1, values.initialMarginBps, true); view.setUint16(3, values.maintenanceMarginBps, true);
   view.setUint16(5, values.liquidationFeeBps, true); view.setUint16(7, values.makerFeeBps, true); view.setUint16(9, values.takerFeeBps, true);
   view.setUint32(11, values.maximumLeverage, true);
   writeSigned128(view, 15, values.maximumPosition); writeSigned128(view, 31, values.maximumOpenInterest);
   view.setUint16(47, values.markDeviationBps, true);
+  writeSigned128(view, 49, values.vaultSurplus);
+  writeSigned128(view, 65, values.withdrawalBuffer);
   return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]);
 }
 

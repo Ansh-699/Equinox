@@ -21,7 +21,8 @@ use stockstream::{
         read_v3_risk_config, update_funding_v3, validate_execution_bundle,
         validate_v3_session_actor, validate_v3_withdrawal_readiness, withdraw_collateral_v3,
         PagedBookV3, V3_BOOK_PAGES_PER_SIDE, V3_BOOK_PAGE_SIZE,
-        V3_CORE_PROTOCOL_FEE_BALANCE_OFFSET, V3_EVENT_SHARD_SIZE, V3_EXECUTION_BUNDLE_LEN,
+        V3_CORE_PROTOCOL_FEE_BALANCE_OFFSET, V3_CORE_VAULT_SURPLUS_OFFSET,
+        V3_CORE_WITHDRAWAL_BUFFER_OFFSET, V3_EVENT_SHARD_SIZE, V3_EXECUTION_BUNDLE_LEN,
         V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
     },
     ID,
@@ -425,6 +426,22 @@ fn v3_risk_config_rejects_negative_economic_ledgers() {
     let accounts = bundle();
     let mut core = unsafe { accounts[0].view.borrow_unchecked().to_vec() };
     core[V3_CORE_PROTOCOL_FEE_BALANCE_OFFSET..V3_CORE_PROTOCOL_FEE_BALANCE_OFFSET + 16]
+        .copy_from_slice(&(-1i128).to_le_bytes());
+    assert!(read_v3_risk_config(&core).is_err());
+}
+
+#[test]
+fn v3_risk_config_persists_surplus_and_withdrawal_buffer_in_core_reserve() {
+    let accounts = bundle();
+    let mut core = unsafe { accounts[0].view.borrow_unchecked().to_vec() };
+    core[V3_CORE_VAULT_SURPLUS_OFFSET..V3_CORE_VAULT_SURPLUS_OFFSET + 16]
+        .copy_from_slice(&400i128.to_le_bytes());
+    core[V3_CORE_WITHDRAWAL_BUFFER_OFFSET..V3_CORE_WITHDRAWAL_BUFFER_OFFSET + 16]
+        .copy_from_slice(&25i128.to_le_bytes());
+    let config = read_v3_risk_config(&core).unwrap();
+    assert_eq!(config.vault_surplus, 400);
+    assert_eq!(config.withdrawal_buffer, 25);
+    core[V3_CORE_WITHDRAWAL_BUFFER_OFFSET..V3_CORE_WITHDRAWAL_BUFFER_OFFSET + 16]
         .copy_from_slice(&(-1i128).to_le_bytes());
     assert!(read_v3_risk_config(&core).is_err());
 }

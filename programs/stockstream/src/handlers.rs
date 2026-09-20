@@ -549,6 +549,8 @@ pub fn dispatch(
             maximum_position,
             maximum_open_interest,
             mark_deviation_bps,
+            vault_surplus,
+            withdrawal_buffer,
         } => crate::v3::update_v3_risk_config(
             program_id,
             accounts,
@@ -562,6 +564,8 @@ pub fn dispatch(
                 maximum_position,
                 maximum_open_interest,
                 mark_deviation_bps,
+                vault_surplus,
+                withdrawal_buffer,
             },
         ),
         StockStreamInstruction::TransitionMarket { mode, action } => {
