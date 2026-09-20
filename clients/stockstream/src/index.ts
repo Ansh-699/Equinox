@@ -2,9 +2,10 @@ import { PublicKey, SystemProgram, TransactionInstruction, type AccountMeta } fr
 import { STOCKSTREAM_ACCOUNT_SIZE, STOCKSTREAM_INSTRUCTION, STOCKSTREAM_PROGRAM_ID, STOCKSTREAM_TRADING_SESSION_SIZE } from "./constants";
 import { deriveBookPageV3, deriveEventShardV3, deriveMarketCoreV3, deriveSeatShardV3, V3_BOOK_PAGES_PER_SIDE } from "./abi/v3";
 import { checkedSigned, checkedUnsigned, writeSigned, writeUnsigned } from "./abi/encoding";
+import { accountMeta, instruction, publicKey, STOCKSTREAM_PROGRAM_KEY, type AddressInput } from "./abi/transaction";
 
-export const STOCKSTREAM_PROGRAM_KEY = new PublicKey(STOCKSTREAM_PROGRAM_ID);
-export type AddressInput = PublicKey | string;
+export { STOCKSTREAM_PROGRAM_KEY } from "./abi/transaction";
+export type { AddressInput } from "./abi/transaction";
 export type Side = "bid" | "ask";
 export type OrderTree = "fixed" | "oracle-pegged";
 export type SelfTradeBehavior = "abort" | "cancel-provide" | "decrement-take";
@@ -104,21 +105,8 @@ export interface V3UndelegationRecoveryAccounts {
   reimbursement?: AddressInput;
 }
 
-function publicKey(value: AddressInput): PublicKey {
-  if (value instanceof PublicKey) return value;
-  try { return new PublicKey(value); } catch { throw new RangeError("Invalid Solana public key"); }
-}
-
 function selfTradeBits(value: SelfTradeBehavior = "abort"): number {
   return value === "abort" ? 0 : value === "cancel-provide" ? 1 << 3 : value === "decrement-take" ? 2 << 3 : (() => { throw new RangeError("Invalid self-trade behavior"); })();
-}
-
-function accountMeta(address: AddressInput, isSigner: boolean, isWritable: boolean): AccountMeta {
-  return { pubkey: publicKey(address), isSigner, isWritable };
-}
-
-function instruction(data: Uint8Array, accounts: AccountMeta[]): TransactionInstruction {
-  return new TransactionInstruction({ programId: STOCKSTREAM_PROGRAM_KEY, keys: accounts, data: Buffer.from(data) });
 }
 
 function v3ExecutionMetas(accounts: V3ExecutionAccounts): AccountMeta[] {
