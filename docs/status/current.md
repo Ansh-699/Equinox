@@ -99,6 +99,10 @@ Fresh current-HEAD regression evidence: `cargo test -p stockstream --test v3_bun
   reserve, open-order, and side-exposure release. Underflow now rejects rather
   than silently saturating corrupted ledger state; the changed artifact is
   local-only.
+- Fresh stale-oracle cancellation regression: the same V3 bundle test disables
+  the oracle-valid flag after placing a pegged order and confirms cancel-all
+  still releases its reservation using the last stored price. The validity
+  flag gates new pegged orders, not cancellation of existing orders.
 - Commit-limit correction (`6492c75`): `cargo test -p stockstream --test
   magicblock` (30), `--test v3_bundle` (7), root V3 ABI tests (6), Worker
   V3 state tests (4), both TypeScript checks, ABI parity, and a loadable SBF

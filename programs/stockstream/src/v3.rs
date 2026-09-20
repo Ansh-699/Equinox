@@ -2776,6 +2776,19 @@ fn v3_order_reserve(
     crate::risk::initial_margin(notional, config.initial_margin_bps).map_err(v3_risk_error)
 }
 
+/// Returns the last stored oracle price for reserve accounting. Cancellation
+/// must remain available during a stale/temporarily invalid oracle window; the
+/// validity flag gates new pegged orders, while the stored price lets existing
+/// reservations be released deterministically.
+fn v3_reserve_oracle(core: &[u8]) -> Result<Option<i64>, ProgramError> {
+    let price = i64::from_le_bytes(
+        core[V3_CORE_ORACLE_PRICE_OFFSET..V3_CORE_ORACLE_PRICE_OFFSET + 8]
+            .try_into()
+            .map_err(|_| bundle_error())?,
+    );
+    Ok((price > 0).then_some(price))
+}
+
 fn recompute_v3_open_interest(seat_accounts: &[AccountView]) -> Result<i128, ProgramError> {
     if seat_accounts.len() != V3_SEAT_SHARDS {
         return Err(StockStreamError::InvalidSeat.into());
@@ -3723,18 +3736,7 @@ fn cancel_order_v3_with_action(
         }
     }
     let (tree, leaf) = removed.ok_or(StockStreamError::InvalidInstruction)?;
-    let oracle = {
-        let core = unsafe { core_accounts[0].borrow_unchecked() };
-        if core[V3_CORE_ORACLE_VALID_OFFSET] == 0 {
-            None
-        } else {
-            Some(i64::from_le_bytes(
-                core[V3_CORE_ORACLE_PRICE_OFFSET..V3_CORE_ORACLE_PRICE_OFFSET + 8]
-                    .try_into()
-                    .map_err(|_| bundle_error())?,
-            ))
-        }
-    };
+    let oracle = v3_reserve_oracle(unsafe { core_accounts[0].borrow_unchecked() })?;
     let reserve_price = match tree {
         TreeKind::Fixed => leaf.price_or_offset,
         TreeKind::OraclePegged => oracle
@@ -3871,15 +3873,7 @@ pub fn cancel_all_v3(
         let (seat, shard, slot) = v3_trade_seat_shards(seat_accounts, seat_index)?;
         let mut updated = seat;
         let core_bytes = unsafe { core_accounts[0].borrow_unchecked() };
-        let oracle = if core_bytes[V3_CORE_ORACLE_VALID_OFFSET] == 0 {
-            None
-        } else {
-            Some(i64::from_le_bytes(
-                core_bytes[V3_CORE_ORACLE_PRICE_OFFSET..V3_CORE_ORACLE_PRICE_OFFSET + 8]
-                    .try_into()
-                    .map_err(|_| bundle_error())?,
-            ))
-        };
+        let oracle = v3_reserve_oracle(&core_bytes)?;
         let config = read_v3_risk_config(&core_bytes)?;
         updated.reserved_margin = updated
             .reserved_margin
