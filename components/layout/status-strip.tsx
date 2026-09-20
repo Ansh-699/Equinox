@@ -37,6 +37,8 @@ export function ProtocolStatusStrip({
   v3: V3MarketReadiness;
 }) {
   const v3Label = v3.state === "available" ? (v3.withdrawalReady ? "withdrawal ready" : "execution state incomplete") : v3.state.replace("_", " ");
+  const commitLabel = v3.state === "available" && v3.expectedCommitSequence !== null && v3.lastCommittedSequence !== null
+    ? `commit ${v3.lastCommittedSequence.toString()}/${v3.expectedCommitSequence.toString()}` : "commit unavailable";
   return (
     <section className="status-strip" aria-label="StockStream status">
       <label>
@@ -51,6 +53,8 @@ export function ProtocolStatusStrip({
       <div><strong>Collateral</strong><span>test-only/not connected</span></div>
       <div><strong>Session</strong><span>{authenticated ? "authenticated" : "not authenticated"}</span></div>
       <div><strong>V3 bundle</strong><span>{v3Label}</span></div>
+      <div><strong>V3 shards</strong><span>{v3.bookPageCount} pages · {v3.seatShardCount} seats · {v3.eventShardCount} events</span></div>
+      <div><strong>V3 finality</strong><span>{commitLabel}{v3.delegationStatus === null ? " · status unavailable" : ` · delegation ${v3.delegationStatus}`}</span></div>
     </section>
   );
 }
