@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { classifyOpenOrdersResult, unimplementedOpenOrdersAdapter, OPEN_ORDERS_UNAVAILABLE_REASON, type OpenOrderView, type OpenOrdersViewState } from "./open-orders";
+import { describe, expect, it, vi } from "vitest";
+import { classifyOpenOrdersResult, createV3OpenOrdersAdapter, unimplementedOpenOrdersAdapter, OPEN_ORDERS_UNAVAILABLE_REASON, type OpenOrderView, type OpenOrdersViewState } from "./open-orders";
 
 const order: OpenOrderView = {
   orderKey: 1n, side: "bid", tree: "fixed", price: 100n, quantity: 5n, filledQuantity: 0n, postOnly: false, reduceOnly: false, expiresAt: null,
@@ -9,6 +9,37 @@ describe("unimplementedOpenOrdersAdapter", () => {
   it("always reports unavailable with the real, non-fabricated reason -- never a mock order", async () => {
     const result = await unimplementedOpenOrdersAdapter.fetchOpenOrders({ marketPda: "m", seatIndex: 0 });
     expect(result).toEqual({ status: "unavailable", reason: OPEN_ORDERS_UNAVAILABLE_REASON });
+  });
+});
+
+describe("createV3OpenOrdersAdapter", () => {
+  it("decodes fixed and oracle-pegged seat orders from the Worker aggregate", async () => {
+    const fixedBid = ((100n << 64n) | 7n).toString();
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        completeExecutionState: true,
+        core: { lastVerifiedOraclePrice: "1000" },
+        orderBook: {
+          bids: [{ key: fixedBid, side: 0, owner: 0, quantity: "5", expiresAt: "18446744073709551615", priceOrOffset: "100", tree: "fixed", postOnly: true }],
+          asks: [{ key: ((1100n << 64n) | 8n).toString(), side: 1, owner: 0, quantity: "2", expiresAt: "20", priceOrOffset: "25", tree: "oracle-pegged", reduceOnly: true }],
+        },
+      }),
+    })));
+    const result = await createV3OpenOrdersAdapter({ marketApiUrl: "https://api.example", core: "core" }).fetchOpenOrders({ marketPda: "ignored", seatIndex: 0 });
+    expect(result).toMatchObject({ status: "ready" });
+    if (result.status !== "ready") return;
+    expect(result.orders).toEqual([
+      expect.objectContaining({ side: "bid", tree: "fixed", price: (2n ** 64n - 1n) - 100n, postOnly: true, expiresAt: null }),
+      expect.objectContaining({ side: "ask", tree: "oracle-pegged", price: 1025n, reduceOnly: true, expiresAt: 20n }),
+    ]);
+    vi.unstubAllGlobals();
+  });
+
+  it("fails closed when the Worker aggregate is incomplete", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => ({}) })));
+    await expect(createV3OpenOrdersAdapter({ marketApiUrl: "https://api.example", core: "core" }).fetchOpenOrders({ marketPda: "ignored", seatIndex: 0 })).resolves.toEqual({ status: "unavailable", reason: OPEN_ORDERS_UNAVAILABLE_REASON });
+    vi.unstubAllGlobals();
   });
 });
 

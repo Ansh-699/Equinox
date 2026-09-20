@@ -41,6 +41,21 @@ describe("V3 worker shard aggregation", () => {
     expect(aggregate.orderBook.bids[0]).toMatchObject({ tag: 2, side: 0, quantity: 5n });
     expect(aggregateV3Market(core(), [...books.slice(0, books.length - 1), page(1, 2)], seats, events, coreAddress)).toBeNull();
   });
+
+  it("retains V3 leaf fields and attributes leaves to their Patricia tree", () => {
+    const bytes = leafPage(0, 0);
+    const view = new DataView(bytes.buffer);
+    view.setUint32(44, 0, true); // fixed root -> global handle zero
+    view.setBigInt64(64 + 56, 101n, true);
+    view.setBigUint64(64 + 64, 9n, true);
+    bytes[64 + 72] = 3; // post-only + reduce-only
+    const decoded = decodeV3BookPage(bytes)!;
+    expect(decoded.nodes[0]).toMatchObject({ priceOrOffset: 101n, sequence: 9n, postOnly: true, reduceOnly: true });
+    const books = [bytes, ...Array.from({ length: 2 * V3_BOOK_PAGES_PER_SIDE - 1 }, (_, value) => page(Math.floor((value + 1) / V3_BOOK_PAGES_PER_SIDE), (value + 1) % V3_BOOK_PAGES_PER_SIDE))];
+    const seats = Array.from({ length: 4 }, (_, value) => shard(false, value));
+    const events = Array.from({ length: 4 }, (_, value) => shard(true, value));
+    expect(aggregateV3Market(core(), books, seats, events, coreAddress)?.orderBook.bids[0]).toMatchObject({ tree: "fixed" });
+  });
   it("decodes complete persisted event records", () => {
     const bytes = shard(true, 0);
     bytes[44] = 200; bytes[45] = 0;

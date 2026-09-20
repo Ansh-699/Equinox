@@ -24,7 +24,7 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 | CreateVaultAccount account ABI | Complete | commit `54cd92b`; 8 new LiteSVM tests incl. a proven CPI-rollback case |
 | CreateScratchAccount (op45) | Complete | commit `00c4fb7`; 6 LiteSVM tests; live on Devnet |
 | Session-relayer authorization chain | Complete | commit `8c4d624`; 31 new unit tests; deployed live, all 4 auth gates verified via curl |
-| Worker deployment | Complete, live-reverified | `https://stockstream-market-api.ansht.workers.dev`; real D1 database (`1dced396-c76a-4147-8a4f-70465e9aff55`, 7 migrations applied). Version `d71e3bdf-bd49-4a73-a19a-4266c51d69bc` deploys the native `@solana/kit` V3 PDA facade and batched 27-account reads. The read-only `GET /v1/v3/markets/:core?domain=l1|er` route derives core + 18 book + 4 seat + 4 event shards; its live absent-core probe now returns the intended structured 404, not an internal error. Pyth catalog/Privy server-only bindings are deployed by name; no V3 state is claimed until a V3 core is deployed. |
+| Worker deployment | Complete, live-reverified | `https://stockstream-market-api.ansht.workers.dev`; real D1 database (`1dced396-c76a-4147-8a4f-70465e9aff55`, 7 migrations applied). Version `d71e3bdf-bd49-4a73-a19a-4266c51d69bc` deploys the native `@solana/kit` V3 PDA facade and batched 27-account reads. The read-only `GET /v1/v3/markets/:core?domain=l1|er` route derives core + 18 book + 4 seat + 4 event shards; its live absent-core probe now returns the intended structured 404, not an internal error. Pyth catalog/Privy server-only bindings are deployed by name; no V3 state is claimed until a V3 core is deployed. The frontend V3 open-orders adapter now consumes Patricia tree attribution and fails closed on incomplete state. |
 | E2E auth-bypass parity (Worker <-> Next.js) | Complete | commit `822ec18`; double-gated, Miniflare-tested, confirmed inert on the live deployment |
 | Devnet lifecycle script correctness | Complete | commit `25a1b0e` + follow-ups; matches the corrected ABI everywhere |
 | MagicBlock delegate (market + 4-account hot cluster) | Complete, live | market `9d75hK8GyfqajxcijLa35bEh8SYUtobqi6eSdtF42RuS` fully delegated: L1 owner `DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh`, router `isDelegated: true`; 2 real protocol bugs found and fixed live (buffer-growth cap, commit-CPI off-by-one) |
@@ -45,8 +45,8 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives all 26 child PDAs from the supplied core and returns a bigint-safe aggregate. It is read-only and cannot claim live V3 state until a V3 core is deployed.
 
 - Rust (native + LiteSVM runtime): 290 passing, `cargo fmt --check` clean.
-- Workers (Miniflare/vitest): 338 passing (33 files).
-- Frontend (vitest): 192 passing.
+- Workers (Miniflare/vitest): 339 passing (33 files).
+- Frontend (vitest): 194 passing.
 - Frontend (Playwright fixture E2E): 50 passing; opt-in Devnet read-only E2E: 2 passing.
 - Frontend (Playwright production smoke): 6 passing.
 - `tsc --noEmit` clean on both the frontend and workers packages.
