@@ -17,9 +17,10 @@ use stockstream::{
         append_event_record, cancel_all_v3, close_trader_seat, create_trader_seat,
         deposit_collateral_v3, derive_book_page_v3, derive_event_shard_v3, derive_market_core_v3,
         derive_seat_shard_v3, initialize_book_page_metadata, liquidate_v3, place_order_v3,
-        update_funding_v3, validate_execution_bundle, validate_v3_session_actor,
-        validate_v3_withdrawal_readiness, withdraw_collateral_v3, PagedBookV3,
-        V3_BOOK_PAGES_PER_SIDE, V3_BOOK_PAGE_SIZE, V3_EVENT_SHARD_SIZE, V3_EXECUTION_BUNDLE_LEN,
+        read_v3_risk_config, update_funding_v3, validate_execution_bundle,
+        validate_v3_session_actor, validate_v3_withdrawal_readiness, withdraw_collateral_v3,
+        PagedBookV3, V3_BOOK_PAGES_PER_SIDE, V3_BOOK_PAGE_SIZE,
+        V3_CORE_PROTOCOL_FEE_BALANCE_OFFSET, V3_EVENT_SHARD_SIZE, V3_EXECUTION_BUNDLE_LEN,
         V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
     },
     ID,
@@ -368,6 +369,15 @@ fn v3_place_rejects_negative_available_margin_before_mutation() {
         unsafe { accounts[V3_SEAT_START].view.borrow_unchecked() },
         before_seat
     );
+}
+
+#[test]
+fn v3_risk_config_rejects_negative_economic_ledgers() {
+    let accounts = bundle();
+    let mut core = unsafe { accounts[0].view.borrow_unchecked().to_vec() };
+    core[V3_CORE_PROTOCOL_FEE_BALANCE_OFFSET..V3_CORE_PROTOCOL_FEE_BALANCE_OFFSET + 16]
+        .copy_from_slice(&(-1i128).to_le_bytes());
+    assert!(read_v3_risk_config(&core).is_err());
 }
 
 #[test]
