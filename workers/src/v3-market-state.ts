@@ -87,7 +87,14 @@ export interface V3BookNodeState {
   owner?: number;
   quantity?: bigint;
   expiresAt?: bigint;
+  pegLimit?: bigint;
+  clientOrderId?: bigint;
+  priceOrOffset?: bigint;
   sequence?: bigint;
+  timeInForce?: number;
+  postOnly?: boolean;
+  reduceOnly?: boolean;
+  tree?: "fixed" | "oracle-pegged";
 }
 
 function nodeKey(bytes: Uint8Array): bigint {
@@ -101,7 +108,63 @@ function decodeBookNode(bytes: Uint8Array, handle: number): V3BookNodeState | nu
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const base: V3BookNodeState = { handle, tag, key: nodeKey(bytes) };
   if (tag === 1) return base;
-  return { ...base, side: bytes[1] as 0 | 1, owner: view.getUint32(4, true), quantity: view.getBigUint64(24, true), expiresAt: view.getBigUint64(32, true), sequence: view.getBigUint64(64, true) };
+  return {
+    ...base,
+    side: bytes[1] as 0 | 1,
+    owner: view.getUint32(4, true),
+    quantity: view.getBigUint64(24, true),
+    expiresAt: view.getBigUint64(32, true),
+    pegLimit: view.getBigInt64(40, true),
+    clientOrderId: view.getBigUint64(48, true),
+    priceOrOffset: view.getBigInt64(56, true),
+    sequence: view.getBigUint64(64, true),
+    timeInForce: bytes[2],
+    postOnly: (bytes[72] & 1) !== 0,
+    reduceOnly: (bytes[72] & 2) !== 0,
+  };
+}
+
+const NONE_HANDLE = 0xffff_ffff;
+
+/** Patricia roots are page-zero metadata, while children use global handles.
+ * Walk each root separately so a leaf retains its fixed/oracle-pegged tree
+ * identity when pages are flattened for API consumers. Invalid/cyclic links
+ * are ignored; aggregate validation still requires the page ABI itself. */
+function annotateBookTrees(pages: readonly V3BookPageState[]): void {
+  for (const side of [0, 1] as const) {
+    const sidePages = pages.filter((page) => page.side === side);
+    const byHandle = new Map<number, V3BookNodeState>();
+    for (const page of sidePages) for (const node of page.nodes) byHandle.set(node.handle, node);
+    const roots = new Map<"fixed" | "oracle-pegged", number>([
+      ["fixed", sidePages.find((page) => page.page === 0)?.fixedRoot ?? NONE_HANDLE],
+      ["oracle-pegged", sidePages.find((page) => page.page === 0)?.peggedRoot ?? NONE_HANDLE],
+    ]);
+    for (const [tree, root] of roots) {
+      const seen = new Set<number>();
+      const walk = (handle: number): void => {
+        if (handle === NONE_HANDLE || seen.has(handle)) return;
+        seen.add(handle);
+        const node = byHandle.get(handle);
+        if (!node) return;
+        // A zero-filled fixture can expose both roots as handle zero. Keep
+        // the first valid attribution rather than letting the second walk
+        // relabel a leaf; real initialized pages use NONE for empty roots.
+        if (node.tree && node.tree !== tree) return;
+        node.tree = tree;
+        if (node.tag !== 1) return;
+        const page = Math.floor(handle / V3_BOOK_NODES_PER_PAGE);
+        const slot = handle % V3_BOOK_NODES_PER_PAGE;
+        const source = sidePages.find((candidate) => candidate.page === page);
+        if (!source) return;
+        const raw = source.nodeBytes.subarray(slot * V3_NODE_SIZE, (slot + 1) * V3_NODE_SIZE);
+        if (raw.length !== V3_NODE_SIZE) return;
+        const view = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
+        walk(view.getUint32(24, true));
+        walk(view.getUint32(28, true));
+      };
+      walk(root);
+    }
+  }
 }
 
 export function decodeV3BookPage(bytes: Uint8Array): V3BookPageState | null {
@@ -206,6 +269,7 @@ export function aggregateV3Market(
   if (!unique(bookPages.map((page) => page.side * V3_BOOK_PAGES_PER_SIDE + page.page))
     || !unique(seatShards.map((shard) => shard.shard))
     || !unique(eventShards.map((shard) => shard.shard))) return null;
+  annotateBookTrees(bookPages);
   const leaves = bookPages.flatMap((page) => page.nodes).filter((node) => node.tag === 2);
   return {
     core, bookPages, seatShards, eventShards, completeBook, completeExecutionState,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CircleAlert } from "lucide-react";
 import { TopBar } from "@/components/layout/top-bar";
 import { ExecutionStatusBanner, ProtocolStatusStrip } from "@/components/layout/status-strip";
@@ -31,7 +31,7 @@ import { LifecyclePanel } from "./lifecycle-panel";
 import { LaunchLab } from "@/features/launch/launch-lab";
 import { useOpenOrders } from "@/features/orders/use-open-orders";
 import { OpenOrdersPanel } from "@/features/orders/open-orders-panel";
-import { unimplementedOpenOrdersAdapter } from "@/lib/open-orders";
+import { createV3OpenOrdersAdapter, unimplementedOpenOrdersAdapter } from "@/lib/open-orders";
 
 const marketApiUrl = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_API_URL;
 
@@ -74,7 +74,13 @@ export function TradingTerminal() {
   const sessionOrder = useSessionOrder(protocol?.rpc ?? null, session.status, auth, handleSessionResult, session.advanceNonce, executionStatus);
   const canTrade = session.status !== null && isSessionUsable(session.status);
   const position = usePosition(protocol?.rpc ?? null, marketAddress, 0);
-  const openOrders = useOpenOrders(unimplementedOpenOrdersAdapter, marketAddress, 0);
+  const openOrdersAdapter = useMemo(
+    () => marketApiUrl && process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS
+      ? createV3OpenOrdersAdapter({ marketApiUrl, core: process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS })
+      : unimplementedOpenOrdersAdapter,
+    [],
+  );
+  const openOrders = useOpenOrders(openOrdersAdapter, marketAddress, 0);
   const marketClock = useMarketClock(protocol?.rpc ?? null, marketAddress);
   const oracleSafety = deriveOracleSafety({
     oracleValid: marketClock?.oracleValid ?? null,
