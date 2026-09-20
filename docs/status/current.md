@@ -51,7 +51,7 @@ typechecks, Playwright fixture E2E, and the secret scan. It emits a
 machine-readable gate record (use
 `VERIFY_SUMMARY_PATH=docs/status/verify-latest.json npm run verify` to refresh
 the tracked copy); the latest continuation run finished with `VERIFY-OK` on
-source commit `d3093ca` (documentation checkpoint `240740b`). The funding clamp correction is committed as
+source commit `f5f6a7b` (documentation checkpoint pending this update). The funding clamp correction is committed as
 `a89c313`; `d563f28` additionally enforces persisted V3 maximum open interest
 before mutation and session `max_open_orders` during canonical bundle
 authorization.
@@ -60,7 +60,7 @@ Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives 
 
 Fresh current-HEAD regression evidence: `cargo test -p stockstream --test v3_bundle v3_cancel_all_releases_reserve_and_side_exposure_for_every_tree` passes after `cancel_all_v3` was corrected to decrement the owning seat's bid/ask exposure counters along with reserved margin and open-order count. This is local Pinocchio/LiteSVM-style evidence only; no Devnet account was mutated.
 
-- Rust (native + LiteSVM runtime): 248 passing, `cargo fmt --check` clean; fresh `NO_DNA=1 cargo test -p stockstream --tests` on the current checkout passed 248/248 across 29 suites. This includes configured mark-deviation, maximum-open-interest preflight, configured leverage, malformed economic-ledger rejection, session open-order limits, repeated-partial-close, funding-aware liquidation, reduce-only flip rejection, and OraclePegged validation regressions.
+- Rust (native + LiteSVM runtime): 249 passing, `cargo fmt --check` clean; fresh `NO_DNA=1 cargo test -p stockstream --tests` on the current checkout passed 249/249 across 29 suites. This includes configured mark-deviation, maximum-open-interest preflight, configured leverage, malformed economic-ledger rejection, adversarial cross-tree matching, session open-order limits, repeated-partial-close, funding-aware liquidation, reduce-only flip rejection, and OraclePegged validation regressions.
 - Workers (Miniflare/vitest): 354 passing (34 files; relayer risk/version/lifetime guards and typed V3 write-builder vectors included).
 - Frontend (vitest): 210 passing (33 files).
 - Frontend (Playwright fixture E2E): 54 passing, including V3 deposit, confirmed L1 seat creation, ER-owned seat-write blocking, session authorization, place/cancel/replace/reduce-only, commit-pending blocking and restored withdrawal; opt-in Devnet read-only E2E: 2 passing.
@@ -68,7 +68,7 @@ Fresh current-HEAD regression evidence: `cargo test -p stockstream --test v3_bun
 - `tsc --noEmit` clean on both the frontend and workers packages.
 - `eslint .` clean.
 - ABI manifest parity: `ABI-OK`.
-- Fresh full gate on current HEAD: `VERIFY_SUMMARY_PATH=/tmp/stockstream-verify-summary-20260921-leverage.json NO_DNA=1 bash scripts/verify.sh` finished `VERIFY-OK`; Rust 248, frontend 210, Worker 354, Playwright fixture 54/54, SBF artifact verification, ABI parity, typechecks, lint, and secret scan all passed. Current local artifact SHA-256 is `f29719b2e8b19cd35d3f34188f8f7dbe2b42553aa136072add53108c0baae7b7`; it is not deployed.
+- Fresh full gate on current HEAD: `VERIFY_SUMMARY_PATH=/tmp/stockstream-verify-summary-20260921-cross-tree.json NO_DNA=1 bash scripts/verify.sh` finished `VERIFY-OK`; Rust 249, frontend 210, Worker 354, Playwright fixture 54/54, SBF artifact verification, ABI parity, typechecks, lint, and secret scan all passed. Current local artifact SHA-256 is `f29719b2e8b19cd35d3f34188f8f7dbe2b42553aa136072add53108c0baae7b7`; it is not deployed.
 - Fresh V3 funding-risk regression: accepted resting-order placement now settles the seat's pending funding accumulator before exposure/margin checks and persists the settlement exactly once when no fill occurs. `NO_DNA=1 cargo test -p stockstream --test v3_bundle v3_owner_place_reserves_collateral_and_writes_paged_book_and_event` verifies the realized PnL and accumulator update; the current full gate is 248 Rust tests and the local artifact is not deployed.
 - Fresh V3 liquidation atomicity regression: `liquidate_v3` now preflights insurance, open-interest, and bad-debt ledger arithmetic before writing the seat. `NO_DNA=1 cargo test -p stockstream --test v3_bundle v3_liquidation_updates_open_interest_and_insurance_fee` verifies an open-interest rejection leaves both seat and core bytes unchanged, then verifies the successful liquidation path. Current Rust verification is 248/248 plus `cargo build-sbf`; the full repository gate is recorded in `verify-latest.json`.
 - Fresh V3 cancel-all atomicity regression: `cancel_all_v3` now preflights reserve and open-order/exposure counters before removing a leaf, uses checked counter subtraction, and rejects malformed seat state without changing the page. `NO_DNA=1 cargo test -p stockstream --test v3_bundle v3_cancel_all_releases_reserve_and_side_exposure_for_every_tree` passes; current Rust verification remains 248/248 plus `cargo build-sbf`.
