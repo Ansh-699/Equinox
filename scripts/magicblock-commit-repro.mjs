@@ -3,7 +3,8 @@
  * Read-only MagicBlock CommitMarket reproducer.
  *
  * It never sends a transaction.  It derives the already-created hot cluster
- * from /tmp/opencode/lifecycle-state.json, signs a simulation with the
+ * from the checkpoint selected by MAGICBLOCK_REPRO_STATE_PATH (default
+ * /tmp/opencode/lifecycle-state.json), signs a simulation with the
  * existing market authority, and writes redacted diagnostic evidence.  This
  * lets us distinguish a caller ABI mistake from an ER-validator rejection
  * without recreating, committing, or undelegating any checkpoint account.
@@ -17,7 +18,7 @@ const ROUTER = "https://devnet-router.magicblock.app";
 const PROGRAM_ID = new PublicKey("H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET");
 const MAGIC_PROGRAM = new PublicKey("Magic11111111111111111111111111111111111111");
 const MAGIC_CONTEXT = new PublicKey("MagicContext1111111111111111111111111111111");
-const STATE_PATH = "/tmp/opencode/lifecycle-state.json";
+const STATE_PATH = process.env.MAGICBLOCK_REPRO_STATE_PATH ?? "/tmp/opencode/lifecycle-state.json";
 const OUTPUT_PATH = process.argv[2] ?? "/tmp/opencode/magicblock-commit-simulation.json";
 
 const state = JSON.parse(fs.readFileSync(STATE_PATH, "utf8"));
