@@ -11,7 +11,8 @@ use stockstream::{
     book::{LeafNode, Side, TreeKind},
     instruction::{PlaceOrderData, StockStreamInstruction},
     session::{
-        self, TradingSession, SESSION_ACTION_PLACE, SESSION_ACTION_REPLACE, TRADING_SESSION_SIZE,
+        self, TradingSession, SESSION_ACTION_CANCEL_ALL, SESSION_ACTION_PLACE,
+        SESSION_ACTION_REPLACE, TRADING_SESSION_SIZE,
     },
     v3::{
         append_event_record, cancel_all_v3, close_trader_seat, create_trader_seat,
@@ -665,6 +666,101 @@ fn v3_cancel_all_releases_reserve_and_side_exposure_for_every_tree() {
     assert_eq!(i128::from_le_bytes(seat[100..116].try_into().unwrap()), 0);
     assert_eq!(i128::from_le_bytes(seat[180..196].try_into().unwrap()), 0);
     assert_eq!(u32::from_le_bytes(seat[212..216].try_into().unwrap()), 0);
+}
+
+#[test]
+fn v3_session_cancel_all_consumes_one_nonce_and_rejects_replay() {
+    let mut accounts = bundle();
+    let owner = account(Address::new_from_array([54; 32]), 0, true);
+    let session_signer = account(Address::new_from_array([55; 32]), 0, true);
+    let mut seat_call = vec![
+        accounts[0].view.clone(),
+        accounts[V3_SEAT_START].view.clone(),
+        accounts[V3_SEAT_START + 1].view.clone(),
+        accounts[V3_SEAT_START + 2].view.clone(),
+        accounts[V3_SEAT_START + 3].view.clone(),
+        accounts[V3_EVENT_START].view.clone(),
+        accounts[V3_EVENT_START + 1].view.clone(),
+        accounts[V3_EVENT_START + 2].view.clone(),
+        accounts[V3_EVENT_START + 3].view.clone(),
+        owner.view.clone(),
+    ];
+    create_trader_seat(&ID, &mut seat_call, 0).unwrap();
+    unsafe {
+        accounts[V3_SEAT_START].view.borrow_unchecked_mut()[84..100]
+            .copy_from_slice(&1_000i128.to_le_bytes());
+        accounts[0].view.borrow_unchecked_mut()[197] = 1;
+    }
+    let mut owner_order = views(&accounts);
+    owner_order.push(owner.view.clone());
+    place_order_v3(
+        &ID,
+        &mut owner_order,
+        PlaceOrderData {
+            side: Side::Bid as u8,
+            tree: TreeKind::Fixed as u8,
+            flags: 0,
+            seat_index: 0,
+            quantity: 2,
+            price_or_offset: 5,
+            expires_at: 100,
+            peg_limit: 0,
+            client_order_id: 54,
+            action_nonce: 0,
+        },
+    )
+    .unwrap();
+
+    let core_key = *accounts[0].view.address();
+    let session_key = session::derive_trading_session(
+        &owner.view.address(),
+        &core_key,
+        0,
+        &session_signer.view.address(),
+        &ID,
+    );
+    let mut session_account = account(session_key, TRADING_SESSION_SIZE, false);
+    let mut state = TradingSession::empty();
+    state.initialized = 1;
+    state.owner = owner.view.address().to_bytes();
+    state.session_signer = session_signer.view.address().to_bytes();
+    state.target_program = ID.to_bytes();
+    state.market = core_key.to_bytes();
+    state.trader_seat_index = 0;
+    state.expires_at = 100;
+    state.actions = SESSION_ACTION_CANCEL_ALL;
+    state.max_order_notional = 100;
+    state.max_cumulative_notional = 100;
+    state.max_exposure = 100;
+    state.max_open_orders = 2;
+    session::write_session(
+        &mut unsafe { session_account.view.borrow_unchecked_mut() },
+        &state,
+    )
+    .unwrap();
+
+    let mut cancel = views(&accounts);
+    cancel.push(session_signer.view.clone());
+    cancel.push(session_account.view.clone());
+    cancel_all_v3(&ID, &mut cancel, 0, 4, 1).unwrap();
+    let session =
+        session::read_session(unsafe { session_account.view.borrow_unchecked() }).unwrap();
+    let next_nonce = session.next_expected_nonce;
+    assert_eq!(next_nonce, 2);
+    let seat = unsafe { accounts[V3_SEAT_START].view.borrow_unchecked() };
+    assert_eq!(u32::from_le_bytes(seat[212..216].try_into().unwrap()), 0);
+
+    let before_page = unsafe { accounts[1].view.borrow_unchecked().to_vec() };
+    let before_session = unsafe { session_account.view.borrow_unchecked().to_vec() };
+    let mut replay = views(&accounts);
+    replay.push(session_signer.view.clone());
+    replay.push(session_account.view.clone());
+    assert!(cancel_all_v3(&ID, &mut replay, 0, 4, 1).is_err());
+    assert_eq!(unsafe { accounts[1].view.borrow_unchecked() }, before_page);
+    assert_eq!(
+        unsafe { session_account.view.borrow_unchecked() },
+        before_session
+    );
 }
 
 #[test]
