@@ -18,6 +18,7 @@ import { SessionPolicyPanel } from "@/features/sessions/session-policy-panel";
 import type { SessionActionResult } from "@/lib/session-relay-status";
 import type { OrderTree } from "@/clients/stockstream/src";
 import { useExecutionStatus } from "@/features/magicblock/use-execution-status";
+import { useV3MarketState } from "@/features/magicblock/use-v3-market-state";
 import { usePosition } from "@/features/positions/use-position";
 import { PositionsPanel } from "@/features/positions/positions-panel";
 import { useMarketClock } from "@/features/oracle/use-market-clock";
@@ -69,6 +70,7 @@ export function TradingTerminal() {
   const session = useTradingSession(protocol, auth.walletAddress, marketAddress, 0);
   const handleSessionResult = (result: SessionActionResult) => { setNotice(result.detail ? `${result.message}: ${result.detail}` : result.message); setSessionActionReason(result.reason); };
   const executionStatus = useExecutionStatus(marketApiUrl, marketSymbol);
+  const v3MarketState = useV3MarketState(marketApiUrl, process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS);
   const sessionOrder = useSessionOrder(protocol?.rpc ?? null, session.status, auth, handleSessionResult, session.advanceNonce, executionStatus);
   const canTrade = session.status !== null && isSessionUsable(session.status);
   const position = usePosition(protocol?.rpc ?? null, marketAddress, 0);
@@ -206,7 +208,7 @@ export function TradingTerminal() {
     <main className="shell">
       <TopBar active={tab} onTabChange={setTab} auth={auth} />
       <ExecutionStatusBanner display={executionStatus} canTrade={canTrade} oracleSafety={oracleSafety} />
-      <ProtocolStatusStrip marketSymbol={marketSymbol} onMarketSymbolChange={setMarketSymbol} authenticated={auth.authenticated} />
+      <ProtocolStatusStrip marketSymbol={marketSymbol} onMarketSymbolChange={setMarketSymbol} authenticated={auth.authenticated} v3={v3MarketState} />
 
       {tab === "trade" ? (
         <div id="main-content" tabIndex={-1} className="terminal-grid">
