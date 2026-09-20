@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { evaluateSessionActionGate } from "./use-session-order";
+import { evaluateSessionActionGate, resolveSessionExecutionMode } from "./use-session-order";
 import { SESSION_ACTION, type SessionStatus } from "@/lib/browser-session";
 import { deriveExecutionDisplay, type ExecutionStatusResponse } from "@/lib/execution-status";
 
@@ -80,5 +80,22 @@ describe("evaluateSessionActionGate", () => {
     // reason -- session validity is checked first regardless of market state.
     const gate = evaluateSessionActionGate(session({ revoked: true }), ["place"], null);
     expect(gate).toMatchObject({ allowed: false, result: { reason: "session_revoked" } });
+  });
+});
+
+describe("resolveSessionExecutionMode", () => {
+  it("keeps legacy V2 explicit when no V3 core is configured", () => {
+    expect(resolveSessionExecutionMode(session(), undefined)).toEqual({ mode: "v2" });
+  });
+
+  it("fails closed instead of downgrading a configured V3 deployment to V2", () => {
+    expect(resolveSessionExecutionMode(session(), "configured-v3-core")).toMatchObject({ mode: "invalid" });
+  });
+
+  it("selects V3 only when the canonical execution bundle is present", () => {
+    const accounts = {
+      core: "core", bookPages: [], seatShards: [], eventShards: [], authority: "authority",
+    } as SessionStatus["v3ExecutionAccounts"];
+    expect(resolveSessionExecutionMode(session({ v3ExecutionAccounts: accounts }), "configured-v3-core").mode).toBe("v3");
   });
 });
