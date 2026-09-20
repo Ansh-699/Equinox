@@ -23,7 +23,7 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 | DepositCollateral account ABI | Complete | commit `8abc245`; 254+ Rust tests; live Devnet vault balance matched exactly (800,000 = 2x400,000 deposits) |
 | CreateVaultAccount account ABI | Complete | commit `54cd92b`; 8 new LiteSVM tests incl. a proven CPI-rollback case |
 | CreateScratchAccount (op45) | Complete | commit `00c4fb7`; 6 LiteSVM tests; live on Devnet |
-| Session-relayer authorization chain | Complete | commit `8c4d624`; 31 new unit tests; deployed live, all 4 auth gates verified via curl |
+| Session-relayer authorization chain | Complete (V2 compatibility + V3 bundle guard locally verified) | commit `8c4d624`; the relayer now derives and validates the canonical 29-account V3 execution bundle (core, 18 pages, 4 seats, 4 events, session signer, session PDA), rejects address-table lookups, duplicate/reordered/substituted accounts, and signer/writable mismatches before co-signing (`5f9fb5a`). Worker tests: 350 passing. Live Privy/nonce success remains externally blocked. |
 | Worker deployment | Complete, live-reverified; config hardened | `https://stockstream-market-api.ansht.workers.dev`; real D1 database (`1dced396-c76a-4147-8a4f-70465e9aff55`, 7 migrations applied). Version `d71e3bdf-bd49-4a73-a19-4266c51d69bc` deploys the native `@solana/kit` V3 PDA facade and batched 27-account reads. The read-only `GET /v1/v3/markets/:core?domain=l1|er` route derives core + 18 book + 4 seat + 4 event shards; its live absent-core probe now returns the intended structured 404, not an internal error. `workers/wrangler.jsonc` now declares non-secret Pyth feed vars (`922`, `fixed_rate@50ms`) and explicitly carries D1/DO bindings plus required production secret names across staging/production; `wrangler deploy --dry-run --env production` and `--env staging` confirm the bindings, while `wrangler check startup --env production` reports a 21.2 ms local startup profile. Worker V3 aggregate snapshots now expose an executable mark computed from validated paged Patricia leaves (`6d2ea54`, `80e8557`) instead of V2 arena offsets; malformed, cyclic, or missing Patricia child handles now fail closed (`2206762`), and the finalized atomic RPC context slot is carried through to the API/open-orders adapter (`77a95e2`). Funding decisions now accept that validated V3 mark while retaining a safe index-price fallback (`9e0bddf`). The session relayer and private-session projection path now require explicit V3 core + seat-shard validation and fail closed instead of applying V2 monolithic offsets (`0e2bea6`). The aggregate reader now rejects foreign-owned shard accounts (`6a387c8`). Actual secret deployment remains auth-gated. The frontend V3 open-orders adapter consumes Patricia tree attribution, its readiness strip surfaces shard counts, position/event counts, delegation status, and commit cursor state, and portfolio/trading position reads now use the V3 aggregate when configured. |
 | E2E auth-bypass parity (Worker <-> Next.js) | Complete | commit `822ec18`; double-gated, Miniflare-tested, confirmed inert on the live deployment |
 | Devnet lifecycle script correctness | Complete | commit `25a1b0e` + follow-ups; matches the corrected ABI everywhere |
@@ -41,12 +41,19 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 | Repository cleanup / doc classification | Complete | `docs/status/document-classification.md` classifies every `docs/*.md` file as canonical specification, operational runbook/release gate, historical research, or navigation map; this file remains the authoritative implementation snapshot. |
 | `clients/stockstream/src/index.ts` facade reduction | Complete (compatibility facade retained) | commits `7fba664`, `309a475`, `bc917d9`, `8f981f8`, `ddf3776`, `ac88ed9`, `04dbf8f`, `9576c85`, `cc799d7`, `06965ee`, `bd9eef5`, `6612697`, `80ce102`, `7004dc5`, `7009301`, `92fc7ec`, `cd9aaa2`, and `799017f` remove duplicated opcode/state authorities, correct V3 session-replace encoding, and extract V3 order/cancel/funding/oracle/commit/recovery/custody/account-creation/initialization/delegation/session/registry/V2-custody/order/oracle/MagicBlock/exchange-config/event/legacy-book decoder logic into dedicated ABI modules; `abi/encoding.ts` and `abi/transaction.ts` own shared integer, public-key, account-meta, and transaction primitives. The remaining facade is intentionally retained for parity-tested compatibility APIs. |
 
-## Test counts (latest rerun; scope is stated explicitly)
+## Test counts (latest `npm run verify`; scope is stated explicitly)
+
+`npm run verify` (introduced in `43ec308`) is the repository verification gate and
+produces the counts below from the current checkout; it runs Rust formatting,
+workspace tests, the SBF artifact verifier, ABI parity, frontend/Worker tests and
+typechecks, Playwright fixture E2E, and the secret scan. The last complete run
+finished with `VERIFY-OK` on the current pre-relayer checkout; the relayer-only
+follow-up is recorded below.
 
 Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives all 26 child PDAs from the supplied core and returns a bigint-safe aggregate. It is read-only and cannot claim live V3 state until a V3 core is deployed.
 
 - Rust (native + LiteSVM runtime): 290 passing, `cargo fmt --check` clean.
-- Workers (Miniflare/vitest): 348 passing (33 files).
+- Workers (Miniflare/vitest): 350 passing (33 files; after `5f9fb5a`).
 - Frontend (vitest): 205 passing.
 - Frontend (Playwright fixture E2E): 50 passing; opt-in Devnet read-only E2E: 2 passing.
 - Frontend (Playwright production smoke): 6 passing.
