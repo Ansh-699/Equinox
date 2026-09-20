@@ -48,7 +48,7 @@ export function LifecyclePanel({
           <button disabled={parsedOrderKey === null} onClick={() => parsedOrderKey !== null && onCancelOrder(parsedOrderKey)}>Cancel order</button>
           <button disabled={parsedOrderKey === null} onClick={() => parsedOrderKey !== null && onReplaceOrder(parsedOrderKey)}>Replace with ticket</button>
         </div>
-        <p className="form-note">Replace uses the current order-ticket side/size/price/type. There is no open-orders list yet -- it needs the canonical order-book layout manifest (order keys/prices/owners live in the book arenas).</p>
+        <p className="form-note">Replace uses the current order-ticket side/size/price/type. The open-orders panel below reads the complete V3 shard aggregate when it is available; this manual field remains useful for an order key copied from an event.</p>
       </section>
 
       <section className="sponsor-panel">
