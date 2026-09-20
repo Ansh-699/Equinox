@@ -5,11 +5,13 @@
     "catalogCommand": "node --env-file=.env.local scripts/pyth-catalog-discovery.mjs AAPL",
     "catalogResult": "authenticated; Equity.US.AAPL/USD=922, Equity.Index.AAPL/USD=3191; fixed_rate@50ms",
     "streamCommand": "node --env-file=.env.local scripts/pyth-live-smoke.mjs",
-    "streamResult": "feed 922 rejected on all 3 endpoints with Not entitled; 0/3 subscribed; no payload submitted"
+    "streamResult": "feed 922 rejected on all 3 endpoints with Not entitled; 0/3 subscribed; no payload submitted",
+    "entitlementError": "Not entitled: feed 922 (no grant accepts this feed (asset type 'equity', instrument type 'spot', exchange 1))",
+    "redundancyFloor": "broken (0/3; minimum 2 required)"
   },
   "privy": {
     "command": "node --env-file=.env.local scripts/privy-relay-live.mjs",
-    "result": "preflight did not run: runtime lacks PRIVY_ACCESS_TOKEN and PRIVY_EXPECTED_WALLET; no relay request or transaction submitted",
+    "result": "preflight did not run: runtime lacks PRIVY_ACCESS_TOKEN, PRIVY_EXPECTED_WALLET, and/or required app credentials; command exited 1; no relay request or transaction submitted",
     "submitReplay": "not attempted"
   },
   "magicblock": {
