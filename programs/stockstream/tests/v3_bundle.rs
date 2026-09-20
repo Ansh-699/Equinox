@@ -188,6 +188,41 @@ fn v3_funding_recomputes_mark_from_pages_and_emits_event() {
 }
 
 #[test]
+fn v3_funding_uses_configured_mark_deviation_clamp() {
+    let mut accounts = bundle();
+    let authority = account(Address::new_from_array([78; 32]), 0, true);
+    {
+        let core = unsafe { accounts[0].view.borrow_unchecked_mut() };
+        core[44..76].copy_from_slice(authority.view.address().as_ref());
+        core[180] = 1;
+        core[181..189].copy_from_slice(&100i64.to_le_bytes());
+        core[189..197].copy_from_slice(&10u64.to_le_bytes());
+        core[304..306].copy_from_slice(&100u16.to_le_bytes());
+        core[371] = 1;
+    }
+    let mut page_views = views(&accounts);
+    let mut bid_book = PagedBookV3::new(&mut page_views[1..1 + V3_BOOK_PAGES_PER_SIDE]).unwrap();
+    let mut bid = leaf(1, 0);
+    bid.side = Side::Bid as u8;
+    bid.price_or_offset = 200;
+    bid_book.insert_resting_order(TreeKind::Fixed, bid).unwrap();
+    let mut call = views(&accounts);
+    call.push(authority.view.clone());
+    let result = update_funding_v3(
+        &ID,
+        &mut call,
+        StockStreamInstruction::UpdateFunding {
+            accumulator: 200,
+            timestamp: 600,
+        },
+    );
+    assert!(result.is_err());
+    let core = unsafe { accounts[0].view.borrow_unchecked() };
+    assert_eq!(i128::from_le_bytes(core[156..172].try_into().unwrap()), 0);
+    assert_eq!(u64::from_le_bytes(core[172..180].try_into().unwrap()), 0);
+}
+
+#[test]
 fn v3_owner_place_reserves_collateral_and_writes_paged_book_and_event() {
     let mut accounts = bundle();
     let owner = account(Address::new_from_array([44; 32]), 0, true);

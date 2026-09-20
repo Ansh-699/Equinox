@@ -1417,6 +1417,10 @@ pub fn update_funding_v3(
     if oracle <= 0 {
         return Err(StockStreamError::OracleUnavailable.into());
     }
+    let mark_deviation_bps = {
+        let core = unsafe { bundle[0].borrow_unchecked() };
+        read_v3_risk_config(&core)?.mark_deviation_bps
+    };
     let now = {
         let core = unsafe { bundle[0].borrow_unchecked() };
         u64::from_le_bytes(
@@ -1453,8 +1457,15 @@ pub fn update_funding_v3(
         (None, Some(ask)) => i128::from(ask),
         _ => i128::from(oracle),
     };
+    // A zero mark-deviation field retains the historical 500 bps default;
+    // configured V3 risk values otherwise control the clamp deterministically.
+    let deviation_bps = if mark_deviation_bps == 0 {
+        500
+    } else {
+        i128::from(mark_deviation_bps)
+    };
     let max_deviation = i128::from(oracle)
-        .checked_mul(500)
+        .checked_mul(deviation_bps)
         .and_then(|value| value.checked_div(10_000))
         .ok_or(StockStreamError::ArithmeticOverflow)?;
     let lower = (i128::from(oracle) - max_deviation).max(1);
