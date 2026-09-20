@@ -1,6 +1,6 @@
 # StockStream evidence matrix
 
-This matrix is scoped to current source HEAD `95244e2` (post-V3-cancellation-atomicity, funding-settlement, liquidation-preflight, cancel-all-preflight, replacement-matching-preflight, Worker nonce-mode enforcement, available-margin, economic-ledger validation, configured-leverage, adversarial cross-tree matching, fail-closed V3 frontend boundary, and session cancel-all nonce fixes). “Fresh” means rerun on this checkout; live claims additionally require the cited Devnet artifact. The fresh full local gate is `VERIFY_SUMMARY_PATH=/tmp/stockstream-verify-summary-20260921-worker-nonce.json NO_DNA=1 bash scripts/verify.sh` at source checkpoint `95244e2`; the checked-in summary is `verify-latest.json`.
+This matrix is scoped to current source HEAD `069d406` (post-V3-cancellation-atomicity, funding-settlement, liquidation-preflight, cancel-all-preflight, replacement-matching-preflight, Worker nonce-mode and opcode-parity enforcement, available-margin, economic-ledger validation, configured-leverage, adversarial cross-tree matching, fail-closed V3 frontend boundary, and session cancel-all nonce fixes). “Fresh” means rerun on this checkout; live claims additionally require the cited Devnet artifact. The fresh full local gate is `VERIFY_SUMMARY_PATH=/tmp/stockstream-verify-summary-20260921-worker-opcodes.json NO_DNA=1 bash scripts/verify.sh` at source checkpoint `069d406`; the checked-in summary is `verify-latest.json`.
 
 | Subsystem | Classification | Source and exact evidence | Fresh on current HEAD |
 |---|---|---|---|

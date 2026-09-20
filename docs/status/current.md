@@ -51,7 +51,7 @@ typechecks, Playwright fixture E2E, and the secret scan. It emits a
 machine-readable gate record (use
 `VERIFY_SUMMARY_PATH=docs/status/verify-latest.json npm run verify` to refresh
 the tracked copy); the latest continuation run finished with `VERIFY-OK` on
-source commit `95244e2` (documentation checkpoint pending this update). The funding clamp correction is committed as
+source commit `069d406` (documentation checkpoint pending this update). The funding clamp correction is committed as
 `a89c313`; `d563f28` additionally enforces persisted V3 maximum open interest
 before mutation and session `max_open_orders` during canonical bundle
 authorization.
@@ -68,7 +68,8 @@ Fresh current-HEAD regression evidence: `cargo test -p stockstream --test v3_bun
 - `tsc --noEmit` clean on both the frontend and workers packages.
 - `eslint .` clean.
 - ABI manifest parity: `ABI-OK`.
-- Fresh full gate on current HEAD: `VERIFY_SUMMARY_PATH=/tmp/stockstream-verify-summary-20260921-worker-nonce.json NO_DNA=1 bash scripts/verify.sh` finished `VERIFY-OK`; Rust 250, frontend 213, Worker 355, Playwright fixture 54/54, SBF artifact verification, ABI parity, typechecks, lint, and secret scan all passed. Current local artifact SHA-256 is `f0d87f3d24fca7b24ef55a1e0715c9bc48fdec977cfd72ff4d91c8d7e5a2231c`; it is not deployed.
+- Fresh full gate on current HEAD: `VERIFY_SUMMARY_PATH=/tmp/stockstream-verify-summary-20260921-worker-opcodes.json NO_DNA=1 bash scripts/verify.sh` finished `VERIFY-OK`; Rust 250, frontend 213, Worker 355, Playwright fixture 54/54, SBF artifact verification, ABI parity, typechecks, lint, and secret scan all passed. Current local artifact SHA-256 is `f0d87f3d24fca7b24ef55a1e0715c9bc48fdec977cfd72ff4d91c8d7e5a2231c`; it is not deployed.
+- Fresh Worker V3 opcode-parity regression: V3 custody builders now use named opcode constants (`depositCollateralV3=53`, `withdrawCollateralV3=54`) instead of duplicated literals; the Worker transaction suite remains 355/355.
 - Fresh Worker V3 nonce-mode regression: the typed V3 place/cancel/cancel-all/replace builders reject nonzero action nonces when no session PDA is present; `workers/src/transactions.test.ts` passes 10/10 and the full Worker suite passes 355/355.
 - Fresh V3 replacement preflight: `NO_DNA=1 cargo test -p stockstream --test v3_bundle v3_session_replace_consumes_one_nonce_and_requires_replace_permission` passes 1/1 after matching/post-only/IOC checks were moved ahead of cancellation; the regression proves a rejected post-only crossing replacement leaves the old page and session nonce unchanged.
 - Fresh V3 frontend-boundary regression: `resolveSessionExecutionMode` preserves explicit V2 compatibility only when no V3 core is configured and rejects a configured V3 deployment whose canonical execution bundle is missing, preventing silent V2 downgrade. `npm test` passes 213/213; this is locally tested and not live-signed.
