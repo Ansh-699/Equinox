@@ -131,6 +131,35 @@ fn unknown_opcode_is_rejected() {
 }
 
 #[test]
+fn v3_risk_update_vector_decodes_all_persisted_fields() {
+    let mut data = vec![instruction::UPDATE_MARKET_RISK];
+    data.extend_from_slice(&2_000u16.to_le_bytes());
+    data.extend_from_slice(&1_000u16.to_le_bytes());
+    data.extend_from_slice(&50u16.to_le_bytes());
+    data.extend_from_slice(&2u16.to_le_bytes());
+    data.extend_from_slice(&5u16.to_le_bytes());
+    data.extend_from_slice(&5u32.to_le_bytes());
+    data.extend_from_slice(&100i128.to_le_bytes());
+    data.extend_from_slice(&1_000i128.to_le_bytes());
+    data.extend_from_slice(&250u16.to_le_bytes());
+    assert_eq!(data.len(), 49);
+    assert!(matches!(
+        StockStreamInstruction::decode(&data),
+        Ok(StockStreamInstruction::UpdateV3Risk {
+            initial_margin_bps: 2_000,
+            maintenance_margin_bps: 1_000,
+            liquidation_fee_bps: 50,
+            maker_fee_bps: 2,
+            taker_fee_bps: 5,
+            maximum_leverage: 5,
+            maximum_position: 100,
+            maximum_open_interest: 1_000,
+            mark_deviation_bps: 250,
+        })
+    ));
+}
+
+#[test]
 fn typescript_golden_instruction_vectors_decode_in_rust() {
     assert!(matches!(
         StockStreamInstruction::decode(&[0]),

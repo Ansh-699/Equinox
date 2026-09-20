@@ -293,6 +293,17 @@ pub enum StockStreamInstruction {
         maintenance_margin_bps: u16,
         maximum_leverage: u32,
     },
+    UpdateV3Risk {
+        initial_margin_bps: u16,
+        maintenance_margin_bps: u16,
+        liquidation_fee_bps: u16,
+        maker_fee_bps: u16,
+        taker_fee_bps: u16,
+        maximum_leverage: u32,
+        maximum_position: i128,
+        maximum_open_interest: i128,
+        mark_deviation_bps: u16,
+    },
     TransitionMarket {
         mode: u8,
         /// The specific opcode that produced this transition. Several of
@@ -597,6 +608,23 @@ impl StockStreamInstruction {
                 maintenance_margin_bps: read_u16(data, 3)
                     .ok_or(ProgramError::InvalidInstructionData)?,
                 maximum_leverage: read_u32(data, 5).ok_or(ProgramError::InvalidInstructionData)?,
+            }),
+            Some(UPDATE_MARKET_RISK) if data.len() == 49 => Ok(Self::UpdateV3Risk {
+                initial_margin_bps: read_u16(data, 1)
+                    .ok_or(ProgramError::InvalidInstructionData)?,
+                maintenance_margin_bps: read_u16(data, 3)
+                    .ok_or(ProgramError::InvalidInstructionData)?,
+                liquidation_fee_bps: read_u16(data, 5)
+                    .ok_or(ProgramError::InvalidInstructionData)?,
+                maker_fee_bps: read_u16(data, 7).ok_or(ProgramError::InvalidInstructionData)?,
+                taker_fee_bps: read_u16(data, 9).ok_or(ProgramError::InvalidInstructionData)?,
+                maximum_leverage: read_u32(data, 11).ok_or(ProgramError::InvalidInstructionData)?,
+                maximum_position: read_i128(data, 15)
+                    .ok_or(ProgramError::InvalidInstructionData)?,
+                maximum_open_interest: read_i128(data, 31)
+                    .ok_or(ProgramError::InvalidInstructionData)?,
+                mark_deviation_bps: read_u16(data, 47)
+                    .ok_or(ProgramError::InvalidInstructionData)?,
             }),
             Some(PAUSE_MARKET) if data.len() == 1 => Ok(Self::TransitionMarket {
                 mode: 0,

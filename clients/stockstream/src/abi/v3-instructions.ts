@@ -17,6 +17,21 @@ export interface V3ExecutionAccounts {
   session?: AddressInput;
 }
 
+/** Builds the canonical V3 execution account tuple from a core address. The
+ * helper is intentionally pure so browser callers can construct the exact
+ * 27-account bundle without copying PDA seed logic into UI code. */
+export function deriveV3ExecutionAccounts(core: AddressInput, authority: AddressInput, session?: AddressInput): V3ExecutionAccounts {
+  const market = publicKey(core);
+  return {
+    core,
+    bookPages: Array.from({ length: 2 * V3_BOOK_PAGES_PER_SIDE }, (_, flat) => deriveBookPageV3(market, Math.floor(flat / V3_BOOK_PAGES_PER_SIDE), flat % V3_BOOK_PAGES_PER_SIDE)),
+    seatShards: Array.from({ length: 4 }, (_, shard) => deriveSeatShardV3(market, shard)),
+    eventShards: Array.from({ length: 4 }, (_, shard) => deriveEventShardV3(market, shard)),
+    authority,
+    ...(session ? { session } : {}),
+  };
+}
+
 export interface V3OrderParams extends V3ExecutionAccounts {
   seatIndex: number;
   side: V3OrderSide;

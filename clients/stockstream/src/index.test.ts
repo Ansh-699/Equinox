@@ -2,7 +2,7 @@ import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { expect, test } from "vitest";
 import { STOCKSTREAM_PROGRAM_ID } from "./constants";
 import { MAGICBLOCK_DELEGATION_PROGRAM_ID, MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID, STOCKSTREAM_PROGRAM_KEY, cancelAllV3, cancelOrderV3, placeOrderV3, replaceOrderV3, commitV3Shard, consumeOracleUpdateV3, updateFundingV3 } from "./index";
-import { authorizeTradingSession, cancelOrder, closeV3TraderSeat, commitMarket, delegateClusterMember, delegateV3Account, deriveClusterMemberPdas, createPerpMarket, createV3Account, createV3TraderSeat, decodeFillPayload, decodeInstruction, decodeMarketState, decodeSeatAmountPayload, decodeStockStreamEvent, decodeTradingSession, delegateMarket, deriveTradingSession, depositCollateral, depositCollateralV3, EVENT_SIZE, initializeExchange, initializeMarket, initializeV3Market, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateExchangeConfig, updateStockInstrument, withdrawCollateral, withdrawCollateralV3, withdrawInsuranceFunds, withdrawProtocolFees, EXCHANGE_CONFIG_FIELD, requestV3Undelegation, rollbackV3Undelegation } from "./index";
+import { authorizeTradingSession, cancelOrder, closeV3TraderSeat, commitMarket, delegateClusterMember, delegateV3Account, deriveClusterMemberPdas, createPerpMarket, createV3Account, createV3TraderSeat, decodeFillPayload, decodeInstruction, decodeMarketState, decodeSeatAmountPayload, decodeStockStreamEvent, decodeTradingSession, delegateMarket, deriveTradingSession, depositCollateral, depositCollateralV3, EVENT_SIZE, initializeExchange, initializeMarket, initializeV3Market, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateExchangeConfig, updateStockInstrument, updateV3Risk, withdrawCollateral, withdrawCollateralV3, withdrawInsuranceFunds, withdrawProtocolFees, EXCHANGE_CONFIG_FIELD, requestV3Undelegation, rollbackV3Undelegation } from "./index";
 import { STOCKSTREAM_ACCOUNT_SIZE } from "./constants";
 import { deriveBookPageV3, deriveEventShardV3, deriveMarketCoreV3, deriveSeatShardV3 } from "./abi/v3";
 
@@ -52,6 +52,17 @@ test("V3 funding builder uses the canonical 27-account execution bundle", () => 
   expect(ix.keys).toHaveLength(28);
   expect(ix.keys[0]).toMatchObject({ pubkey: core, isWritable: true });
   expect(ix.keys[27]).toMatchObject({ pubkey: authority, isSigner: true, isWritable: false });
+});
+
+test("V3 risk update uses the versioned 49-byte payload", () => {
+  const ix = updateV3Risk({ market, authority }, {
+    initialMarginBps: 2_000, maintenanceMarginBps: 1_000, liquidationFeeBps: 50,
+    makerFeeBps: 2, takerFeeBps: 5, maximumLeverage: 5,
+    maximumPosition: 100n, maximumOpenInterest: 1_000n, markDeviationBps: 250,
+  });
+  expect(ix.data).toHaveLength(49);
+  expect(ix.data[0]).toBe(24);
+  expect(ix.keys).toHaveLength(2);
 });
 
 test("instruction constructors use canonical program id and exact account flags", () => {

@@ -41,6 +41,14 @@ impl TreeKind {
     const fn index(self) -> usize {
         self as usize
     }
+
+    pub const fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Fixed),
+            1 => Some(Self::OraclePegged),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

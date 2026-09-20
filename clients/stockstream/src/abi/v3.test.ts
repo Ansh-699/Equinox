@@ -8,7 +8,7 @@ import {
   decodeV3BookPage, decodeV3MarketCore,
   decodeV3EventShard, decodeV3SeatShard,
 } from "./v3";
-import { commitMarketV3, commitV3Shard } from "./v3-instructions";
+import { commitMarketV3, commitV3Shard, deriveV3ExecutionAccounts, placeOrderV3 } from "./v3-instructions";
 
 function key(seed: number): PublicKey {
   return new PublicKey(Uint8Array.from({ length: 32 }, (_, index) => (seed + index) & 0xff));
@@ -77,11 +77,23 @@ describe("V3 sharded ABI", () => {
     expect(() => deriveSeatShardV3(market, 4)).toThrow(RangeError);
   });
 
+  it("derives the complete canonical execution bundle for V3 writes", () => {
+    const market = deriveMarketCoreV3(instrument);
+    const accounts = deriveV3ExecutionAccounts(market, key(80), key(81));
+    expect(accounts.bookPages).toHaveLength(18);
+    expect(accounts.seatShards).toHaveLength(4);
+    expect(accounts.eventShards).toHaveLength(4);
+    const ix = placeOrderV3({ ...accounts, seatIndex: 0, side: "bid", quantity: 1, priceOrOffset: 10, expiresAt: 100, clientOrderId: 1, actionNonce: 1 });
+    expect(ix.keys).toHaveLength(29);
+    expect(ix.keys.at(-2)?.isSigner).toBe(true);
+    expect(ix.keys.at(-1)?.isWritable).toBe(true);
+  });
+
   it("decodes V3 bytes without interpreting them as a V2 header", () => {
     const core = new Uint8Array(V3_MARKET_CORE_SIZE);
     core.set(Buffer.from("STKMK003")); const view = new DataView(core.buffer); view.setUint16(8, 3, true); core[10] = 1; core[11] = 1; core[12] = 4;
     view.setUint32(246, 922, true); core[250] = 1; view.setInt32(251, -6, true);
-    expect(decodeV3MarketCore(core)).toMatchObject({ mode: 1, oracleValid: false, oracleFeedId: 922, oracleChannel: 1, oracleExponent: -6 });
+    expect(decodeV3MarketCore(core)).toMatchObject({ mode: 1, oracleValid: false, oracleFeedId: 922, oracleChannel: 1, oracleExponent: -6, riskConfigVersion: 0, protocolFeeBalance: 0n });
     const page = new Uint8Array(V3_BOOK_PAGE_SIZE);
     page.set(Buffer.from("STKBK003")); new DataView(page.buffer).setUint16(8, 3, true); page[10] = 1; page[11] = 3;
     expect(decodeV3BookPage(page)).toMatchObject({ side: 1, page: 3, nodeCount: 0 });

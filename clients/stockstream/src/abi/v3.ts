@@ -53,6 +53,11 @@ export interface V3MarketCoreView {
   oracleValid: boolean; lastVerifiedOraclePrice: bigint; lastVerifiedOracleTimestamp: bigint;
   oracleFeedId: number; oracleChannel: number; oracleExponent: number;
   delegationStatus: number; expectedCommitSequence: bigint; lastCommittedSequence: bigint; validator: PublicKey;
+  initialMarginBps: number; maintenanceMarginBps: number; liquidationFeeBps: number;
+  makerFeeBps: number; takerFeeBps: number; maximumLeverage: number;
+  maximumPosition: bigint; maximumOpenInterest: bigint; currentOpenInterest: bigint;
+  markDeviationBps: number; protocolFeeBalance: bigint; insuranceBalance: bigint;
+  badDebt: bigint; vaultLiability: bigint; reconciliationStatus: number; riskConfigVersion: number;
 }
 export function decodeV3MarketCore(bytes: Uint8Array): V3MarketCoreView {
   if (!versioned(bytes, "STKMK003", V3_MARKET_CORE_SIZE) || bytes[10] !== 1) throw new RangeError("Invalid V3 market core");
@@ -63,6 +68,14 @@ export function decodeV3MarketCore(bytes: Uint8Array): V3MarketCoreView {
     oracleFeedId: view.getUint32(246, true), oracleChannel: bytes[250], oracleExponent: view.getInt32(251, true),
     delegationStatus: bytes[197], expectedCommitSequence: view.getBigUint64(198, true),
     lastCommittedSequence: view.getBigUint64(206, true), validator: key(bytes, 214),
+    initialMarginBps: view.getUint16(218, true), maintenanceMarginBps: view.getUint16(220, true),
+    liquidationFeeBps: view.getUint16(222, true), makerFeeBps: view.getUint16(224, true),
+    takerFeeBps: view.getUint16(226, true), maximumLeverage: view.getUint32(228, true),
+    maximumPosition: signed128(view, 256), maximumOpenInterest: signed128(view, 272),
+    currentOpenInterest: signed128(view, 288), markDeviationBps: view.getUint16(304, true),
+    protocolFeeBalance: signed128(view, 306), insuranceBalance: signed128(view, 322),
+    badDebt: signed128(view, 338), vaultLiability: signed128(view, 354),
+    reconciliationStatus: bytes[370], riskConfigVersion: bytes[371],
   };
 }
 
