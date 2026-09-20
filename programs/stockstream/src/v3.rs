@@ -1969,8 +1969,8 @@ fn place_order_v3_with_action(
     }
     for fill in plan.fills[..plan.fill_count as usize].iter() {
         settle_v3_fill(seat_accounts, order.seat_index, side, *fill)?;
-        remaining = remaining.saturating_sub(fill.quantity);
     }
+    remaining = plan.taker_remaining;
     drop(bid_book);
     drop(ask_book);
     if remaining > 0 && order.flags & 2 == 0 {
