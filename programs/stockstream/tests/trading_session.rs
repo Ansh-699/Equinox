@@ -16,6 +16,7 @@ use pinocchio::{
     Address,
 };
 use stockstream::{
+    error::StockStreamError,
     process_instruction,
     scratch::{derive_settlement_scratch, SETTLEMENT_SCRATCH_LEN},
     session::{
@@ -29,6 +30,13 @@ use stockstream::{
 struct TestAccount {
     _storage: Vec<u64>,
     view: AccountView,
+}
+
+impl TestAccount {
+    fn set_lamports(&mut self, lamports: u64) {
+        let raw = self._storage.as_mut_ptr() as *mut RuntimeAccount;
+        unsafe { (*raw).lamports = lamports };
+    }
 }
 
 fn account(
@@ -288,7 +296,11 @@ fn authorize_session(
         &session_signer,
         &ID,
     );
-    let session = account(pda, Address::default(), TRADING_SESSION_SIZE, false, true);
+    let mut session = account(pda, Address::default(), TRADING_SESSION_SIZE, false, true);
+    // A real system-owned CreateAccount target starts with zero lamports.
+    // The generic test account helper defaults to one lamport for ordinary
+    // account fixtures, so model the CPI target explicitly here.
+    session.set_lamports(0);
     let signer_account = account(session_signer, Address::default(), 0, true, false);
     process_instruction(
         &ID,
@@ -312,6 +324,36 @@ fn authorize_session(
     .unwrap();
     unsafe { session.view.clone().assign(&ID) };
     session
+}
+
+#[test]
+fn authorize_rejects_a_pre_funded_system_owned_session_pda() {
+    let f = fixture();
+    let session_signer = Address::new_from_array([92; 32]);
+    let pda = derive_trading_session(
+        &OWNER,
+        f.market.view.address(),
+        SEAT_INDEX,
+        &session_signer,
+        &ID,
+    );
+    let session = account(pda, Address::default(), TRADING_SESSION_SIZE, false, true);
+    let signer_account = account(session_signer, Address::default(), 0, true, false);
+    let result = process_instruction(
+        &ID,
+        &mut [
+            f.market.view.clone(),
+            f.owner_payer.view.clone(),
+            session.view.clone(),
+            signer_account.view.clone(),
+            f.system_program.view.clone(),
+        ],
+        &authorize_data(SEAT_INDEX, 1_000, SESSION_ACTION_PLACE, 100, 200, 300, 5),
+    );
+    assert_eq!(
+        err_code(result),
+        StockStreamError::InvalidTradingSession as u32
+    );
 }
 
 fn err_code(result: Result<(), ProgramError>) -> u32 {
