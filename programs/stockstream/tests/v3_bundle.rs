@@ -571,6 +571,26 @@ fn v3_liquidation_updates_open_interest_and_insurance_fee() {
         seat[116..132].copy_from_slice(&10i128.to_le_bytes());
         seat[132..148].copy_from_slice(&1_000i128.to_le_bytes());
     }
+    let before_failed_liquidation_seat =
+        unsafe { accounts[V3_SEAT_START].view.borrow_unchecked().to_vec() };
+    unsafe {
+        accounts[0].view.borrow_unchecked_mut()[288..304].copy_from_slice(&0i128.to_le_bytes());
+    }
+    let before_failed_liquidation_core = unsafe { accounts[0].view.borrow_unchecked().to_vec() };
+    let mut rejected_liquidation = views(&accounts);
+    rejected_liquidation.push(authority.view.clone());
+    assert!(liquidate_v3(&ID, &mut rejected_liquidation, 0, 5).is_err());
+    assert_eq!(
+        unsafe { accounts[V3_SEAT_START].view.borrow_unchecked() },
+        before_failed_liquidation_seat
+    );
+    assert_eq!(
+        unsafe { accounts[0].view.borrow_unchecked()[288..304].to_vec() },
+        before_failed_liquidation_core[288..304]
+    );
+    unsafe {
+        accounts[0].view.borrow_unchecked_mut()[288..304].copy_from_slice(&10i128.to_le_bytes());
+    }
     let mut liquidation_accounts = views(&accounts);
     liquidation_accounts.push(authority.view.clone());
     liquidate_v3(&ID, &mut liquidation_accounts, 0, 5).unwrap();
