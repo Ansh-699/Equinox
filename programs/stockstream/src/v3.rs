@@ -71,6 +71,12 @@ pub const V3_CORE_DELEGATION_STATUS_OFFSET: usize = 197;
 pub const V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET: usize = 198;
 pub const V3_CORE_LAST_COMMITTED_SEQUENCE_OFFSET: usize = 206;
 pub const V3_CORE_VALIDATOR_OFFSET: usize = 214;
+/// V3 oracle configuration is copied from the registered instrument at
+/// activation. These bytes live after the fixed lifecycle fields in the
+/// durable core reserve and are read by the verified Pyth update path.
+pub const V3_CORE_ORACLE_FEED_ID_OFFSET: usize = 246;
+pub const V3_CORE_ORACLE_CHANNEL_OFFSET: usize = 250;
+pub const V3_CORE_ORACLE_EXPONENT_OFFSET: usize = 251;
 
 /// `64 + 115 * 88 = 10,184`, safely below the scheduler's 10,240-byte
 /// per-account limit. Nine pages provide physical room for 1,035 nodes; the

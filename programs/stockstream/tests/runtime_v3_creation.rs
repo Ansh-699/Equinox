@@ -138,6 +138,9 @@ fn creates_core_and_resumable_book_page_with_real_system_cpis() {
     instrument_data[8..10].copy_from_slice(&1u16.to_le_bytes());
     instrument_data[10] = 1;
     instrument_data[11..43].copy_from_slice(&instrument_id);
+    instrument_data[75..79].copy_from_slice(&922u32.to_le_bytes());
+    instrument_data[79] = 1;
+    instrument_data[107..111].copy_from_slice(&(-6i32).to_le_bytes());
     svm.set_account(
         instrument,
         Account {
@@ -166,13 +169,18 @@ fn creates_core_and_resumable_book_page_with_real_system_cpis() {
     let active_core = svm.get_account(&core).expect("activated core");
     assert_eq!(active_core.data[11], 1);
     assert_eq!(&active_core.data[44..76], authority.pubkey().as_ref());
+    assert_eq!(&active_core.data[246..250], &922u32.to_le_bytes());
+    assert_eq!(active_core.data[250], 1);
+    assert_eq!(&active_core.data[251..255], &(-6i32).to_le_bytes());
     assert!(
         activate(&mut svm, &authority, exchange, instrument, core).is_err(),
         "activation is one-time"
     );
 
     let pinocchio_core = pinocchio::Address::new_from_array(core.to_bytes());
-    let page = solana_address(derive_book_page_v3(&ID, &pinocchio_core, 1, 3));
+    // The V3 creation opcode uses a flattened book-page index: 7 is side 0,
+    // page 7 (the same mapping used by `derive_v3_account`).
+    let page = solana_address(derive_book_page_v3(&ID, &pinocchio_core, 0, 7));
     for expected_len in [V3_BOOK_PAGE_SIZE] {
         send(&mut svm, &authority, core, page, 1, 7).expect("resume V3 book-page creation");
         assert_eq!(
@@ -184,6 +192,6 @@ fn creates_core_and_resumable_book_page_with_real_system_cpis() {
     assert_eq!(page_account.owner, solana_address(ID));
     assert_eq!(&page_account.data[0..8], b"STKBK003");
     assert_eq!(page_account.data[8..10], V3_LAYOUT_VERSION.to_le_bytes());
-    assert_eq!(&page_account.data[10..12], &[1, 3]);
+    assert_eq!(&page_account.data[10..12], &[0, 7]);
     assert_eq!(&page_account.data[12..44], core.as_ref());
 }

@@ -142,6 +142,9 @@ fn build_manifest() -> String {
   "V3_SEAT_SHARDS": {v3_seat_shards},
   "V3_EVENTS_PER_SHARD": {v3_events_per_shard},
   "V3_EVENT_SHARDS": {v3_event_shards}
+  ,"V3_CORE_ORACLE_FEED_ID_OFFSET": {v3_core_oracle_feed_id_offset}
+  ,"V3_CORE_ORACLE_CHANNEL_OFFSET": {v3_core_oracle_channel_offset}
+  ,"V3_CORE_ORACLE_EXPONENT_OFFSET": {v3_core_oracle_exponent_offset}
   ,"V3_EXECUTION_BUNDLE_LEN": {v3_execution_bundle_len}
 }}
 "#,
@@ -180,6 +183,9 @@ fn build_manifest() -> String {
         v3_seat_shards = stockstream::v3::V3_SEAT_SHARDS,
         v3_events_per_shard = stockstream::v3::V3_EVENTS_PER_SHARD,
         v3_event_shards = stockstream::v3::V3_EVENT_SHARDS,
+        v3_core_oracle_feed_id_offset = stockstream::v3::V3_CORE_ORACLE_FEED_ID_OFFSET,
+        v3_core_oracle_channel_offset = stockstream::v3::V3_CORE_ORACLE_CHANNEL_OFFSET,
+        v3_core_oracle_exponent_offset = stockstream::v3::V3_CORE_ORACLE_EXPONENT_OFFSET,
         v3_execution_bundle_len = stockstream::v3::V3_EXECUTION_BUNDLE_LEN,
     )
 }
