@@ -248,8 +248,12 @@ export async function validateSessionTransaction(request: RelaySessionTransactio
     if (!lifetimeToken || !lifetimeBytes || lifetimeBytes.length !== 32 || lifetimeBytes.every((value) => value === 0)) {
       return { ok: false, reason: "v3_recent_blockhash_missing" };
     }
-    if (request.recentBlockhashValid && !(await request.recentBlockhashValid(lifetimeToken))) {
-      return { ok: false, reason: "v3_recent_blockhash_expired" };
+    if (request.recentBlockhashValid) {
+      try {
+        if (!(await request.recentBlockhashValid(lifetimeToken))) return { ok: false, reason: "v3_recent_blockhash_expired" };
+      } catch {
+        return { ok: false, reason: "v3_recent_blockhash_unverifiable" };
+      }
     }
     const pages = await Promise.all(Array.from({ length: 18 }, (_, flat) =>
       deriveBookPageV3(request.expectedMarket!, Math.floor(flat / 9), flat % 9)));
