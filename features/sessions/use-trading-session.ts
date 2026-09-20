@@ -158,7 +158,7 @@ export function useTradingSession(protocol: StockStreamProtocol | null, ownerWal
         readback.owner.toBase58() !== ownerWallet ||
         readback.market.toBase58() !== sessionMarket
       ) return;
-      setStatus(toSessionStatus(existing.sessionPda, existing.sessionSignerAddress, ownerWallet, marketPda, seatIndex, readback, v3Core));
+      setStatus(toSessionStatus(existing.sessionPda, existing.sessionSignerAddress, ownerWallet, sessionMarket, seatIndex, readback, v3Core));
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [protocol, ownerWallet, marketPda, seatIndex, status, v3Core]);
