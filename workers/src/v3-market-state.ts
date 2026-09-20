@@ -6,12 +6,13 @@ import { fetchAuthoritativeMarketAccountBytes } from "./market-state";
  * web3.js SDK and treats each shard as an independently fetched account. */
 export const V3_LAYOUT_VERSION = 3;
 export const V3_CORE_SIZE = 4_096;
-export const V3_BOOK_PAGE_SIZE = 22_592;
+export const V3_BOOK_PAGE_SIZE = 10_184;
 export const V3_SEAT_SHARD_SIZE = 8_236;
 export const V3_EVENT_RECORD_SIZE = 100;
 export const V3_EVENT_SHARD_SIZE = 3_244;
-export const V3_BOOK_NODES_PER_PAGE = 256;
-export const V3_BOOK_PAGES_PER_SIDE = 4;
+export const V3_BOOK_NODES_PER_PAGE = 115;
+export const V3_BOOK_PAGES_PER_SIDE = 9;
+export const V3_BOOK_SLOTS_PER_SIDE = 1_024;
 export const V3_SEATS_PER_SHARD = 32;
 export const V3_EVENTS_PER_SHARD = 32;
 export const V3_NODE_SIZE = 88;
@@ -108,7 +109,7 @@ export function decodeV3BookPage(bytes: Uint8Array): V3BookPageState | null {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const nodeCount = view.getUint32(60, true);
   const freeCount = view.getUint32(56, true);
-  const limit = bytes[11] === 0 ? V3_BOOK_PAGES_PER_SIDE * V3_BOOK_NODES_PER_PAGE : V3_BOOK_NODES_PER_PAGE;
+  const limit = bytes[11] === 0 ? V3_BOOK_SLOTS_PER_SIDE : V3_BOOK_NODES_PER_PAGE;
   if (nodeCount > limit || freeCount > limit) return null;
   const nodeBytes = bytes.slice(64);
   const nodes = Array.from({ length: V3_BOOK_NODES_PER_PAGE }, (_, index) => decodeBookNode(nodeBytes.slice(index * V3_NODE_SIZE, (index + 1) * V3_NODE_SIZE), bytes[11] * V3_BOOK_NODES_PER_PAGE + index)).filter((node): node is V3BookNodeState => node !== null);
@@ -169,7 +170,7 @@ export interface V3MarketAggregate {
   bookPages: readonly V3BookPageState[];
   seatShards: readonly V3SeatShardState[];
   eventShards: readonly V3EventShardState[];
-  /** A complete book needs all 8 pages; durable withdrawal readiness also
+  /** A complete book needs all 18 pages; durable withdrawal readiness also
    * requires every seat/event shard to be present and the core restored. */
   completeBook: boolean;
   completeExecutionState: boolean;
@@ -199,10 +200,10 @@ export function aggregateV3Market(
   const seatShards = seats as V3SeatShardState[];
   const eventShards = events as V3EventShardState[];
   const unique = (values: readonly number[]) => new Set(values).size === values.length;
-  const completeBook = bookPages.length === 8 && unique(bookPages.map((page) => page.side * 4 + page.page));
+  const completeBook = bookPages.length === 2 * V3_BOOK_PAGES_PER_SIDE && unique(bookPages.map((page) => page.side * V3_BOOK_PAGES_PER_SIDE + page.page));
   const completeExecutionState = completeBook && seatShards.length === 4 && eventShards.length === 4
     && unique(seatShards.map((shard) => shard.shard)) && unique(eventShards.map((shard) => shard.shard));
-  if (!unique(bookPages.map((page) => page.side * 4 + page.page))
+  if (!unique(bookPages.map((page) => page.side * V3_BOOK_PAGES_PER_SIDE + page.page))
     || !unique(seatShards.map((shard) => shard.shard))
     || !unique(eventShards.map((shard) => shard.shard))) return null;
   const leaves = bookPages.flatMap((page) => page.nodes).filter((node) => node.tag === 2);
@@ -232,8 +233,9 @@ export async function fetchAuthoritativeV3Market(
   transport: SolanaL1Transport | MagicRouterTransport,
   addresses: V3ShardAddresses,
 ): Promise<V3MarketAggregate | null> {
-  if (addresses.bookPages.length !== 8 || addresses.seatShards.length !== 4 || addresses.eventShards.length !== 4
-    || new Set([addresses.core, ...addresses.bookPages, ...addresses.seatShards, ...addresses.eventShards]).size !== 17) return null;
+  const bookPageCount = 2 * V3_BOOK_PAGES_PER_SIDE;
+  if (addresses.bookPages.length !== bookPageCount || addresses.seatShards.length !== 4 || addresses.eventShards.length !== 4
+    || new Set([addresses.core, ...addresses.bookPages, ...addresses.seatShards, ...addresses.eventShards]).size !== 1 + bookPageCount + 8) return null;
   const values = await Promise.all([
     fetchAuthoritativeMarketAccountBytes(transport, addresses.core),
     ...addresses.bookPages.map((address) => fetchAuthoritativeMarketAccountBytes(transport, address)),
@@ -242,6 +244,6 @@ export async function fetchAuthoritativeV3Market(
   ]);
   if (values.some((value) => value === null)) return null;
   return aggregateV3Market(
-    values[0]!, values.slice(1, 9) as Uint8Array[], values.slice(9, 13) as Uint8Array[], values.slice(13, 17) as Uint8Array[], addresses.core,
+    values[0]!, values.slice(1, 1 + bookPageCount) as Uint8Array[], values.slice(1 + bookPageCount, 5 + bookPageCount) as Uint8Array[], values.slice(5 + bookPageCount, 9 + bookPageCount) as Uint8Array[], addresses.core,
   );
 }

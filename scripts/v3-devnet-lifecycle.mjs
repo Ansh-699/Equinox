@@ -17,7 +17,8 @@ const PROGRAM = new PublicKey("H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET");
 const STATE_PATH = "/tmp/opencode/v3-lifecycle-state.json";
 const EXCHANGE_KEY_PATH = "/tmp/opencode/v3-lifecycle-exchange.json";
 const PRESERVED_V2_MARKET = "9d75hK8GyfqajxcijLa35bEh8SYUtobqi6eSdtF42RuS";
-const SIZES = { core: 4_096, book: 22_592, seat: 8_236, event: 2_092 };
+const SIZES = { core: 4_096, book: 10_184, seat: 8_236, event: 3_244 };
+const BOOK_PAGES_PER_SIDE = 9;
 const connection = new Connection(RPC, "confirmed");
 const execute = process.argv.includes("--execute");
 const stage = process.argv.filter((value) => !value.startsWith("--")).at(-1) ?? "plan";
@@ -81,8 +82,8 @@ async function setup() {
   const coreInfo = await connection.getAccountInfo(core, "confirmed");
   if (!coreInfo?.data[11]) await send("activate V3 core", [ix(47, [ro(exchange.publicKey), ro(instrument), wr(core), sg(payer.publicKey)])], [payer]);
   const accounts = { bookPages: [], seatShards: [], eventShards: [] };
-  for (let side = 0; side < 2; side += 1) for (let page = 0; page < 4; page += 1) {
-    const index = side * 4 + page; const target = PublicKey.findProgramAddressSync([Buffer.from("book-page-v3"), core.toBuffer(), Buffer.from([side]), Buffer.from([page])], PROGRAM)[0];
+  for (let side = 0; side < 2; side += 1) for (let page = 0; page < BOOK_PAGES_PER_SIDE; page += 1) {
+    const index = side * BOOK_PAGES_PER_SIDE + page; const target = PublicKey.findProgramAddressSync([Buffer.from("book-page-v3"), core.toBuffer(), Buffer.from([side]), Buffer.from([page])], PROGRAM)[0];
     await ensureV3Account(`V3 book ${side}/${page}`, core, target, 1, index, SIZES.book, payer); accounts.bookPages.push(target.toBase58());
   }
   for (let index = 0; index < 4; index += 1) {
@@ -97,6 +98,6 @@ async function setup() {
 }
 function plan() {
   const state = load(); assertFresh(state);
-  console.log(JSON.stringify({ version: 3, execute, statePath: STATE_PATH, protectedV2Market: PRESERVED_V2_MARKET, stages: { setup: "fresh core + 8 pages + 4 seat shards + 4 event shards", delegation: "blocked until a corrected V3 program is deployed", custody: "blocked until V3 custody handlers exist", trading: "blocked until V3 matching handlers exist" }, state }, null, 2));
+  console.log(JSON.stringify({ version: 3, execute, statePath: STATE_PATH, protectedV2Market: PRESERVED_V2_MARKET, stages: { setup: "fresh core + 18 pages + 4 seat shards + 4 event shards", delegation: "blocked until a corrected V3 program is deployed", custody: "blocked until V3 custody handlers exist", trading: "blocked until V3 matching handlers exist" }, state }, null, 2));
 }
 if (stage === "plan") plan(); else if (stage === "setup") await setup(); else throw new Error("usage: node scripts/v3-devnet-lifecycle.mjs [--execute] [plan|setup]");

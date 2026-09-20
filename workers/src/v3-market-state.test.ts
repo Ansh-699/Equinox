@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getBase58Decoder } from "@solana/kit";
-import { aggregateV3Market, decodeV3BookPage, decodeV3Core, decodeV3EventShard, decodeV3SeatShard, V3_BOOK_PAGE_SIZE, V3_CORE_SIZE, V3_EVENT_SHARD_SIZE, V3_SEAT_SHARD_SIZE } from "./v3-market-state";
+import { aggregateV3Market, decodeV3BookPage, decodeV3Core, decodeV3EventShard, decodeV3SeatShard, V3_BOOK_PAGE_SIZE, V3_BOOK_PAGES_PER_SIDE, V3_CORE_SIZE, V3_EVENT_SHARD_SIZE, V3_SEAT_SHARD_SIZE } from "./v3-market-state";
 
 const decoder = getBase58Decoder();
 const coreAddress = decoder.decode(new Uint8Array(32).fill(7));
@@ -33,13 +33,13 @@ describe("V3 worker shard aggregation", () => {
     expect(decodeV3BookPage(localPage)).toBeNull();
   });
   it("requires every distinct shard before declaring withdrawal ready", () => {
-    const books = Array.from({ length: 8 }, (_, value) => page(Math.floor(value / 4), value % 4));
+    const books = Array.from({ length: 2 * V3_BOOK_PAGES_PER_SIDE }, (_, value) => page(Math.floor(value / V3_BOOK_PAGES_PER_SIDE), value % V3_BOOK_PAGES_PER_SIDE));
     const seats = Array.from({ length: 4 }, (_, value) => shard(false, value));
     const events = Array.from({ length: 4 }, (_, value) => shard(true, value));
     expect(aggregateV3Market(core(), books, seats, events, coreAddress)).toMatchObject({ completeBook: true, completeExecutionState: true, withdrawalReady: true });
     const aggregate = aggregateV3Market(core(), [leafPage(0, 0), ...books.slice(1)], seats, events, coreAddress)!;
     expect(aggregate.orderBook.bids[0]).toMatchObject({ tag: 2, side: 0, quantity: 5n });
-    expect(aggregateV3Market(core(), [...books.slice(0, 7), page(1, 2)], seats, events, coreAddress)).toBeNull();
+    expect(aggregateV3Market(core(), [...books.slice(0, books.length - 1), page(1, 2)], seats, events, coreAddress)).toBeNull();
   });
   it("decodes complete persisted event records", () => {
     const bytes = shard(true, 0);

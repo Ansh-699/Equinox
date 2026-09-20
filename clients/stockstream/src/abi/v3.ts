@@ -5,21 +5,21 @@ import { PROGRAM_ID } from "./constants";
 const PROGRAM_KEY = new PublicKey(PROGRAM_ID);
 export const V3_LAYOUT_VERSION = 3;
 export const V3_COMMIT_ACCOUNT_HARD_MAX = 65_535;
-export const V3_COMMIT_ACCOUNT_SAFE_MAX = 50_000;
+export const V3_COMMIT_ACCOUNT_SAFE_MAX = 10_240;
 export const V3_MARKET_CORE_SIZE = 4_096;
-export const V3_BOOK_PAGE_SIZE = 22_592;
+export const V3_BOOK_PAGE_SIZE = 10_184;
 export const V3_SEAT_SHARD_SIZE = 8_236;
 export const V3_SEAT_SIZE = 256;
 export const V3_EVENT_RECORD_SIZE = 100;
 export const V3_EVENT_SHARD_SIZE = 3_244;
-export const V3_BOOK_NODES_PER_PAGE = 256;
-export const V3_BOOK_PAGES_PER_SIDE = 4;
+export const V3_BOOK_NODES_PER_PAGE = 115;
+export const V3_BOOK_PAGES_PER_SIDE = 9;
 export const V3_BOOK_SLOTS_PER_SIDE = 1_024;
 export const V3_SEATS_PER_SHARD = 32;
 export const V3_SEAT_SHARDS = 4;
 export const V3_EVENTS_PER_SHARD = 32;
 export const V3_EVENT_SHARDS = 4;
-export const V3_EXECUTION_BUNDLE_LEN = 17;
+export const V3_EXECUTION_BUNDLE_LEN = 27;
 
 export function deriveMarketCoreV3(instrument: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync([Buffer.from("market-v3"), instrument.toBuffer()], PROGRAM_KEY)[0];

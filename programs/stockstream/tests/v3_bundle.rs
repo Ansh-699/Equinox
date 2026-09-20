@@ -13,11 +13,15 @@ use stockstream::{
         append_event_record, close_trader_seat, create_trader_seat, derive_book_page_v3,
         derive_event_shard_v3, derive_market_core_v3, derive_seat_shard_v3,
         initialize_book_page_metadata, validate_execution_bundle, validate_v3_session_actor,
-        validate_v3_withdrawal_readiness, PagedBookV3, V3_BOOK_PAGE_SIZE, V3_EVENT_SHARD_SIZE,
-        V3_EXECUTION_BUNDLE_LEN, V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
+        validate_v3_withdrawal_readiness, PagedBookV3, V3_BOOK_PAGES_PER_SIDE, V3_BOOK_PAGE_SIZE,
+        V3_EVENT_SHARD_SIZE, V3_EXECUTION_BUNDLE_LEN, V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
     },
     ID,
 };
+
+const V3_BOOK_ACCOUNT_COUNT: usize = 2 * V3_BOOK_PAGES_PER_SIDE;
+const V3_SEAT_START: usize = 1 + V3_BOOK_ACCOUNT_COUNT;
+const V3_EVENT_START: usize = V3_SEAT_START + 4;
 
 struct TestAccount {
     _storage: Vec<u64>,
@@ -67,9 +71,9 @@ fn bundle() -> Vec<TestAccount> {
         core.view.borrow_unchecked_mut()[11] = 1;
     }
     let mut accounts = vec![core];
-    for flat in 0..8u8 {
-        let side = flat / 4;
-        let page = flat % 4;
+    for flat in 0..V3_BOOK_ACCOUNT_COUNT as u8 {
+        let side = flat / V3_BOOK_PAGES_PER_SIDE as u8;
+        let page = flat % V3_BOOK_PAGES_PER_SIDE as u8;
         let mut value = account(
             derive_book_page_v3(&ID, &core_key, side, page),
             V3_BOOK_PAGE_SIZE,
@@ -149,7 +153,7 @@ fn v3_bundle_rejects_duplicate_substitution_and_foreign_parent() {
     duplicate[2] = duplicate[1].clone();
     assert!(validate_execution_bundle(&ID, &duplicate, true).is_err());
     unsafe {
-        accounts[9].view.borrow_unchecked_mut()[12] ^= 1;
+        accounts[V3_SEAT_START].view.borrow_unchecked_mut()[12] ^= 1;
     }
     assert!(validate_execution_bundle(&ID, &views(&accounts), true).is_err());
 }
@@ -161,14 +165,14 @@ fn v3_session_actor_binds_sharded_seat_and_rejects_replay_or_risk() {
     let session_signer = account(Address::new_from_array([43; 32]), 0, true);
     let mut seat_call = vec![
         accounts[0].view.clone(),
-        accounts[9].view.clone(),
-        accounts[10].view.clone(),
-        accounts[11].view.clone(),
-        accounts[12].view.clone(),
-        accounts[13].view.clone(),
-        accounts[14].view.clone(),
-        accounts[15].view.clone(),
-        accounts[16].view.clone(),
+        accounts[V3_SEAT_START].view.clone(),
+        accounts[V3_SEAT_START + 1].view.clone(),
+        accounts[V3_SEAT_START + 2].view.clone(),
+        accounts[V3_SEAT_START + 3].view.clone(),
+        accounts[V3_EVENT_START].view.clone(),
+        accounts[V3_EVENT_START + 1].view.clone(),
+        accounts[V3_EVENT_START + 2].view.clone(),
+        accounts[V3_EVENT_START + 3].view.clone(),
         owner.view.clone(),
     ];
     create_trader_seat(&ID, &mut seat_call, 32).unwrap();
@@ -199,10 +203,10 @@ fn v3_session_actor_binds_sharded_seat_and_rejects_replay_or_risk() {
         session::write_session(&mut session_bytes, &state).unwrap();
     }
     let shards = [
-        accounts[9].view.clone(),
-        accounts[10].view.clone(),
-        accounts[11].view.clone(),
-        accounts[12].view.clone(),
+        accounts[V3_SEAT_START].view.clone(),
+        accounts[V3_SEAT_START + 1].view.clone(),
+        accounts[V3_SEAT_START + 2].view.clone(),
+        accounts[V3_SEAT_START + 3].view.clone(),
     ];
     let authorized = validate_v3_session_actor(
         &ID,
@@ -257,24 +261,27 @@ fn v3_seat_creation_uses_derived_shard_and_prevents_cross_shard_duplicates() {
     let trader = account(Address::new_from_array([42; 32]), 0, true);
     let mut call = vec![
         accounts[0].view.clone(),
-        accounts[9].view.clone(),
-        accounts[10].view.clone(),
-        accounts[11].view.clone(),
-        accounts[12].view.clone(),
-        accounts[13].view.clone(),
-        accounts[14].view.clone(),
-        accounts[15].view.clone(),
-        accounts[16].view.clone(),
+        accounts[V3_SEAT_START].view.clone(),
+        accounts[V3_SEAT_START + 1].view.clone(),
+        accounts[V3_SEAT_START + 2].view.clone(),
+        accounts[V3_SEAT_START + 3].view.clone(),
+        accounts[V3_EVENT_START].view.clone(),
+        accounts[V3_EVENT_START + 1].view.clone(),
+        accounts[V3_EVENT_START + 2].view.clone(),
+        accounts[V3_EVENT_START + 3].view.clone(),
     ];
     call.push(trader.view.clone());
     create_trader_seat(&ID, &mut call, 32).expect("seat 32 lives in shard 1 slot 0");
-    let occupied = unsafe { accounts[10].view.borrow_unchecked() };
+    let occupied = unsafe { accounts[V3_SEAT_START + 1].view.borrow_unchecked() };
     assert_eq!(occupied[44], 1);
     assert_eq!(&occupied[45..77], trader.view.address().as_ref());
     assert!(create_trader_seat(&ID, &mut call, 1).is_err());
     assert!(create_trader_seat(&ID, &mut call, 128).is_err());
     close_trader_seat(&ID, &mut call, 32).expect("empty seat closes");
-    assert_eq!(unsafe { accounts[10].view.borrow_unchecked() }[44], 0);
+    assert_eq!(
+        unsafe { accounts[V3_SEAT_START + 1].view.borrow_unchecked() }[44],
+        0
+    );
     assert!(close_trader_seat(&ID, &mut call, 32).is_err());
     create_trader_seat(&ID, &mut call, 32).expect("closed seat can be reused");
     let core = unsafe { accounts[0].view.borrow_unchecked() };
@@ -284,12 +291,9 @@ fn v3_seat_creation_uses_derived_shard_and_prevents_cross_shard_duplicates() {
 #[test]
 fn v3_paged_book_preserves_global_handles_across_page_boundaries() {
     let accounts = bundle();
-    let mut pages = vec![
-        accounts[1].view.clone(),
-        accounts[2].view.clone(),
-        accounts[3].view.clone(),
-        accounts[4].view.clone(),
-    ];
+    let mut pages = (1..=V3_BOOK_PAGES_PER_SIDE)
+        .map(|index| accounts[index].view.clone())
+        .collect::<Vec<_>>();
     let mut book = PagedBookV3::new(&mut pages).unwrap();
     for index in 0..129u128 {
         let key = index << 64;
@@ -340,19 +344,19 @@ fn v3_event_queue_uses_full_records_and_crosses_shard_boundary() {
     let accounts = bundle();
     let mut core = accounts[0].view.clone();
     let mut shards = vec![
-        accounts[13].view.clone(),
-        accounts[14].view.clone(),
-        accounts[15].view.clone(),
-        accounts[16].view.clone(),
+        accounts[V3_EVENT_START].view.clone(),
+        accounts[V3_EVENT_START + 1].view.clone(),
+        accounts[V3_EVENT_START + 2].view.clone(),
+        accounts[V3_EVENT_START + 3].view.clone(),
     ];
     let payload = [9u8; 48];
     for _ in 0..33 {
         append_event_record(&ID, &mut core, &mut shards, 200, &payload, 77).unwrap();
     }
-    let first = unsafe { accounts[13].view.borrow_unchecked() };
+    let first = unsafe { accounts[V3_EVENT_START].view.borrow_unchecked() };
     assert_eq!(u16::from_le_bytes(first[44..46].try_into().unwrap()), 200);
     assert_eq!(&first[96..144], &payload);
-    let second = unsafe { accounts[14].view.borrow_unchecked() };
+    let second = unsafe { accounts[V3_EVENT_START + 1].view.borrow_unchecked() };
     assert_eq!(u16::from_le_bytes(second[44..46].try_into().unwrap()), 200);
     assert_eq!(u64::from_le_bytes(second[48..56].try_into().unwrap()), 32);
 }
