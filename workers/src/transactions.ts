@@ -181,6 +181,8 @@ export const OPCODE = {
   recordBadDebt: 37,
   resolveBadDebt: 38,
   reconcileVault: 39,
+  depositCollateralV3: 53,
+  withdrawCollateralV3: 54,
 } as const;
 
 /** Deposit/withdraw reduce-only flag bits (`place_order`'s `flags` byte). */
@@ -338,13 +340,13 @@ export function replaceOrderV3Instruction(programAddress: string, accounts: V3Ex
  * session account. The account order mirrors `depositCollateralV3` exactly. */
 export function depositCollateralV3Instruction(programAddress: string, accounts: V3DepositAccountMetas, seatIndex: number, amount: bigint): Instruction {
   if (accounts.eventShards.length !== 4) throw new RangeError("V3 deposit requires four event shards");
-  const data = new DataWriter().u8(53).u16(seatIndex).u64(amount).build();
+  const data = new DataWriter().u8(OPCODE.depositCollateralV3).u16(seatIndex).u64(amount).build();
   return instruction(programAddress, [accounts.core, accounts.seatShard, ...accounts.eventShards, accounts.authority, accounts.source, accounts.vault, accounts.mint, accounts.tokenProgram], data);
 }
 
 export function withdrawCollateralV3Instruction(programAddress: string, accounts: V3WithdrawAccountMetas, seatIndex: number, amount: bigint): Instruction {
   if (accounts.session !== undefined) throw new RangeError("V3 withdrawal cannot include a session PDA");
-  const data = new DataWriter().u8(54).u16(seatIndex).u64(amount).build();
+  const data = new DataWriter().u8(OPCODE.withdrawCollateralV3).u16(seatIndex).u64(amount).build();
   return instruction(programAddress, [...v3ExecutionMetas(accounts), accounts.destination, accounts.mint, accounts.vault, accounts.vaultAuthority, accounts.tokenProgram], data);
 }
 

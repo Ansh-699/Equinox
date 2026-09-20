@@ -191,12 +191,12 @@ describe("StockStream transaction construction (@solana/kit)", () => {
       core: writable, seatShard: writable, eventShards: Array.from({ length: 4 }, () => writable),
       authority: meta(OTHER, AccountRole.READONLY_SIGNER), source: writable, vault: writable, mint: readonly, tokenProgram: readonly,
     }, 0, 1n);
-    expect(deposit.data![0]).toBe(53);
+    expect(deposit.data![0]).toBe(OPCODE.depositCollateralV3);
     expect(deposit.accounts).toHaveLength(11);
     const withdraw = withdrawCollateralV3Instruction(PROGRAM, {
       ...v3, destination: writable, mint: readonly, vault: writable, vaultAuthority: readonly, tokenProgram: readonly,
     }, 0, 1n);
-    expect(withdraw.data![0]).toBe(54);
+    expect(withdraw.data![0]).toBe(OPCODE.withdrawCollateralV3);
     expect(withdraw.accounts).toHaveLength(33);
     expect(() => withdrawCollateralV3Instruction(PROGRAM, { ...v3, session: readonly, destination: writable, mint: readonly, vault: writable, vaultAuthority: readonly, tokenProgram: readonly }, 0, 1n)).toThrow("session PDA");
   });
