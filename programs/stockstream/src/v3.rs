@@ -17,11 +17,22 @@ use core::{
 use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
 
 use crate::{
-    book::{InnerNode, LeafNode, TreeKind, ANY_NODE_SIZE, NONE, TAG_INNER, TAG_LEAF},
+    book::{
+        InnerNode, LeafNode, OrderInput, SelfTradeBehavior, Side, TimeInForce, TreeKind,
+        ANY_NODE_SIZE, NONE, TAG_INNER, TAG_LEAF,
+    },
     error::StockStreamError,
+    instruction::PlaceOrderData,
     session::{self, TradingSession},
     state::{DelegationStatus, LiquidationState, TraderSeat, TRADER_SEAT_SIZE},
 };
+
+/// The V3 trading ABI places the complete execution bundle first, followed by
+/// the transaction signer and (for delegated sessions) one writable session
+/// PDA. Keeping the signer outside the bundle means every shard can remain a
+/// deterministic PDA set while the authorization account stays ephemeral.
+pub const V3_SIGNER_ACCOUNT_INDEX: usize = V3_EXECUTION_BUNDLE_LEN;
+pub const V3_SESSION_ACCOUNT_INDEX: usize = V3_EXECUTION_BUNDLE_LEN + 1;
 
 pub const V3_LAYOUT_VERSION: u16 = 3;
 pub const V3_COMMIT_ACCOUNT_HARD_MAX: usize = u16::MAX as usize;
@@ -46,6 +57,11 @@ pub const V3_EVENT_SHARD_DISCRIMINATOR: [u8; 8] = *b"STKEV003";
 pub const V3_CORE_MODE_OFFSET: usize = 11;
 pub const V3_CORE_INSTRUMENT_OFFSET: usize = 12;
 pub const V3_CORE_MARKET_AUTHORITY_OFFSET: usize = 44;
+pub const V3_CORE_GLOBAL_ORDER_SEQUENCE_OFFSET: usize = 140;
+pub const V3_CORE_GLOBAL_EVENT_SEQUENCE_OFFSET: usize = 148;
+pub const V3_CORE_ORACLE_VALID_OFFSET: usize = 180;
+pub const V3_CORE_ORACLE_PRICE_OFFSET: usize = 181;
+pub const V3_CORE_ORACLE_TIMESTAMP_OFFSET: usize = 189;
 pub const V3_CORE_DELEGATION_STATUS_OFFSET: usize = 197;
 pub const V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET: usize = 198;
 pub const V3_CORE_LAST_COMMITTED_SEQUENCE_OFFSET: usize = 206;
@@ -79,7 +95,6 @@ pub const V3_SEAT_SEQUENCE_OFFSET: usize = 176;
 /// event shards. Vaults remain outside this bundle on L1 by design.
 pub const V3_EXECUTION_BUNDLE_LEN: usize =
     1 + (2 * V3_BOOK_PAGES_PER_SIDE) + V3_SEAT_SHARDS + V3_EVENT_SHARDS;
-const V3_CORE_GLOBAL_EVENT_SEQUENCE_OFFSET: usize = 148;
 const V3_SHARD_HEADER_SIZE: usize = 44;
 const V3_BOOK_HEADER_SIZE: usize = 64;
 const V3_BOOK_FIXED_ROOT_OFFSET: usize = 44;
@@ -1026,7 +1041,7 @@ pub fn append_event_record(
     if shards.len() != V3_EVENT_SHARDS || !core.is_writable() {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
-    let core_key = validate_active_core(program_id, core)?;
+    let core_key = validate_event_core(program_id, core)?;
     for (index, shard) in shards.iter().enumerate() {
         validate_event_shard(program_id, shard, &core_key, index as u8)?;
     }
@@ -1303,6 +1318,23 @@ fn validate_active_core(program_id: &Address, core: &AccountView) -> Result<Addr
     Ok(*core.address())
 }
 
+fn validate_event_core(program_id: &Address, core: &AccountView) -> Result<Address, ProgramError> {
+    if !core.owned_by(program_id) || !core.is_writable() {
+        return Err(bundle_error());
+    }
+    let bytes = unsafe { core.borrow_unchecked() };
+    if bytes.len() != V3_MARKET_CORE_SIZE
+        || bytes[0..8] != V3_MARKET_CORE_DISCRIMINATOR
+        || bytes[8..10] != V3_LAYOUT_VERSION.to_le_bytes()
+        || bytes[10] != 1
+        || bytes[V3_CORE_MODE_OFFSET] != 1
+        || bytes[V3_CORE_DELEGATION_STATUS_OFFSET] > DelegationStatus::Delegated as u8
+    {
+        return Err(bundle_error());
+    }
+    Ok(*core.address())
+}
+
 fn validate_seat_shard(
     program_id: &Address,
     account: &AccountView,
@@ -1495,6 +1527,693 @@ pub fn close_trader_seat(
         &payload,
         crate::handlers::event_timestamp(),
     )
+}
+
+fn core_u64(bytes: &[u8], offset: usize) -> Result<u64, ProgramError> {
+    bytes
+        .get(offset..offset + 8)
+        .ok_or_else(bundle_error)
+        .and_then(|raw| raw.try_into().map_err(|_| bundle_error()))
+        .map(u64::from_le_bytes)
+}
+
+fn set_core_u64(bytes: &mut [u8], offset: usize, value: u64) -> ProgramResult {
+    let target = bytes.get_mut(offset..offset + 8).ok_or_else(bundle_error)?;
+    target.copy_from_slice(&value.to_le_bytes());
+    Ok(())
+}
+
+fn v3_trade_seat(
+    accounts: &[AccountView],
+    seat_index: u16,
+) -> Result<(TraderSeat, usize, usize), ProgramError> {
+    let index = seat_index as usize;
+    if index >= V3_SEAT_SHARDS * V3_SEATS_PER_SHARD {
+        return Err(StockStreamError::InvalidSeat.into());
+    }
+    let shard = index / V3_SEATS_PER_SHARD;
+    let slot = index % V3_SEATS_PER_SHARD;
+    let seat = read_shard_seat(
+        unsafe { accounts[1 + (2 * V3_BOOK_PAGES_PER_SIDE) + shard].borrow_unchecked() },
+        slot,
+    )?;
+    if seat.occupancy != 1 || seat.trader == [0; 32] {
+        return Err(StockStreamError::InvalidSeat.into());
+    }
+    Ok((seat, shard, slot))
+}
+
+fn validate_v3_trade_accounts(
+    program_id: &Address,
+    accounts: &[AccountView],
+    seat_index: u16,
+    required_actions: u8,
+    notional: i128,
+    resulting_exposure: u128,
+    action_nonce: u64,
+    now: u64,
+) -> Result<(TraderSeat, Option<V3SessionAuthorization>), ProgramError> {
+    if accounts.len() < V3_SIGNER_ACCOUNT_INDEX + 1
+        || accounts.len() > V3_SESSION_ACCOUNT_INDEX + 1
+        || !accounts[V3_SIGNER_ACCOUNT_INDEX].is_signer()
+    {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    validate_execution_bundle(program_id, &accounts[..V3_EXECUTION_BUNDLE_LEN], true)?;
+    let core = &accounts[0];
+    let core_bytes = unsafe { core.borrow_unchecked() };
+    if core_bytes[V3_CORE_MODE_OFFSET] != 1
+        || core_bytes[V3_CORE_DELEGATION_STATUS_OFFSET] != DelegationStatus::Delegated as u8
+    {
+        return Err(StockStreamError::InvalidInstruction.into());
+    }
+    if accounts[..V3_EXECUTION_BUNDLE_LEN]
+        .iter()
+        .any(|account| account.address() == accounts[V3_SIGNER_ACCOUNT_INDEX].address())
+    {
+        return Err(StockStreamError::InvalidInstruction.into());
+    }
+    let (seat, _, _) = v3_trade_seat(accounts, seat_index)?;
+    let signer = *accounts[V3_SIGNER_ACCOUNT_INDEX].address();
+    if seat.trader == signer.to_bytes() {
+        if action_nonce != 0 {
+            return Err(StockStreamError::InvalidInstruction.into());
+        }
+        return Ok((seat, None));
+    }
+    if accounts.len() != V3_SESSION_ACCOUNT_INDEX + 1
+        || !accounts[V3_SESSION_ACCOUNT_INDEX].is_writable()
+    {
+        return Err(StockStreamError::InvalidTradingSession.into());
+    }
+    let auth = validate_v3_session_actor(
+        program_id,
+        core,
+        &accounts
+            [1 + (2 * V3_BOOK_PAGES_PER_SIDE)..1 + (2 * V3_BOOK_PAGES_PER_SIDE) + V3_SEAT_SHARDS],
+        &accounts[V3_SESSION_ACCOUNT_INDEX],
+        &accounts[V3_SIGNER_ACCOUNT_INDEX],
+        seat_index,
+        required_actions,
+        notional,
+        resulting_exposure,
+        action_nonce,
+        now,
+    )?;
+    Ok((seat, Some(auth)))
+}
+
+fn v3_trade_seat_shards(
+    seat_accounts: &[AccountView],
+    seat_index: u16,
+) -> Result<(TraderSeat, usize, usize), ProgramError> {
+    let index = seat_index as usize;
+    if index >= V3_SEAT_SHARDS * V3_SEATS_PER_SHARD || seat_accounts.len() != V3_SEAT_SHARDS {
+        return Err(StockStreamError::InvalidSeat.into());
+    }
+    let shard = index / V3_SEATS_PER_SHARD;
+    let slot = index % V3_SEATS_PER_SHARD;
+    let seat = read_shard_seat(unsafe { seat_accounts[shard].borrow_unchecked() }, slot)?;
+    if seat.occupancy != 1 || seat.trader == [0; 32] {
+        return Err(StockStreamError::InvalidSeat.into());
+    }
+    Ok((seat, shard, slot))
+}
+
+fn write_v3_seat_shards(
+    seat_accounts: &mut [AccountView],
+    shard: usize,
+    slot: usize,
+    seat: &TraderSeat,
+) -> ProgramResult {
+    let mut bytes = unsafe { seat_accounts[shard].borrow_unchecked_mut() };
+    write_shard_seat(&mut bytes, slot, seat)
+}
+
+fn adjust_v3_position(
+    seat: &mut TraderSeat,
+    side: Side,
+    quantity: u64,
+    price: u64,
+) -> ProgramResult {
+    let signed = if side == Side::Bid {
+        i128::try_from(quantity).map_err(|_| StockStreamError::ArithmeticOverflow)?
+    } else {
+        -i128::try_from(quantity).map_err(|_| StockStreamError::ArithmeticOverflow)?
+    };
+    let value = signed
+        .checked_mul(i128::try_from(price).map_err(|_| StockStreamError::ArithmeticOverflow)?)
+        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    seat.base_position = seat
+        .base_position
+        .checked_add(signed)
+        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    seat.quote_entry_value = seat
+        .quote_entry_value
+        .checked_sub(value)
+        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    Ok(())
+}
+
+fn settle_v3_fill(
+    seat_accounts: &mut [AccountView],
+    taker_seat_index: u16,
+    taker_side: Side,
+    fill: V3Fill,
+) -> ProgramResult {
+    if fill.maker_owner as usize >= V3_SEAT_SHARDS * V3_SEATS_PER_SHARD {
+        return Err(StockStreamError::InvalidSeat.into());
+    }
+    if fill.maker_owner == taker_seat_index as u32 {
+        return Err(StockStreamError::SelfTradeAborted.into());
+    }
+    let maker_index = fill.maker_owner as u16;
+    let (maker_before, maker_shard, maker_slot) = v3_trade_seat_shards(seat_accounts, maker_index)?;
+    let (taker_before, taker_shard, taker_slot) =
+        v3_trade_seat_shards(seat_accounts, taker_seat_index)?;
+    let maker_side = if taker_side == Side::Bid {
+        Side::Ask
+    } else {
+        Side::Bid
+    };
+    let notional = u128::from(fill.quantity)
+        .checked_mul(u128::from(fill.price))
+        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    let mut maker = maker_before;
+    let mut taker = taker_before;
+    adjust_v3_position(&mut maker, maker_side, fill.quantity, fill.price)?;
+    adjust_v3_position(&mut taker, taker_side, fill.quantity, fill.price)?;
+    let margin = i128::try_from(notional).map_err(|_| StockStreamError::ArithmeticOverflow)?;
+    maker.reserved_margin = maker.reserved_margin.saturating_sub(margin);
+    if fill.maker_remaining == 0 {
+        maker.open_order_count = maker.open_order_count.saturating_sub(1);
+    }
+    if maker_side == Side::Bid {
+        maker.open_bid_exposure = maker
+            .open_bid_exposure
+            .saturating_sub(i128::from(fill.quantity));
+    } else {
+        maker.open_ask_exposure = maker
+            .open_ask_exposure
+            .saturating_sub(i128::from(fill.quantity));
+    }
+    write_v3_seat_shards(seat_accounts, maker_shard, maker_slot, &maker)?;
+    write_v3_seat_shards(seat_accounts, taker_shard, taker_slot, &taker)
+}
+
+/// Executes a delegated V3 place order against the canonical 27-account
+/// bundle.  This path intentionally keeps token vaults and L1 custody out of
+/// the delegated cluster: collateral is reserved on the seat, while the
+/// vault remains an L1 account reconciled before withdrawal.
+pub fn place_order_v3(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    order: PlaceOrderData,
+) -> ProgramResult {
+    if accounts.len() < V3_SIGNER_ACCOUNT_INDEX + 1 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    let now = core_u64(
+        unsafe { accounts[0].borrow_unchecked() },
+        V3_CORE_ORACLE_TIMESTAMP_OFFSET,
+    )?;
+    let (seat_snapshot, _, _) = v3_trade_seat(accounts, order.seat_index)?;
+    let side = match order.side {
+        0 => Side::Bid,
+        1 => Side::Ask,
+        _ => return Err(StockStreamError::InvalidInstruction.into()),
+    };
+    let tree = match order.tree {
+        0 => TreeKind::Fixed,
+        1 => TreeKind::OraclePegged,
+        _ => return Err(StockStreamError::InvalidInstruction.into()),
+    };
+    if order.quantity == 0 || order.flags & !31 != 0 || order.expires_at <= now {
+        return Err(StockStreamError::InvalidInstruction.into());
+    }
+    let core_snapshot = unsafe { accounts[0].borrow_unchecked() };
+    let oracle = if core_snapshot[V3_CORE_ORACLE_VALID_OFFSET] != 0 {
+        Some(i64::from_le_bytes(
+            core_snapshot[V3_CORE_ORACLE_PRICE_OFFSET..V3_CORE_ORACLE_PRICE_OFFSET + 8]
+                .try_into()
+                .map_err(|_| bundle_error())?,
+        ))
+    } else {
+        None
+    };
+    let effective_price = match tree {
+        TreeKind::Fixed => order.price_or_offset,
+        TreeKind::OraclePegged => oracle
+            .ok_or(StockStreamError::OracleUnavailable)?
+            .checked_add(order.price_or_offset)
+            .ok_or(StockStreamError::ArithmeticOverflow)?,
+    };
+    if effective_price <= 0 {
+        return Err(StockStreamError::InvalidInstruction.into());
+    }
+    let notional = i128::from(order.quantity)
+        .checked_mul(i128::from(effective_price))
+        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    let signed = if side == Side::Bid {
+        i128::from(order.quantity)
+    } else {
+        -i128::from(order.quantity)
+    };
+    let resulting_exposure = seat_snapshot
+        .base_position
+        .checked_add(signed)
+        .ok_or(StockStreamError::ArithmeticOverflow)?
+        .unsigned_abs();
+    if resulting_exposure
+        .checked_mul(u128::from(effective_price as u64))
+        .ok_or(StockStreamError::ArithmeticOverflow)?
+        > u128::try_from(seat_snapshot.available_collateral.max(0))
+            .map_err(|_| StockStreamError::RiskViolation)?
+    {
+        return Err(StockStreamError::RiskViolation.into());
+    }
+    let (_, session) = validate_v3_trade_accounts(
+        program_id,
+        accounts,
+        order.seat_index,
+        if order.flags & 4 != 0 {
+            crate::session::SESSION_ACTION_PLACE | crate::session::SESSION_ACTION_REDUCE_ONLY_CLOSE
+        } else {
+            crate::session::SESSION_ACTION_PLACE
+        },
+        notional,
+        resulting_exposure,
+        order.action_nonce,
+        now,
+    )?;
+    let sequence = {
+        let bytes = unsafe { accounts[0].borrow_unchecked() };
+        core_u64(bytes, V3_CORE_GLOBAL_ORDER_SEQUENCE_OFFSET)?
+            .checked_add(1)
+            .ok_or(StockStreamError::ArithmeticOverflow)?
+    };
+    let input = OrderInput {
+        side,
+        tree,
+        owner: order.seat_index as u32,
+        price_or_offset: order.price_or_offset,
+        sequence,
+        quantity: order.quantity,
+        expires_at: order.expires_at,
+        peg_limit: order.peg_limit,
+        client_order_id: order.client_order_id,
+        time_in_force: if order.flags & 2 != 0 {
+            TimeInForce::ImmediateOrCancel
+        } else {
+            TimeInForce::GoodTilCancelled
+        },
+        post_only: order.flags & 1 != 0,
+        self_trade_behavior: SelfTradeBehavior::AbortTransaction,
+    };
+    let leaf = input.leaf().map_err(|_| bundle_error())?;
+    let (core_accounts, tail) = accounts.split_at_mut(1);
+    let (book_accounts, tail) = tail.split_at_mut(2 * V3_BOOK_PAGES_PER_SIDE);
+    let (seat_accounts, event_accounts) = tail.split_at_mut(V3_SEAT_SHARDS);
+    let (bid_pages, ask_pages) = book_accounts.split_at_mut(V3_BOOK_PAGES_PER_SIDE);
+    let mut bid_book = PagedBookV3::new(bid_pages)?;
+    let mut ask_book = PagedBookV3::new(ask_pages)?;
+    let opposite = if side == Side::Bid {
+        &mut ask_book
+    } else {
+        &mut bid_book
+    };
+    let mut remaining = order.quantity;
+    let plan = opposite.plan_crossing(tree, side, effective_price, remaining, oracle, now)?;
+    opposite.apply_match_plan(tree, &plan)?;
+    for fill in plan.fills[..plan.fill_count as usize].iter() {
+        settle_v3_fill(seat_accounts, order.seat_index, side, *fill)?;
+        remaining = remaining.saturating_sub(fill.quantity);
+    }
+    drop(bid_book);
+    drop(ask_book);
+    if remaining > 0 && order.flags & 2 == 0 {
+        let mut resting = leaf;
+        resting.quantity = remaining;
+        let reserve = i128::from(remaining)
+            .checked_mul(i128::from(effective_price))
+            .ok_or(StockStreamError::ArithmeticOverflow)?;
+        let (seat, shard, slot) = v3_trade_seat_shards(seat_accounts, order.seat_index)?;
+        if seat
+            .available_collateral
+            .checked_sub(seat.reserved_margin)
+            .ok_or(StockStreamError::RiskViolation)?
+            < reserve
+        {
+            return Err(StockStreamError::RiskViolation.into());
+        }
+        let mut updated = seat;
+        updated.reserved_margin = updated
+            .reserved_margin
+            .checked_add(reserve)
+            .ok_or(StockStreamError::ArithmeticOverflow)?;
+        updated.open_order_count = updated
+            .open_order_count
+            .checked_add(1)
+            .ok_or(StockStreamError::ArithmeticOverflow)?;
+        if side == Side::Bid {
+            updated.open_bid_exposure = updated
+                .open_bid_exposure
+                .checked_add(i128::from(remaining))
+                .ok_or(StockStreamError::ArithmeticOverflow)?;
+        } else {
+            updated.open_ask_exposure = updated
+                .open_ask_exposure
+                .checked_add(i128::from(remaining))
+                .ok_or(StockStreamError::ArithmeticOverflow)?;
+        }
+        write_v3_seat_shards(seat_accounts, shard, slot, &updated)?;
+        if side == Side::Bid {
+            let (bid_pages, _) = book_accounts.split_at_mut(V3_BOOK_PAGES_PER_SIDE);
+            PagedBookV3::new(bid_pages)?.insert_resting_order(tree, resting)?;
+        } else {
+            let (_, ask_pages) = book_accounts.split_at_mut(V3_BOOK_PAGES_PER_SIDE);
+            PagedBookV3::new(ask_pages)?.insert_resting_order(tree, resting)?;
+        }
+    }
+    {
+        let core = unsafe { core_accounts[0].borrow_unchecked_mut() };
+        set_core_u64(core, V3_CORE_GLOBAL_ORDER_SEQUENCE_OFFSET, sequence)?;
+    }
+    let payload = crate::events::payload_order(
+        order.seat_index,
+        leaf.key,
+        order.side,
+        effective_price,
+        order.quantity,
+    );
+    append_event_record(
+        program_id,
+        &mut core_accounts[0],
+        &mut event_accounts[..V3_EVENT_SHARDS],
+        crate::events::EventKind::OrderPlaced as u16,
+        &payload,
+        crate::handlers::event_timestamp(),
+    )?;
+    for fill in plan.fills[..plan.fill_count as usize].iter() {
+        let payload = crate::events::payload_fill(
+            fill.maker_owner,
+            order.seat_index as u32,
+            i64::try_from(fill.price).map_err(|_| StockStreamError::ArithmeticOverflow)?,
+            fill.quantity,
+            sequence,
+        );
+        append_event_record(
+            program_id,
+            &mut core_accounts[0],
+            &mut event_accounts[..V3_EVENT_SHARDS],
+            if fill.maker_remaining == 0 {
+                crate::events::EventKind::OrderFilled as u16
+            } else {
+                crate::events::EventKind::OrderPartiallyFilled as u16
+            },
+            &payload,
+            crate::handlers::event_timestamp(),
+        )?;
+    }
+    if let Some(auth) = session {
+        crate::handlers::consume_session_action(
+            &mut accounts[V3_SESSION_ACCOUNT_INDEX],
+            auth.session,
+            notional,
+            order.action_nonce,
+            now,
+        )?;
+    }
+    Ok(())
+}
+
+/// Cancels one V3 order by searching both canonical roots.  The owner is
+/// always the seat encoded in the order leaf; a session signer can authorize
+/// the action but cannot redirect cancellation to another seat.
+pub fn cancel_order_v3(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    seat_index: u16,
+    order_key: u128,
+    action_nonce: u64,
+) -> ProgramResult {
+    let now = core_u64(
+        unsafe { accounts[0].borrow_unchecked() },
+        V3_CORE_ORACLE_TIMESTAMP_OFFSET,
+    )?;
+    let (seat_snapshot, _, _) = v3_trade_seat(accounts, seat_index)?;
+    let (_, session) = validate_v3_trade_accounts(
+        program_id,
+        accounts,
+        seat_index,
+        crate::session::SESSION_ACTION_CANCEL,
+        0,
+        seat_snapshot.base_position.unsigned_abs(),
+        action_nonce,
+        now,
+    )?;
+    let (core_accounts, tail) = accounts.split_at_mut(1);
+    let (book_accounts, tail) = tail.split_at_mut(2 * V3_BOOK_PAGES_PER_SIDE);
+    let (seat_accounts, event_accounts) = tail.split_at_mut(V3_SEAT_SHARDS);
+    let (bid_pages, ask_pages) = book_accounts.split_at_mut(V3_BOOK_PAGES_PER_SIDE);
+    let mut removed: Option<(TreeKind, LeafNode)> = None;
+    {
+        let mut bid = PagedBookV3::new(bid_pages)?;
+        if let Ok(handle) = bid.find(TreeKind::Fixed, order_key) {
+            if bid.leaf(handle)?.owner == seat_index as u32 {
+                removed = Some((
+                    TreeKind::Fixed,
+                    bid.cancel_owned_order(TreeKind::Fixed, order_key, seat_index as u32)?,
+                ));
+            }
+        }
+    }
+    if removed.is_none() {
+        let mut ask = PagedBookV3::new(ask_pages)?;
+        if let Ok(handle) = ask.find(TreeKind::Fixed, order_key) {
+            if ask.leaf(handle)?.owner == seat_index as u32 {
+                removed = Some((
+                    TreeKind::Fixed,
+                    ask.cancel_owned_order(TreeKind::Fixed, order_key, seat_index as u32)?,
+                ));
+            }
+        }
+        if removed.is_none() {
+            if let Ok(handle) = ask.find(TreeKind::OraclePegged, order_key) {
+                if ask.leaf(handle)?.owner == seat_index as u32 {
+                    removed = Some((
+                        TreeKind::OraclePegged,
+                        ask.cancel_owned_order(
+                            TreeKind::OraclePegged,
+                            order_key,
+                            seat_index as u32,
+                        )?,
+                    ));
+                }
+            }
+        }
+    }
+    if removed.is_none() {
+        let mut bid = PagedBookV3::new(bid_pages)?;
+        if let Ok(handle) = bid.find(TreeKind::OraclePegged, order_key) {
+            if bid.leaf(handle)?.owner == seat_index as u32 {
+                removed = Some((
+                    TreeKind::OraclePegged,
+                    bid.cancel_owned_order(TreeKind::OraclePegged, order_key, seat_index as u32)?,
+                ));
+            }
+        }
+    }
+    let (tree, leaf) = removed.ok_or(StockStreamError::InvalidInstruction)?;
+    let oracle = {
+        let core = unsafe { core_accounts[0].borrow_unchecked() };
+        if core[V3_CORE_ORACLE_VALID_OFFSET] == 0 {
+            None
+        } else {
+            Some(i64::from_le_bytes(
+                core[V3_CORE_ORACLE_PRICE_OFFSET..V3_CORE_ORACLE_PRICE_OFFSET + 8]
+                    .try_into()
+                    .map_err(|_| bundle_error())?,
+            ))
+        }
+    };
+    let reserve_price = match tree {
+        TreeKind::Fixed => leaf.price_or_offset,
+        TreeKind::OraclePegged => oracle
+            .ok_or(StockStreamError::OracleUnavailable)?
+            .checked_add(leaf.price_or_offset)
+            .ok_or(StockStreamError::ArithmeticOverflow)?,
+    };
+    if reserve_price <= 0 {
+        return Err(StockStreamError::InvalidInstruction.into());
+    }
+    let reserve = i128::from(leaf.quantity)
+        .checked_mul(i128::from(reserve_price))
+        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    let (seat, shard, slot) = v3_trade_seat_shards(seat_accounts, seat_index)?;
+    let mut updated = seat;
+    updated.reserved_margin = updated.reserved_margin.saturating_sub(reserve);
+    updated.open_order_count = updated.open_order_count.saturating_sub(1);
+    if leaf.side == Side::Bid as u8 {
+        updated.open_bid_exposure = updated
+            .open_bid_exposure
+            .saturating_sub(i128::from(leaf.quantity));
+    } else {
+        updated.open_ask_exposure = updated
+            .open_ask_exposure
+            .saturating_sub(i128::from(leaf.quantity));
+    }
+    write_v3_seat_shards(seat_accounts, shard, slot, &updated)?;
+    let payload = crate::events::payload_order(
+        seat_index,
+        leaf.key,
+        leaf.side,
+        leaf.price_or_offset,
+        leaf.quantity,
+    );
+    append_event_record(
+        program_id,
+        &mut core_accounts[0],
+        &mut event_accounts[..V3_EVENT_SHARDS],
+        crate::events::EventKind::OrderCancelled as u16,
+        &payload,
+        crate::handlers::event_timestamp(),
+    )?;
+    if let Some(auth) = session {
+        crate::handlers::consume_session_action(
+            &mut accounts[V3_SESSION_ACCOUNT_INDEX],
+            auth.session,
+            0,
+            action_nonce,
+            now,
+        )?;
+    }
+    Ok(())
+}
+
+/// Cancels up to `max_cancellations` owner orders.  It scans the bounded
+/// global handle space, so the operation is deterministic and cannot be
+/// steered toward a caller-selected page.
+pub fn cancel_all_v3(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    seat_index: u16,
+    max_cancellations: u8,
+    action_nonce: u64,
+) -> ProgramResult {
+    if max_cancellations == 0 {
+        return Err(StockStreamError::InvalidInstruction.into());
+    }
+    let now = core_u64(
+        unsafe { accounts[0].borrow_unchecked() },
+        V3_CORE_ORACLE_TIMESTAMP_OFFSET,
+    )?;
+    let (seat_snapshot, _, _) = v3_trade_seat(accounts, seat_index)?;
+    let (_, session) = validate_v3_trade_accounts(
+        program_id,
+        accounts,
+        seat_index,
+        crate::session::SESSION_ACTION_CANCEL_ALL,
+        0,
+        seat_snapshot.base_position.unsigned_abs(),
+        action_nonce,
+        now,
+    )?;
+    let mut cancelled = 0u8;
+    while cancelled < max_cancellations {
+        let mut found = None;
+        for side in 0..2usize {
+            let mut pages: [AccountView; V3_BOOK_PAGES_PER_SIDE] = core::array::from_fn(|page| {
+                accounts[1 + side * V3_BOOK_PAGES_PER_SIDE + page].clone()
+            });
+            let mut book = PagedBookV3::new(&mut pages)?;
+            for tree in [TreeKind::Fixed, TreeKind::OraclePegged] {
+                for handle in 0..V3_BOOK_SLOTS_PER_SIDE as u32 {
+                    if book.node_tag(handle).ok() != Some(TAG_LEAF) {
+                        continue;
+                    }
+                    let leaf = book.leaf(handle)?;
+                    if leaf.owner == seat_index as u32
+                        && book.find(tree, leaf.key).ok() == Some(handle)
+                    {
+                        found = Some((side, tree, leaf.key));
+                        break;
+                    }
+                }
+                if found.is_some() {
+                    break;
+                }
+            }
+            if found.is_some() {
+                break;
+            }
+        }
+        let Some((side, tree, key)) = found else {
+            break;
+        };
+        let (core_accounts, tail) = accounts.split_at_mut(1);
+        let (book_accounts, tail) = tail.split_at_mut(2 * V3_BOOK_PAGES_PER_SIDE);
+        let (seat_accounts, event_accounts) = tail.split_at_mut(V3_SEAT_SHARDS);
+        let pages = if side == 0 {
+            &mut book_accounts[..V3_BOOK_PAGES_PER_SIDE]
+        } else {
+            &mut book_accounts[V3_BOOK_PAGES_PER_SIDE..]
+        };
+        let leaf = PagedBookV3::new(pages)?.cancel_owned_order(tree, key, seat_index as u32)?;
+        let (seat, shard, slot) = v3_trade_seat_shards(seat_accounts, seat_index)?;
+        let mut updated = seat;
+        updated.reserved_margin = updated.reserved_margin.saturating_sub(
+            i128::from(leaf.quantity) * i128::from(leaf.price_or_offset.unsigned_abs()),
+        );
+        updated.open_order_count = updated.open_order_count.saturating_sub(1);
+        write_v3_seat_shards(seat_accounts, shard, slot, &updated)?;
+        let payload = crate::events::payload_order(
+            seat_index,
+            leaf.key,
+            leaf.side,
+            leaf.price_or_offset,
+            leaf.quantity,
+        );
+        append_event_record(
+            program_id,
+            &mut core_accounts[0],
+            &mut event_accounts[..V3_EVENT_SHARDS],
+            crate::events::EventKind::OrderCancelled as u16,
+            &payload,
+            crate::handlers::event_timestamp(),
+        )?;
+        cancelled = cancelled.saturating_add(1);
+    }
+    if let Some(auth) = session {
+        crate::handlers::consume_session_action(
+            &mut accounts[V3_SESSION_ACCOUNT_INDEX],
+            auth.session,
+            0,
+            action_nonce,
+            now,
+        )?;
+    }
+    Ok(())
+}
+
+/// Replaces an order atomically for the seat owner.  Session-authorized
+/// replacement remains explicitly rejected until the single-action nonce
+/// transition is wired through the combined cancel/insert transaction; it
+/// must not consume two nonces as two independent actions.
+pub fn replace_order_v3(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    old_order_key: u128,
+    new_order: PlaceOrderData,
+) -> ProgramResult {
+    if accounts.len() > V3_SESSION_ACCOUNT_INDEX + 1 {
+        return Err(StockStreamError::InvalidTradingSession.into());
+    }
+    if new_order.action_nonce != 0 {
+        return Err(StockStreamError::InvalidTradingSession.into());
+    }
+    cancel_order_v3(program_id, accounts, new_order.seat_index, old_order_key, 0)?;
+    place_order_v3(program_id, accounts, new_order)
 }
 
 #[cfg(test)]

@@ -65,6 +65,14 @@ export type V3AccountKind = "core" | "book-page" | "seat-shard" | "event-shard";
 export interface V3InitializationAccounts { exchange: AddressInput; instrument: AddressInput; core: AddressInput; authority: AddressInput; }
 export interface V3DelegationAccounts extends V3CreationAccounts { authority: AddressInput; }
 export interface V3SeatAccounts { core: AddressInput; seatShards: readonly AddressInput[]; eventShards: readonly AddressInput[]; trader: AddressInput; }
+export interface V3ExecutionAccounts {
+  core: AddressInput;
+  bookPages: readonly AddressInput[];
+  seatShards: readonly AddressInput[];
+  eventShards: readonly AddressInput[];
+  authority: AddressInput;
+  session?: AddressInput;
+}
 
 function publicKey(value: AddressInput): PublicKey {
   if (value instanceof PublicKey) return value;
@@ -100,6 +108,20 @@ function accountMeta(address: AddressInput, isSigner: boolean, isWritable: boole
 
 function instruction(data: Uint8Array, accounts: AccountMeta[]): TransactionInstruction {
   return new TransactionInstruction({ programId: STOCKSTREAM_PROGRAM_KEY, keys: accounts, data: Buffer.from(data) });
+}
+
+function v3ExecutionMetas(accounts: V3ExecutionAccounts): AccountMeta[] {
+  if (accounts.bookPages.length !== 2 * V3_BOOK_PAGES_PER_SIDE
+      || accounts.seatShards.length !== 4 || accounts.eventShards.length !== 4) {
+    throw new RangeError("V3 execution requires 18 book pages, 4 seat shards and 4 event shards");
+  }
+  const metas = [accountMeta(accounts.core, false, true),
+    ...accounts.bookPages.map((address) => accountMeta(address, false, true)),
+    ...accounts.seatShards.map((address) => accountMeta(address, false, true)),
+    ...accounts.eventShards.map((address) => accountMeta(address, false, true)),
+    accountMeta(accounts.authority, true, false)];
+  if (accounts.session) metas.push(accountMeta(accounts.session, false, true));
+  return metas;
 }
 
 export function initializeMarket(accounts: InstructionAccounts): TransactionInstruction {
@@ -144,6 +166,28 @@ export function placeOrder(params: PlaceOrderParams): TransactionInstruction {
   return instruction(data, accounts);
 }
 
+/** Builds the same PlaceOrder wire bytes against the canonical V3 execution
+ * bundle. The V3 account order is core, 18 pages, 4 seat shards, 4 event
+ * shards, signer, optional session; no V2 settlement scratch is accepted. */
+export function placeOrderV3(params: Omit<PlaceOrderParams, "market" | "authority" | "settlementScratch"> & V3ExecutionAccounts): TransactionInstruction {
+  const data = new Uint8Array(54);
+  data[0] = STOCKSTREAM_INSTRUCTION.placeOrder;
+  data[1] = params.side === "bid" ? 0 : params.side === "ask" ? 1 : 255;
+  data[2] = (params.tree ?? "fixed") === "fixed" ? 0 : 1;
+  data[3] = (params.postOnly ? 1 : 0) | (params.immediateOrCancel ? 2 : 0) | (params.reduceOnly ? 4 : 0);
+  if (data[1] > 1) throw new RangeError("Invalid order side");
+  writeUnsigned(data, 4, checkedUnsigned(params.seatIndex, 16, "seatIndex"), 2);
+  writeUnsigned(data, 6, checkedUnsigned(params.quantity, 64, "quantity"), 8);
+  writeSigned(data, 14, checkedSigned(params.priceOrOffset, 64, "priceOrOffset"), 8);
+  writeUnsigned(data, 22, checkedUnsigned(params.expiresAt ?? 0, 64, "expiresAt"), 8);
+  writeSigned(data, 30, checkedSigned(params.pegLimit ?? 0, 64, "pegLimit"), 8);
+  writeUnsigned(data, 38, checkedUnsigned(params.clientOrderId, 64, "clientOrderId"), 8);
+  const actionNonce = params.actionNonce ?? 0;
+  if (!params.session && actionNonce !== 0) throw new RangeError("Main-wallet actions must use actionNonce zero");
+  writeUnsigned(data, 46, checkedUnsigned(actionNonce, 64, "actionNonce"), 8);
+  return instruction(data, v3ExecutionMetas(params));
+}
+
 /**
  * Atomically cancels `oldOrderKey` and places a new order in its place. The
  * new order always receives a fresh sequence number, so a replacement
@@ -174,16 +218,53 @@ export function replaceOrder(params: PlaceOrderParams & { oldOrderKey: bigint })
   return instruction(data, accounts);
 }
 
+export function replaceOrderV3(params: Omit<PlaceOrderParams, "market" | "authority" | "settlementScratch"> & V3ExecutionAccounts & { oldOrderKey: bigint }): TransactionInstruction {
+  const data = new Uint8Array(70); data[0] = STOCKSTREAM_INSTRUCTION.replaceOrder;
+  writeUnsigned(data, 1, checkedUnsigned(params.oldOrderKey, 128, "oldOrderKey"), 16);
+  data[17] = params.side === "bid" ? 0 : params.side === "ask" ? 1 : 255;
+  data[18] = (params.tree ?? "fixed") === "fixed" ? 0 : 1;
+  data[19] = (params.postOnly ? 1 : 0) | (params.immediateOrCancel ? 2 : 0) | (params.reduceOnly ? 4 : 0);
+  if (data[17] > 1) throw new RangeError("Invalid order side");
+  writeUnsigned(data, 20, checkedUnsigned(params.seatIndex, 16, "seatIndex"), 2);
+  writeUnsigned(data, 22, checkedUnsigned(params.quantity, 64, "quantity"), 8);
+  writeSigned(data, 30, checkedSigned(params.priceOrOffset, 64, "priceOrOffset"), 8);
+  writeUnsigned(data, 38, checkedUnsigned(params.expiresAt ?? 0, 64, "expiresAt"), 8);
+  writeSigned(data, 46, checkedSigned(params.pegLimit ?? 0, 64, "pegLimit"), 8);
+  writeUnsigned(data, 54, checkedUnsigned(params.clientOrderId, 64, "clientOrderId"), 8);
+  const actionNonce = params.actionNonce ?? 0;
+  if (actionNonce !== 0) throw new RangeError("V3 replacement currently requires a main-wallet action");
+  writeUnsigned(data, 62, 0n, 8);
+  return instruction(data, v3ExecutionMetas(params));
+}
+
 export function cancelOrder(accounts: SessionAuthorizedAccounts, seatIndex: number, orderKey: bigint, actionNonce: bigint | number = 0): TransactionInstruction {
   if (!accounts.session && actionNonce !== 0) throw new RangeError("Main-wallet actions must use actionNonce zero");
   const data = new Uint8Array(27); data[0] = STOCKSTREAM_INSTRUCTION.cancelOrder; writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2); writeUnsigned(data, 3, checkedUnsigned(orderKey, 128, "orderKey"), 16); writeUnsigned(data, 19, checkedUnsigned(actionNonce, 64, "actionNonce"), 8);
   const metas = [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]; if (accounts.session) metas.push(accountMeta(accounts.session, false, true)); return instruction(data, metas);
 }
 
+export function cancelOrderV3(accounts: V3ExecutionAccounts, seatIndex: number, orderKey: bigint, actionNonce: bigint | number = 0): TransactionInstruction {
+  if (!accounts.session && actionNonce !== 0) throw new RangeError("Main-wallet actions must use actionNonce zero");
+  const data = new Uint8Array(27); data[0] = STOCKSTREAM_INSTRUCTION.cancelOrder;
+  writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2);
+  writeUnsigned(data, 3, checkedUnsigned(orderKey, 128, "orderKey"), 16);
+  writeUnsigned(data, 19, checkedUnsigned(actionNonce, 64, "actionNonce"), 8);
+  return instruction(data, v3ExecutionMetas(accounts));
+}
+
 export function cancelAll(accounts: SessionAuthorizedAccounts, seatIndex: number, maxCancellations: number, actionNonce: bigint | number = 0): TransactionInstruction {
   if (!accounts.session && actionNonce !== 0) throw new RangeError("Main-wallet actions must use actionNonce zero");
   const data = new Uint8Array(12); data[0] = STOCKSTREAM_INSTRUCTION.cancelAll; writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2); data[3] = Number(checkedUnsigned(maxCancellations, 8, "maxCancellations")); writeUnsigned(data, 4, checkedUnsigned(actionNonce, 64, "actionNonce"), 8);
   const metas = [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]; if (accounts.session) metas.push(accountMeta(accounts.session, false, true)); return instruction(data, metas);
+}
+
+export function cancelAllV3(accounts: V3ExecutionAccounts, seatIndex: number, maxCancellations: number, actionNonce: bigint | number = 0): TransactionInstruction {
+  if (!accounts.session && actionNonce !== 0) throw new RangeError("Main-wallet actions must use actionNonce zero");
+  const data = new Uint8Array(12); data[0] = STOCKSTREAM_INSTRUCTION.cancelAll;
+  writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2);
+  data[3] = Number(checkedUnsigned(maxCancellations, 8, "maxCancellations"));
+  writeUnsigned(data, 4, checkedUnsigned(actionNonce, 64, "actionNonce"), 8);
+  return instruction(data, v3ExecutionMetas(accounts));
 }
 
 export function updateFunding(accounts: InstructionAccounts, accumulator: bigint, timestamp: bigint | number): TransactionInstruction {

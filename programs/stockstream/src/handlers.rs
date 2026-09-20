@@ -259,7 +259,7 @@ fn authorize_trading_actor(
 /// Must only be called after the complete trading action has already
 /// succeeded; on any earlier failure the whole instruction is rejected by
 /// the runtime and this is never reached, so the session is left untouched.
-fn consume_session_action(
+pub(crate) fn consume_session_action(
     session_account: &mut AccountView,
     mut trading_session: TradingSession,
     notional: i128,
@@ -2207,22 +2207,14 @@ fn close_seat(program_id: &Address, accounts: &mut [AccountView], index: usize) 
 }
 
 #[inline(never)]
-fn reject_v3_execution_bundle(program_id: &Address, accounts: &[AccountView]) -> ProgramResult {
-    // V3 uses a complete, canonical 27-account execution bundle.  Until the
-    // V3 settlement handlers are wired, fail closed instead of letting a V3
-    // core fall through to the V2 monolith path (which would reinterpret the
-    // first account as a legacy market and could mutate the wrong state).
-    if accounts.len() >= crate::v3::V3_EXECUTION_BUNDLE_LEN
+fn is_v3_execution_bundle(program_id: &Address, accounts: &[AccountView]) -> bool {
+    accounts.len() >= crate::v3::V3_EXECUTION_BUNDLE_LEN
         && crate::v3::validate_execution_bundle(
             program_id,
             &accounts[..crate::v3::V3_EXECUTION_BUNDLE_LEN],
             true,
         )
         .is_ok()
-    {
-        return Err(custom(StockStreamError::InvalidInstruction));
-    }
-    Ok(())
 }
 
 #[inline(never)]
@@ -2231,7 +2223,9 @@ fn place_order(
     accounts: &mut [AccountView],
     order: PlaceOrderData,
 ) -> ProgramResult {
-    reject_v3_execution_bundle(program_id, accounts)?;
+    if is_v3_execution_bundle(program_id, accounts) {
+        return crate::v3::place_order_v3(program_id, accounts, order);
+    }
     if accounts.len() < 3 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
@@ -2667,7 +2661,9 @@ fn replace_order(
     old_order_key: u128,
     order: PlaceOrderData,
 ) -> ProgramResult {
-    reject_v3_execution_bundle(program_id, accounts)?;
+    if is_v3_execution_bundle(program_id, accounts) {
+        return crate::v3::replace_order_v3(program_id, accounts, old_order_key, order);
+    }
     if accounts.len() < 3 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
@@ -3216,7 +3212,15 @@ fn cancel_order(
     order_key: u128,
     action_nonce: u64,
 ) -> ProgramResult {
-    reject_v3_execution_bundle(program_id, accounts)?;
+    if is_v3_execution_bundle(program_id, accounts) {
+        return crate::v3::cancel_order_v3(
+            program_id,
+            accounts,
+            seat_index as u16,
+            order_key,
+            action_nonce,
+        );
+    }
     if accounts.len() < 2 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
@@ -3513,7 +3517,15 @@ fn cancel_all(
     max: u8,
     action_nonce: u64,
 ) -> ProgramResult {
-    reject_v3_execution_bundle(program_id, accounts)?;
+    if is_v3_execution_bundle(program_id, accounts) {
+        return crate::v3::cancel_all_v3(
+            program_id,
+            accounts,
+            seat_index as u16,
+            max,
+            action_nonce,
+        );
+    }
     if accounts.len() < 2 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }

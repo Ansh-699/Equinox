@@ -1,7 +1,7 @@
 import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { expect, test } from "vitest";
 import { STOCKSTREAM_PROGRAM_ID } from "./constants";
-import { MAGICBLOCK_DELEGATION_PROGRAM_ID, MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID, STOCKSTREAM_PROGRAM_KEY } from "./index";
+import { MAGICBLOCK_DELEGATION_PROGRAM_ID, MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID, STOCKSTREAM_PROGRAM_KEY, cancelAllV3, cancelOrderV3, placeOrderV3, replaceOrderV3 } from "./index";
 import { authorizeTradingSession, cancelOrder, closeV3TraderSeat, commitMarket, delegateClusterMember, delegateV3Account, deriveClusterMemberPdas, createPerpMarket, createV3Account, createV3TraderSeat, decodeFillPayload, decodeInstruction, decodeMarketState, decodeSeatAmountPayload, decodeStockStreamEvent, delegateMarket, deriveTradingSession, depositCollateral, EVENT_SIZE, initializeExchange, initializeMarket, initializeV3Market, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateExchangeConfig, updateStockInstrument, withdrawCollateral, withdrawInsuranceFunds, withdrawProtocolFees, EXCHANGE_CONFIG_FIELD } from "./index";
 import { STOCKSTREAM_ACCOUNT_SIZE } from "./constants";
 import { deriveBookPageV3, deriveEventShardV3, deriveMarketCoreV3, deriveSeatShardV3 } from "./abi/v3";
@@ -92,6 +92,21 @@ test("place order serializes little-endian fields and decodes", () => {
   expect(ix.data.length).toBe(54);
   expect(Array.from(ix.data.slice(0, 4))).toEqual([3, 0, 0, 4]);
   expect(decodeInstruction(ix.data).name).toBe("PlaceOrder");
+});
+
+test("V3 trading constructors use the complete 27-account bundle", () => {
+  const core = PublicKey.unique();
+  const bookPages = Array.from({ length: 18 }, () => PublicKey.unique());
+  const seatShards = Array.from({ length: 4 }, () => PublicKey.unique());
+  const eventShards = Array.from({ length: 4 }, () => PublicKey.unique());
+  const v3 = { core, bookPages, seatShards, eventShards, authority };
+  const place = placeOrderV3({ ...v3, seatIndex: 0, side: "bid", quantity: 1n, priceOrOffset: 10n, clientOrderId: 1n });
+  expect(place.keys).toHaveLength(28);
+  expect(place.keys.slice(0, 27).every(({ isWritable }) => isWritable)).toBe(true);
+  expect(place.keys[27]).toEqual({ pubkey: authority, isSigner: true, isWritable: false });
+  expect(cancelOrderV3(v3, 0, 1n).keys).toHaveLength(28);
+  expect(cancelAllV3(v3, 0, 2).keys).toHaveLength(28);
+  expect(replaceOrderV3({ ...v3, oldOrderKey: 1n, seatIndex: 0, side: "bid", quantity: 1n, priceOrOffset: 10n, clientOrderId: 2n }).keys).toHaveLength(28);
 });
 
 test("cancel order encodes a full 128-bit key", () => {
