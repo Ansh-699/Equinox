@@ -1,0 +1,22 @@
+{
+  "asOf": "2026-09-21",
+  "command": "NO_DNA=1 node scripts/v3-live-account-audit.mjs",
+  "readOnly": true,
+  "program": "H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET",
+  "core": "47Mx7SZvt7EY6NydsA5krgrqvcDDR1H5BG5xTPDSnhso",
+  "accountCount": 27,
+  "l1Slot": 501589893,
+  "erSlot": 598337375,
+  "delegatedCount": 1,
+  "delegatedAccounts": [
+    "47Mx7SZvt7EY6NydsA5krgrqvcDDR1H5BG5xTPDSnhso"
+  ],
+  "sizes": {
+    "core": 4096,
+    "bookPages": 10184,
+    "seatShards": 8236,
+    "eventShards": 3244
+  },
+  "childOwner": "H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET",
+  "safety": "No transaction or checkpoint mutation was performed."
+}
