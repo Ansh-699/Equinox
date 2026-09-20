@@ -1,9 +1,9 @@
 /**
  * Open-orders data boundary. Order keys, prices, quantities, and owners
- * live in the book's PATRICIA-tree arenas (docs/orderbook.md), and there
- * The V3 Worker aggregate exposes the versioned page layout and Patricia tree
- * identity. This module keeps the UI independent of transport details and
- * still fails closed whenever the aggregate is absent or a node is malformed.
+ * live in the book's PATRICIA-tree arenas (docs/orderbook.md). The V3 Worker
+ * aggregate exposes the versioned page layout and Patricia tree identity.
+ * This module keeps the UI independent of transport details and still fails
+ * closed whenever the aggregate is absent or a node is malformed.
  */
 
 export interface OpenOrderView {
@@ -29,7 +29,8 @@ export interface OpenOrdersAdapter {
 export const OPEN_ORDERS_UNAVAILABLE_REASON =
   "Open orders require a complete V3 shard aggregate; the authoritative market state is currently unavailable.";
 
-/** Legacy/V2 fallback. It never decodes bytes from the monolithic market. */
+/** Explicit V2/unknown-version fallback. It never decodes bytes from the
+ * monolithic market; configured V3 flows use createV3OpenOrdersAdapter below. */
 export const unimplementedOpenOrdersAdapter: OpenOrdersAdapter = {
   async fetchOpenOrders() {
     return { status: "unavailable", reason: OPEN_ORDERS_UNAVAILABLE_REASON };
