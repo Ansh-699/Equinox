@@ -8,8 +8,10 @@
     "signature": "4La3hXgViTtJ3uFrnRHZXmdwbGyDWitQXJj4Czfg2T69hqXBg1wiHQZtcfsLAyhR9DtFjU5htt9ZXN7cTk2xc9MS",
     "slot": 501407453,
     "upgradeAuthority": "none",
-    "elfLength": 451024,
-    "sha256": "24ee8e881c9909fb56b89571756f01e080e4c64758a8a2af176f98adc97a4bc7"
+    "elfLength": 441856,
+    "programDataPayloadLength": 451024,
+    "programDataPayloadSha256": "24ee8e881c9909fb56b89571756f01e080e4c64758a8a2af176f98adc97a4bc7",
+    "sha256": "034b3088eeaf682c5c4618a2b704706eae177cd128d07a74f8365682bf15c0aa"
   },
   "deployedDlp": {
     "program": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh",

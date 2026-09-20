@@ -18,8 +18,10 @@
     "owner": "BPFLoaderUpgradeab1e11111111111111111111111",
     "upgradeAuthority": "none",
     "lastDeployedSlot": 501407453,
-    "elfLength": 451024,
-    "sha256": "24ee8e881c9909fb56b89571756f01e080e4c64758a8a2af176f98adc97a4bc7"
+    "elfLength": 441856,
+    "sha256": "034b3088eeaf682c5c4618a2b704706eae177cd128d07a74f8365682bf15c0aa",
+    "programDataPayloadLength": 451024,
+    "programDataPayloadSha256": "24ee8e881c9909fb56b89571756f01e080e4c64758a8a2af176f98adc97a4bc7"
   },
   "commands": [
     "solana program show --url https://api.devnet.solana.com H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET",

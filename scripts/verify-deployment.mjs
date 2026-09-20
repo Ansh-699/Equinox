@@ -34,6 +34,13 @@ const { createHash } = await import("node:crypto");
 const deployedSha = createHash("sha256").update(deployed).digest("hex");
 const localSha = createHash("sha256").digest ? createHash("sha256").update(local).digest("hex") : "";
 
+const authorityTag = programData.data[12];
+const upgradeAuthority = authorityTag === 0
+  ? null
+  : authorityTag === 1
+    ? new PublicKey(programData.data.subarray(13, 45)).toBase58()
+    : `invalid-option-tag:${authorityTag}`;
+
 const report = {
   checkedAt: new Date().toISOString(),
   programId: PROGRAM_ID.toBase58(),
@@ -41,9 +48,9 @@ const report = {
   ownerOk: program.owner.equals(OWNER),
   programDataAddress: "GCLwk9aFz8cz4etHv4cibqSwaKBa2ubQUgPRhRiHqTP2",
   programDataOwnerOk: programData.owner.equals(OWNER),
-  // programdata header: 4-byte variant + 8-byte deploy slot + 1-byte
-  // Option<authority> tag = 13-byte prefix, then the 32-byte authority.
-  upgradeAuthority: new PublicKey(programData.data.subarray(13, 45)).toBase58(),
+  // ProgramData header: 4-byte variant + 8-byte deploy slot + 1-byte
+  // Option<authority> tag, followed by the key only when the tag is Some.
+  upgradeAuthority,
   deployedElfLen: elfLen,
   localElfLen: local.length,
   deployedSha256: createHash("sha256").update(deployed).digest("hex"),
