@@ -1,6 +1,6 @@
 # StockStream evidence matrix
 
-This matrix is scoped to current HEAD `23edb3d4b21b349ee7654170a06e936e23b26f21` (post-V3-cancellation-atomicity fix). “Fresh” means rerun on this checkout; live claims additionally require the cited Devnet artifact. The full local gate is `VERIFY_SUMMARY_PATH=/tmp/stockstream-verify-summary-20260921-current.json NO_DNA=1 bash scripts/verify.sh` and the checked-in summary is `verify-latest.json`.
+This matrix is scoped to current HEAD `0b31be4` (post-V3-cancellation-atomicity and funding-settlement fixes). “Fresh” means rerun on this checkout; live claims additionally require the cited Devnet artifact. The full local gate is `VERIFY_SUMMARY_PATH=/tmp/stockstream-verify-summary-20260921-funding.json NO_DNA=1 bash scripts/verify.sh` and the checked-in summary is `verify-latest.json`.
 
 | Subsystem | Classification | Source and exact evidence | Fresh on current HEAD |
 |---|---|---|---|
@@ -17,7 +17,7 @@ This matrix is scoped to current HEAD `23edb3d4b21b349ee7654170a06e936e23b26f21`
 | V3 fill accounting | locally-tested | `programs/stockstream/src/risk.rs`, `programs/stockstream/src/v3.rs`; `cargo test -p stockstream --tests` | yes |
 | V3 PnL accounting | locally-tested | `programs/stockstream/src/risk.rs`; `cargo test -p stockstream --test state_risk repeated_partial_closes_preserve_fractional_entry_value` verifies proportional entry allocation across repeated partial closes | yes |
 | V3 fee accounting | locally-tested | `programs/stockstream/src/v3.rs`; `cargo test -p stockstream --test v3_bundle` | yes |
-| V3 funding accounting | locally-tested | `programs/stockstream/src/risk.rs`, `programs/stockstream/src/v3.rs`; `cargo test -p stockstream --test v3_bundle` | yes |
+| V3 funding accounting | locally-tested | `programs/stockstream/src/risk.rs`, `programs/stockstream/src/v3.rs`; `cargo test -p stockstream --test v3_bundle` verifies funding-aware liquidation, pegged funding marks, and pending-funding settlement before a resting order's risk decision | yes |
 | V3 open-interest accounting | locally-tested | `programs/stockstream/src/v3.rs`; commit `d563f28`; `NO_DNA=1 cargo test -p stockstream --tests`, including `v3_place_rejects_maximum_open_interest_before_mutation` | yes; current HEAD gate |
 | V3 liquidation | locally-tested | `programs/stockstream/src/v3.rs`, `programs/stockstream/src/handlers.rs`; `NO_DNA=1 cargo test -p stockstream --test v3_bundle v3_liquidation_updates_open_interest_and_insurance_fee` verifies funding settlement before health evaluation, exactly-once funding application, position/open-interest reduction, insurance fee, and recognized bad debt | yes; no live liquidation |
 | Fixed/OraclePegged matching | locally-tested | `programs/stockstream/src/book.rs`, `programs/stockstream/src/v3.rs`; `NO_DNA=1 cargo test -p stockstream --test v3_bundle v3_place_rejects_an_invalid_oracle_peg_before_mutation` plus `cargo test -p stockstream --test order_book` | yes |
