@@ -250,6 +250,7 @@ export interface V3MarketAggregate {
   withdrawalReady: boolean;
   orderBook: { bids: readonly V3BookNodeState[]; asks: readonly V3BookNodeState[] };
   positions: readonly V3SeatPositionState[];
+  mark: V3MarkQuote | null;
 }
 
 export const V3_MARK_SOURCE = { Index: 0, BookMid: 1, BookOneSided: 2 } as const;
@@ -322,7 +323,7 @@ export function aggregateV3Market(
     || !unique(eventShards.map((shard) => shard.shard))) return null;
   if (!annotateBookTrees(bookPages)) return null;
   const leaves = bookPages.flatMap((page) => page.nodes).filter((node) => node.tag === 2);
-  return {
+  const aggregate: V3MarketAggregate = {
     core, bookPages, seatShards, eventShards, completeBook, completeExecutionState,
     withdrawalReady: completeExecutionState && core.delegationStatus === 3,
     orderBook: {
@@ -330,7 +331,10 @@ export function aggregateV3Market(
       asks: leaves.filter((node) => node.side === 1).sort((left, right) => left.key < right.key ? -1 : left.key > right.key ? 1 : 0),
     },
     positions: seatShards.flatMap((shard) => shard.positions),
+    mark: null,
   };
+  aggregate.mark = executableV3Mark(aggregate);
+  return aggregate;
 }
 
 export interface V3ShardAddresses {
