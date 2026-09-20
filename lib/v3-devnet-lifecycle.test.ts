@@ -9,5 +9,7 @@ describe("V3 lifecycle runner", () => {
     expect(plan.execute).toBe(false);
     expect(plan.statePath).toContain("v3-lifecycle-state");
     expect(plan.protectedV2Market).toBe("9d75hK8GyfqajxcijLa35bEh8SYUtobqi6eSdtF42RuS");
+    expect(plan.stages.setup).not.toContain("complete on Devnet");
+    expect(plan.stages.commit).toMatch(/complete|blocked\/pending/);
   });
 });
