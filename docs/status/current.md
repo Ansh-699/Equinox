@@ -47,8 +47,8 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 produces the counts below from the current checkout; it runs Rust formatting,
 workspace tests, the SBF artifact verifier, ABI parity, frontend/Worker tests and
 typechecks, Playwright fixture E2E, and the secret scan. The last complete run
-finished with `VERIFY-OK` on the current pre-relayer checkout; the relayer-only
-follow-up is recorded below.
+finished with `VERIFY-OK` on the current checkout after `5f9fb5a` and
+`2faa492`.
 
 Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives all 26 child PDAs from the supplied core and returns a bigint-safe aggregate. It is read-only and cannot claim live V3 state until a V3 core is deployed.
 
