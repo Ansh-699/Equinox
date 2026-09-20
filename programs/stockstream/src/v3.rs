@@ -3135,6 +3135,17 @@ fn place_order_v3_with_action(
     }
     let initial_requirement = crate::risk::initial_margin(notional, risk_config.initial_margin_bps)
         .map_err(v3_risk_error)?;
+    let margin_mark = oracle.unwrap_or(effective_price);
+    if crate::risk::available_margin(
+        &seat_snapshot,
+        i128::from(margin_mark),
+        risk_config.initial_margin_bps,
+    )
+    .map_err(v3_risk_error)?
+        < 0
+    {
+        return Err(StockStreamError::RiskViolation.into());
+    }
     if seat_snapshot
         .available_collateral
         .checked_sub(seat_snapshot.reserved_margin)
@@ -4100,6 +4111,17 @@ fn preflight_replace_order_v3(
     }
     let initial_requirement =
         crate::risk::initial_margin(notional, config.initial_margin_bps).map_err(v3_risk_error)?;
+    let margin_mark = oracle.unwrap_or(effective_price);
+    if crate::risk::available_margin(
+        &adjusted,
+        i128::from(margin_mark),
+        config.initial_margin_bps,
+    )
+    .map_err(v3_risk_error)?
+        < 0
+    {
+        return Err(StockStreamError::RiskViolation.into());
+    }
     if adjusted
         .available_collateral
         .checked_sub(adjusted.reserved_margin)
