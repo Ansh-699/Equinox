@@ -28,6 +28,25 @@ export type SessionActionGate =
   | { allowed: true; domain: "l1" | "er" }
   | { allowed: false; result: SessionActionResult };
 
+export type SessionExecutionMode =
+  | { mode: "v3"; accounts: V3ExecutionAccounts }
+  | { mode: "v2" }
+  | { mode: "invalid"; reason: string };
+
+/** Resolve the write ABI explicitly. V2 is retained only for deployments
+ * that have no configured V3 core; a configured V3 deployment must never
+ * silently downgrade a malformed/missing session bundle to V2. */
+export function resolveSessionExecutionMode(
+  session: Pick<SessionStatus, "v3ExecutionAccounts">,
+  configuredV3Core: string | undefined = process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS,
+): SessionExecutionMode {
+  const accounts = session.v3ExecutionAccounts as V3ExecutionAccounts | undefined;
+  if (configuredV3Core && !accounts) {
+    return { mode: "invalid", reason: "V3 execution bundle unavailable for the configured V3 core" };
+  }
+  return accounts ? { mode: "v3", accounts } : { mode: "v2" };
+}
+
 /** Pure, unit-testable prefix of relay(): every reason a session-signed
  * action must be refused before a transaction is even built, in the order
  * they're checked. Kept separate from the relay/submit side effects so
@@ -125,7 +144,9 @@ export function useSessionOrder(
 
   const placeSessionOrder = useCallback((params: Omit<PlaceOrderParams, "authority" | "session" | "actionNonce" | "market" | "seatIndex">) => {
     if (!session) { onResult(blocked("session_invalid")); return Promise.resolve(); }
-    const v3 = session.v3ExecutionAccounts as V3ExecutionAccounts | undefined;
+    const execution = resolveSessionExecutionMode(session);
+    if (execution.mode === "invalid") { onResult(blocked("session_invalid", execution.reason)); return Promise.resolve(); }
+    const v3 = execution.mode === "v3" ? execution.accounts : undefined;
     const instruction = v3
       ? placeOrderV3({ ...params, ...v3, core: v3.core, seatIndex: session.seatIndex, authority: session.sessionSignerAddress, session: session.sessionPda, actionNonce: session.nextExpectedNonce })
       : placeOrder({ ...params, market: session.marketPda, seatIndex: session.seatIndex, authority: session.sessionSignerAddress, session: session.sessionPda, actionNonce: session.nextExpectedNonce });
@@ -134,7 +155,9 @@ export function useSessionOrder(
 
   const cancelSessionOrder = useCallback((orderKey: bigint) => {
     if (!session) { onResult(blocked("session_invalid")); return Promise.resolve(); }
-    const v3 = session.v3ExecutionAccounts as V3ExecutionAccounts | undefined;
+    const execution = resolveSessionExecutionMode(session);
+    if (execution.mode === "invalid") { onResult(blocked("session_invalid", execution.reason)); return Promise.resolve(); }
+    const v3 = execution.mode === "v3" ? execution.accounts : undefined;
     const instruction = v3
       ? cancelOrderV3({ ...v3, core: v3.core, authority: session.sessionSignerAddress, session: session.sessionPda }, session.seatIndex, orderKey, session.nextExpectedNonce)
       : cancelOrder({ market: session.marketPda, authority: session.sessionSignerAddress, session: session.sessionPda }, session.seatIndex, orderKey, session.nextExpectedNonce);
@@ -143,7 +166,9 @@ export function useSessionOrder(
 
   const replaceSessionOrder = useCallback((oldOrderKey: bigint, params: Omit<PlaceOrderParams, "authority" | "session" | "actionNonce" | "market" | "seatIndex">) => {
     if (!session) { onResult(blocked("session_invalid")); return Promise.resolve(); }
-    const v3 = session.v3ExecutionAccounts as V3ExecutionAccounts | undefined;
+    const execution = resolveSessionExecutionMode(session);
+    if (execution.mode === "invalid") { onResult(blocked("session_invalid", execution.reason)); return Promise.resolve(); }
+    const v3 = execution.mode === "v3" ? execution.accounts : undefined;
     const instruction = v3
       ? replaceOrderV3({ ...params, ...v3, core: v3.core, oldOrderKey, seatIndex: session.seatIndex, authority: session.sessionSignerAddress, session: session.sessionPda, actionNonce: session.nextExpectedNonce })
       : replaceOrder({ ...params, oldOrderKey, market: session.marketPda, seatIndex: session.seatIndex, authority: session.sessionSignerAddress, session: session.sessionPda, actionNonce: session.nextExpectedNonce });
@@ -152,7 +177,9 @@ export function useSessionOrder(
 
   const cancelAllSessionOrders = useCallback((limit: number) => {
     if (!session) { onResult(blocked("session_invalid")); return Promise.resolve(); }
-    const v3 = session.v3ExecutionAccounts as V3ExecutionAccounts | undefined;
+    const execution = resolveSessionExecutionMode(session);
+    if (execution.mode === "invalid") { onResult(blocked("session_invalid", execution.reason)); return Promise.resolve(); }
+    const v3 = execution.mode === "v3" ? execution.accounts : undefined;
     const instruction = v3
       ? cancelAllV3({ ...v3, core: v3.core, authority: session.sessionSignerAddress, session: session.sessionPda }, session.seatIndex, limit, session.nextExpectedNonce)
       : cancelAll({ market: session.marketPda, authority: session.sessionSignerAddress, session: session.sessionPda }, session.seatIndex, limit, session.nextExpectedNonce);
