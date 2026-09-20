@@ -319,6 +319,58 @@ fn v3_owner_place_reserves_collateral_and_writes_paged_book_and_event() {
 }
 
 #[test]
+fn v3_place_rejects_negative_available_margin_before_mutation() {
+    let mut accounts = bundle();
+    let owner = account(Address::new_from_array([43; 32]), 0, true);
+    let mut seat_call = vec![
+        accounts[0].view.clone(),
+        accounts[V3_SEAT_START].view.clone(),
+        accounts[V3_SEAT_START + 1].view.clone(),
+        accounts[V3_SEAT_START + 2].view.clone(),
+        accounts[V3_SEAT_START + 3].view.clone(),
+        accounts[V3_EVENT_START].view.clone(),
+        accounts[V3_EVENT_START + 1].view.clone(),
+        accounts[V3_EVENT_START + 2].view.clone(),
+        accounts[V3_EVENT_START + 3].view.clone(),
+        owner.view.clone(),
+    ];
+    create_trader_seat(&ID, &mut seat_call, 0).unwrap();
+    unsafe {
+        let seat = accounts[V3_SEAT_START].view.borrow_unchecked_mut();
+        seat[84..100].copy_from_slice(&100i128.to_le_bytes());
+        seat[116..132].copy_from_slice(&10i128.to_le_bytes());
+        seat[132..148].copy_from_slice(&1_000i128.to_le_bytes());
+        accounts[0].view.borrow_unchecked_mut()[197] = 1;
+    }
+    let before_page = unsafe { accounts[1].view.borrow_unchecked().to_vec() };
+    let before_seat = unsafe { accounts[V3_SEAT_START].view.borrow_unchecked().to_vec() };
+    let mut trade_accounts = views(&accounts);
+    trade_accounts.push(owner.view.clone());
+    assert!(place_order_v3(
+        &ID,
+        &mut trade_accounts,
+        PlaceOrderData {
+            side: Side::Bid as u8,
+            tree: TreeKind::Fixed as u8,
+            flags: 0,
+            seat_index: 0,
+            quantity: 1,
+            price_or_offset: 5,
+            expires_at: u64::MAX,
+            peg_limit: 0,
+            client_order_id: 8,
+            action_nonce: 0,
+        },
+    )
+    .is_err());
+    assert_eq!(unsafe { accounts[1].view.borrow_unchecked() }, before_page);
+    assert_eq!(
+        unsafe { accounts[V3_SEAT_START].view.borrow_unchecked() },
+        before_seat
+    );
+}
+
+#[test]
 fn v3_place_rejects_maximum_open_interest_before_mutation() {
     let mut accounts = bundle();
     let owner = account(Address::new_from_array([45; 32]), 0, true);
