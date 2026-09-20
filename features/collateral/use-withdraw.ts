@@ -9,6 +9,7 @@ import { recordSignature } from "@/lib/last-signature";
 import type { StockStreamProtocol } from "@/features/wallet/use-stockstream-protocol";
 import type { ExecutionDisplayState } from "@/lib/execution-status";
 import { decodeTraderSeat, type TraderSeatView } from "@/lib/positions";
+import { decodeV3SeatShard } from "@/clients/stockstream/src/abi/v3";
 
 export interface WithdrawGate {
   allowed: boolean;
@@ -65,12 +66,15 @@ export function useWithdraw(protocol: StockStreamProtocol | null) {
     try {
       const result = await protocol.service.executeL1(preview, [instruction]);
       recordSignature("WithdrawCollateral", result.signature, "l1");
-      const [vaultBalance, destinationBalance, market] = await Promise.all([
+      const [vaultBalance, destinationBalance, readbackSeat] = await Promise.all([
         protocol.rpc.tokenBalance(String(accounts.vault)).catch(() => null),
         protocol.rpc.tokenBalance(String(accounts.sourceOrDestination)).catch(() => null),
-        protocol.rpc.market(String(accounts.market)).catch(() => null),
+        accounts.v3
+          ? protocol.rpc.accountBytes(String(accounts.v3.withdraw.seatShards[Math.floor(accounts.seatIndex / 32)]))
+            .then((bytes) => decodeV3SeatShard(bytes)?.positions.find((position) => position.slot === accounts.seatIndex % 32) ?? null)
+            .catch(() => null)
+          : protocol.rpc.market(String(accounts.market)).then((market) => decodeTraderSeat(market.bytes, market.state.traderSeatOffset, accounts.seatIndex)).catch(() => null),
       ]);
-      const readbackSeat = market ? decodeTraderSeat(market.bytes, market.state.traderSeatOffset, accounts.seatIndex) : null;
       setNotice(
         `WithdrawCollateral ${result.confirmation} — signature ${result.signature.slice(0, 8)}…${result.signature.slice(-8)}.` +
         (vaultBalance !== null ? ` Vault (readback): ${vaultBalance}.` : "") +
