@@ -15,7 +15,7 @@ export {
 } from "./constants";
 export { deriveInstrument, derivePerpMarket, deriveVault, deriveVaultAuthority, deriveSettlementScratch, deriveTradingSession, deriveDelegateBuffer, deriveDelegationRecord, deriveDelegationMetadata, deriveUndelegateBuffer } from "./pda";
 export { OPCODE, SESSION_ACTION as ABI_SESSION_ACTION, MARKET_MODE as ABI_MARKET_MODE, DELEGATION_STATUS as ABI_DELEGATION_STATUS, RECONCILIATION_STATUS as ABI_RECONCILIATION_STATUS, decodeInstruction, type InstructionFixture } from "./instructions";
-export { decodeMarketHeader, type MarketHeaderView } from "./accounts";
+export { decodeMarketHeader, decodeMarketState, type MarketHeaderView, type MarketStateView } from "./accounts";
 export { EVENT_ABI_VERSION, EVENT_SIZE, EVENT_HEADER_SIZE, EVENT_PAYLOAD_SIZE, EVENT_KIND, EVENT_KIND_NAMES, NO_SEAT } from "./events";
 export { MARKET_SESSION, SESSION_TO_MODE } from "./oracle";
 export { checkedSigned, checkedUnsigned, writeSigned, writeUnsigned } from "./encoding";

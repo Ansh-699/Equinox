@@ -1,5 +1,5 @@
 import { PublicKey, SystemProgram } from "@solana/web3.js";
-import { STOCKSTREAM_ACCOUNT_SIZE, STOCKSTREAM_PROGRAM_ID, STOCKSTREAM_TRADING_SESSION_SIZE } from "./constants";
+import { STOCKSTREAM_PROGRAM_ID, STOCKSTREAM_TRADING_SESSION_SIZE } from "./constants";
 import { cancelAllV3, cancelOrderV3, closeV3TraderSeat, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, createV3Account, createV3TraderSeat, delegateV3Account, depositCollateralV3, initializeV3Market, placeOrderV3, replaceOrderV3, requestV3Undelegation, rollbackV3Undelegation, updateFundingV3, withdrawCollateralV3 } from "./abi/v3-instructions";
 import { authorizeTradingSession, closeTradingSession, deriveTradingSession, revokeTradingSession, updateTradingSessionLimits } from "./abi/session-instructions";
 import { createPerpMarket, initializeExchange, registerStockInstrument, suspendStockInstrument, transitionMarket, updateMarketRisk, updateStockInstrument } from "./abi/registry-instructions";
@@ -35,6 +35,8 @@ export { STOCKSTREAM_PROGRAM_KEY } from "./abi/transaction";
 export type { AddressInput } from "./abi/transaction";
 export { decodeInstruction } from "./abi/instructions";
 export type { InstructionFixture } from "./abi/instructions";
+export { decodeMarketState } from "./abi/accounts";
+export type { MarketStateView } from "./abi/accounts";
 
 /** Account tuple for opcode 46. `parent` is an instrument for `core`, and a V3 core otherwise. */
 
@@ -150,78 +152,6 @@ export function decodeReconciliationPayload(payload: Uint8Array) {
  * completion are idempotent. The builder validates the target PDA so a
  * client cannot accidentally point this isolated V3 flow at the V2 market.
  */
-export interface MarketStateView {
-  discriminator: string;
-  version: number;
-  initialized: boolean;
-  mode: number;
-  marketAuthority: PublicKey;
-  /** Required signer for `Liquidate` (`handlers::liquidate` checks `authority == header.emergency_authority`). */
-  emergencyAuthority: PublicKey;
-  maintenanceMarginBps: number;
-  makerFeeBps: number;
-  takerFeeBps: number;
-  currentOpenInterest: bigint;
-  globalEventSequence: bigint;
-  fundingAccumulator: bigint;
-  lastFundingTimestamp: bigint;
-  oracleValid: boolean;
-  lastVerifiedOraclePrice: bigint;
-  lastVerifiedOracleTimestamp: bigint;
-  bidArenaOffset: number;
-  askArenaOffset: number;
-  traderSeatOffset: number;
-  fillEventOffset: number;
-  /** `reserved_upgrade[122..130]`, byte 449. See `docs/program-layout.md`. */
-  protocolFeeBalance: bigint;
-  /** `reserved_upgrade[130..138]`, byte 457. */
-  insuranceFundBalance: bigint;
-  /** `reserved_upgrade[138..146]`, byte 465. */
-  recognizedBadDebt: bigint;
-  /** `reserved_upgrade[146]`, byte 473. 0=Reconciled 1=SurplusDetected 2=DeficitDetected 3=RecoveryRequired. */
-  reconciliationStatus: number;
-  /** `reserved_upgrade[147..155]`, byte 474. */
-  vaultSurplus: bigint;
-}
-
-/** `MARKET_VERSION` in `state.rs`. Bumped from `1` to `2` when
- * `reserved_upgrade[122..155]` (previously unused scratch space) became
- * permanent protocol fields for custody fee/insurance/reconciliation
- * accounting (Priority 4) -- see `docs/program-layout.md`. A `version: 1`
- * account predates those fields entirely and is rejected outright rather
- * than silently read as if they were present. */
-const CURRENT_MARKET_VERSION = 2;
-
-export function decodeMarketState(data: Uint8Array): MarketStateView {
-  if (data.byteLength !== STOCKSTREAM_ACCOUNT_SIZE) throw new RangeError("Invalid StockStream market account size");
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  const bytes = data.slice(0, 8); const discriminator = new TextDecoder().decode(bytes);
-  const version = view.getUint16(8, true);
-  if (discriminator !== "STKMRK01" || version !== CURRENT_MARKET_VERSION) throw new RangeError("Invalid StockStream market header");
-  if (view.getUint32(311, true) !== 512 || view.getUint32(315, true) !== 91152 ||
-      view.getUint32(319, true) !== 181792 || view.getUint32(323, true) !== 214560)
-    throw new RangeError('Invalid StockStream regions');
-  return {
-    discriminator, version,
-    initialized: view.getUint8(10) === 1,
-    mode: view.getUint8(11),
-    marketAuthority: new PublicKey(data.slice(12, 44)),
-    emergencyAuthority: new PublicKey(data.slice(76, 108)),
-    maintenanceMarginBps: view.getUint16(194, true),
-    makerFeeBps: view.getUint16(198, true),
-    takerFeeBps: view.getUint16(200, true),
-    currentOpenInterest: readSignedLE(data, 238, 16),
-    globalEventSequence: view.getBigUint64(262, true),
-    fundingAccumulator: readSignedLE(data, 270, 16),
-    lastFundingTimestamp: view.getBigUint64(286, true),
-    oracleValid: view.getUint8(294) === 1,
-    lastVerifiedOraclePrice: view.getBigInt64(295, true),
-    lastVerifiedOracleTimestamp: view.getBigUint64(303, true),
-    bidArenaOffset: view.getUint32(311, true), askArenaOffset: view.getUint32(315, true), traderSeatOffset: view.getUint32(319, true), fillEventOffset: view.getUint32(323, true),
-    protocolFeeBalance: view.getBigUint64(449, true), insuranceFundBalance: view.getBigUint64(457, true), recognizedBadDebt: view.getBigUint64(465, true), reconciliationStatus: view.getUint8(473), vaultSurplus: view.getBigUint64(474, true),
-  };
-}
-
 export interface BookMetadata { version: number; fixedRoot: number; peggedRoot: number; fixedLeaves: number; peggedLeaves: number; bumpIndex: number; freeHead: number; freeLength: number; }
 export function decodeBookMetadata(data: Uint8Array): BookMetadata {
   return decodeBookMetadataAbi(data);
