@@ -60,7 +60,7 @@ Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives 
 
 Fresh current-HEAD regression evidence: `cargo test -p stockstream --test v3_bundle v3_cancel_all_releases_reserve_and_side_exposure_for_every_tree` passes after `cancel_all_v3` was corrected to decrement the owning seat's bid/ask exposure counters along with reserved margin and open-order count. This is local Pinocchio/LiteSVM-style evidence only; no Devnet account was mutated.
 
-- Rust (native + LiteSVM runtime): 243 passing, `cargo fmt --check` clean; fresh `NO_DNA=1 cargo test -p stockstream --tests` on the current checkout passed 243/243 across 29 suites. This includes configured mark-deviation, maximum-open-interest preflight, session open-order limits, repeated-partial-close, and V3 liquidation ledger regressions.
+- Rust (native + LiteSVM runtime): 245 passing, `cargo fmt --check` clean; fresh `NO_DNA=1 cargo test -p stockstream --tests` on the current checkout passed 245/245 across 29 suites. This includes configured mark-deviation, maximum-open-interest preflight, session open-order limits, repeated-partial-close, funding-aware liquidation, reduce-only flip rejection, and OraclePegged validation regressions.
 - Workers (Miniflare/vitest): 354 passing (34 files; relayer risk/version/lifetime guards and typed V3 write-builder vectors included).
 - Frontend (vitest): 210 passing (33 files).
 - Frontend (Playwright fixture E2E): 54 passing, including V3 deposit, confirmed L1 seat creation, ER-owned seat-write blocking, session authorization, place/cancel/replace/reduce-only, commit-pending blocking and restored withdrawal; opt-in Devnet read-only E2E: 2 passing.
@@ -87,7 +87,13 @@ Fresh current-HEAD regression evidence: `cargo test -p stockstream --test v3_bun
   passes after the canonical V3 place path rejects a reduce-only quantity that
   exceeds the current position; this prevents a direction flip before any
   page, seat, event, or sequence mutation. The full Rust suite remains
-  243/243 and `NO_DNA=1 cargo build-sbf` passes; this artifact is not deployed.
+  245/245 and `NO_DNA=1 cargo build-sbf` passes; this artifact is not deployed.
+- Fresh V3 OraclePegged validation regression: `NO_DNA=1 cargo test -p
+  stockstream --test v3_bundle v3_place_rejects_an_invalid_oracle_peg_before_mutation`
+  passes after the place path validates the taker leaf with `pegged_state`
+  before matching or mutation; invalid peg limits now leave pages, seats,
+  events, and the global sequence unchanged. The full Rust suite remains
+  245/245; this local artifact is not deployed.
 - Commit-limit correction (`6492c75`): `cargo test -p stockstream --test
   magicblock` (30), `--test v3_bundle` (7), root V3 ABI tests (6), Worker
   V3 state tests (4), both TypeScript checks, ABI parity, and a loadable SBF
