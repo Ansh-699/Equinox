@@ -51,7 +51,7 @@ typechecks, Playwright fixture E2E, and the secret scan. It emits a
 machine-readable gate record (use
 `VERIFY_SUMMARY_PATH=docs/status/verify-latest.json npm run verify` to refresh
 the tracked copy); the latest continuation run finished with `VERIFY-OK` on
-source commit `5ab5e47` (fresh full-gate checkpoint). The funding clamp correction is committed as
+source commit `aa65c7f` (fresh full-gate checkpoint). The funding clamp correction is committed as
 `a89c313`; `d563f28` additionally enforces persisted V3 maximum open interest
 before mutation and session `max_open_orders` during canonical bundle
 authorization.
@@ -68,8 +68,8 @@ Fresh current-HEAD regression evidence: `cargo test -p stockstream --test v3_bun
 - `tsc --noEmit` clean on both the frontend and workers packages.
 - `eslint .` clean.
 - ABI manifest parity: `ABI-OK`.
-- Fresh full gate on current HEAD: `VERIFY_SUMMARY_PATH=docs/status/verify-latest.json NO_DNA=1 bash scripts/verify.sh` finished `VERIFY-OK`; Rust 255, frontend 214, Worker 355, Playwright fixture 54/54, SBF artifact verification, ABI parity, typechecks, lint, and secret scan all passed. Current local artifact SHA-256 is `6055883e85f7f1ac600610097bfb04bd407f19bedadf650af7bbc6fcb2fe0ce3`; it is not deployed.
-- Fresh V3 economic/custody checkpoint (`717add9`, `c6ffca5`, `5f77b42`, `5ab5e47`): `MarketCoreV3` persists nonnegative `vault_surplus` at offset 1640 and `withdrawal_buffer` at offset 1656 after the 26 child commit records; the 81-byte versioned risk-update ABI, authorized update path, V3 L1 liability accounting, restored-core vault reconciliation opcode 55, canonical 30-account client/Worker builders, and reconciliation safety guards are covered by the 255-test Rust gate, 214 frontend tests, and 38 targeted ABI/facade tests. This is source/local evidence only; the preserved Devnet core was not mutated or redeployed.
+- Fresh full gate on current HEAD (`aa65c7f`): `VERIFY_SUMMARY_PATH=docs/status/verify-latest.json NO_DNA=1 bash scripts/verify.sh` finished `VERIFY-OK`; Rust 255, frontend 214, Worker 355, Playwright fixture 54/54, SBF artifact verification, ABI parity, typechecks, lint, and secret scan all passed. Current local artifact SHA-256 is `4314b89cfa66bf6c28b688348dbc920a9e5c0ac59d1704e95bfad9b9100b72a6`; it is not deployed.
+- Fresh V3 economic/custody checkpoint (`717add9`, `c6ffca5`, `5f77b42`, `5ab5e47`, `aa65c7f`): `MarketCoreV3` persists nonnegative `vault_surplus` at offset 1640 and `withdrawal_buffer` at offset 1656 after the 26 child commit records; the 81-byte versioned risk-update ABI, authorized update path, V3 L1 liability accounting, restored-core vault reconciliation opcode 55, canonical 30-account client/Worker builders, and reconciliation safety guards are covered by the 255-test Rust gate, 214 frontend tests, and 38 targeted ABI/facade tests. Withdrawals now also reject every non-reconciled status. This is source/local evidence only; the preserved Devnet core was not mutated or redeployed.
 - Fresh Worker V3 opcode-parity regression: V3 custody builders now use named opcode constants (`depositCollateralV3=53`, `withdrawCollateralV3=54`) instead of duplicated literals; the Worker transaction suite remains 355/355.
 - Fresh Worker V3 nonce-mode regression: the typed V3 place/cancel/cancel-all/replace builders reject nonzero action nonces when no session PDA is present; `workers/src/transactions.test.ts` passes 10/10 and the full Worker suite passes 355/355.
 - Fresh V3 replacement preflight: `NO_DNA=1 cargo test -p stockstream --test v3_bundle v3_session_replace_consumes_one_nonce_and_requires_replace_permission` passes 1/1 after matching/post-only/IOC checks were moved ahead of cancellation; the regression proves a rejected post-only crossing replacement leaves the old page and session nonce unchanged.
