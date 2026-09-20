@@ -3128,6 +3128,14 @@ fn place_order_v3_with_action(
         self_trade_behavior,
     };
     let leaf = input.leaf().map_err(|_| bundle_error())?;
+    if tree == TreeKind::OraclePegged
+        && !matches!(
+            crate::book::pegged_state(&leaf, oracle, now),
+            crate::book::PeggedState::Valid(_)
+        )
+    {
+        return Err(StockStreamError::RiskViolation.into());
+    }
     let plan = {
         let (book_accounts, _) = accounts[1..].split_at_mut(2 * V3_BOOK_PAGES_PER_SIDE);
         let (bid_pages, ask_pages) = book_accounts.split_at_mut(V3_BOOK_PAGES_PER_SIDE);
