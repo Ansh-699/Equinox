@@ -380,7 +380,11 @@ pub fn dispatch(
             action_nonce,
         ),
         funding @ StockStreamInstruction::UpdateFunding { .. } => {
-            update_funding(program_id, accounts, funding)
+            if accounts.len() == crate::v3::V3_SIGNER_ACCOUNT_INDEX + 1 {
+                crate::v3::update_funding_v3(program_id, accounts, funding)
+            } else {
+                update_funding(program_id, accounts, funding)
+            }
         }
         StockStreamInstruction::Liquidate {
             seat_index,

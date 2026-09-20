@@ -73,6 +73,7 @@ export interface V3SeatAccounts { core: AddressInput; seatShards: readonly Addre
 export interface V3DepositAccounts { core: AddressInput; seatShard: AddressInput; eventShards: readonly AddressInput[]; authority: AddressInput; source: AddressInput; vault: AddressInput; mint: AddressInput; tokenProgram: AddressInput; }
 export interface V3WithdrawAccounts extends V3ExecutionAccounts { destination: AddressInput; mint: AddressInput; vault: AddressInput; vaultAuthority: AddressInput; tokenProgram: AddressInput; }
 export interface V3OracleAccounts { core: AddressInput; eventShards: readonly AddressInput[]; payer: AddressInput; pythProgram: AddressInput; storage: AddressInput; treasury: AddressInput; systemProgram: AddressInput; instructionsSysvar: AddressInput; }
+export interface V3FundingAccounts extends V3ExecutionAccounts { authority: AddressInput; }
 export interface V3ExecutionAccounts {
   core: AddressInput;
   bookPages: readonly AddressInput[];
@@ -322,6 +323,17 @@ export function rollbackV3Undelegation(accounts: V3UndelegationRecoveryAccounts)
 export function updateFunding(accounts: InstructionAccounts, accumulator: bigint, timestamp: bigint | number): TransactionInstruction {
   const data = new Uint8Array(25); data[0] = STOCKSTREAM_INSTRUCTION.updateFunding; writeSigned(data, 1, checkedSigned(accumulator, 128, "accumulator"), 16); writeUnsigned(data, 17, checkedUnsigned(timestamp, 64, "timestamp"), 8);
   return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]);
+}
+
+/** Builds the V3 funding update over the complete bounded execution bundle. */
+export function updateFundingV3(accounts: V3FundingAccounts, accumulator: bigint, timestamp: bigint | number): TransactionInstruction {
+  if (accounts.bookPages.length !== 18 || accounts.seatShards.length !== 4 || accounts.eventShards.length !== 4) throw new RangeError("V3 funding requires the canonical 27-account execution bundle");
+  const data = new Uint8Array(25); data[0] = STOCKSTREAM_INSTRUCTION.updateFunding; writeSigned(data, 1, checkedSigned(accumulator, 128, "accumulator"), 16); writeUnsigned(data, 17, checkedUnsigned(timestamp, 64, "timestamp"), 8);
+  return instruction(data, [accountMeta(accounts.core, false, true),
+    ...accounts.bookPages.map((page) => accountMeta(page, false, true)),
+    ...accounts.seatShards.map((shard) => accountMeta(shard, false, true)),
+    ...accounts.eventShards.map((shard) => accountMeta(shard, false, true)),
+    accountMeta(accounts.authority, true, false)]);
 }
 
 export function liquidate(accounts: InstructionAccounts, seatIndex: number, maxQuantity: bigint | number): TransactionInstruction {
