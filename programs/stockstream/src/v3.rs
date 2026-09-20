@@ -2963,6 +2963,34 @@ pub fn liquidate_v3(
         .checked_sub(new_abs)
         .ok_or(StockStreamError::ArithmeticOverflow)?;
     let post_liquidation_equity = crate::risk::equity(&seat, mark).map_err(v3_risk_error)?;
+    // Finish every core-ledger validation on immutable values before writing
+    // the seat.  A malformed open-interest or insurance/bad-debt ledger must
+    // reject without leaving a partially liquidated seat behind in direct
+    // harnesses (and makes the runtime's transaction atomicity explicit).
+    let (updated_insurance, updated_open_interest, updated_bad_debt) = {
+        let core = unsafe { accounts[0].borrow_unchecked() };
+        let insurance = core_i128(&core, V3_CORE_INSURANCE_BALANCE_OFFSET)?
+            .checked_add(fee)
+            .ok_or(StockStreamError::ArithmeticOverflow)?;
+        let current_open_interest = core_i128(&core, V3_CORE_CURRENT_OPEN_INTEREST_OFFSET)?;
+        let open_interest = current_open_interest
+            .checked_sub(open_interest_reduction)
+            .ok_or(StockStreamError::RiskViolation)?;
+        if open_interest < 0 {
+            return Err(StockStreamError::RiskViolation.into());
+        }
+        let bad_debt = if post_liquidation_equity < 0 {
+            post_liquidation_equity
+                .checked_neg()
+                .ok_or(StockStreamError::ArithmeticOverflow)?
+        } else {
+            0
+        };
+        let updated_bad_debt = core_i128(&core, V3_CORE_BAD_DEBT_OFFSET)?
+            .checked_add(bad_debt)
+            .ok_or(StockStreamError::ArithmeticOverflow)?;
+        (insurance, open_interest, updated_bad_debt)
+    };
     write_v3_seat_shards(
         &mut accounts
             [1 + (2 * V3_BOOK_PAGES_PER_SIDE)..1 + (2 * V3_BOOK_PAGES_PER_SIDE) + V3_SEAT_SHARDS],
@@ -2972,31 +3000,17 @@ pub fn liquidate_v3(
     )?;
     {
         let mut core = unsafe { accounts[0].borrow_unchecked_mut() };
-        let insurance = core_i128(&core, V3_CORE_INSURANCE_BALANCE_OFFSET)?
-            .checked_add(fee)
-            .ok_or(StockStreamError::ArithmeticOverflow)?;
-        set_core_i128(&mut core, V3_CORE_INSURANCE_BALANCE_OFFSET, insurance)?;
-        let current_open_interest = core_i128(&core, V3_CORE_CURRENT_OPEN_INTEREST_OFFSET)?;
-        let updated_open_interest = current_open_interest
-            .checked_sub(open_interest_reduction)
-            .ok_or(StockStreamError::RiskViolation)?;
-        if updated_open_interest < 0 {
-            return Err(StockStreamError::RiskViolation.into());
-        }
+        set_core_i128(
+            &mut core,
+            V3_CORE_INSURANCE_BALANCE_OFFSET,
+            updated_insurance,
+        )?;
         set_core_i128(
             &mut core,
             V3_CORE_CURRENT_OPEN_INTEREST_OFFSET,
             updated_open_interest,
         )?;
-        if post_liquidation_equity < 0 {
-            let bad_debt = post_liquidation_equity
-                .checked_neg()
-                .ok_or(StockStreamError::ArithmeticOverflow)?;
-            let recognized = core_i128(&core, V3_CORE_BAD_DEBT_OFFSET)?
-                .checked_add(bad_debt)
-                .ok_or(StockStreamError::ArithmeticOverflow)?;
-            set_core_i128(&mut core, V3_CORE_BAD_DEBT_OFFSET, recognized)?;
-        }
+        set_core_i128(&mut core, V3_CORE_BAD_DEBT_OFFSET, updated_bad_debt)?;
     }
     let (core_accounts, rest) = accounts.split_at_mut(1);
     let (book_accounts, rest) = rest.split_at_mut(2 * V3_BOOK_PAGES_PER_SIDE);
