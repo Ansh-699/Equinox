@@ -1,6 +1,6 @@
 import { getBase58Decoder } from "@solana/kit";
 import type { MagicRouterTransport, SolanaL1Transport } from "./chain-transports";
-import { fetchAuthoritativeMarketAccountBytes } from "./market-state";
+import { base64ToBytes } from "./market-state";
 
 /** Worker-side V3 shard decoder. It intentionally has no dependency on the
  * web3.js SDK and treats each shard as an independently fetched account. */
@@ -236,12 +236,13 @@ export async function fetchAuthoritativeV3Market(
   const bookPageCount = 2 * V3_BOOK_PAGES_PER_SIDE;
   if (addresses.bookPages.length !== bookPageCount || addresses.seatShards.length !== 4 || addresses.eventShards.length !== 4
     || new Set([addresses.core, ...addresses.bookPages, ...addresses.seatShards, ...addresses.eventShards]).size !== 1 + bookPageCount + 8) return null;
-  const values = await Promise.all([
-    fetchAuthoritativeMarketAccountBytes(transport, addresses.core),
-    ...addresses.bookPages.map((address) => fetchAuthoritativeMarketAccountBytes(transport, address)),
-    ...addresses.seatShards.map((address) => fetchAuthoritativeMarketAccountBytes(transport, address)),
-    ...addresses.eventShards.map((address) => fetchAuthoritativeMarketAccountBytes(transport, address)),
-  ]);
+  // The complete V3 bundle is 27 accounts. Fetch it atomically in one RPC
+  // request: a 27-way finalized-read fanout triggers public-RPC throttling
+  // and can mix slots across shards even when it does not fail.
+  const requested = [addresses.core, ...addresses.bookPages, ...addresses.seatShards, ...addresses.eventShards];
+  const response = await transport.multipleAccounts(requested);
+  if (response.value.length !== requested.length) return null;
+  const values = response.value.map((account) => account?.data ? base64ToBytes(account.data[0]) : null);
   if (values.some((value) => value === null)) return null;
   return aggregateV3Market(
     values[0]!, values.slice(1, 1 + bookPageCount) as Uint8Array[], values.slice(1 + bookPageCount, 5 + bookPageCount) as Uint8Array[], values.slice(5 + bookPageCount, 9 + bookPageCount) as Uint8Array[], addresses.core,
