@@ -16,7 +16,7 @@ import { relaySessionTransaction, validateSessionTransaction } from './session-r
 import { ProtocolKeeperOrchestrator, type OrchestratorRunSummary } from './keeper-orchestrator';
 import { STOCKSTREAM_PROGRAM_ID } from '../../clients/stockstream/src/constants';
 import { deriveBookPageV3, deriveEventShardV3, deriveSeatShardV3, V3_BOOK_PAGES_PER_SIDE } from './v3-pdas';
-import { fetchAuthoritativeV3Market, type V3MarketAggregate } from './v3-market-state';
+import { decodeV3Core, decodeV3SeatShard, fetchAuthoritativeV3Market, type V3MarketAggregate } from './v3-market-state';
 import { address, getBase58Decoder } from '@solana/kit';
 
 export { MarketStream };
@@ -501,6 +501,16 @@ export default {
       const marketAccount = await transport.account(body.expectedMarket).catch(() => null);
       if (!marketAccount?.value?.data) return json({ error: "market_not_found" }, 404);
       const marketBytes = Uint8Array.from(atob(marketAccount.value.data[0]), (c) => c.charCodeAt(0));
+      const v3Core = decodeV3Core(marketBytes);
+      let v3Seat: import('./v3-market-state').V3SeatPositionState | null = null;
+      if (v3Core) {
+        if (marketAccount.value.owner !== STOCKSTREAM_PROGRAM_ID) return json({ error: "market_wrong_owner" }, 403);
+        const seatShardAddress = await deriveSeatShardV3(body.expectedMarket, Math.floor(shapeCheck.seatIndex / 32));
+        const seatShardAccount = await transport.account(seatShardAddress).catch(() => null);
+        if (!seatShardAccount?.value?.data || seatShardAccount.value.owner !== STOCKSTREAM_PROGRAM_ID) return json({ error: "seat_shard_not_found" }, 404);
+        const seatShard = decodeV3SeatShard(Uint8Array.from(atob(seatShardAccount.value.data[0]), (c) => c.charCodeAt(0)));
+        v3Seat = seatShard?.positions.find((position) => position.slot === shapeCheck.seatIndex % 32) ?? null;
+      }
 
       const sessionAddress = await deriveTradingSessionAddress(
         body.ownerWallet, body.expectedMarket, shapeCheck.seatIndex, body.sessionSignerAddress, STOCKSTREAM_PROGRAM_ID,
@@ -521,6 +531,7 @@ export default {
         opcode: shapeCheck.opcode,
         placeOrderFlags: shapeCheck.placeOrderFlags,
         now: new Date(),
+        v3: v3Core ? { core: v3Core, seat: v3Seat } : undefined,
       });
       if (!chainCheck.ok) return json({ error: chainCheck.reason }, 403);
 

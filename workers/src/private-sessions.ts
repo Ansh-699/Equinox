@@ -1,4 +1,6 @@
 import type { SolanaL1Transport, MagicBlockErTransport } from "./chain-transports";
+import { decodeV3Core, decodeV3SeatShard } from "./v3-market-state";
+import { deriveSeatShardV3 } from "./v3-pdas";
 
 /** Priority 5, Section 7: private trader projections.
  *
@@ -96,6 +98,23 @@ function readI128(bytes: Uint8Array, offset: number): bigint {
  */
 export function decodeTraderSeatProjection(marketBytes: Uint8Array, seatIndex: number): TraderSeatProjection | null {
   if (!Number.isInteger(seatIndex) || seatIndex < 0 || seatIndex >= MAX_TRADER_SEATS) return null;
+  // V3 seats are no longer embedded in the V2 market arena. Callers that
+  // hand us a seat shard get the same projection shape without ever applying
+  // the legacy 181,792-byte offset to a V3 account.
+  if (marketBytes.length === 8_236) {
+    const shard = decodeV3SeatShard(marketBytes);
+    if (!shard || shard.shard !== Math.floor(seatIndex / 32)) return null;
+    const seat = shard.positions.find((position) => position.slot === seatIndex % 32);
+    if (!seat) return null;
+    return {
+      seatIndex, owner: seat.trader, availableCollateral: seat.availableCollateral,
+      reservedMargin: seat.reservedMargin, basePosition: seat.basePosition,
+      quoteEntryValue: seat.quoteEntryValue, realizedPnl: seat.realizedPnl,
+      lastFundingAccumulator: 0n, openBidExposure: seat.openBidExposure,
+      openAskExposure: seat.openAskExposure, openOrderCount: seat.openOrderCount,
+      liquidationState: seat.liquidationState, sequence: seat.sequence,
+    };
+  }
   const start = TRADER_SEAT_OFFSET + seatIndex * TRADER_SEAT_SIZE;
   if (marketBytes.length < start + TRADER_SEAT_SIZE) return null;
   if (marketBytes[start + SEAT_FIELD_OFFSETS.occupancy] !== 1) return null;
@@ -158,6 +177,14 @@ export async function seatOwner(
   const result = await transport.account(marketPda);
   if (!result.value?.data) return null;
   const bytes = base64ToBytes(result.value.data[0]);
+  const core = decodeV3Core(bytes);
+  if (core) {
+    const shardAddress = await deriveSeatShardV3(marketPda, Math.floor(seatIndex / 32));
+    const shardResult = await transport.account(shardAddress);
+    if (!shardResult.value?.data) return null;
+    const shard = decodeV3SeatShard(base64ToBytes(shardResult.value.data[0]));
+    return shard?.positions.find((position) => position.slot === seatIndex % 32)?.trader ?? null;
+  }
   const start = TRADER_SEAT_OFFSET + seatIndex * TRADER_SEAT_SIZE;
   if (bytes.length < start + TRADER_SEAT_SIZE) return null;
   if (bytes[start] !== 1) return null; // occupancy: 0 = empty seat, no owner

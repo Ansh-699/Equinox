@@ -128,6 +128,19 @@ it("decodeTraderSeatProjection returns null for an unoccupied seat", () => {
   expect(decodeTraderSeatProjection(bytes, 0)).toBeNull();
 });
 
+it("decodes a V3 seat shard without applying legacy market offsets", () => {
+  const bytes = new Uint8Array(8_236);
+  bytes.set(new TextEncoder().encode("STKST003"), 0);
+  const view = new DataView(bytes.buffer);
+  view.setUint16(8, 3, true); bytes[10] = 0; bytes[11] = 0; bytes[44] = 1;
+  bytes.set(OWNER_BYTES, 45);
+  view.setBigUint64(44 + 40, 123n, true);
+  view.setBigUint64(44 + 72, 9n, true);
+  view.setBigUint64(44 + 176, 7n, true);
+  const projection = decodeTraderSeatProjection(bytes, 0);
+  expect(projection).toMatchObject({ seatIndex: 0, availableCollateral: 123n, basePosition: 9n, sequence: 7n });
+});
+
 it("seatsAffectedByEvent extracts the single seat for a seat-scoped payload, both seats for a fill, and none for a market-level event", () => {
   function payload(writer: (view: DataView) => void): string {
     const bytes = new Uint8Array(48);
