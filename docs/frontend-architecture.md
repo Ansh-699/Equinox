@@ -77,13 +77,12 @@ repeated on purpose, not incidental:
 - `lib/activity-view-model.ts` -- Activity feed rendering, with an
   explicit `ACTIVITY_DETAIL_UNAVAILABLE` fallback rather than a guessed
   event detail.
-- `lib/open-orders.ts` -- the open-orders data boundary. Its only
-  concrete adapter today, `unimplementedOpenOrdersAdapter`, always
-  honestly reports "unavailable" with the real reason (no canonical
-  order-book layout yet) -- see `docs/abi-handoff-checklist.md` for
-  exactly what changes once that lands, and note the UI/hook
-  (`features/orders/`) need no changes at all when it does; only the
-  adapter implementation swaps in.
+- `lib/open-orders.ts` -- the open-orders data boundary. Configured V3
+  markets use `createV3OpenOrdersAdapter`, which reads the Worker's complete
+  versioned shard aggregate and fails closed on missing or malformed state.
+  `unimplementedOpenOrdersAdapter` is retained only as the explicit V2/
+  unknown-version fallback; it never decodes the legacy monolithic market.
+  The UI/hook (`features/orders/`) remains transport-independent.
 
 When you're about to decode something new, look for whether it already
 has (or should have) a module here first, rather than inlining a

@@ -49,7 +49,7 @@ one directly against the actual new files:
 
 | Blocked item | Resolved by the new ABI package? | Detail |
 |---|---|---|
-| Raw order-book (PATRICIA tree) decoding | **Yes** | `orderbook.ts` has real, generated offsets: `ARENA_NODES_OFFSET`, `ANY_NODE_SIZE` (88), `TAG_INNER`/`TAG_LEAF`, and per-field offsets for both `InnerNode` and `LeafNode` (side, quantity, expires_at, peg_limit, price_or_offset, sequence). This is exactly what `lib/open-orders.ts`'s `unimplementedOpenOrdersAdapter` is waiting on. |
+| Raw order-book (PATRICIA tree) decoding | **Yes** | `orderbook.ts` has real, generated offsets: `ARENA_NODES_OFFSET`, `ANY_NODE_SIZE` (88), `TAG_INNER`/`TAG_LEAF`, and per-field offsets for both `InnerNode` and `LeafNode` (side, quantity, expires_at, peg_limit, price_or_offset, sequence). The V3 Worker aggregate adapter now consumes the validated page/tree projection; `unimplementedOpenOrdersAdapter` is retained only for explicit V2/unknown-version fallback. |
 | Per-kind raw event decoding | **Already resolved on THIS branch, independently of the new ABI package -- see below** | The new `abi/events.ts`'s `EVENT_HEADER_SIZE`/`EVENT_PAYLOAD_SIZE` (12/88) are a **verified bug**, not a real discrepancy to reconcile (see "Resolved: the event-payload-size question" below). Separately and more importantly: `clients/stockstream/src/index.ts` (unchanged between the two branches, i.e. already on THIS branch) already has a complete, unit-tested set of per-kind payload decoders (`decodeOrderPayload`, `decodeFillPayload`, `decodePositionPayload`, `decodeFundingPayload`, `decodeLiquidationPayload`, `decodeOraclePayload`, `decodeDelegationPayload`, `decodeSessionPayload`, `decodeRegistryPayload`, `decodeReconciliationPayload`), matching `programs/stockstream/src/events.rs`'s real `payload_*` builder functions byte-for-byte, with real assertions in `clients/stockstream/src/index.test.ts`. |
 | Raw oracle payload decoding | **The decoder already exists and is tested on THIS branch (`decodeOraclePayload`) -- never wired into any UI** | `clients/stockstream/src/index.ts::decodeOraclePayload` decodes `events::payload_oracle`'s real fields (price, exponent, confidence, session) and is exercised in `index.test.ts`. `lib/oracle-safety.ts` was deliberately built to never call it, per the standing "hold" instruction -- see below for why this is flagged as a decision point rather than acted on unilaterally. |
 | Canonical ABI migration (this frontend's own `clients/stockstream/src/index.ts` vs. the new `abi/` package) | **Verified compatible already -- no migration needed for market/session decoding** | `accounts.ts::decodeMarketHeader` and `sessions.ts::decodeTradingSession` were checked field-by-field against this branch's existing `decodeMarketState`/`decodeTradingSession`: identical offsets throughout (see the resolved session-discriminator question below). The only genuinely NEW layout the `abi/` package provides that this branch didn't already have is the order book (`orderbook.ts`) -- that's the real, and only, migration item. |
@@ -216,16 +216,13 @@ is implementation work and one real decision, in dependency order:
    `lib/activity-view-model.ts`. This is flagged, not decided, in this
    document -- see the "Resolved: per-kind event payload decoding..."
    section above for why.
-2. Implement a real `OpenOrdersAdapter` (replacing
-   `lib/open-orders.ts`'s `unimplementedOpenOrdersAdapter`) using
-   `abi/orderbook.ts`'s verified offsets to walk the PATRICIA tree arena
-   and decode `LeafNode`s into `OpenOrderView`s. `features/orders/
-   open-orders-panel.tsx` and `use-open-orders.ts` need no changes --
-   they were built against the adapter interface specifically so this
-   swap is the only change required. This is the one piece of real,
-   net-new decoding work the ABI package unblocks -- unlike the
-   event/oracle payloads, no order-book decoder existed anywhere in this
-   branch before now.
+2. **Completed in the current V3 path:** the Worker validates the paged
+   Patricia projection and `lib/open-orders.ts`'s
+   `createV3OpenOrdersAdapter` turns the aggregate into `OpenOrderView`s.
+   `features/orders/open-orders-panel.tsx` and `use-open-orders.ts` remain
+   unchanged because they consume the adapter interface. The old
+   `unimplementedOpenOrdersAdapter` is intentionally V2/unknown-version
+   fallback only.
 3. If (1) is decided yes: extend `lib/activity-view-model.ts`'s
    `toActivityRow` to call the existing per-kind decoders and surface
    real fields instead of (or alongside) `ACTIVITY_DETAIL_UNAVAILABLE`,
