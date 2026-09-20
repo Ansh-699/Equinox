@@ -15,7 +15,7 @@ This matrix is scoped to the current checkout (`b93c1cf`). “Fresh” means rer
 | V3 restoration | externally-blocked | `programs/stockstream/src/v3.rs`; `docs/status/v3-recovery-evidence-20260920.json`; DLP callback remains pending | no (live state preserved) |
 | V3 risk configuration | locally-tested | `programs/stockstream/src/v3.rs`; `cargo test -p stockstream --tests` (risk-update vectors and bundle tests) | yes |
 | V3 fill accounting | locally-tested | `programs/stockstream/src/risk.rs`, `programs/stockstream/src/v3.rs`; `cargo test -p stockstream --tests` | yes |
-| V3 PnL accounting | locally-tested | `programs/stockstream/src/risk.rs`; `cargo test -p stockstream --test state_risk` | yes |
+| V3 PnL accounting | locally-tested | `programs/stockstream/src/risk.rs`; `cargo test -p stockstream --test state_risk repeated_partial_closes_preserve_fractional_entry_value` verifies proportional entry allocation across repeated partial closes | yes |
 | V3 fee accounting | locally-tested | `programs/stockstream/src/v3.rs`; `cargo test -p stockstream --test v3_bundle` | yes |
 | V3 funding accounting | locally-tested | `programs/stockstream/src/risk.rs`, `programs/stockstream/src/v3.rs`; `cargo test -p stockstream --test v3_bundle` | yes |
 | V3 open-interest accounting | locally-tested | `programs/stockstream/src/v3.rs`; `cargo test -p stockstream --test v3_bundle` | yes |
