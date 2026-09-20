@@ -1,16 +1,14 @@
-import { PublicKey, SystemProgram, TransactionInstruction, type AccountMeta } from "@solana/web3.js";
-import { STOCKSTREAM_ACCOUNT_SIZE, STOCKSTREAM_INSTRUCTION, STOCKSTREAM_PROGRAM_ID, STOCKSTREAM_TRADING_SESSION_SIZE } from "./constants";
-import { checkedSigned, checkedUnsigned, writeSigned, writeUnsigned } from "./abi/encoding";
-import { accountMeta, instruction, publicKey, type AddressInput } from "./abi/transaction";
+import { PublicKey, SystemProgram } from "@solana/web3.js";
+import { STOCKSTREAM_ACCOUNT_SIZE, STOCKSTREAM_PROGRAM_ID, STOCKSTREAM_TRADING_SESSION_SIZE } from "./constants";
 import { cancelAllV3, cancelOrderV3, closeV3TraderSeat, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, createV3Account, createV3TraderSeat, delegateV3Account, depositCollateralV3, initializeV3Market, placeOrderV3, replaceOrderV3, requestV3Undelegation, rollbackV3Undelegation, updateFundingV3, withdrawCollateralV3 } from "./abi/v3-instructions";
 import { authorizeTradingSession, closeTradingSession, deriveTradingSession, revokeTradingSession, updateTradingSessionLimits } from "./abi/session-instructions";
 import { createPerpMarket, initializeExchange, registerStockInstrument, suspendStockInstrument, transitionMarket, updateMarketRisk, updateStockInstrument } from "./abi/registry-instructions";
-import type { RegistryAccounts } from "./abi/registry-instructions";
 import { depositCollateral, initializeVault, reconcileVault, recordBadDebt, resolveBadDebt, transferToInsuranceFund, withdrawCollateral, withdrawInsuranceFunds, withdrawProtocolFees } from "./abi/custody-instructions";
 import { cancelAll, cancelOrder, closeTraderSeat, createTraderSeat, initializeMarket, initializeSettlementScratch, liquidate, placeOrder, replaceOrder, updateFunding } from "./abi/order-instructions";
 import type { PlaceOrderParams } from "./abi/order-instructions";
 import { consumeOracleUpdate } from "./abi/oracle-instructions";
 import { commitAndUndelegate, commitMarket, delegateClusterMember, delegateMarket, deriveClusterMemberPdas } from "./abi/magicblock-instructions";
+import { updateExchangeConfig } from "./abi/exchange-config-instructions";
 
 export { cancelAllV3, cancelOrderV3, closeV3TraderSeat, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, createV3Account, createV3TraderSeat, delegateV3Account, depositCollateralV3, initializeV3Market, placeOrderV3, replaceOrderV3, requestV3Undelegation, rollbackV3Undelegation, updateFundingV3, withdrawCollateralV3 } from "./abi/v3-instructions";
 export type { V3AccountKind, V3CommitAccounts, V3CreationAccounts, V3DelegationAccounts, V3DepositAccounts, V3ExecutionAccounts, V3FundingAccounts, V3InitializationAccounts, V3OracleAccounts, V3SeatAccounts, V3ShardCommitAccounts, V3UndelegationRecoveryAccounts, V3WithdrawAccounts } from "./abi/v3-instructions";
@@ -26,6 +24,8 @@ export { CONSUME_ORACLE_UPDATE_MESSAGE_OFFSET, consumeOracleUpdate } from "./abi
 export type { ConsumeOracleUpdateAccounts } from "./abi/oracle-instructions";
 export { MAGICBLOCK_DELEGATION_PROGRAM_ID, MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID, commitAndUndelegate, commitMarket, delegateClusterMember, delegateMarket, deriveClusterMemberPdas } from "./abi/magicblock-instructions";
 export type { ClusterMemberAccounts, CommitAccounts, DelegationAccounts } from "./abi/magicblock-instructions";
+export { EXCHANGE_CONFIG_FIELD, updateExchangeConfig } from "./abi/exchange-config-instructions";
+export type { UpdateExchangeConfigFields } from "./abi/exchange-config-instructions";
 
 export { STOCKSTREAM_PROGRAM_KEY } from "./abi/transaction";
 export type { AddressInput } from "./abi/transaction";
@@ -35,94 +35,6 @@ export interface InstructionFixture {
 }
 
 /** Account tuple for opcode 46. `parent` is an instrument for `core`, and a V3 core otherwise. */
-
-/** Mirrors `programs/stockstream/src/instruction.rs::exchange_config_field`
- * exactly -- one bit per `UpdateExchangeConfig` field. */
-export const EXCHANGE_CONFIG_FIELD = {
-  pauseAuthority: 1 << 0,
-  emergencyAuthority: 1 << 1,
-  keeperAuthority: 1 << 2,
-  makerFeeBps: 1 << 3,
-  takerFeeBps: 1 << 4,
-  liquidationFeeBps: 1 << 5,
-  defaultInitialMarginBps: 1 << 6,
-  defaultMaintenanceMarginBps: 1 << 7,
-  defaultMaximumLeverage: 1 << 8,
-  collateralMint: 1 << 9,
-  oracleProgram: 1 << 10,
-  insuranceTargetBalance: 1 << 11,
-  protocolStatus: 1 << 12,
-} as const;
-
-export interface UpdateExchangeConfigFields {
-  pauseAuthority?: AddressInput;
-  emergencyAuthority?: AddressInput;
-  keeperAuthority?: AddressInput;
-  makerFeeBps?: number;
-  takerFeeBps?: number;
-  liquidationFeeBps?: number;
-  defaultInitialMarginBps?: number;
-  defaultMaintenanceMarginBps?: number;
-  defaultMaximumLeverage?: number;
-  collateralMint?: AddressInput;
-  oracleProgram?: AddressInput;
-  insuranceTargetBalance?: bigint | number;
-  protocolStatus?: number;
-}
-
-/**
- * Only the fields present as keys of `fields` are applied on-chain (the
- * field mask is derived from which keys are set, not their value) --
- * every other field is still present on the wire, zeroed, exactly
- * matching `programs/stockstream/src/instruction.rs`'s fixed 196-byte
- * `UpdateExchangeConfig` layout. `expectedConfigSequence` must equal the
- * exchange account's current `config_sequence` (read it from the account
- * first) or the instruction is rejected as a stale concurrent update.
- */
-export function updateExchangeConfig(
-  accounts: RegistryAccounts,
-  fields: UpdateExchangeConfigFields,
-  expectedConfigSequence: bigint | number,
-): TransactionInstruction {
-  let fieldMask = 0;
-  const data = new Uint8Array(196);
-  data[0] = STOCKSTREAM_INSTRUCTION.updateExchangeConfig;
-  const writePubkeyField = (offset: number, bit: number, value: AddressInput | undefined) => {
-    if (value === undefined) return;
-    fieldMask |= bit;
-    data.set(publicKey(value).toBytes(), offset);
-  };
-  const writeU16Field = (offset: number, bit: number, value: number | undefined) => {
-    if (value === undefined) return;
-    fieldMask |= bit;
-    writeUnsigned(data, offset, checkedUnsigned(value, 16, "value"), 2);
-  };
-  writePubkeyField(5, EXCHANGE_CONFIG_FIELD.pauseAuthority, fields.pauseAuthority);
-  writePubkeyField(37, EXCHANGE_CONFIG_FIELD.emergencyAuthority, fields.emergencyAuthority);
-  writePubkeyField(69, EXCHANGE_CONFIG_FIELD.keeperAuthority, fields.keeperAuthority);
-  writeU16Field(101, EXCHANGE_CONFIG_FIELD.makerFeeBps, fields.makerFeeBps);
-  writeU16Field(103, EXCHANGE_CONFIG_FIELD.takerFeeBps, fields.takerFeeBps);
-  writeU16Field(105, EXCHANGE_CONFIG_FIELD.liquidationFeeBps, fields.liquidationFeeBps);
-  writeU16Field(107, EXCHANGE_CONFIG_FIELD.defaultInitialMarginBps, fields.defaultInitialMarginBps);
-  writeU16Field(109, EXCHANGE_CONFIG_FIELD.defaultMaintenanceMarginBps, fields.defaultMaintenanceMarginBps);
-  if (fields.defaultMaximumLeverage !== undefined) {
-    fieldMask |= EXCHANGE_CONFIG_FIELD.defaultMaximumLeverage;
-    writeUnsigned(data, 111, checkedUnsigned(fields.defaultMaximumLeverage, 32, "defaultMaximumLeverage"), 4);
-  }
-  writePubkeyField(115, EXCHANGE_CONFIG_FIELD.collateralMint, fields.collateralMint);
-  writePubkeyField(147, EXCHANGE_CONFIG_FIELD.oracleProgram, fields.oracleProgram);
-  if (fields.insuranceTargetBalance !== undefined) {
-    fieldMask |= EXCHANGE_CONFIG_FIELD.insuranceTargetBalance;
-    writeUnsigned(data, 179, checkedUnsigned(fields.insuranceTargetBalance, 64, "insuranceTargetBalance"), 8);
-  }
-  if (fields.protocolStatus !== undefined) {
-    fieldMask |= EXCHANGE_CONFIG_FIELD.protocolStatus;
-    data[187] = fields.protocolStatus;
-  }
-  writeUnsigned(data, 1, BigInt(fieldMask), 4);
-  writeUnsigned(data, 188, checkedUnsigned(expectedConfigSequence, 64, "expectedConfigSequence"), 8);
-  return instruction(data, [accountMeta(accounts.exchange, false, true), accountMeta(accounts.authority, true, false)]);
-}
 
 // ---------------------------------------------------------------------
 // Priority 7: the complete, versioned, binary StockStream event ABI
