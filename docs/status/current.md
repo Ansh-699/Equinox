@@ -94,6 +94,11 @@ Fresh current-HEAD regression evidence: `cargo test -p stockstream --test v3_bun
   before matching or mutation; invalid peg limits now leave pages, seats,
   events, and the global sequence unchanged. The full Rust suite remains
   245/245; this local artifact is not deployed.
+- Fresh V3 accounting guard: `NO_DNA=1 cargo test -p stockstream --test
+  v3_bundle` passes with checked subtraction for maker-fill and cancel-all
+  reserve, open-order, and side-exposure release. Underflow now rejects rather
+  than silently saturating corrupted ledger state; the changed artifact is
+  local-only.
 - Commit-limit correction (`6492c75`): `cargo test -p stockstream --test
   magicblock` (30), `--test v3_bundle` (7), root V3 ABI tests (6), Worker
   V3 state tests (4), both TypeScript checks, ABI parity, and a loadable SBF
