@@ -1,5 +1,5 @@
 {
-  "asOf": "2026-09-20",
+  "asOf": "2026-09-21",
   "title": "StockStream V3 MagicBlock commit and undelegation support bundle",
   "network": "devnet",
   "core": "47Mx7SZvt7EY6NydsA5krgrqvcDDR1H5BG5xTPDSnhso",
@@ -74,6 +74,31 @@
     "Retry the already-pending core undelegation callback for the preserved core and child bundle only after that wire contract is confirmed.",
     "Return the full callback simulation logs and finalized signature/slot so StockStream can verify same-epoch restoration and reconciled withdrawal readiness."
   ],
+  "latestReadOnlyProbe": {
+    "command": "node scripts/magicblock-dlp-discriminator-repro.mjs",
+    "requestUndelegation": {
+      "discriminator": 26,
+      "err": { "InstructionError": [0, "InvalidInstructionData"] },
+      "logs": [
+        "Program DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh invoke [1]",
+        "Program log: Failed to read and parse discriminator",
+        "Program log: fast_process_instruction: Error: InvalidInstructionData",
+        "Program DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh consumed 501 of 200000 compute units",
+        "Program DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh failed: invalid instruction data"
+      ]
+    },
+    "delegateControl": {
+      "discriminator": 0,
+      "err": { "InstructionError": [0, "InvalidAccountOwner"] },
+      "logs": [
+        "Program DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh invoke [1]",
+        "Program log: Invalid account owner for delegated account:",
+        "Program log: fast_process_instruction: Error: InvalidAccountOwner",
+        "Program DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh consumed 1109 of 200000 compute units",
+        "Program DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh failed: Invalid account owner"
+      ]
+    }
+  },
   "safetyBoundary": "No guessed discriminator, rollback, recovery, or destructive transaction was submitted. The two DLP probes were simulations only; the full-bundle failure is a read-only simulation.",
   "sourceEvidence": [
     "docs/status/v3-recovery-evidence-20260920.json",
