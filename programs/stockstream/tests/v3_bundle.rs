@@ -267,6 +267,29 @@ fn v3_owner_place_reserves_collateral_and_writes_paged_book_and_event() {
     // V3 reserves configured initial margin, not the full notional.
     assert_eq!(i128::from_le_bytes(seat[100..116].try_into().unwrap()), 10);
     assert_eq!(u32::from_le_bytes(seat[212..216].try_into().unwrap()), 1);
+    let before_failed_cancel = unsafe { accounts[1].view.borrow_unchecked().to_vec() };
+    unsafe {
+        accounts[V3_SEAT_START].view.borrow_unchecked_mut()[212..216]
+            .copy_from_slice(&0u32.to_le_bytes());
+    }
+    let mut failed_cancel = views(&accounts);
+    failed_cancel.push(owner.view.clone());
+    assert!(stockstream::v3::cancel_order_v3(
+        &ID,
+        &mut failed_cancel,
+        0,
+        ((u64::MAX - 10) as u128) << 64 | 1,
+        0
+    )
+    .is_err());
+    assert_eq!(
+        unsafe { accounts[1].view.borrow_unchecked() },
+        before_failed_cancel
+    );
+    unsafe {
+        accounts[V3_SEAT_START].view.borrow_unchecked_mut()[212..216]
+            .copy_from_slice(&1u32.to_le_bytes());
+    }
     let page = unsafe { accounts[1].view.borrow_unchecked() };
     assert_ne!(
         u32::from_le_bytes(page[44..48].try_into().unwrap()),

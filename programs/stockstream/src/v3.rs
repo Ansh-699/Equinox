@@ -3687,15 +3687,12 @@ fn cancel_order_v3_with_action(
     let (book_accounts, tail) = tail.split_at_mut(2 * V3_BOOK_PAGES_PER_SIDE);
     let (seat_accounts, event_accounts) = tail.split_at_mut(V3_SEAT_SHARDS);
     let (bid_pages, ask_pages) = book_accounts.split_at_mut(V3_BOOK_PAGES_PER_SIDE);
-    let mut removed: Option<(TreeKind, LeafNode)> = None;
+    let mut removed: Option<(usize, TreeKind, LeafNode)> = None;
     {
         let mut bid = PagedBookV3::new(bid_pages)?;
         if let Ok(handle) = bid.find(TreeKind::Fixed, order_key) {
             if bid.leaf(handle)?.owner == seat_index as u32 {
-                removed = Some((
-                    TreeKind::Fixed,
-                    bid.cancel_owned_order(TreeKind::Fixed, order_key, seat_index as u32)?,
-                ));
+                removed = Some((0, TreeKind::Fixed, bid.leaf(handle)?));
             }
         }
     }
@@ -3703,23 +3700,13 @@ fn cancel_order_v3_with_action(
         let mut ask = PagedBookV3::new(ask_pages)?;
         if let Ok(handle) = ask.find(TreeKind::Fixed, order_key) {
             if ask.leaf(handle)?.owner == seat_index as u32 {
-                removed = Some((
-                    TreeKind::Fixed,
-                    ask.cancel_owned_order(TreeKind::Fixed, order_key, seat_index as u32)?,
-                ));
+                removed = Some((1, TreeKind::Fixed, ask.leaf(handle)?));
             }
         }
         if removed.is_none() {
             if let Ok(handle) = ask.find(TreeKind::OraclePegged, order_key) {
                 if ask.leaf(handle)?.owner == seat_index as u32 {
-                    removed = Some((
-                        TreeKind::OraclePegged,
-                        ask.cancel_owned_order(
-                            TreeKind::OraclePegged,
-                            order_key,
-                            seat_index as u32,
-                        )?,
-                    ));
+                    removed = Some((1, TreeKind::OraclePegged, ask.leaf(handle)?));
                 }
             }
         }
@@ -3728,14 +3715,11 @@ fn cancel_order_v3_with_action(
         let mut bid = PagedBookV3::new(bid_pages)?;
         if let Ok(handle) = bid.find(TreeKind::OraclePegged, order_key) {
             if bid.leaf(handle)?.owner == seat_index as u32 {
-                removed = Some((
-                    TreeKind::OraclePegged,
-                    bid.cancel_owned_order(TreeKind::OraclePegged, order_key, seat_index as u32)?,
-                ));
+                removed = Some((0, TreeKind::OraclePegged, bid.leaf(handle)?));
             }
         }
     }
-    let (tree, leaf) = removed.ok_or(StockStreamError::InvalidInstruction)?;
+    let (side, tree, leaf) = removed.ok_or(StockStreamError::InvalidInstruction)?;
     let oracle = v3_reserve_oracle(unsafe { core_accounts[0].borrow_unchecked() })?;
     let reserve_price = match tree {
         TreeKind::Fixed => leaf.price_or_offset,
@@ -3770,6 +3754,12 @@ fn cancel_order_v3_with_action(
             .checked_sub(i128::from(leaf.quantity))
             .ok_or(StockStreamError::RiskViolation)?;
     }
+    let pages = if side == 0 {
+        &mut book_accounts[..V3_BOOK_PAGES_PER_SIDE]
+    } else {
+        &mut book_accounts[V3_BOOK_PAGES_PER_SIDE..]
+    };
+    PagedBookV3::new(pages)?.cancel_owned_order(tree, order_key, seat_index as u32)?;
     write_v3_seat_shards(seat_accounts, shard, slot, &updated)?;
     let payload = crate::events::payload_order(
         seat_index,

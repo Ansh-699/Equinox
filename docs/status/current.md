@@ -103,6 +103,10 @@ Fresh current-HEAD regression evidence: `cargo test -p stockstream --test v3_bun
   the oracle-valid flag after placing a pegged order and confirms cancel-all
   still releases its reservation using the last stored price. The validity
   flag gates new pegged orders, not cancellation of existing orders.
+- Fresh V3 cancellation atomicity regression: `cancel_order_v3_with_action`
+  now preflights reserve arithmetic and seat counters before removing the
+  paged-book leaf. A malformed `open_order_count` rejects with page bytes
+  unchanged in `v3_owner_place_reserves_collateral_and_writes_paged_book_and_event`.
 - Commit-limit correction (`6492c75`): `cargo test -p stockstream --test
   magicblock` (30), `--test v3_bundle` (7), root V3 ABI tests (6), Worker
   V3 state tests (4), both TypeScript checks, ABI parity, and a loadable SBF
