@@ -2724,16 +2724,21 @@ fn settle_v3_fill(
         .checked_sub(margin)
         .ok_or(StockStreamError::RiskViolation)?;
     if fill.maker_remaining == 0 {
-        maker.open_order_count = maker.open_order_count.saturating_sub(1);
+        maker.open_order_count = maker
+            .open_order_count
+            .checked_sub(1)
+            .ok_or(StockStreamError::RiskViolation)?;
     }
     if maker_side == Side::Bid {
         maker.open_bid_exposure = maker
             .open_bid_exposure
-            .saturating_sub(i128::from(fill.quantity));
+            .checked_sub(i128::from(fill.quantity))
+            .ok_or(StockStreamError::RiskViolation)?;
     } else {
         maker.open_ask_exposure = maker
             .open_ask_exposure
-            .saturating_sub(i128::from(fill.quantity));
+            .checked_sub(i128::from(fill.quantity))
+            .ok_or(StockStreamError::RiskViolation)?;
     }
     let mut core_bytes = unsafe { core.borrow_unchecked_mut() };
     let protocol_balance = core_i128(&core_bytes, V3_CORE_PROTOCOL_FEE_BALANCE_OFFSET)?
@@ -3744,16 +3749,24 @@ fn cancel_order_v3_with_action(
     let reserve = v3_order_reserve(&leaf, tree, oracle, config)?;
     let (seat, shard, slot) = v3_trade_seat_shards(seat_accounts, seat_index)?;
     let mut updated = seat;
-    updated.reserved_margin = updated.reserved_margin.saturating_sub(reserve);
-    updated.open_order_count = updated.open_order_count.saturating_sub(1);
+    updated.reserved_margin = updated
+        .reserved_margin
+        .checked_sub(reserve)
+        .ok_or(StockStreamError::RiskViolation)?;
+    updated.open_order_count = updated
+        .open_order_count
+        .checked_sub(1)
+        .ok_or(StockStreamError::RiskViolation)?;
     if leaf.side == Side::Bid as u8 {
         updated.open_bid_exposure = updated
             .open_bid_exposure
-            .saturating_sub(i128::from(leaf.quantity));
+            .checked_sub(i128::from(leaf.quantity))
+            .ok_or(StockStreamError::RiskViolation)?;
     } else {
         updated.open_ask_exposure = updated
             .open_ask_exposure
-            .saturating_sub(i128::from(leaf.quantity));
+            .checked_sub(i128::from(leaf.quantity))
+            .ok_or(StockStreamError::RiskViolation)?;
     }
     write_v3_seat_shards(seat_accounts, shard, slot, &updated)?;
     let payload = crate::events::payload_order(
