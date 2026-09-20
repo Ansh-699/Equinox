@@ -3,10 +3,10 @@ import { STOCKSTREAM_ACCOUNT_SIZE, STOCKSTREAM_INSTRUCTION, STOCKSTREAM_PROGRAM_
 import { deriveBookPageV3, deriveEventShardV3, deriveMarketCoreV3, deriveSeatShardV3, V3_BOOK_PAGES_PER_SIDE } from "./abi/v3";
 import { checkedSigned, checkedUnsigned, writeSigned, writeUnsigned } from "./abi/encoding";
 import { accountMeta, instruction, publicKey, STOCKSTREAM_PROGRAM_KEY, type AddressInput } from "./abi/transaction";
-import { cancelAllV3, cancelOrderV3, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, placeOrderV3, replaceOrderV3, requestV3Undelegation, rollbackV3Undelegation, updateFundingV3 } from "./abi/v3-instructions";
+import { cancelAllV3, cancelOrderV3, closeV3TraderSeat, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, createV3TraderSeat, depositCollateralV3, placeOrderV3, replaceOrderV3, requestV3Undelegation, rollbackV3Undelegation, updateFundingV3, withdrawCollateralV3 } from "./abi/v3-instructions";
 
-export { cancelAllV3, cancelOrderV3, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, placeOrderV3, replaceOrderV3, requestV3Undelegation, rollbackV3Undelegation, updateFundingV3 } from "./abi/v3-instructions";
-export type { V3CommitAccounts, V3OracleAccounts, V3ShardCommitAccounts, V3UndelegationRecoveryAccounts } from "./abi/v3-instructions";
+export { cancelAllV3, cancelOrderV3, closeV3TraderSeat, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, createV3TraderSeat, depositCollateralV3, placeOrderV3, replaceOrderV3, requestV3Undelegation, rollbackV3Undelegation, updateFundingV3, withdrawCollateralV3 } from "./abi/v3-instructions";
+export type { V3CommitAccounts, V3DepositAccounts, V3ExecutionAccounts, V3FundingAccounts, V3OracleAccounts, V3SeatAccounts, V3ShardCommitAccounts, V3UndelegationRecoveryAccounts, V3WithdrawAccounts } from "./abi/v3-instructions";
 
 export { STOCKSTREAM_PROGRAM_KEY } from "./abi/transaction";
 export type { AddressInput } from "./abi/transaction";
@@ -73,35 +73,9 @@ export interface V3CreationAccounts { parent: AddressInput; target: AddressInput
 export type V3AccountKind = "core" | "book-page" | "seat-shard" | "event-shard";
 export interface V3InitializationAccounts { exchange: AddressInput; instrument: AddressInput; core: AddressInput; authority: AddressInput; }
 export interface V3DelegationAccounts extends V3CreationAccounts { authority: AddressInput; }
-export interface V3SeatAccounts { core: AddressInput; seatShards: readonly AddressInput[]; eventShards: readonly AddressInput[]; trader: AddressInput; }
-export interface V3DepositAccounts { core: AddressInput; seatShard: AddressInput; eventShards: readonly AddressInput[]; authority: AddressInput; source: AddressInput; vault: AddressInput; mint: AddressInput; tokenProgram: AddressInput; }
-export interface V3WithdrawAccounts extends V3ExecutionAccounts { destination: AddressInput; mint: AddressInput; vault: AddressInput; vaultAuthority: AddressInput; tokenProgram: AddressInput; }
-export interface V3FundingAccounts extends V3ExecutionAccounts { authority: AddressInput; }
-export interface V3ExecutionAccounts {
-  core: AddressInput;
-  bookPages: readonly AddressInput[];
-  seatShards: readonly AddressInput[];
-  eventShards: readonly AddressInput[];
-  authority: AddressInput;
-  session?: AddressInput;
-}
 
 function selfTradeBits(value: SelfTradeBehavior = "abort"): number {
   return value === "abort" ? 0 : value === "cancel-provide" ? 1 << 3 : value === "decrement-take" ? 2 << 3 : (() => { throw new RangeError("Invalid self-trade behavior"); })();
-}
-
-function v3ExecutionMetas(accounts: V3ExecutionAccounts): AccountMeta[] {
-  if (accounts.bookPages.length !== 2 * V3_BOOK_PAGES_PER_SIDE
-      || accounts.seatShards.length !== 4 || accounts.eventShards.length !== 4) {
-    throw new RangeError("V3 execution requires 18 book pages, 4 seat shards and 4 event shards");
-  }
-  const metas = [accountMeta(accounts.core, false, true),
-    ...accounts.bookPages.map((address) => accountMeta(address, false, true)),
-    ...accounts.seatShards.map((address) => accountMeta(address, false, true)),
-    ...accounts.eventShards.map((address) => accountMeta(address, false, true)),
-    accountMeta(accounts.authority, true, false)];
-  if (accounts.session) metas.push(accountMeta(accounts.session, false, true));
-  return metas;
 }
 
 export function initializeMarket(accounts: InstructionAccounts): TransactionInstruction {
@@ -781,56 +755,6 @@ export function delegateV3Account(accounts: V3DelegationAccounts, kind: V3Accoun
     accountMeta(parent, false, false), accountMeta(target, false, true), accountMeta(accounts.authority, true, false), accountMeta(accounts.payer, true, true),
     accountMeta(buffer, false, true), accountMeta(record, false, true), accountMeta(metadata, false, true),
     accountMeta(MAGICBLOCK_DELEGATION_PROGRAM_ID, false, false), accountMeta(SystemProgram.programId, false, false), accountMeta(STOCKSTREAM_PROGRAM_KEY, false, false),
-  ]);
-}
-/** Creates a V3 trader seat. All four shards are required so the program can
- * reject duplicate ownership across the full 128-seat domain. */
-export function createV3TraderSeat(accounts: V3SeatAccounts, seatIndex: number): TransactionInstruction {
-  if (!Number.isInteger(seatIndex) || seatIndex < 0 || seatIndex >= 128) throw new RangeError("invalid V3 seat index");
-  if (accounts.seatShards.length !== 4) throw new RangeError("exactly four V3 seat shards are required");
-  if (accounts.eventShards.length !== 4) throw new RangeError("exactly four V3 event shards are required");
-  const core = publicKey(accounts.core);
-  const shards = accounts.seatShards.map(publicKey);
-  const events = accounts.eventShards.map(publicKey);
-  for (let index = 0; index < 4; index += 1) if (!shards[index].equals(deriveSeatShardV3(core, index))) throw new RangeError("seat shard is not the derived V3 PDA");
-  for (let index = 0; index < 4; index += 1) if (!events[index].equals(deriveEventShardV3(core, index))) throw new RangeError("event shard is not the derived V3 PDA");
-  const data = new Uint8Array(3); data[0] = STOCKSTREAM_INSTRUCTION.createV3TraderSeat; new DataView(data.buffer).setUint16(1, seatIndex, true);
-  return instruction(data, [accountMeta(core, false, true), ...shards.map((shard) => accountMeta(shard, false, true)), ...events.map((event) => accountMeta(event, false, true)), accountMeta(accounts.trader, true, false)]);
-}
-/** Closes an empty V3 trader seat owned by `trader`. */
-export function closeV3TraderSeat(accounts: V3SeatAccounts, seatIndex: number): TransactionInstruction {
-  if (!Number.isInteger(seatIndex) || seatIndex < 0 || seatIndex >= 128) throw new RangeError("invalid V3 seat index");
-  if (accounts.seatShards.length !== 4) throw new RangeError("exactly four V3 seat shards are required");
-  if (accounts.eventShards.length !== 4) throw new RangeError("exactly four V3 event shards are required");
-  const core = publicKey(accounts.core);
-  const shards = accounts.seatShards.map(publicKey);
-  const events = accounts.eventShards.map(publicKey);
-  for (let index = 0; index < 4; index += 1) if (!shards[index].equals(deriveSeatShardV3(core, index))) throw new RangeError("seat shard is not the derived V3 PDA");
-  for (let index = 0; index < 4; index += 1) if (!events[index].equals(deriveEventShardV3(core, index))) throw new RangeError("event shard is not the derived V3 PDA");
-  const data = new Uint8Array(3); data[0] = STOCKSTREAM_INSTRUCTION.closeV3TraderSeat; new DataView(data.buffer).setUint16(1, seatIndex, true);
-  return instruction(data, [accountMeta(core, false, true), ...shards.map((shard) => accountMeta(shard, false, true)), ...events.map((event) => accountMeta(event, false, true)), accountMeta(accounts.trader, true, false)]);
-}
-function v3AmountData(discriminator: number, seatIndex: number, amount: bigint | number): Uint8Array {
-  const data = new Uint8Array(11); data[0] = discriminator;
-  writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2);
-  writeUnsigned(data, 3, checkedUnsigned(amount, 64, "amount"), 8); return data;
-}
-/** L1 V3 deposit: core, target seat shard, four event shards, signer, source, vault, mint, token program. */
-export function depositCollateralV3(accounts: V3DepositAccounts, seatIndex: number, amount: bigint | number): TransactionInstruction {
-  if (accounts.eventShards.length !== 4) throw new RangeError("exactly four V3 event shards are required");
-  return instruction(v3AmountData(STOCKSTREAM_INSTRUCTION.depositCollateralV3, seatIndex, amount), [
-    accountMeta(accounts.core, false, true), accountMeta(accounts.seatShard, false, true),
-    ...accounts.eventShards.map((event) => accountMeta(event, false, true)), accountMeta(accounts.authority, true, false),
-    accountMeta(accounts.source, false, true), accountMeta(accounts.vault, false, true), accountMeta(accounts.mint, false, false), accountMeta(accounts.tokenProgram, false, false),
-  ]);
-}
-/** L1 V3 withdrawal: complete 27-account execution bundle plus custody accounts. */
-export function withdrawCollateralV3(accounts: V3WithdrawAccounts, seatIndex: number, amount: bigint | number): TransactionInstruction {
-  if (accounts.session) throw new RangeError("V3 custody withdrawal cannot include a delegated session account");
-  const metas = v3ExecutionMetas(accounts);
-  return instruction(v3AmountData(STOCKSTREAM_INSTRUCTION.withdrawCollateralV3, seatIndex, amount), [
-    ...metas, accountMeta(accounts.destination, false, true), accountMeta(accounts.mint, false, false),
-    accountMeta(accounts.vault, false, true), accountMeta(accounts.vaultAuthority, false, false), accountMeta(accounts.tokenProgram, false, false),
   ]);
 }
 export function updateStockInstrument(accounts: InstrumentAccounts, instrumentId: Uint8Array, pythFeedId: number, oracleChannel: number, priceExponent: number): TransactionInstruction { if (!Number.isInteger(pythFeedId) || pythFeedId <= 0 || pythFeedId > 0xffff_ffff) throw new RangeError("pythFeedId must be a non-zero u32"); if (!Number.isInteger(oracleChannel) || oracleChannel < 1 || oracleChannel > 4) throw new RangeError("oracleChannel must be between 1 and 4"); const data = new Uint8Array(42); const view = new DataView(data.buffer); data[0] = STOCKSTREAM_INSTRUCTION.updateStockInstrument; data.set(instrumentId, 1); view.setUint32(33, pythFeedId, true); data[37] = oracleChannel; view.setInt32(38, priceExponent, true); return instruction(data, [accountMeta(accounts.exchange, false, false), accountMeta(accounts.instrument, false, true), accountMeta(accounts.authority, true, false)]); }

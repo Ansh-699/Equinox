@@ -1,7 +1,7 @@
 import { PublicKey, SystemProgram, TransactionInstruction, type AccountMeta } from "@solana/web3.js";
 import { OPCODE } from "./instructions";
 import { checkedSigned, checkedUnsigned, writeSigned, writeUnsigned } from "./encoding";
-import { accountMeta, instruction, STOCKSTREAM_PROGRAM_KEY, type AddressInput } from "./transaction";
+import { accountMeta, instruction, publicKey, STOCKSTREAM_PROGRAM_KEY, type AddressInput } from "./transaction";
 import { V3_BOOK_PAGES_PER_SIDE } from "./v3";
 
 export type V3OrderSide = "bid" | "ask";
@@ -67,6 +67,9 @@ export interface V3UndelegationRecoveryAccounts {
   commitRecord?: AddressInput;
   reimbursement?: AddressInput;
 }
+export interface V3SeatAccounts { core: AddressInput; seatShards: readonly AddressInput[]; eventShards: readonly AddressInput[]; trader: AddressInput; }
+export interface V3DepositAccounts { core: AddressInput; seatShard: AddressInput; eventShards: readonly AddressInput[]; authority: AddressInput; source: AddressInput; vault: AddressInput; mint: AddressInput; tokenProgram: AddressInput; }
+export interface V3WithdrawAccounts extends V3ExecutionAccounts { destination: AddressInput; mint: AddressInput; vault: AddressInput; vaultAuthority: AddressInput; tokenProgram: AddressInput; }
 
 const MAGICBLOCK_DELEGATION_PROGRAM_ID = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
 
@@ -203,4 +206,46 @@ export function rollbackV3Undelegation(accounts: V3UndelegationRecoveryAccounts)
     accountMeta(accounts.metadata, false, true), accountMeta(accounts.payer, false, true),
     accountMeta(accounts.state, false, true), accountMeta(accounts.commitRecord, false, true),
     accountMeta(accounts.reimbursement, false, true), accountMeta(MAGICBLOCK_DELEGATION_PROGRAM_ID, false, false)]);
+}
+
+function v3AmountData(opcode: number, seatIndex: number, amount: bigint | number): Uint8Array {
+  const data = new Uint8Array(11); data[0] = opcode;
+  writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2);
+  writeUnsigned(data, 3, checkedUnsigned(amount, 64, "amount"), 8);
+  return data;
+}
+
+function validateSeatAccounts(accounts: V3SeatAccounts, seatIndex: number): { core: ReturnType<typeof publicKey>; seats: ReturnType<typeof publicKey>[]; events: ReturnType<typeof publicKey>[] } {
+  if (!Number.isInteger(seatIndex) || seatIndex < 0 || seatIndex >= 128) throw new RangeError("invalid V3 seat index");
+  if (accounts.seatShards.length !== 4 || accounts.eventShards.length !== 4) throw new RangeError("exactly four V3 seat and event shards are required");
+  const core = publicKey(accounts.core);
+  return { core, seats: accounts.seatShards.map(publicKey), events: accounts.eventShards.map(publicKey) };
+}
+
+export function createV3TraderSeat(accounts: V3SeatAccounts, seatIndex: number): TransactionInstruction {
+  const { core, seats, events } = validateSeatAccounts(accounts, seatIndex);
+  const data = new Uint8Array(3); data[0] = OPCODE.createV3TraderSeat; new DataView(data.buffer).setUint16(1, seatIndex, true);
+  return instruction(data, [accountMeta(core, false, true), ...seats.map((shard) => accountMeta(shard, false, true)), ...events.map((event) => accountMeta(event, false, true)), accountMeta(accounts.trader, true, false)]);
+}
+
+export function closeV3TraderSeat(accounts: V3SeatAccounts, seatIndex: number): TransactionInstruction {
+  const { core, seats, events } = validateSeatAccounts(accounts, seatIndex);
+  const data = new Uint8Array(3); data[0] = OPCODE.closeV3TraderSeat; new DataView(data.buffer).setUint16(1, seatIndex, true);
+  return instruction(data, [accountMeta(core, false, true), ...seats.map((shard) => accountMeta(shard, false, true)), ...events.map((event) => accountMeta(event, false, true)), accountMeta(accounts.trader, true, false)]);
+}
+
+export function depositCollateralV3(accounts: V3DepositAccounts, seatIndex: number, amount: bigint | number): TransactionInstruction {
+  if (accounts.eventShards.length !== 4) throw new RangeError("exactly four V3 event shards are required");
+  return instruction(v3AmountData(OPCODE.depositCollateralV3, seatIndex, amount), [
+    accountMeta(accounts.core, false, true), accountMeta(accounts.seatShard, false, true),
+    ...accounts.eventShards.map((event) => accountMeta(event, false, true)), accountMeta(accounts.authority, true, false),
+    accountMeta(accounts.source, false, true), accountMeta(accounts.vault, false, true), accountMeta(accounts.mint, false, false), accountMeta(accounts.tokenProgram, false, false)]);
+}
+
+export function withdrawCollateralV3(accounts: V3WithdrawAccounts, seatIndex: number, amount: bigint | number): TransactionInstruction {
+  if (accounts.session) throw new RangeError("V3 custody withdrawal cannot include a delegated session account");
+  const metas = v3ExecutionMetas(accounts);
+  return instruction(v3AmountData(OPCODE.withdrawCollateralV3, seatIndex, amount), [
+    ...metas, accountMeta(accounts.destination, false, true), accountMeta(accounts.mint, false, false),
+    accountMeta(accounts.vault, false, true), accountMeta(accounts.vaultAuthority, false, false), accountMeta(accounts.tokenProgram, false, false)]);
 }
