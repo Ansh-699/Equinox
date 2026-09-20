@@ -1686,6 +1686,9 @@ pub fn validate_v3_withdrawal_readiness(
     if expected != committed {
         return Err(StockStreamError::CustodyViolation.into());
     }
+    if core[V3_CORE_RECONCILIATION_STATUS_OFFSET] != ReconciliationStatus::Reconciled as u8 {
+        return Err(StockStreamError::CustodyViolation.into());
+    }
     Ok(())
 }
 

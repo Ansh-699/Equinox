@@ -1582,6 +1582,13 @@ fn v3_withdrawal_requires_restored_and_reconciled_full_bundle() {
     }
     assert!(validate_v3_withdrawal_readiness(&ID, &views(&accounts)).is_ok());
     unsafe {
+        accounts[0].view.borrow_unchecked_mut()[370] = 1;
+    }
+    assert!(validate_v3_withdrawal_readiness(&ID, &views(&accounts)).is_err());
+    unsafe {
+        accounts[0].view.borrow_unchecked_mut()[370] = 0;
+    }
+    unsafe {
         accounts[0].view.borrow_unchecked_mut()[206] = 6;
     }
     assert!(validate_v3_withdrawal_readiness(&ID, &views(&accounts)).is_err());
