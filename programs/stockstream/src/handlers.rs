@@ -568,6 +568,9 @@ pub fn dispatch(
                 withdrawal_buffer,
             },
         ),
+        StockStreamInstruction::ReconcileVaultV3 => {
+            crate::v3::reconcile_vault_v3(program_id, accounts)
+        }
         StockStreamInstruction::TransitionMarket { mode, action } => {
             transition_market(program_id, accounts, mode, action)
         }

@@ -493,6 +493,29 @@ fn v3_risk_update_writes_surplus_and_withdrawal_buffer_atomically() {
 }
 
 #[test]
+fn v3_reconcile_rejects_delegated_core_without_mutation() {
+    let mut accounts = bundle();
+    unsafe {
+        accounts[0].view.borrow_unchecked_mut()[197] = 1;
+    }
+    let before = unsafe { accounts[0].view.borrow_unchecked().to_vec() };
+    let vault = account(Address::new_from_array([91; 32]), 165, false);
+    let mint = account(Address::new_from_array([92; 32]), 165, false);
+    let token_program = account(Address::new_from_array([93; 32]), 0, false);
+    let mut call = views(&accounts);
+    call.extend([
+        vault.view.clone(),
+        mint.view.clone(),
+        token_program.view.clone(),
+    ]);
+    assert!(stockstream::v3::reconcile_vault_v3(&ID, &mut call).is_err());
+    assert_eq!(
+        unsafe { accounts[0].view.borrow_unchecked() },
+        before.as_slice()
+    );
+}
+
+#[test]
 fn v3_place_rejects_maximum_open_interest_before_mutation() {
     let mut accounts = bundle();
     let owner = account(Address::new_from_array([45; 32]), 0, true);

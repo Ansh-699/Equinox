@@ -90,6 +90,7 @@ export interface V3UndelegationRecoveryAccounts {
 export interface V3SeatAccounts { core: AddressInput; seatShards: readonly AddressInput[]; eventShards: readonly AddressInput[]; trader: AddressInput; }
 export interface V3DepositAccounts { core: AddressInput; seatShard: AddressInput; eventShards: readonly AddressInput[]; authority: AddressInput; source: AddressInput; vault: AddressInput; mint: AddressInput; tokenProgram: AddressInput; }
 export interface V3WithdrawAccounts extends V3ExecutionAccounts { destination: AddressInput; mint: AddressInput; vault: AddressInput; vaultAuthority: AddressInput; tokenProgram: AddressInput; }
+export interface V3ReconcileAccounts extends V3ExecutionAccounts { vault: AddressInput; mint: AddressInput; tokenProgram: AddressInput; }
 export type V3AccountKind = "core" | "book-page" | "seat-shard" | "event-shard";
 export interface V3CreationAccounts { parent: AddressInput; target: AddressInput; payer: AddressInput; }
 export interface V3InitializationAccounts { exchange: AddressInput; instrument: AddressInput; core: AddressInput; authority: AddressInput; }
@@ -330,6 +331,21 @@ export function withdrawCollateralV3(accounts: V3WithdrawAccounts, seatIndex: nu
   return instruction(v3AmountData(OPCODE.withdrawCollateralV3, seatIndex, amount), [
     ...metas, accountMeta(accounts.destination, false, true), accountMeta(accounts.mint, false, false),
     accountMeta(accounts.vault, false, true), accountMeta(accounts.vaultAuthority, false, false), accountMeta(accounts.tokenProgram, false, false)]);
+}
+
+export function reconcileVaultV3(accounts: V3ReconcileAccounts): TransactionInstruction {
+  if (accounts.session) throw new RangeError("V3 reconciliation cannot include a delegated session account");
+  if (accounts.bookPages.length !== 2 * V3_BOOK_PAGES_PER_SIDE || accounts.seatShards.length !== 4 || accounts.eventShards.length !== 4) {
+    throw new RangeError("V3 reconciliation requires 18 book pages, 4 seat shards and 4 event shards");
+  }
+  return instruction(Uint8Array.of(OPCODE.reconcileVaultV3), [
+    accountMeta(accounts.core, false, true),
+    ...accounts.bookPages.map((address) => accountMeta(address, false, true)),
+    ...accounts.seatShards.map((address) => accountMeta(address, false, true)),
+    ...accounts.eventShards.map((address) => accountMeta(address, false, true)),
+    accountMeta(accounts.vault, false, true),
+    accountMeta(accounts.mint, false, false), accountMeta(accounts.tokenProgram, false, false),
+  ]);
 }
 
 function v3KindAndIndex(kind: V3AccountKind, index: number): [number, number] {

@@ -8,7 +8,7 @@ import {
   decodeV3BookPage, decodeV3MarketCore,
   decodeV3EventShard, decodeV3SeatShard,
 } from "./v3";
-import { authorizeTradingSessionV3, closeTradingSessionV3, commitMarketV3, commitV3Shard, deriveV3ExecutionAccounts, placeOrderV3, revokeTradingSessionV3, updateTradingSessionV3 } from "./v3-instructions";
+import { authorizeTradingSessionV3, closeTradingSessionV3, commitMarketV3, commitV3Shard, deriveV3ExecutionAccounts, placeOrderV3, reconcileVaultV3, revokeTradingSessionV3, updateTradingSessionV3 } from "./v3-instructions";
 
 function key(seed: number): PublicKey {
   return new PublicKey(Uint8Array.from({ length: 32 }, (_, index) => (seed + index) & 0xff));
@@ -87,6 +87,18 @@ describe("V3 sharded ABI", () => {
     expect(ix.keys).toHaveLength(29);
     expect(ix.keys.at(-2)?.isSigner).toBe(true);
     expect(ix.keys.at(-1)?.isWritable).toBe(true);
+  });
+
+  it("builds the restored-core reconciliation bundle without a signer", () => {
+    const market = deriveMarketCoreV3(instrument);
+    const accounts = deriveV3ExecutionAccounts(market, key(81));
+    const ix = reconcileVaultV3({ ...accounts, vault: key(82), mint: key(83), tokenProgram: key(84) });
+    expect(ix.data).toEqual(Buffer.from([55]));
+    expect(ix.keys).toHaveLength(30);
+    expect(ix.keys[27]).toMatchObject({ isWritable: true, isSigner: false });
+    expect(ix.keys[28]).toMatchObject({ isWritable: false, isSigner: false });
+    expect(ix.keys[29]).toMatchObject({ isWritable: false, isSigner: false });
+    expect(() => reconcileVaultV3({ ...accounts, session: key(85), vault: key(82), mint: key(83), tokenProgram: key(84) })).toThrow("delegated session");
   });
 
   it("builds V3 session authorization with the full bundle and owner payer", () => {
