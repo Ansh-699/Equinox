@@ -11,6 +11,7 @@ import { commitAndUndelegate, commitMarket, delegateClusterMember, delegateMarke
 import { updateExchangeConfig } from "./abi/exchange-config-instructions";
 import { decodeDelegationPayload as decodeDelegationPayloadAbi, decodeFillPayload as decodeFillPayloadAbi, decodeFundingPayload as decodeFundingPayloadAbi, decodeLiquidationPayload as decodeLiquidationPayloadAbi, decodeOraclePayload as decodeOraclePayloadAbi, decodeOrderPayload as decodeOrderPayloadAbi, decodePositionPayload as decodePositionPayloadAbi, decodeReconciliationPayload as decodeReconciliationPayloadAbi, decodeRegistryPayload as decodeRegistryPayloadAbi, decodeSeatAmountPayload as decodeSeatAmountPayloadAbi, decodeSeatPayload as decodeSeatPayloadAbi, decodeSessionPayload as decodeSessionPayloadAbi, decodeStockStreamEvent as decodeStockStreamEventAbi } from "./abi/event-decoders";
 import { decodeBookMetadata as decodeBookMetadataAbi, decodeFillEvent as decodeFillEventAbi } from "./abi/legacy-decoders";
+import { EVENT_ABI_VERSION, EVENT_HEADER_SIZE, EVENT_KIND_NAMES, EVENT_PAYLOAD_SIZE, EVENT_SIZE, NO_SEAT } from "./abi/events";
 
 export { cancelAllV3, cancelOrderV3, closeV3TraderSeat, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, createV3Account, createV3TraderSeat, delegateV3Account, depositCollateralV3, initializeV3Market, placeOrderV3, replaceOrderV3, requestV3Undelegation, rollbackV3Undelegation, updateFundingV3, withdrawCollateralV3 } from "./abi/v3-instructions";
 export type { V3AccountKind, V3CommitAccounts, V3CreationAccounts, V3DelegationAccounts, V3DepositAccounts, V3ExecutionAccounts, V3FundingAccounts, V3InitializationAccounts, V3OracleAccounts, V3SeatAccounts, V3ShardCommitAccounts, V3UndelegationRecoveryAccounts, V3WithdrawAccounts } from "./abi/v3-instructions";
@@ -28,6 +29,7 @@ export { MAGICBLOCK_DELEGATION_PROGRAM_ID, MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLO
 export type { ClusterMemberAccounts, CommitAccounts, DelegationAccounts } from "./abi/magicblock-instructions";
 export { EXCHANGE_CONFIG_FIELD, updateExchangeConfig } from "./abi/exchange-config-instructions";
 export type { UpdateExchangeConfigFields } from "./abi/exchange-config-instructions";
+export { EVENT_ABI_VERSION, EVENT_HEADER_SIZE, EVENT_KIND_NAMES, EVENT_PAYLOAD_SIZE, EVENT_SIZE, NO_SEAT } from "./abi/events";
 
 export { STOCKSTREAM_PROGRAM_KEY } from "./abi/transaction";
 export type { AddressInput } from "./abi/transaction";
@@ -49,34 +51,6 @@ export interface InstructionFixture {
 // `SS:<Kind> ...` text format (`Program log:` lines via `pinocchio_log`)
 // with this single ABI covering every event category.
 // ---------------------------------------------------------------------
-
-export const EVENT_ABI_VERSION = 1;
-export const EVENT_HEADER_SIZE = 52;
-export const EVENT_PAYLOAD_SIZE = 48;
-export const EVENT_SIZE = EVENT_HEADER_SIZE + EVENT_PAYLOAD_SIZE;
-/** Sentinel `seatIndex` meaning "this event is market-level, not one trader seat's" -- mirrors `events::NO_SEAT`. */
-export const NO_SEAT = 0xffff;
-
-export const EVENT_KIND_NAMES: Record<number, string> = {
-  100: "ExchangeInitialized", 101: "ExchangeConfigUpdated", 102: "StockInstrumentRegistered",
-  103: "StockInstrumentUpdated", 104: "StockInstrumentSuspended", 105: "PerpMarketCreated",
-  106: "MarketRiskUpdated", 107: "MarketPaused", 108: "MarketResumed", 109: "MarketCloseOnly",
-  110: "CorporateActionEntered", 111: "CorporateActionResolved", 112: "MarketClosed",
-  200: "TraderSeatCreated", 201: "TraderSeatClosed", 202: "OrderPlaced", 203: "OrderPartiallyFilled",
-  204: "OrderFilled", 205: "OrderCancelled", 206: "CancelAllProgress", 207: "OrderReplaced",
-  208: "OrderExpired", 209: "InvalidOrderRemoved", 210: "SelfTradePrevented",
-  300: "PositionChanged", 301: "MarginChanged", 302: "FundingAccumulatorUpdated", 303: "FundingSettled",
-  304: "LiquidationStarted", 305: "PositionLiquidated", 306: "BankruptcyRecorded", 307: "InsuranceApplied",
-  400: "VaultInitialized", 401: "CollateralDeposited", 402: "CollateralWithdrawn", 403: "ProtocolFeesChanged",
-  404: "InsuranceFundChanged", 405: "BadDebtRecorded", 406: "BadDebtResolved", 407: "VaultSurplusDetected",
-  408: "VaultDeficitDetected", 409: "VaultReconciled",
-  500: "OracleUpdated", 501: "OracleRejected", 502: "MarketSessionChanged", 503: "TradingStatusChanged",
-  504: "OracleStale", 505: "OracleRecovered",
-  600: "DelegationRequested", 601: "MarketDelegated", 602: "CommitRequested", 603: "CommitSequenceChanged",
-  604: "UndelegationRequested", 605: "RestorationPending", 606: "MarketRestored", 607: "DelegationErrorState",
-  700: "TradingSessionAuthorized", 701: "TradingSessionLimitsUpdated", 702: "TradingSessionActionConsumed",
-  703: "TradingSessionRevoked", 704: "TradingSessionClosed",
-};
 
 export interface StockStreamEvent {
   discriminator: number;
