@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { authorizeTradingSession, revokeTradingSession } from "@/clients/stockstream/src";
+import { authorizeTradingSession, authorizeTradingSessionV3, deriveV3ExecutionAccounts, revokeTradingSession, revokeTradingSessionV3 } from "@/clients/stockstream/src";
+import { decodeV3MarketCore } from "@/clients/stockstream/src/abi/v3";
 import { createSession, destroySession, hasSessionKey, lookupSession, type SessionStatus } from "@/lib/session-trading";
 import type { TradingSessionView } from "@/clients/stockstream/src";
 import type { TransactionPreview } from "@/lib/execution-boundary";
@@ -9,7 +10,9 @@ import { RpcFailure } from "@/lib/rpc-transport";
 import { recordSignature } from "@/lib/last-signature";
 import type { StockStreamProtocol } from "@/features/wallet/use-stockstream-protocol";
 
-function toSessionStatus(sessionPda: string, sessionSignerAddress: string, ownerWallet: string, marketPda: string, seatIndex: number, readback: TradingSessionView): SessionStatus {
+function toSessionStatus(sessionPda: string, sessionSignerAddress: string, ownerWallet: string, marketPda: string, seatIndex: number, readback: TradingSessionView, v3Core: string | null): SessionStatus {
+  const address = (value: { toBase58(): string } | string): string => typeof value === "string" ? value : value.toBase58();
+  const v3 = v3Core ? deriveV3ExecutionAccounts(v3Core, ownerWallet, sessionPda) : null;
   return {
     sessionPda,
     sessionSignerAddress,
@@ -24,6 +27,10 @@ function toSessionStatus(sessionPda: string, sessionSignerAddress: string, owner
     maximumOpenOrders: readback.maxOpenOrders,
     nextExpectedNonce: readback.nextExpectedNonce,
     revoked: readback.revoked,
+    ...(v3 ? { v3ExecutionAccounts: {
+      core: address(v3.core), bookPages: v3.bookPages.map(address), seatShards: v3.seatShards.map(address), eventShards: v3.eventShards.map(address),
+      authority: address(v3.authority), session: v3.session ? address(v3.session) : undefined,
+    } } : {}),
   };
 }
 
@@ -58,6 +65,7 @@ export function useTradingSession(protocol: StockStreamProtocol | null, ownerWal
   const [rawStatus, setStatus] = useState<SessionStatus | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const v3Core = process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS ?? null;
 
   // A session belongs to whichever wallet authorized it -- switching the
   // active wallet must disable it immediately, not just until the next
@@ -81,22 +89,27 @@ export function useTradingSession(protocol: StockStreamProtocol | null, ownerWal
     setPending(true);
     setError(null);
     try {
-      const created = await createSession(ownerWallet, marketPda, seatIndex);
+      const sessionMarket = v3Core ?? marketPda;
+      const created = await createSession(ownerWallet, sessionMarket, seatIndex);
       // The program compares expires_at against the MARKET's own clock
       // (header.last_verified_oracle_timestamp), not wall-clock -- see
       // handlers.rs::authorize_trading_session. Anchor to that, not
       // Date.now(), so "N minutes" means the same thing on-chain as it
       // does here even when the oracle is stale relative to wall-clock.
-      const market = await protocol.rpc.market(marketPda);
-      if (!market.state.oracleValid) {
-        throw new Error("The market's oracle has never been verified -- session expiry has no valid clock reference yet.");
+      const policy = { seatIndex, actions: config.actions, maxOrderNotional: config.maxOrderNotional, maxCumulativeNotional: config.maxCumulativeNotional, maximumExposure: config.maximumExposure, maximumOpenOrders: config.maximumOpenOrders };
+      let expiresAt: number;
+      let instruction;
+      if (v3Core) {
+        const core = decodeV3MarketCore(await protocol.rpc.accountBytes(v3Core));
+        if (!core.oracleValid) throw new Error("The V3 core's oracle has never been verified -- session expiry has no valid clock reference yet.");
+        expiresAt = Number(core.lastVerifiedOracleTimestamp) + config.expiresInMinutes * 60;
+        instruction = authorizeTradingSessionV3({ ...deriveV3ExecutionAccounts(v3Core, ownerWallet), session: created.sessionPda, sessionSigner: created.sessionSignerAddress }, expiresAt, policy);
+      } else {
+        const market = await protocol.rpc.market(marketPda);
+        if (!market.state.oracleValid) throw new Error("The market's oracle has never been verified -- session expiry has no valid clock reference yet.");
+        expiresAt = Number(market.state.lastVerifiedOracleTimestamp) + config.expiresInMinutes * 60;
+        instruction = authorizeTradingSession({ market: marketPda, authority: ownerWallet, payer: ownerWallet, sessionSigner: created.sessionSignerAddress }, expiresAt, policy);
       }
-      const expiresAt = Number(market.state.lastVerifiedOracleTimestamp) + config.expiresInMinutes * 60;
-      const instruction = authorizeTradingSession(
-        { market: marketPda, authority: ownerWallet, payer: ownerWallet, sessionSigner: created.sessionSignerAddress },
-        expiresAt,
-        { seatIndex, actions: config.actions, maxOrderNotional: config.maxOrderNotional, maxCumulativeNotional: config.maxCumulativeNotional, maximumExposure: config.maximumExposure, maximumOpenOrders: config.maximumOpenOrders },
-      );
       const submitted = await protocol.service.executeL1(previewFor(instruction, "AuthorizeTradingSession"), [instruction]);
       recordSignature("AuthorizeTradingSession", submitted.signature, "l1");
 
@@ -109,17 +122,17 @@ export function useTradingSession(protocol: StockStreamProtocol | null, ownerWal
         readback.revoked ||
         readback.sessionSigner.toBase58() !== created.sessionSignerAddress ||
         readback.owner.toBase58() !== ownerWallet ||
-        readback.market.toBase58() !== marketPda
+        readback.market.toBase58() !== (v3Core ?? marketPda)
       ) {
         throw new Error("Session authorized on-chain but readback did not match the requested session -- trading stays disabled.");
       }
-      setStatus(toSessionStatus(created.sessionPda, created.sessionSignerAddress, ownerWallet, marketPda, seatIndex, readback));
+      setStatus(toSessionStatus(created.sessionPda, created.sessionSignerAddress, ownerWallet, sessionMarket, seatIndex, readback, v3Core));
     } catch (err) {
       setError(describeError(err, "AuthorizeTradingSession"));
     } finally {
       setPending(false);
     }
-  }, [protocol, ownerWallet, marketPda, seatIndex]);
+  }, [protocol, ownerWallet, marketPda, seatIndex, v3Core]);
 
   // Rehydrates status from the on-chain session PDA on mount (e.g. after
   // navigating from Trade to Settings, or a page refresh) whenever a
@@ -140,17 +153,19 @@ export function useTradingSession(protocol: StockStreamProtocol | null, ownerWal
         readback.owner.toBase58() !== ownerWallet ||
         readback.market.toBase58() !== marketPda
       ) return;
-      setStatus(toSessionStatus(existing.sessionPda, existing.sessionSignerAddress, ownerWallet, marketPda, seatIndex, readback));
+      setStatus(toSessionStatus(existing.sessionPda, existing.sessionSignerAddress, ownerWallet, marketPda, seatIndex, readback, v3Core));
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [protocol, ownerWallet, marketPda, seatIndex, status]);
+  }, [protocol, ownerWallet, marketPda, seatIndex, status, v3Core]);
 
   const revoke = useCallback(async () => {
     if (!protocol || !ownerWallet || !marketPda || !status) { setError("No active session to revoke."); return; }
     setPending(true);
     setError(null);
     try {
-      const instruction = revokeTradingSession({ market: marketPda, authority: ownerWallet, session: status.sessionPda, sessionSigner: status.sessionSignerAddress }, seatIndex);
+      const instruction = v3Core
+        ? revokeTradingSessionV3({ ...deriveV3ExecutionAccounts(v3Core, ownerWallet), session: status.sessionPda, sessionSigner: status.sessionSignerAddress }, seatIndex)
+        : revokeTradingSession({ market: marketPda, authority: ownerWallet, session: status.sessionPda, sessionSigner: status.sessionSignerAddress }, seatIndex);
       const submitted = await protocol.service.executeL1(previewFor(instruction, "RevokeTradingSession"), [instruction]);
       recordSignature("RevokeTradingSession", submitted.signature, "l1");
       // Clear the in-memory key immediately -- do not wait on a subsequent
@@ -162,7 +177,7 @@ export function useTradingSession(protocol: StockStreamProtocol | null, ownerWal
     } finally {
       setPending(false);
     }
-  }, [protocol, ownerWallet, marketPda, status, seatIndex]);
+  }, [protocol, ownerWallet, marketPda, status, seatIndex, v3Core]);
 
   const clearLocal = useCallback(() => {
     if (status) destroySession(status.sessionSignerAddress);

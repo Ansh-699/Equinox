@@ -14,6 +14,7 @@ use core::{
     ptr,
 };
 
+use pinocchio::sysvars::{rent::Rent, Sysvar};
 use pinocchio::{
     cpi::{Seed, Signer},
     error::ProgramError,
@@ -98,6 +99,17 @@ pub const V3_CORE_BAD_DEBT_OFFSET: usize = 338;
 pub const V3_CORE_VAULT_LIABILITY_OFFSET: usize = 354;
 pub const V3_CORE_RECONCILIATION_STATUS_OFFSET: usize = 370;
 pub const V3_CORE_RISK_CONFIG_VERSION_OFFSET: usize = 371;
+/// Commit state is durable in the core reserve.  A non-zero phase freezes
+/// trading while a single snapshot epoch is being committed child-by-child.
+pub const V3_CORE_COMMIT_PHASE_OFFSET: usize = 372;
+pub const V3_CORE_SNAPSHOT_EPOCH_OFFSET: usize = 376;
+pub const V3_CORE_SNAPSHOT_CHILD_COUNT_OFFSET: usize = 384;
+pub const V3_CORE_CHILD_RECORDS_OFFSET: usize = 392;
+pub const V3_CORE_CHILD_RECORD_SIZE: usize = 48; // epoch + sequence + 32-byte digest
+pub const V3_CHILD_COUNT: usize = V3_EXECUTION_BUNDLE_LEN - 1;
+pub const V3_COMMIT_PHASE_IDLE: u8 = 0;
+pub const V3_COMMIT_PHASE_SNAPSHOT: u8 = 1;
+pub const V3_COMMIT_PHASE_UNDELEGATING: u8 = 2;
 
 pub const V3_RISK_CONFIG_VERSION: u8 = 1;
 
@@ -1562,6 +1574,9 @@ pub fn validate_execution_bundle(
     if core_bytes[V3_CORE_DELEGATION_STATUS_OFFSET] > DelegationStatus::Restored as u8 {
         return Err(bundle_error());
     }
+    if core_bytes[V3_CORE_COMMIT_PHASE_OFFSET] != V3_COMMIT_PHASE_IDLE {
+        return Err(StockStreamError::MagicBlockUndelegationInProgress.into());
+    }
     let core_key = *core.address();
     let book_account_count = 2 * V3_BOOK_PAGES_PER_SIDE;
     for flat in 0..book_account_count {
@@ -1768,6 +1783,7 @@ fn validate_active_core(program_id: &Address, core: &AccountView) -> Result<Addr
         || bytes[10] != 1
         || bytes[V3_CORE_MODE_OFFSET] != 1
         || bytes[V3_CORE_DELEGATION_STATUS_OFFSET] != DelegationStatus::NotDelegated as u8
+        || bytes[V3_CORE_COMMIT_PHASE_OFFSET] != V3_COMMIT_PHASE_IDLE
     {
         return Err(bundle_error());
     }
@@ -1785,6 +1801,7 @@ fn validate_event_core(program_id: &Address, core: &AccountView) -> Result<Addre
         || bytes[10] != 1
         || bytes[V3_CORE_MODE_OFFSET] != 1
         || bytes[V3_CORE_DELEGATION_STATUS_OFFSET] == DelegationStatus::Undelegating as u8
+        || bytes[V3_CORE_COMMIT_PHASE_OFFSET] == V3_COMMIT_PHASE_UNDELEGATING
     {
         return Err(bundle_error());
     }
@@ -1935,6 +1952,288 @@ pub fn create_trader_seat(
     )
 }
 
+/// V3 session authorization uses the same TradingSession account format as
+/// the legacy market, but binds it to the complete sharded execution bundle.
+/// Accounts are `[core, 18 book pages, 4 seat shards, 4 event shards,
+/// owner(signer,writable), session PDA(writable), session signer,
+/// system program]`.  Requiring the bundle here prevents a session from being
+/// authorized against one seat-shard view and later traded against another.
+#[allow(clippy::too_many_arguments)]
+pub fn authorize_trading_session_v3(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    seat_index: u16,
+    expires_at: u64,
+    actions: u8,
+    max_order_notional: u64,
+    max_cumulative_notional: u64,
+    maximum_exposure: i128,
+    maximum_open_orders: u16,
+) -> ProgramResult {
+    if accounts.len() != V3_EXECUTION_BUNDLE_LEN + 4 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    validate_execution_bundle(program_id, &accounts[..V3_EXECUTION_BUNDLE_LEN], true)?;
+    let owner = &accounts[V3_EXECUTION_BUNDLE_LEN];
+    let session_account = &accounts[V3_EXECUTION_BUNDLE_LEN + 1];
+    let session_signer = &accounts[V3_EXECUTION_BUNDLE_LEN + 2];
+    if !owner.is_signer()
+        || !owner.is_writable()
+        || !session_account.is_writable()
+        || *accounts[V3_EXECUTION_BUNDLE_LEN + 3].address() != pinocchio_system::ID
+    {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    if owner.address() == session_signer.address() || owner.address() == accounts[0].address() {
+        return Err(StockStreamError::InvalidTradingSession.into());
+    }
+    let seat = v3_trade_seat(&accounts[..V3_EXECUTION_BUNDLE_LEN], seat_index)?.0;
+    if seat.trader != owner.address().to_bytes() {
+        return Err(StockStreamError::InvalidSeat.into());
+    }
+    let core_snapshot = unsafe { accounts[0].borrow_unchecked() };
+    let now = u64::from_le_bytes(
+        core_snapshot[V3_CORE_ORACLE_TIMESTAMP_OFFSET..V3_CORE_ORACLE_TIMESTAMP_OFFSET + 8]
+            .try_into()
+            .map_err(|_| bundle_error())?,
+    );
+    if core_snapshot[V3_CORE_ORACLE_VALID_OFFSET] != 1
+        || expires_at <= now
+        || actions == 0
+        || max_order_notional == 0
+        || max_cumulative_notional < max_order_notional
+        || maximum_exposure <= 0
+        || maximum_open_orders == 0
+    {
+        return Err(StockStreamError::InvalidTradingSession.into());
+    }
+    let core_key = *accounts[0].address();
+    let signer_key = *session_signer.address();
+    let (expected_pda, bump) = Address::find_program_address(
+        &[
+            session::TRADING_SESSION_SEED,
+            owner.address().as_ref(),
+            core_key.as_ref(),
+            &seat_index.to_le_bytes(),
+            signer_key.as_ref(),
+        ],
+        program_id,
+    );
+    if expected_pda != *session_account.address()
+        || session_account.lamports() != 0
+        || session_account.owned_by(program_id)
+        || session_account.address() == owner.address()
+    {
+        return Err(StockStreamError::InvalidTradingSession.into());
+    }
+    let bump_bytes = [bump];
+    let seat_bytes = seat_index.to_le_bytes();
+    let seeds = [
+        Seed::from(session::TRADING_SESSION_SEED),
+        Seed::from(owner.address().as_ref()),
+        Seed::from(core_key.as_ref()),
+        Seed::from(&seat_bytes),
+        Seed::from(signer_key.as_ref()),
+        Seed::from(&bump_bytes),
+    ];
+    let signer = Signer::from(&seeds);
+    let rent = Rent::get()?;
+    pinocchio_system::instructions::CreateAccount {
+        from: owner,
+        to: session_account,
+        lamports: rent.try_minimum_balance(session::TRADING_SESSION_SIZE)?,
+        space: session::TRADING_SESSION_SIZE as u64,
+        owner: program_id,
+    }
+    .invoke_signed(core::slice::from_ref(&signer))?;
+    let mut state = TradingSession::empty();
+    state.initialized = 1;
+    state.owner = owner.address().to_bytes();
+    state.session_signer = signer_key.to_bytes();
+    state.target_program = program_id.to_bytes();
+    state.market = core_key.to_bytes();
+    state.trader_seat_index = seat_index;
+    state.created_at = now;
+    state.expires_at = expires_at;
+    state.actions = actions;
+    state.max_order_notional = max_order_notional;
+    state.max_cumulative_notional = max_cumulative_notional;
+    state.max_exposure = maximum_exposure;
+    state.max_open_orders = maximum_open_orders;
+    session::write_session(
+        unsafe { accounts[V3_EXECUTION_BUNDLE_LEN + 1].borrow_unchecked_mut() },
+        &state,
+    )?;
+    let payload = crate::events::payload_session(seat_index, &signer_key.to_bytes(), 0);
+    let (core_accounts, tail) = accounts.split_at_mut(1);
+    let (_, event_accounts) = tail.split_at_mut((2 * V3_BOOK_PAGES_PER_SIDE) + V3_SEAT_SHARDS);
+    append_event_record(
+        program_id,
+        &mut core_accounts[0],
+        &mut event_accounts[..V3_EVENT_SHARDS],
+        crate::events::EventKind::TradingSessionAuthorized as u16,
+        &payload,
+        crate::handlers::event_timestamp(),
+    )
+}
+
+fn validate_v3_session_control(
+    program_id: &Address,
+    accounts: &[AccountView],
+    seat_index: u16,
+) -> Result<(Address, Address, Address, TradingSession), ProgramError> {
+    if accounts.len() != V3_EXECUTION_BUNDLE_LEN + 3 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    validate_execution_bundle(program_id, &accounts[..V3_EXECUTION_BUNDLE_LEN], true)?;
+    let owner = &accounts[V3_EXECUTION_BUNDLE_LEN];
+    let session_account = &accounts[V3_EXECUTION_BUNDLE_LEN + 1];
+    let session_signer = &accounts[V3_EXECUTION_BUNDLE_LEN + 2];
+    if !owner.is_signer() || !session_account.is_writable() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    let core = *accounts[0].address();
+    let signer = *session_signer.address();
+    let state = session::validated_session_account(
+        program_id,
+        session_account,
+        owner.address(),
+        &core,
+        seat_index,
+        &signer,
+        true,
+    )?;
+    Ok((*owner.address(), core, signer, state))
+}
+
+/// Revokes a V3 session and records the event in the same sharded bundle used
+/// for trading. Accounts are `[execution bundle, owner, session, signer]`.
+pub fn revoke_trading_session_v3(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    seat_index: u16,
+) -> ProgramResult {
+    let (owner, core, signer, mut state) =
+        validate_v3_session_control(program_id, accounts, seat_index)?;
+    state.revoked = 1;
+    session::write_session(
+        unsafe { accounts[V3_EXECUTION_BUNDLE_LEN + 1].borrow_unchecked_mut() },
+        &state,
+    )?;
+    let payload = crate::events::payload_session(seat_index, &signer.to_bytes(), 0);
+    let (core_accounts, tail) = accounts.split_at_mut(1);
+    let (_, event_accounts) = tail.split_at_mut((2 * V3_BOOK_PAGES_PER_SIDE) + V3_SEAT_SHARDS);
+    let _ = owner;
+    let _ = core;
+    append_event_record(
+        program_id,
+        &mut core_accounts[0],
+        &mut event_accounts[..V3_EVENT_SHARDS],
+        crate::events::EventKind::TradingSessionRevoked as u16,
+        &payload,
+        crate::handlers::event_timestamp(),
+    )
+}
+
+/// Updates V3 session limits without allowing the session signer to update
+/// itself. The owner and complete execution bundle remain mandatory.
+#[allow(clippy::too_many_arguments)]
+pub fn update_trading_session_v3(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    seat_index: u16,
+    expires_at: u64,
+    actions: u8,
+    max_order_notional: u64,
+    max_cumulative_notional: u64,
+    maximum_exposure: i128,
+    maximum_open_orders: u16,
+) -> ProgramResult {
+    let (owner, _core, signer, mut state) =
+        validate_v3_session_control(program_id, accounts, seat_index)?;
+    if state.revoked == 1
+        || expires_at <= state.created_at
+        || actions == 0
+        || max_order_notional == 0
+        || max_cumulative_notional < max_order_notional
+        || maximum_exposure <= 0
+        || maximum_open_orders == 0
+        || max_cumulative_notional < state.consumed_cumulative_notional
+    {
+        return Err(StockStreamError::InvalidTradingSession.into());
+    }
+    state.expires_at = expires_at;
+    state.actions = actions;
+    state.max_order_notional = max_order_notional;
+    state.max_cumulative_notional = max_cumulative_notional;
+    state.max_exposure = maximum_exposure;
+    state.max_open_orders = maximum_open_orders;
+    state.session_generation = state
+        .session_generation
+        .checked_add(1)
+        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    session::write_session(
+        unsafe { accounts[V3_EXECUTION_BUNDLE_LEN + 1].borrow_unchecked_mut() },
+        &state,
+    )?;
+    let payload = crate::events::payload_session(
+        seat_index,
+        &signer.to_bytes(),
+        state.session_generation.into(),
+    );
+    let (core_accounts, tail) = accounts.split_at_mut(1);
+    let (_, event_accounts) = tail.split_at_mut((2 * V3_BOOK_PAGES_PER_SIDE) + V3_SEAT_SHARDS);
+    let _ = owner;
+    append_event_record(
+        program_id,
+        &mut core_accounts[0],
+        &mut event_accounts[..V3_EVENT_SHARDS],
+        crate::events::EventKind::TradingSessionLimitsUpdated as u16,
+        &payload,
+        crate::handlers::event_timestamp(),
+    )
+}
+
+/// Closes an expired/revoked V3 session and refunds its rent to the owner.
+pub fn close_trading_session_v3(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    seat_index: u16,
+) -> ProgramResult {
+    let (owner, _core, signer, state) =
+        validate_v3_session_control(program_id, accounts, seat_index)?;
+    let now = u64::from_le_bytes(
+        unsafe { accounts[0].borrow_unchecked() }
+            [V3_CORE_ORACLE_TIMESTAMP_OFFSET..V3_CORE_ORACLE_TIMESTAMP_OFFSET + 8]
+            .try_into()
+            .map_err(|_| bundle_error())?,
+    );
+    if state.revoked == 0 && state.expires_at > now {
+        return Err(StockStreamError::InvalidTradingSession.into());
+    }
+    let refund = accounts[V3_EXECUTION_BUNDLE_LEN + 1].lamports();
+    accounts[V3_EXECUTION_BUNDLE_LEN + 1].set_lamports(0);
+    accounts[V3_EXECUTION_BUNDLE_LEN].set_lamports(
+        accounts[V3_EXECUTION_BUNDLE_LEN]
+            .lamports()
+            .checked_add(refund)
+            .ok_or(StockStreamError::ArithmeticOverflow)?,
+    );
+    unsafe { accounts[V3_EXECUTION_BUNDLE_LEN + 1].borrow_unchecked_mut() }.fill(0);
+    let payload = crate::events::payload_session(seat_index, &signer.to_bytes(), 0);
+    let (core_accounts, tail) = accounts.split_at_mut(1);
+    let (_, event_accounts) = tail.split_at_mut((2 * V3_BOOK_PAGES_PER_SIDE) + V3_SEAT_SHARDS);
+    let _ = owner;
+    append_event_record(
+        program_id,
+        &mut core_accounts[0],
+        &mut event_accounts[..V3_EVENT_SHARDS],
+        crate::events::EventKind::TradingSessionClosed as u16,
+        &payload,
+        crate::handlers::event_timestamp(),
+    )
+}
+
 /// Opcode 50. Accounts are `[core(write), seat_shard_0..3(write),
 /// event_shard_0..3(write), trader(signer)]`.
 /// All shards stay mandatory: besides fixing the account ABI, it keeps close
@@ -2013,6 +2312,39 @@ fn set_core_i128(bytes: &mut [u8], offset: usize, value: i128) -> ProgramResult 
         .ok_or_else(bundle_error)?;
     target.copy_from_slice(&value.to_le_bytes());
     Ok(())
+}
+
+/// Produces a bounded, deterministic digest for a committed child account.
+/// The digest is deliberately computed without heap allocation or a crypto
+/// dependency; it detects mixed/partial snapshots inside the protocol's
+/// trusted program boundary and is paired with the exact epoch/sequence.
+pub fn snapshot_digest(bytes: &[u8]) -> [u8; 32] {
+    let mut lanes = [
+        0xcbf29ce484222325u64,
+        0x84222325cbf29ce4u64,
+        0x9e3779b185ebca87u64,
+        0xd6e8feb86659fd93u64,
+    ];
+    for (index, byte) in bytes.iter().enumerate() {
+        for (lane, value) in lanes.iter_mut().enumerate() {
+            *value ^= u64::from(*byte).wrapping_add((index as u64) << (lane + 1));
+            *value = value.wrapping_mul(0x100000001b3u64 ^ ((lane as u64) << 32));
+            *value = value.rotate_left((7 + lane * 11) as u32);
+        }
+    }
+    let mut out = [0u8; 32];
+    for (lane, value) in lanes.iter().enumerate() {
+        out[lane * 8..lane * 8 + 8].copy_from_slice(&value.to_le_bytes());
+    }
+    out
+}
+
+pub const fn child_record_offset(index: usize) -> Option<usize> {
+    if index < V3_CHILD_COUNT {
+        Some(V3_CORE_CHILD_RECORDS_OFFSET + index * V3_CORE_CHILD_RECORD_SIZE)
+    } else {
+        None
+    }
 }
 
 pub fn read_v3_risk_config(bytes: &[u8]) -> Result<V3RiskConfig, ProgramError> {
@@ -2929,6 +3261,7 @@ pub fn deposit_collateral_v3(
             x if x == DelegationStatus::Delegated as u8
                 || x == DelegationStatus::Undelegating as u8
         )
+        || core_bytes[V3_CORE_COMMIT_PHASE_OFFSET] != V3_COMMIT_PHASE_IDLE
         || core_bytes[V3_CORE_MARKET_AUTHORITY_OFFSET..V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
             != authority.address().to_bytes()
     {
@@ -3484,5 +3817,16 @@ mod tests {
             derive_v3_account(&id, &market, V3AccountKind::BookPage, 0),
             derive_v3_account(&id, &market, V3AccountKind::BookPage, 1)
         );
+    }
+
+    #[test]
+    fn v3_snapshot_records_cover_every_child_without_overlapping_risk_state() {
+        assert_eq!(V3_CHILD_COUNT, 26);
+        let first = child_record_offset(0).unwrap();
+        let last = child_record_offset(V3_CHILD_COUNT - 1).unwrap();
+        assert_eq!(first, V3_CORE_CHILD_RECORDS_OFFSET);
+        assert_eq!(last + V3_CORE_CHILD_RECORD_SIZE, 1_640);
+        assert!(child_record_offset(V3_CHILD_COUNT).is_none());
+        assert_ne!(snapshot_digest(&[1, 2, 3]), snapshot_digest(&[1, 2, 4]));
     }
 }

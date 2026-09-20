@@ -20,6 +20,9 @@ export const V3_SEAT_SHARDS = 4;
 export const V3_EVENTS_PER_SHARD = 32;
 export const V3_EVENT_SHARDS = 4;
 export const V3_EXECUTION_BUNDLE_LEN = 27;
+export const V3_CORE_COMMIT_PHASE_OFFSET = 372;
+export const V3_CORE_SNAPSHOT_EPOCH_OFFSET = 376;
+export const V3_CORE_SNAPSHOT_CHILD_COUNT_OFFSET = 384;
 
 export function deriveMarketCoreV3(instrument: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync([Buffer.from("market-v3"), instrument.toBuffer()], PROGRAM_KEY)[0];
@@ -58,6 +61,7 @@ export interface V3MarketCoreView {
   maximumPosition: bigint; maximumOpenInterest: bigint; currentOpenInterest: bigint;
   markDeviationBps: number; protocolFeeBalance: bigint; insuranceBalance: bigint;
   badDebt: bigint; vaultLiability: bigint; reconciliationStatus: number; riskConfigVersion: number;
+  commitPhase: number; snapshotEpoch: bigint; snapshotChildCount: number;
 }
 export function decodeV3MarketCore(bytes: Uint8Array): V3MarketCoreView {
   if (!versioned(bytes, "STKMK003", V3_MARKET_CORE_SIZE) || bytes[10] !== 1) throw new RangeError("Invalid V3 market core");
@@ -76,6 +80,8 @@ export function decodeV3MarketCore(bytes: Uint8Array): V3MarketCoreView {
     protocolFeeBalance: signed128(view, 306), insuranceBalance: signed128(view, 322),
     badDebt: signed128(view, 338), vaultLiability: signed128(view, 354),
     reconciliationStatus: bytes[370], riskConfigVersion: bytes[371],
+    commitPhase: bytes[V3_CORE_COMMIT_PHASE_OFFSET], snapshotEpoch: view.getBigUint64(V3_CORE_SNAPSHOT_EPOCH_OFFSET, true),
+    snapshotChildCount: view.getUint32(V3_CORE_SNAPSHOT_CHILD_COUNT_OFFSET, true),
   };
 }
 

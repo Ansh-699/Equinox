@@ -2041,6 +2041,23 @@ fn authorize_trading_session(
     maximum_exposure: i128,
     maximum_open_orders: u16,
 ) -> ProgramResult {
+    if accounts.len() == crate::v3::V3_EXECUTION_BUNDLE_LEN + 4
+        && accounts[0].data_len() == crate::v3::V3_MARKET_CORE_SIZE
+        && unsafe { accounts[0].borrow_unchecked() }[0..8]
+            == crate::v3::V3_MARKET_CORE_DISCRIMINATOR
+    {
+        return crate::v3::authorize_trading_session_v3(
+            program_id,
+            accounts,
+            seat_index,
+            expires_at,
+            actions,
+            max_order_notional,
+            max_cumulative_notional,
+            maximum_exposure,
+            maximum_open_orders,
+        );
+    }
     if accounts.len() != 5 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
@@ -2163,6 +2180,13 @@ fn revoke_trading_session(
     accounts: &mut [AccountView],
     seat_index: u16,
 ) -> ProgramResult {
+    if accounts.len() == crate::v3::V3_EXECUTION_BUNDLE_LEN + 3
+        && accounts[0].data_len() == crate::v3::V3_MARKET_CORE_SIZE
+        && unsafe { accounts[0].borrow_unchecked() }[0..8]
+            == crate::v3::V3_MARKET_CORE_DISCRIMINATOR
+    {
+        return crate::v3::revoke_trading_session_v3(program_id, accounts, seat_index);
+    }
     if accounts.len() != 4 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
@@ -2218,6 +2242,23 @@ fn update_trading_session_limits(
     maximum_exposure: i128,
     maximum_open_orders: u16,
 ) -> ProgramResult {
+    if accounts.len() == crate::v3::V3_EXECUTION_BUNDLE_LEN + 3
+        && accounts[0].data_len() == crate::v3::V3_MARKET_CORE_SIZE
+        && unsafe { accounts[0].borrow_unchecked() }[0..8]
+            == crate::v3::V3_MARKET_CORE_DISCRIMINATOR
+    {
+        return crate::v3::update_trading_session_v3(
+            program_id,
+            accounts,
+            seat_index,
+            expires_at,
+            actions,
+            max_order_notional,
+            max_cumulative_notional,
+            maximum_exposure,
+            maximum_open_orders,
+        );
+    }
     if accounts.len() != 4 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
@@ -2301,6 +2342,13 @@ fn close_trading_session(
     accounts: &mut [AccountView],
     seat_index: u16,
 ) -> ProgramResult {
+    if accounts.len() == crate::v3::V3_EXECUTION_BUNDLE_LEN + 3
+        && accounts[0].data_len() == crate::v3::V3_MARKET_CORE_SIZE
+        && unsafe { accounts[0].borrow_unchecked() }[0..8]
+            == crate::v3::V3_MARKET_CORE_DISCRIMINATOR
+    {
+        return crate::v3::close_trading_session_v3(program_id, accounts, seat_index);
+    }
     if accounts.len() != 4 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }

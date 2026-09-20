@@ -17,6 +17,11 @@ export interface V3ExecutionAccounts {
   session?: AddressInput;
 }
 
+export interface V3SessionAuthorizationAccounts extends V3ExecutionAccounts {
+  session: AddressInput;
+  sessionSigner: AddressInput;
+}
+
 /** Builds the canonical V3 execution account tuple from a core address. The
  * helper is intentionally pure so browser callers can construct the exact
  * 27-account bundle without copying PDA seed logic into UI code. */
@@ -108,6 +113,64 @@ function v3ExecutionMetas(accounts: V3ExecutionAccounts): AccountMeta[] {
     accountMeta(accounts.authority, true, false)];
   if (accounts.session) metas.push(accountMeta(accounts.session, false, true));
   return metas;
+}
+
+/** Builds the V3 authorization transaction. The program requires the full
+ * execution bundle so the owner/session PDA is bound to the exact sharded
+ * seat domain that later session-signed orders will use. */
+export function authorizeTradingSessionV3(
+  accounts: V3SessionAuthorizationAccounts,
+  expiresAt: bigint | number,
+  policy: { seatIndex: number; actions: number; maxOrderNotional: bigint | number; maxCumulativeNotional: bigint | number; maximumExposure: bigint | number; maximumOpenOrders: number },
+): TransactionInstruction {
+  const data = new Uint8Array(46);
+  const view = new DataView(data.buffer);
+  data[0] = OPCODE.authorizeTradingSession;
+  view.setUint16(1, Number(checkedUnsigned(policy.seatIndex, 16, "seatIndex")), true);
+  writeUnsigned(data, 3, checkedUnsigned(expiresAt, 64, "expiresAt"), 8);
+  data[11] = Number(checkedUnsigned(policy.actions, 8, "actions"));
+  writeUnsigned(data, 12, checkedUnsigned(policy.maxOrderNotional, 64, "maxOrderNotional"), 8);
+  writeUnsigned(data, 20, checkedUnsigned(policy.maxCumulativeNotional, 64, "maxCumulativeNotional"), 8);
+  writeSigned(data, 28, checkedSigned(policy.maximumExposure, 128, "maximumExposure"), 16);
+  view.setUint16(44, Number(checkedUnsigned(policy.maximumOpenOrders, 16, "maximumOpenOrders")), true);
+  const { session: _session, sessionSigner: _sessionSigner, ...executionAccounts } = accounts;
+  const metas = v3ExecutionMetas(executionAccounts);
+  metas[metas.length - 1] = accountMeta(accounts.authority, true, true);
+  metas.push(accountMeta(accounts.session, false, true), accountMeta(accounts.sessionSigner, false, false), accountMeta(SystemProgram.programId, false, false));
+  return instruction(data, metas);
+}
+
+function v3SessionControlMetas(accounts: V3SessionAuthorizationAccounts, ownerWritable: boolean): AccountMeta[] {
+  const { session: _session, sessionSigner: _sessionSigner, ...executionAccounts } = accounts;
+  const metas = v3ExecutionMetas(executionAccounts);
+  metas[metas.length - 1] = accountMeta(accounts.authority, true, ownerWritable);
+  metas.push(accountMeta(accounts.session, false, true), accountMeta(accounts.sessionSigner, false, false));
+  return metas;
+}
+
+export function revokeTradingSessionV3(accounts: V3SessionAuthorizationAccounts, seatIndex: number): TransactionInstruction {
+  const data = new Uint8Array(3); data[0] = OPCODE.revokeTradingSession;
+  writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2);
+  return instruction(data, v3SessionControlMetas(accounts, false));
+}
+
+export function updateTradingSessionV3(
+  accounts: V3SessionAuthorizationAccounts,
+  expiresAt: bigint | number,
+  policy: { seatIndex: number; actions: number; maxOrderNotional: bigint | number; maxCumulativeNotional: bigint | number; maximumExposure: bigint | number; maximumOpenOrders: number },
+): TransactionInstruction {
+  const data = new Uint8Array(46); const view = new DataView(data.buffer); data[0] = OPCODE.updateTradingSessionLimits;
+  view.setUint16(1, Number(checkedUnsigned(policy.seatIndex, 16, "seatIndex")), true);
+  writeUnsigned(data, 3, checkedUnsigned(expiresAt, 64, "expiresAt"), 8); data[11] = Number(checkedUnsigned(policy.actions, 8, "actions"));
+  writeUnsigned(data, 12, checkedUnsigned(policy.maxOrderNotional, 64, "maxOrderNotional"), 8); writeUnsigned(data, 20, checkedUnsigned(policy.maxCumulativeNotional, 64, "maxCumulativeNotional"), 8);
+  writeSigned(data, 28, checkedSigned(policy.maximumExposure, 128, "maximumExposure"), 16); view.setUint16(44, Number(checkedUnsigned(policy.maximumOpenOrders, 16, "maximumOpenOrders")), true);
+  return instruction(data, v3SessionControlMetas(accounts, false));
+}
+
+export function closeTradingSessionV3(accounts: V3SessionAuthorizationAccounts, seatIndex: number): TransactionInstruction {
+  const data = new Uint8Array(3); data[0] = OPCODE.closeTradingSession;
+  writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2);
+  return instruction(data, v3SessionControlMetas(accounts, true));
 }
 
 function orderData(opcode: number, params: V3OrderParams): Uint8Array {
