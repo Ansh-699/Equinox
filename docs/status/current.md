@@ -49,9 +49,9 @@ workspace tests, the SBF artifact verifier, ABI parity, frontend/Worker tests an
 typechecks, Playwright fixture E2E, and the secret scan. It emits a
 machine-readable gate record (use
 `VERIFY_SUMMARY_PATH=docs/status/verify-latest.json npm run verify` to refresh
-the tracked copy); the latest continuation run finished with `VERIFY-OK` and
-reported commit `0657af9` (the frontend-only rehydration fix was committed
-after that run as `c585022`; it does not change the Rust artifact).
+the tracked copy); the latest continuation run finished with `VERIFY-OK` on
+commit `9e16dfe`. The frontend-only session rehydration fixes (`c585022`,
+`f75c0da`) and documentation updates do not change the Rust artifact.
 
 Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives all 26 child PDAs from the supplied core and returns a bigint-safe aggregate. It is read-only and cannot claim live V3 state until a V3 core is deployed.
 
