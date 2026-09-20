@@ -5,6 +5,13 @@ reports live in `docs/` alongside their original names; this file is the
 one to read first. Update it (don't create a new dated file) the next time
 a comparable amount of ground is covered.
 
+Takeover baseline (2026-09-20): requested base `ee3c5f6` resolves to
+`ee3c5f60c025d46d032deb33ca07dcaa1e89a634`; the current branch is its
+descendant at `d1361b731d4ffec393cb2b7e0fd4480834015ed0`. The tracked working
+tree was clean before verification; only the pre-existing untracked
+`.deepseek/` directory remains. Re-run evidence is recorded in
+`docs/status/takeover-baseline-20260920.json`.
+
 Program ID (Devnet): `H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET`.
 Worker: `https://stockstream-market-api.ansht.workers.dev`.
 
