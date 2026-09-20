@@ -57,7 +57,7 @@ Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives 
 
 Fresh current-HEAD regression evidence: `cargo test -p stockstream --test v3_bundle v3_cancel_all_releases_reserve_and_side_exposure_for_every_tree` passes after `cancel_all_v3` was corrected to decrement the owning seat's bid/ask exposure counters along with reserved margin and open-order count. This is local Pinocchio/LiteSVM-style evidence only; no Devnet account was mutated.
 
-- Rust (native + LiteSVM runtime): 240 passing, `cargo fmt --check` clean; fresh `NO_DNA=1 cargo test -p stockstream --tests` on the current checkout passed 240/240 across 29 suites. The risk engine's repeated-partial-close regression is covered by `repeated_partial_closes_preserve_fractional_entry_value`.
+- Rust (native + LiteSVM runtime): 241 passing, `cargo fmt --check` clean; fresh `NO_DNA=1 cargo test -p stockstream --tests` on the current checkout passed 241/241 across 29 suites. The risk engine's repeated-partial-close regression and V3 liquidation ledger regression are covered by `repeated_partial_closes_preserve_fractional_entry_value` and `v3_liquidation_updates_open_interest_and_insurance_fee`.
 - Workers (Miniflare/vitest): 353 passing (34 files; relayer risk/version/lifetime guards included).
 - Frontend (vitest): 210 passing (33 files).
 - Frontend (Playwright fixture E2E): 54 passing, including V3 deposit, confirmed L1 seat creation, ER-owned seat-write blocking, session authorization, place/cancel/replace/reduce-only, commit-pending blocking and restored withdrawal; opt-in Devnet read-only E2E: 2 passing.
@@ -71,7 +71,7 @@ Fresh current-HEAD regression evidence: `cargo test -p stockstream --test v3_bun
   `cargo build-sbf`, ABI parity, 210 frontend tests, 351 Worker tests,
   Playwright 50/50, TypeScript, lint and secret scan all passed. This is a
   local build, not a live deployment. Current local artifact SHA-256:
-  `cf9729db6cce7d29967aad52bf77f66f81a4b83010656734d00a1160d68e9f4b`.
+  `f4f36dd2fc185879a690acccc0c5fa1f171968b836268b4dab67f3a7b8f17899`.
 - Commit-limit correction (`6492c75`): `cargo test -p stockstream --test
   magicblock` (30), `--test v3_bundle` (7), root V3 ABI tests (6), Worker
   V3 state tests (4), both TypeScript checks, ABI parity, and a loadable SBF
