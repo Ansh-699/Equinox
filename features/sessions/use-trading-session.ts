@@ -143,7 +143,12 @@ export function useTradingSession(protocol: StockStreamProtocol | null, ownerWal
   // nothing that can sign further trades regardless of on-chain state.
   useEffect(() => {
     if (!protocol || !ownerWallet || !marketPda || status) return;
-    const existing = lookupSession(ownerWallet, marketPda, seatIndex);
+    // V3 sessions are authorized against the core account (the session PDA's
+    // on-chain `market` field is the core), while the route may still expose
+    // the legacy market address. Rehydrate with the same canonical key used
+    // by authorize(), or a valid V3 session vanishes after a refresh.
+    const sessionMarket = v3Core ?? marketPda;
+    const existing = lookupSession(ownerWallet, sessionMarket, seatIndex);
     if (!existing || !hasSessionKey(existing.sessionSignerAddress)) return;
     let cancelled = false;
     protocol.rpc.tradingSession(existing.sessionPda).then((readback) => {
@@ -151,7 +156,7 @@ export function useTradingSession(protocol: StockStreamProtocol | null, ownerWal
       if (
         readback.sessionSigner.toBase58() !== existing.sessionSignerAddress ||
         readback.owner.toBase58() !== ownerWallet ||
-        readback.market.toBase58() !== marketPda
+        readback.market.toBase58() !== sessionMarket
       ) return;
       setStatus(toSessionStatus(existing.sessionPda, existing.sessionSignerAddress, ownerWallet, marketPda, seatIndex, readback, v3Core));
     }).catch(() => {});
