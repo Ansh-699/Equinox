@@ -15,7 +15,9 @@ import { Connection, Keypair, PublicKey, SystemProgram, Transaction, Transaction
 
 const RPC = "https://api.devnet.solana.com";
 const PROGRAM = new PublicKey("H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET");
-const STATE_PATH = "/tmp/opencode/v3-lifecycle-state.json";
+const STATE_PATH = process.env.V3_LIFECYCLE_STATE_PATH ?? "/tmp/opencode/v3-lifecycle-state.json";
+const DELEGATION_STATE_PATH = process.env.V3_DELEGATION_STATE_PATH ?? "/tmp/opencode/v3-delegation-state.json";
+const SHARDED_COMMIT_STATE_PATH = process.env.V3_SHARDED_COMMIT_STATE_PATH ?? "/tmp/opencode/v3-sharded-commit-state.json";
 const EXCHANGE_KEY_PATH = "/tmp/opencode/v3-lifecycle-exchange.json";
 const PRESERVED_V2_MARKET = "9d75hK8GyfqajxcijLa35bEh8SYUtobqi6eSdtF42RuS";
 const SIZES = { core: 4_096, book: 10_184, seat: 8_236, event: 3_244 };
@@ -103,8 +105,8 @@ function plan() {
   const readCheckpoint = (path) => {
     try { return fs.existsSync(path) ? JSON.parse(fs.readFileSync(path, "utf8")) : null; } catch { return null; }
   };
-  const delegation = readCheckpoint("/tmp/opencode/v3-delegation-state.json");
-  const commit = readCheckpoint("/tmp/opencode/v3-sharded-commit-state.json");
+  const delegation = readCheckpoint(DELEGATION_STATE_PATH);
+  const commit = readCheckpoint(SHARDED_COMMIT_STATE_PATH);
   const setupComplete = state.setupComplete === true
     && state.core && state.v3Accounts
     && state.v3Accounts.bookPages?.length === 18
