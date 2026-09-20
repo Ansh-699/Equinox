@@ -32,6 +32,8 @@ import { LaunchLab } from "@/features/launch/launch-lab";
 import { useOpenOrders } from "@/features/orders/use-open-orders";
 import { OpenOrdersPanel } from "@/features/orders/open-orders-panel";
 import { createV3OpenOrdersAdapter, unimplementedOpenOrdersAdapter } from "@/lib/open-orders";
+import type { TransactionPreview } from "@/lib/execution-boundary";
+import { recordSignature } from "@/lib/last-signature";
 
 const marketApiUrl = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_API_URL;
 
@@ -146,20 +148,36 @@ export function TradingTerminal() {
     return () => { stopped = true; socket.close(); };
   }, [marketSymbol]);
 
-  function runLifecycle() {
-    if (!auth.walletAddress || !marketAddress) { setNotice("Configure the market address and sign in before constructing lifecycle actions."); return; }
+  async function runLifecycle() {
+    if (!auth.walletAddress || !marketAddress || !protocol) { setNotice("Configure the market, sign in, and connect a wallet before creating a seat."); return; }
     try {
       const v3Core = process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS;
       if (v3Core) {
+        // A seat mutates the V3 core and seat/event shards, so it is an L1
+        // lifecycle write. Never send it while the bundle is delegated or in
+        // transition; the authoritative execution-status route is the gate.
+        if (executionStatus?.orderRoutingDomain !== "l1") {
+          setNotice("CreateV3TraderSeat blocked: the V3 bundle is not currently L1-owned.");
+          return;
+        }
         const execution = deriveV3ExecutionAccounts(v3Core, auth.walletAddress);
         const seat = createV3TraderSeat({ core: v3Core, seatShards: execution.seatShards, eventShards: execution.eventShards, trader: auth.walletAddress }, 0);
-        setNotice(`Constructed CreateV3TraderSeat (${seat.keys.length} account metas). Signing is disabled until the configured L1 transport is available.`);
+        const preview: TransactionPreview = {
+          instruction: "CreateV3TraderSeat",
+          programId: seat.programId.toBase58(),
+          accounts: seat.keys.map((meta) => ({ address: meta.pubkey.toBase58(), signer: meta.isSigner, writable: meta.isWritable })),
+          status: "constructed",
+        };
+        setNotice("Submitting CreateV3TraderSeat…");
+        const result = await protocol.service.executeL1(preview, [seat]);
+        recordSignature("CreateV3TraderSeat", result.signature, "l1");
+        setNotice(`CreateV3TraderSeat ${result.confirmation} — signature ${result.signature.slice(0, 8)}…${result.signature.slice(-8)}.`);
         return;
       }
       const seat = createTraderSeat({ market: marketAddress, authority: auth.walletAddress }, 0);
       const scratchAddress = process.env.NEXT_PUBLIC_STOCKSTREAM_SETTLEMENT_SCRATCH_ADDRESS ?? marketConfig.scratchPda(0);
       const scratch = scratchAddress ? initializeSettlementScratch({ market: marketAddress, authority: auth.walletAddress, settlementScratch: scratchAddress }, 0) : null;
-      setNotice(`Constructed ${scratch ? "CreateTraderSeat + InitializeSettlementScratch" : "CreateTraderSeat"} (${seat.keys.length + (scratch?.keys.length ?? 0)} account metas). Signing is disabled until the configured L1 transport is available.`);
+      setNotice(`Constructed ${scratch ? "CreateTraderSeat + InitializeSettlementScratch" : "CreateTraderSeat"} (${seat.keys.length + (scratch?.keys.length ?? 0)} account metas). V2 lifecycle writes remain preview-only.`);
     } catch (error) { setNotice(error instanceof Error ? error.message : "Could not construct lifecycle action"); }
   }
 
