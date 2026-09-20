@@ -924,6 +924,39 @@ fn v3_session_replace_consumes_one_nonce_and_requires_replace_permission() {
     let consumed = session.consumed_cumulative_notional;
     assert_eq!(next_nonce, 3);
     assert_eq!(consumed, 11);
+    let replacement_key = ((u64::MAX - 6) as u128) << 64 | 2;
+    let before_rejected_replace_page = unsafe { accounts[1].view.borrow_unchecked().to_vec() };
+    let before_rejected_replace_session =
+        unsafe { session_account.view.borrow_unchecked().to_vec() };
+    let mut rejected_replacement = views(&accounts);
+    rejected_replacement.push(session_signer.view.clone());
+    rejected_replacement.push(session_account.view.clone());
+    assert!(stockstream::v3::replace_order_v3(
+        &ID,
+        &mut rejected_replacement,
+        replacement_key,
+        PlaceOrderData {
+            side: Side::Bid as u8,
+            tree: TreeKind::Fixed as u8,
+            flags: 0,
+            seat_index: 0,
+            quantity: 1_000,
+            price_or_offset: 6,
+            expires_at: 100,
+            peg_limit: 0,
+            client_order_id: 3,
+            action_nonce: 3,
+        },
+    )
+    .is_err());
+    assert_eq!(
+        unsafe { accounts[1].view.borrow_unchecked() },
+        before_rejected_replace_page
+    );
+    assert_eq!(
+        unsafe { session_account.view.borrow_unchecked() },
+        before_rejected_replace_session
+    );
 }
 
 #[test]

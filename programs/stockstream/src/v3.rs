@@ -3965,6 +3965,172 @@ pub fn cancel_all_v3(
     Ok(())
 }
 
+/// Preflights the replacement against the seat state that will remain after
+/// removing the old leaf. This catches malformed/risk-invalid replacements
+/// before the cancellation stage mutates the paged book. Matching-specific
+/// checks still run in the normal placement path after the old leaf is gone.
+fn preflight_replace_order_v3(
+    program_id: &Address,
+    accounts: &[AccountView],
+    old_order_key: u128,
+    new_order: PlaceOrderData,
+) -> ProgramResult {
+    if accounts.len() < V3_SIGNER_ACCOUNT_INDEX + 1 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    let now = core_u64(
+        unsafe { accounts[0].borrow_unchecked() },
+        V3_CORE_ORACLE_TIMESTAMP_OFFSET,
+    )?;
+    let (seat, _, _) = v3_trade_seat(accounts, new_order.seat_index)?;
+    let core_snapshot = unsafe { accounts[0].borrow_unchecked() };
+    let config = read_v3_risk_config(&core_snapshot)?;
+    let oracle = if core_snapshot[V3_CORE_ORACLE_VALID_OFFSET] != 0 {
+        Some(i64::from_le_bytes(
+            core_snapshot[V3_CORE_ORACLE_PRICE_OFFSET..V3_CORE_ORACLE_PRICE_OFFSET + 8]
+                .try_into()
+                .map_err(|_| bundle_error())?,
+        ))
+    } else {
+        None
+    };
+    let funding = core_i128(&core_snapshot, V3_CORE_FUNDING_ACCUMULATOR_OFFSET)?;
+
+    let mut old_leaf = None;
+    for side in 0..2usize {
+        let mut pages: [AccountView; V3_BOOK_PAGES_PER_SIDE] =
+            core::array::from_fn(|page| accounts[1 + side * V3_BOOK_PAGES_PER_SIDE + page].clone());
+        let mut book = PagedBookV3::new(&mut pages)?;
+        for tree in [TreeKind::Fixed, TreeKind::OraclePegged] {
+            if let Ok(handle) = book.find(tree, old_order_key) {
+                let leaf = book.leaf(handle)?;
+                if leaf.owner == new_order.seat_index as u32 {
+                    old_leaf = Some((tree, leaf));
+                    break;
+                }
+            }
+        }
+        if old_leaf.is_some() {
+            break;
+        }
+    }
+    let (old_tree, old_leaf) = old_leaf.ok_or(StockStreamError::InvalidInstruction)?;
+    let mut adjusted = seat;
+    adjusted.reserved_margin = adjusted
+        .reserved_margin
+        .checked_sub(v3_order_reserve(
+            &old_leaf,
+            old_tree,
+            v3_reserve_oracle(&core_snapshot)?,
+            config,
+        )?)
+        .ok_or(StockStreamError::RiskViolation)?;
+    adjusted.open_order_count = adjusted
+        .open_order_count
+        .checked_sub(1)
+        .ok_or(StockStreamError::RiskViolation)?;
+    if old_leaf.side == Side::Bid as u8 {
+        adjusted.open_bid_exposure = adjusted
+            .open_bid_exposure
+            .checked_sub(i128::from(old_leaf.quantity))
+            .ok_or(StockStreamError::RiskViolation)?;
+    } else {
+        adjusted.open_ask_exposure = adjusted
+            .open_ask_exposure
+            .checked_sub(i128::from(old_leaf.quantity))
+            .ok_or(StockStreamError::RiskViolation)?;
+    }
+    crate::risk::settle_funding(&mut adjusted, funding).map_err(v3_risk_error)?;
+
+    let side = match new_order.side {
+        0 => Side::Bid,
+        1 => Side::Ask,
+        _ => return Err(StockStreamError::InvalidInstruction.into()),
+    };
+    let tree = match new_order.tree {
+        0 => TreeKind::Fixed,
+        1 => TreeKind::OraclePegged,
+        _ => return Err(StockStreamError::InvalidInstruction.into()),
+    };
+    if new_order.quantity == 0 || new_order.flags & !31 != 0 || new_order.expires_at <= now {
+        return Err(StockStreamError::InvalidInstruction.into());
+    }
+    let effective_price = match tree {
+        TreeKind::Fixed => new_order.price_or_offset,
+        TreeKind::OraclePegged => oracle
+            .ok_or(StockStreamError::OracleUnavailable)?
+            .checked_add(new_order.price_or_offset)
+            .ok_or(StockStreamError::ArithmeticOverflow)?,
+    };
+    if effective_price <= 0 {
+        return Err(StockStreamError::InvalidInstruction.into());
+    }
+    let notional = i128::from(new_order.quantity)
+        .checked_mul(i128::from(effective_price))
+        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    let signed = if side == Side::Bid {
+        i128::from(new_order.quantity)
+    } else {
+        -i128::from(new_order.quantity)
+    };
+    let resulting_exposure = adjusted
+        .base_position
+        .checked_add(signed)
+        .ok_or(StockStreamError::ArithmeticOverflow)?
+        .unsigned_abs();
+    if new_order.flags & 4 != 0 {
+        let current_exposure = adjusted.base_position.unsigned_abs();
+        if adjusted.base_position == 0
+            || u128::from(new_order.quantity) > current_exposure
+            || resulting_exposure >= current_exposure
+        {
+            return Err(StockStreamError::RiskViolation.into());
+        }
+    }
+    if resulting_exposure
+        .checked_mul(u128::try_from(effective_price).map_err(|_| StockStreamError::RiskViolation)?)
+        .ok_or(StockStreamError::ArithmeticOverflow)?
+        > u128::try_from(adjusted.available_collateral.max(0))
+            .map_err(|_| StockStreamError::RiskViolation)?
+    {
+        return Err(StockStreamError::RiskViolation.into());
+    }
+    if config.maximum_position > 0 && resulting_exposure > config.maximum_position as u128 {
+        return Err(StockStreamError::RiskViolation.into());
+    }
+    let initial_requirement =
+        crate::risk::initial_margin(notional, config.initial_margin_bps).map_err(v3_risk_error)?;
+    if adjusted
+        .available_collateral
+        .checked_sub(adjusted.reserved_margin)
+        .ok_or(StockStreamError::RiskViolation)?
+        < initial_requirement
+    {
+        return Err(StockStreamError::RiskViolation.into());
+    }
+    let resulting_open_orders = adjusted
+        .open_order_count
+        .checked_add(1)
+        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    let required_actions = if new_order.flags & 4 != 0 {
+        crate::session::SESSION_ACTION_REPLACE | crate::session::SESSION_ACTION_REDUCE_ONLY_CLOSE
+    } else {
+        crate::session::SESSION_ACTION_REPLACE
+    };
+    validate_v3_trade_accounts(
+        program_id,
+        accounts,
+        new_order.seat_index,
+        required_actions,
+        notional,
+        resulting_exposure,
+        resulting_open_orders,
+        new_order.action_nonce,
+        now,
+    )?;
+    Ok(())
+}
+
 /// Replaces an order atomically. A session-authorized replacement validates
 /// the dedicated replace permission, cancels without consuming the nonce, and
 /// then inserts the replacement while consuming exactly one nonce.
@@ -3977,6 +4143,7 @@ pub fn replace_order_v3(
     if accounts.len() > V3_SESSION_ACCOUNT_INDEX + 1 {
         return Err(StockStreamError::InvalidTradingSession.into());
     }
+    preflight_replace_order_v3(program_id, accounts, old_order_key, new_order)?;
     if new_order.action_nonce == 0 {
         cancel_order_v3(program_id, accounts, new_order.seat_index, old_order_key, 0)?;
         return place_order_v3(program_id, accounts, new_order);
