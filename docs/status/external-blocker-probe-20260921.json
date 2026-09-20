@@ -16,10 +16,10 @@
   },
   "runtimeProbe": {
     "asOf": "2026-09-21",
-    "pythCommand": "NO_DNA=1 node scripts/pyth-live-smoke.mjs",
-    "pythResult": "PYTH_PRO_API_KEY is not set in the environment; no stream attempted",
-    "privyCommand": "NO_DNA=1 node scripts/privy-relay-live.mjs",
-    "privyResult": "missing PRIVY_ACCESS_TOKEN, PRIVY_EXPECTED_WALLET, PRIVY_APP_ID/NEXT_PUBLIC_PRIVY_APP_ID, or PRIVY_APP_SECRET; no relay attempted",
+    "pythCommand": "NO_DNA=1 node --env-file=.env.local scripts/pyth-live-smoke.mjs",
+    "pythResult": "server-only key loaded from ignored .env.local; all 3 feed-922 streams rejected with Not entitled; no payload submitted",
+    "privyCommand": "NO_DNA=1 node --env-file=.env.local scripts/privy-relay-live.mjs",
+    "privyResult": "server-only app credentials loaded from ignored .env.local, but PRIVY_ACCESS_TOKEN and PRIVY_EXPECTED_WALLET are absent; no relay attempted",
     "magicblockCommand": "NO_DNA=1 node scripts/magicblock-dlp-discriminator-repro.mjs",
     "magicblockResult": "discriminator 26 InvalidInstructionData; discriminator 0 reaches handler then InvalidAccountOwner; simulation only"
   },
