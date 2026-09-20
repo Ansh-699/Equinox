@@ -36,7 +36,7 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 | Privy live verification | Blocked only at interactive token/relayer submission; locally tested | `scripts/privy-relay-live.mjs` now verifies a fresh Privy token's audience and linked Solana wallet before any relay call, and defaults to preflight-only. Its explicit `--submit` path carries the exact Worker request and is deliberately nonce-consuming/opt-in. No fresh token for a preserved trader, deployed relayer key, or service token is available, so live success, nonce consumption, and replay rejection are not claimed. |
 | Frontend fixture E2E (Playwright) | Complete | 50/50 pass; 2 real bugs found and fixed (stale mock-relayer auth contract, a WS-connection race in oracle-safety.spec.ts) |
 | Frontend production build | Complete | `npm run build` exit 0; `next start` serves real HTTP 200; production smoke suite 6/6 |
-| Opt-in Devnet browser E2E | Complete (read-only, live) | `npm run test:browser:devnet` runs `playwright.devnet.config.ts` against the real Devnet RPC, deployed Worker and V3 core configuration; 2/2 pass. It verifies app boot, Devnet/AAPL configuration, server-secret non-disclosure and the live Worker V3 404 contract. Signing/relay is intentionally not claimed because Pyth/Privy remain externally blocked. |
+| Opt-in Devnet browser E2E | Complete (read-only, live) | `npm run test:browser:devnet` rerun on 2026-09-20 against the real Devnet RPC, deployed Worker and V3 core configuration; 2/2 pass. It verifies app boot, Devnet/AAPL configuration, server-secret non-disclosure and the live Worker V3 404 contract. Signing/relay is intentionally not claimed because Pyth/Privy remain externally blocked. |
 | Repository cleanup / doc classification | Complete | `docs/status/document-classification.md` classifies every `docs/*.md` file as canonical specification, operational runbook/release gate, historical research, or navigation map; this file remains the authoritative implementation snapshot. |
 | `clients/stockstream/src/index.ts` facade reduction | In progress | commits `7fba664`, `309a475`, `bc917d9`, `8f981f8`, `ddf3776`, `ac88ed9`, `04dbf8f`, `9576c85`, `cc799d7`, `06965ee`, `bd9eef5`, `6612697`, `80ce102`, `7004dc5`, `7009301`, `92fc7ec`, and `cd9aaa2` remove duplicated opcode/state authorities, correct V3 session-replace encoding, and extract V3 order/cancel/funding/oracle/commit/recovery/custody/account-creation/initialization/delegation/session/registry/V2-custody/order/oracle/MagicBlock/exchange-config/event/legacy-book decoder logic into dedicated ABI modules; `abi/encoding.ts` and `abi/transaction.ts` own shared integer, public-key, account-meta, and transaction primitives. Market/session account decoders and the compatibility facade remain for parity-tested read APIs. |
 
@@ -45,7 +45,7 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives all 26 child PDAs from the supplied core and returns a bigint-safe aggregate. It is read-only and cannot claim live V3 state until a V3 core is deployed.
 
 - Rust (native + LiteSVM runtime): 290 passing, `cargo fmt --check` clean.
-- Workers (Miniflare/vitest): 344 passing (33 files).
+- Workers (Miniflare/vitest): 345 passing (33 files).
 - Frontend (vitest): 200 passing.
 - Frontend (Playwright fixture E2E): 50 passing; opt-in Devnet read-only E2E: 2 passing.
 - Frontend (Playwright production smoke): 6 passing.
