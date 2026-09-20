@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "generatedAt": "2026-09-20T22:25:30.832Z",
-  "commit": "069d406c52b9833a48f894300f324999bb19b118",
+  "generatedAt": "2026-09-20T22:38:57.735Z",
+  "commit": "717add92efcf790c72f1729aceb2821f80e7b900",
   "checks": {
     "rustFormat": true,
-    "rustTests": 250,
+    "rustTests": 252,
     "abiParity": true,
     "frontendTests": 213,
     "workerTests": 355,
@@ -16,6 +16,6 @@
   },
   "artifact": {
     "path": "target/deploy/stockstream.so",
-    "sha256": "f0d87f3d24fca7b24ef55a1e0715c9bc48fdec977cfd72ff4d91c8d7e5a2231c"
+    "sha256": "7c8f33401b590c6c2856cf02a1b713ac10fcc6d0d22923ca25ff27786e00717f"
   }
 }
