@@ -10,7 +10,9 @@ use pinocchio::{
 use stockstream::{
     book::{LeafNode, Side, TreeKind},
     instruction::PlaceOrderData,
-    session::{self, TradingSession, SESSION_ACTION_PLACE, TRADING_SESSION_SIZE},
+    session::{
+        self, TradingSession, SESSION_ACTION_PLACE, SESSION_ACTION_REPLACE, TRADING_SESSION_SIZE,
+    },
     v3::{
         append_event_record, close_trader_seat, create_trader_seat, deposit_collateral_v3,
         derive_book_page_v3, derive_event_shard_v3, derive_market_core_v3, derive_seat_shard_v3,
@@ -393,6 +395,106 @@ fn v3_session_actor_binds_sharded_seat_and_rejects_replay_or_risk() {
         1,
     )
     .is_err());
+}
+
+#[test]
+fn v3_session_replace_consumes_one_nonce_and_requires_replace_permission() {
+    let mut accounts = bundle();
+    let owner = account(Address::new_from_array([52; 32]), 0, true);
+    let session_signer = account(Address::new_from_array([53; 32]), 0, true);
+    let mut seat_call = vec![
+        accounts[0].view.clone(),
+        accounts[V3_SEAT_START].view.clone(),
+        accounts[V3_SEAT_START + 1].view.clone(),
+        accounts[V3_SEAT_START + 2].view.clone(),
+        accounts[V3_SEAT_START + 3].view.clone(),
+        accounts[V3_EVENT_START].view.clone(),
+        accounts[V3_EVENT_START + 1].view.clone(),
+        accounts[V3_EVENT_START + 2].view.clone(),
+        accounts[V3_EVENT_START + 3].view.clone(),
+        owner.view.clone(),
+    ];
+    create_trader_seat(&ID, &mut seat_call, 0).unwrap();
+    unsafe {
+        let bytes = accounts[V3_SEAT_START].view.borrow_unchecked_mut();
+        bytes[44 + 40..44 + 56].copy_from_slice(&1_000i128.to_le_bytes());
+        accounts[0].view.borrow_unchecked_mut()[197] = 1;
+    }
+    let core_key = *accounts[0].view.address();
+    let session_key = session::derive_trading_session(
+        &owner.view.address(),
+        &core_key,
+        0,
+        &session_signer.view.address(),
+        &ID,
+    );
+    let mut session_account = account(session_key, TRADING_SESSION_SIZE, false);
+    let mut state = TradingSession::empty();
+    state.initialized = 1;
+    state.owner = owner.view.address().to_bytes();
+    state.session_signer = session_signer.view.address().to_bytes();
+    state.target_program = ID.to_bytes();
+    state.market = core_key.to_bytes();
+    state.trader_seat_index = 0;
+    state.expires_at = 100;
+    state.actions = SESSION_ACTION_PLACE | SESSION_ACTION_REPLACE;
+    state.max_order_notional = 100;
+    state.max_cumulative_notional = 500;
+    state.max_exposure = 100;
+    state.max_open_orders = 2;
+    session::write_session(
+        &mut unsafe { session_account.view.borrow_unchecked_mut() },
+        &state,
+    )
+    .unwrap();
+    let mut first = views(&accounts);
+    first.push(session_signer.view.clone());
+    first.push(session_account.view.clone());
+    place_order_v3(
+        &ID,
+        &mut first,
+        PlaceOrderData {
+            side: Side::Bid as u8,
+            tree: TreeKind::Fixed as u8,
+            flags: 0,
+            seat_index: 0,
+            quantity: 1,
+            price_or_offset: 5,
+            expires_at: 100,
+            peg_limit: 0,
+            client_order_id: 1,
+            action_nonce: 1,
+        },
+    )
+    .unwrap();
+    let old_key = ((u64::MAX - 5) as u128) << 64 | 1;
+    let mut replacement = views(&accounts);
+    replacement.push(session_signer.view.clone());
+    replacement.push(session_account.view.clone());
+    stockstream::v3::replace_order_v3(
+        &ID,
+        &mut replacement,
+        old_key,
+        PlaceOrderData {
+            side: Side::Bid as u8,
+            tree: TreeKind::Fixed as u8,
+            flags: 0,
+            seat_index: 0,
+            quantity: 1,
+            price_or_offset: 6,
+            expires_at: 100,
+            peg_limit: 0,
+            client_order_id: 2,
+            action_nonce: 2,
+        },
+    )
+    .unwrap();
+    let session =
+        session::read_session(unsafe { session_account.view.borrow_unchecked() }).unwrap();
+    let next_nonce = session.next_expected_nonce;
+    let consumed = session.consumed_cumulative_notional;
+    assert_eq!(next_nonce, 3);
+    assert_eq!(consumed, 11);
 }
 
 #[test]

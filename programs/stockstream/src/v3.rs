@@ -1735,6 +1735,22 @@ pub fn place_order_v3(
     accounts: &mut [AccountView],
     order: PlaceOrderData,
 ) -> ProgramResult {
+    place_order_v3_with_action(
+        program_id,
+        accounts,
+        order,
+        crate::session::SESSION_ACTION_PLACE,
+        true,
+    )
+}
+
+fn place_order_v3_with_action(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    order: PlaceOrderData,
+    required_actions: u8,
+    consume_session: bool,
+) -> ProgramResult {
     if accounts.len() < V3_SIGNER_ACCOUNT_INDEX + 1 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
@@ -1801,11 +1817,12 @@ pub fn place_order_v3(
         program_id,
         accounts,
         order.seat_index,
-        if order.flags & 4 != 0 {
-            crate::session::SESSION_ACTION_PLACE | crate::session::SESSION_ACTION_REDUCE_ONLY_CLOSE
-        } else {
-            crate::session::SESSION_ACTION_PLACE
-        },
+        required_actions
+            | if order.flags & 4 != 0 {
+                crate::session::SESSION_ACTION_REDUCE_ONLY_CLOSE
+            } else {
+                0
+            },
         notional,
         resulting_exposure,
         order.action_nonce,
@@ -1940,14 +1957,16 @@ pub fn place_order_v3(
             crate::handlers::event_timestamp(),
         )?;
     }
-    if let Some(auth) = session {
-        crate::handlers::consume_session_action(
-            &mut accounts[V3_SESSION_ACCOUNT_INDEX],
-            auth.session,
-            notional,
-            order.action_nonce,
-            now,
-        )?;
+    if consume_session {
+        if let Some(auth) = session {
+            crate::handlers::consume_session_action(
+                &mut accounts[V3_SESSION_ACCOUNT_INDEX],
+                auth.session,
+                notional,
+                order.action_nonce,
+                now,
+            )?;
+        }
     }
     Ok(())
 }
@@ -2194,6 +2213,26 @@ pub fn cancel_order_v3(
     order_key: u128,
     action_nonce: u64,
 ) -> ProgramResult {
+    cancel_order_v3_with_action(
+        program_id,
+        accounts,
+        seat_index,
+        order_key,
+        action_nonce,
+        crate::session::SESSION_ACTION_CANCEL,
+        true,
+    )
+}
+
+fn cancel_order_v3_with_action(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    seat_index: u16,
+    order_key: u128,
+    action_nonce: u64,
+    required_actions: u8,
+    consume_session: bool,
+) -> ProgramResult {
     let now = core_u64(
         unsafe { accounts[0].borrow_unchecked() },
         V3_CORE_ORACLE_TIMESTAMP_OFFSET,
@@ -2203,7 +2242,7 @@ pub fn cancel_order_v3(
         program_id,
         accounts,
         seat_index,
-        crate::session::SESSION_ACTION_CANCEL,
+        required_actions,
         0,
         seat_snapshot.base_position.unsigned_abs(),
         action_nonce,
@@ -2316,14 +2355,16 @@ pub fn cancel_order_v3(
         &payload,
         crate::handlers::event_timestamp(),
     )?;
-    if let Some(auth) = session {
-        crate::handlers::consume_session_action(
-            &mut accounts[V3_SESSION_ACCOUNT_INDEX],
-            auth.session,
-            0,
-            action_nonce,
-            now,
-        )?;
+    if consume_session {
+        if let Some(auth) = session {
+            crate::handlers::consume_session_action(
+                &mut accounts[V3_SESSION_ACCOUNT_INDEX],
+                auth.session,
+                0,
+                action_nonce,
+                now,
+            )?;
+        }
     }
     Ok(())
 }
@@ -2433,10 +2474,9 @@ pub fn cancel_all_v3(
     Ok(())
 }
 
-/// Replaces an order atomically for the seat owner.  Session-authorized
-/// replacement remains explicitly rejected until the single-action nonce
-/// transition is wired through the combined cancel/insert transaction; it
-/// must not consume two nonces as two independent actions.
+/// Replaces an order atomically. A session-authorized replacement validates
+/// the dedicated replace permission, cancels without consuming the nonce, and
+/// then inserts the replacement while consuming exactly one nonce.
 pub fn replace_order_v3(
     program_id: &Address,
     accounts: &mut [AccountView],
@@ -2446,11 +2486,29 @@ pub fn replace_order_v3(
     if accounts.len() > V3_SESSION_ACCOUNT_INDEX + 1 {
         return Err(StockStreamError::InvalidTradingSession.into());
     }
-    if new_order.action_nonce != 0 {
+    if new_order.action_nonce == 0 {
+        cancel_order_v3(program_id, accounts, new_order.seat_index, old_order_key, 0)?;
+        return place_order_v3(program_id, accounts, new_order);
+    }
+    if accounts.len() != V3_SESSION_ACCOUNT_INDEX + 1 {
         return Err(StockStreamError::InvalidTradingSession.into());
     }
-    cancel_order_v3(program_id, accounts, new_order.seat_index, old_order_key, 0)?;
-    place_order_v3(program_id, accounts, new_order)
+    cancel_order_v3_with_action(
+        program_id,
+        accounts,
+        new_order.seat_index,
+        old_order_key,
+        new_order.action_nonce,
+        crate::session::SESSION_ACTION_REPLACE,
+        false,
+    )?;
+    place_order_v3_with_action(
+        program_id,
+        accounts,
+        new_order,
+        crate::session::SESSION_ACTION_REPLACE,
+        true,
+    )
 }
 
 #[cfg(test)]
