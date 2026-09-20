@@ -5,11 +5,9 @@ import { classifyOpenOrdersResult, type OpenOrdersAdapter, type OpenOrdersViewSt
 
 const POLL_INTERVAL_MS = 10_000;
 
-/** Polls the open-orders adapter (lib/open-orders.ts). With the only
- * adapter wired in today (unimplementedOpenOrdersAdapter), this always
- * settles on "unavailable" -- the hook and UI shell are built and tested
- * against the full state machine now so no rewiring is needed once a real
- * adapter (backed by the canonical order-book layout) lands. */
+/** Polls the selected open-orders adapter (lib/open-orders.ts). The terminal
+ * selects the V3 shard adapter when a Worker/core is configured and retains a
+ * fail-closed unavailable adapter when it is not. */
 export function useOpenOrders(adapter: OpenOrdersAdapter, marketPda: string | null, seatIndex: number): OpenOrdersViewState {
   const [state, setState] = useState<OpenOrdersViewState>({ kind: "loading" });
 

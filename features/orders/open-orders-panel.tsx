@@ -15,9 +15,9 @@ export interface OpenOrdersPanelProps {
  * rendering -- there is no "loading forever" or silently-blank table.
  * Cancel/Replace/Cancel-all call straight into the same session-signed
  * action functions the manual order-key form already uses
- * (features/sessions/use-session-order.ts) -- once a real adapter
- * replaces lib/open-orders.ts's unimplementedOpenOrdersAdapter, this
- * component needs no changes at all. */
+ * (features/sessions/use-session-order.ts). When the V3 aggregate is not
+ * configured, the selected fallback adapter reports that honestly instead of
+ * fabricating rows. */
 export function OpenOrdersPanel({ state, onCancel, onReplace, onCancelAll, pending }: OpenOrdersPanelProps) {
   return (
     <section className="session-panel open-orders-panel">
