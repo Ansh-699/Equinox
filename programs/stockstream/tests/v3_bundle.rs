@@ -9,17 +9,17 @@ use pinocchio::{
 };
 use stockstream::{
     book::{LeafNode, Side, TreeKind},
-    instruction::PlaceOrderData,
+    instruction::{PlaceOrderData, StockStreamInstruction},
     session::{
         self, TradingSession, SESSION_ACTION_PLACE, SESSION_ACTION_REPLACE, TRADING_SESSION_SIZE,
     },
     v3::{
         append_event_record, close_trader_seat, create_trader_seat, deposit_collateral_v3,
         derive_book_page_v3, derive_event_shard_v3, derive_market_core_v3, derive_seat_shard_v3,
-        initialize_book_page_metadata, place_order_v3, validate_execution_bundle,
-        validate_v3_session_actor, validate_v3_withdrawal_readiness, withdraw_collateral_v3,
-        PagedBookV3, V3_BOOK_PAGES_PER_SIDE, V3_BOOK_PAGE_SIZE, V3_EVENT_SHARD_SIZE,
-        V3_EXECUTION_BUNDLE_LEN, V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
+        initialize_book_page_metadata, place_order_v3, update_funding_v3,
+        validate_execution_bundle, validate_v3_session_actor, validate_v3_withdrawal_readiness,
+        withdraw_collateral_v3, PagedBookV3, V3_BOOK_PAGES_PER_SIDE, V3_BOOK_PAGE_SIZE,
+        V3_EVENT_SHARD_SIZE, V3_EXECUTION_BUNDLE_LEN, V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
     },
     ID,
 };
@@ -149,6 +149,41 @@ fn v3_bundle_requires_all_pages_shards_and_canonical_order() {
     reordered.swap(1, 2);
     assert!(validate_execution_bundle(&ID, &reordered, true).is_err());
     assert!(validate_execution_bundle(&ID, &views(&accounts)[..16], true).is_err());
+}
+
+#[test]
+fn v3_funding_recomputes_mark_from_pages_and_emits_event() {
+    let mut accounts = bundle();
+    let authority = account(Address::new_from_array([77; 32]), 0, true);
+    {
+        let core = unsafe { accounts[0].view.borrow_unchecked_mut() };
+        core[44..76].copy_from_slice(authority.view.address().as_ref());
+        core[180] = 1;
+        core[181..189].copy_from_slice(&100i64.to_le_bytes());
+        core[189..197].copy_from_slice(&10u64.to_le_bytes());
+    }
+    let mut page_views = views(&accounts);
+    let mut bid_book = PagedBookV3::new(&mut page_views[1..1 + V3_BOOK_PAGES_PER_SIDE]).unwrap();
+    let mut bid = leaf(1, 0);
+    bid.side = Side::Bid as u8;
+    bid.price_or_offset = 95;
+    bid_book.insert_resting_order(TreeKind::Fixed, bid).unwrap();
+    let mut call = views(&accounts);
+    call.push(authority.view.clone());
+    update_funding_v3(
+        &ID,
+        &mut call,
+        StockStreamInstruction::UpdateFunding {
+            accumulator: 1,
+            timestamp: 20,
+        },
+    )
+    .unwrap();
+    let core = unsafe { accounts[0].view.borrow_unchecked() };
+    assert_eq!(i128::from_le_bytes(core[156..172].try_into().unwrap()), 1);
+    assert_eq!(u64::from_le_bytes(core[172..180].try_into().unwrap()), 20);
+    let event = unsafe { accounts[V3_EVENT_START].view.borrow_unchecked() };
+    assert_eq!(u16::from_le_bytes(event[44..46].try_into().unwrap()), 302);
 }
 
 #[test]

@@ -27,7 +27,7 @@ use crate::{
         ANY_NODE_SIZE, NONE, TAG_INNER, TAG_LEAF,
     },
     error::StockStreamError,
-    instruction::PlaceOrderData,
+    instruction::{PlaceOrderData, StockStreamInstruction},
     session::{self, TradingSession},
     state::{DelegationStatus, LiquidationState, TraderSeat, TRADER_SEAT_SIZE},
 };
@@ -64,6 +64,8 @@ pub const V3_CORE_INSTRUMENT_OFFSET: usize = 12;
 pub const V3_CORE_MARKET_AUTHORITY_OFFSET: usize = 44;
 pub const V3_CORE_GLOBAL_ORDER_SEQUENCE_OFFSET: usize = 140;
 pub const V3_CORE_GLOBAL_EVENT_SEQUENCE_OFFSET: usize = 148;
+pub const V3_CORE_FUNDING_ACCUMULATOR_OFFSET: usize = 156;
+pub const V3_CORE_LAST_FUNDING_TIMESTAMP_OFFSET: usize = 172;
 pub const V3_CORE_ORACLE_VALID_OFFSET: usize = 180;
 pub const V3_CORE_ORACLE_PRICE_OFFSET: usize = 181;
 pub const V3_CORE_ORACLE_TIMESTAMP_OFFSET: usize = 189;
@@ -824,6 +826,39 @@ impl<'a> PagedBookV3<'a> {
         Ok(None)
     }
 
+    /// Returns the best executable quote for one side of this page-sharded
+    /// book.  Roots and node handles remain global, so traversal is identical
+    /// to the matcher; only the leaf bytes are read from their owning page.
+    pub fn best_executable_price(
+        &mut self,
+        tree: TreeKind,
+        side: Side,
+        oracle: i64,
+        now: u64,
+    ) -> Result<Option<i64>, ProgramError> {
+        let Some(handle) = self.best(tree)? else {
+            return Ok(None);
+        };
+        let leaf = self.leaf(handle)?;
+        let expires_at = unsafe { core::ptr::addr_of!(leaf.expires_at).read_unaligned() };
+        let quantity = unsafe { core::ptr::addr_of!(leaf.quantity).read_unaligned() };
+        let leaf_side = leaf.side;
+        if quantity == 0 || expires_at <= now || leaf_side != side as u8 {
+            return Ok(None);
+        }
+        let raw = unsafe { core::ptr::addr_of!(leaf.price_or_offset).read_unaligned() };
+        let price = match tree {
+            TreeKind::Fixed => raw,
+            TreeKind::OraclePegged => match crate::book::pegged_state(&leaf, Some(oracle), now) {
+                crate::book::PeggedState::Valid(value) => value,
+                crate::book::PeggedState::Skipped | crate::book::PeggedState::Invalid => {
+                    return Ok(None)
+                }
+            },
+        };
+        Ok((price > 0).then_some(price))
+    }
+
     fn best_unselected(
         &mut self,
         tree: TreeKind,
@@ -1136,6 +1171,153 @@ pub fn append_event_record(
     let mut bytes = unsafe { shards[shard_index].borrow_unchecked_mut() };
     let offset = V3_SHARD_HEADER_SIZE + slot * V3_EVENT_RECORD_SIZE;
     bytes[offset..offset + V3_EVENT_RECORD_SIZE].copy_from_slice(&record);
+    Ok(())
+}
+
+/// Applies a funding accumulator update to the bounded V3 bundle. The mark is
+/// recomputed from the same page-sharded PATRICIA roots used by matching; the
+/// caller can only provide a monotonic timestamp and accumulator bounded by
+/// the elapsed-second cap and the mark/index basis.
+pub fn update_funding_v3(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    instruction: StockStreamInstruction,
+) -> ProgramResult {
+    if accounts.len() != V3_SIGNER_ACCOUNT_INDEX + 1 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    validate_execution_bundle(program_id, &accounts[..V3_EXECUTION_BUNDLE_LEN], true)?;
+    let StockStreamInstruction::UpdateFunding {
+        accumulator,
+        timestamp,
+    } = instruction
+    else {
+        return Err(ProgramError::InvalidInstructionData);
+    };
+    let signer = &accounts[V3_SIGNER_ACCOUNT_INDEX];
+    if !signer.is_signer() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    {
+        let core = unsafe { accounts[0].borrow_unchecked() };
+        if core[V3_CORE_MARKET_AUTHORITY_OFFSET..V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
+            != signer.address().to_bytes()
+            || core[V3_CORE_ORACLE_VALID_OFFSET] != 1
+            || !matches!(core[V3_CORE_MODE_OFFSET], 1..=3)
+        {
+            return Err(StockStreamError::OracleUnavailable.into());
+        }
+    }
+    let (bundle, _) = accounts.split_at_mut(V3_EXECUTION_BUNDLE_LEN);
+    let oracle = {
+        let core = unsafe { bundle[0].borrow_unchecked() };
+        i64::from_le_bytes(
+            core[V3_CORE_ORACLE_PRICE_OFFSET..V3_CORE_ORACLE_PRICE_OFFSET + 8]
+                .try_into()
+                .map_err(|_| bundle_error())?,
+        )
+    };
+    if oracle <= 0 {
+        return Err(StockStreamError::OracleUnavailable.into());
+    }
+    let now = {
+        let core = unsafe { bundle[0].borrow_unchecked() };
+        u64::from_le_bytes(
+            core[V3_CORE_ORACLE_TIMESTAMP_OFFSET..V3_CORE_ORACLE_TIMESTAMP_OFFSET + 8]
+                .try_into()
+                .map_err(|_| bundle_error())?,
+        )
+    };
+    let best_for = |book: &mut PagedBookV3<'_>, side: Side| -> Result<Option<i64>, ProgramError> {
+        let mut best: Option<i64> = None;
+        for tree in [TreeKind::Fixed, TreeKind::OraclePegged] {
+            if let Some(price) = book.best_executable_price(tree, side, oracle, now)? {
+                best = Some(match (best, side) {
+                    (None, _) => price,
+                    (Some(current), Side::Bid) => current.max(price),
+                    (Some(current), Side::Ask) => current.min(price),
+                });
+            }
+        }
+        Ok(best)
+    };
+    let best_bid = {
+        let mut book = PagedBookV3::new(&mut bundle[1..1 + V3_BOOK_PAGES_PER_SIDE])?;
+        best_for(&mut book, Side::Bid)?
+    };
+    let best_ask = {
+        let start = 1 + V3_BOOK_PAGES_PER_SIDE;
+        let mut book = PagedBookV3::new(&mut bundle[start..start + V3_BOOK_PAGES_PER_SIDE])?;
+        best_for(&mut book, Side::Ask)?
+    };
+    let mark = match (best_bid, best_ask) {
+        (Some(bid), Some(ask)) if ask > bid => (i128::from(bid) + i128::from(ask)) / 2,
+        (Some(bid), None) => i128::from(bid),
+        (None, Some(ask)) => i128::from(ask),
+        _ => i128::from(oracle),
+    };
+    let max_deviation = i128::from(oracle)
+        .checked_mul(500)
+        .and_then(|value| value.checked_div(10_000))
+        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    let lower = (i128::from(oracle) - max_deviation).max(1);
+    let upper = i128::from(oracle)
+        .checked_add(max_deviation)
+        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    let mark = mark.max(lower).min(upper);
+    let (previous_accumulator, previous_timestamp) = {
+        let core = unsafe { bundle[0].borrow_unchecked() };
+        (
+            i128::from_le_bytes(
+                core[V3_CORE_FUNDING_ACCUMULATOR_OFFSET..V3_CORE_FUNDING_ACCUMULATOR_OFFSET + 16]
+                    .try_into()
+                    .map_err(|_| bundle_error())?,
+            ),
+            u64::from_le_bytes(
+                core[V3_CORE_LAST_FUNDING_TIMESTAMP_OFFSET
+                    ..V3_CORE_LAST_FUNDING_TIMESTAMP_OFFSET + 8]
+                    .try_into()
+                    .map_err(|_| bundle_error())?,
+            ),
+        )
+    };
+    if timestamp < previous_timestamp || accumulator < previous_accumulator {
+        return Err(StockStreamError::InvalidInstruction.into());
+    }
+    let basis_bps = mark
+        .checked_sub(i128::from(oracle))
+        .and_then(|value| value.checked_mul(10_000))
+        .and_then(|value| value.checked_div(i128::from(oracle)))
+        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    let elapsed = timestamp.saturating_sub(previous_timestamp);
+    let cap = i128::from(elapsed)
+        .checked_mul(1)
+        .ok_or(StockStreamError::ArithmeticOverflow)?
+        .min(basis_bps.abs());
+    let requested = accumulator
+        .checked_sub(previous_accumulator)
+        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    if requested.abs() > cap {
+        return Err(StockStreamError::InvalidInstruction.into());
+    }
+    {
+        let core = unsafe { bundle[0].borrow_unchecked_mut() };
+        core[V3_CORE_FUNDING_ACCUMULATOR_OFFSET..V3_CORE_FUNDING_ACCUMULATOR_OFFSET + 16]
+            .copy_from_slice(&accumulator.to_le_bytes());
+        core[V3_CORE_LAST_FUNDING_TIMESTAMP_OFFSET..V3_CORE_LAST_FUNDING_TIMESTAMP_OFFSET + 8]
+            .copy_from_slice(&timestamp.to_le_bytes());
+    }
+    let payload = crate::events::payload_funding(crate::events::NO_SEAT, accumulator, 0);
+    let event_start = 1 + (2 * V3_BOOK_PAGES_PER_SIDE) + V3_SEAT_SHARDS;
+    let (core_prefix, event_accounts) = bundle.split_at_mut(event_start);
+    append_event_record(
+        program_id,
+        &mut core_prefix[0],
+        &mut event_accounts[..V3_EVENT_SHARDS],
+        crate::events::EventKind::FundingAccumulatorUpdated as u16,
+        &payload,
+        timestamp,
+    )?;
     Ok(())
 }
 
