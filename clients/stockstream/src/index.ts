@@ -9,8 +9,6 @@ import type { PlaceOrderParams } from "./abi/order-instructions";
 import { consumeOracleUpdate } from "./abi/oracle-instructions";
 import { commitAndUndelegate, commitMarket, delegateClusterMember, delegateMarket, deriveClusterMemberPdas } from "./abi/magicblock-instructions";
 import { updateExchangeConfig } from "./abi/exchange-config-instructions";
-import { decodeDelegationPayload as decodeDelegationPayloadAbi, decodeFillPayload as decodeFillPayloadAbi, decodeFundingPayload as decodeFundingPayloadAbi, decodeLiquidationPayload as decodeLiquidationPayloadAbi, decodeOraclePayload as decodeOraclePayloadAbi, decodeOrderPayload as decodeOrderPayloadAbi, decodePositionPayload as decodePositionPayloadAbi, decodeReconciliationPayload as decodeReconciliationPayloadAbi, decodeRegistryPayload as decodeRegistryPayloadAbi, decodeSeatAmountPayload as decodeSeatAmountPayloadAbi, decodeSeatPayload as decodeSeatPayloadAbi, decodeSessionPayload as decodeSessionPayloadAbi, decodeStockStreamEvent as decodeStockStreamEventAbi } from "./abi/event-decoders";
-import { decodeBookMetadata as decodeBookMetadataAbi, decodeFillEvent as decodeFillEventAbi } from "./abi/legacy-decoders";
 import { EVENT_ABI_VERSION, EVENT_HEADER_SIZE, EVENT_KIND_NAMES, EVENT_PAYLOAD_SIZE, EVENT_SIZE, NO_SEAT } from "./abi/events";
 import { decodeTradingSession as decodeTradingSessionAbi, type TradingSessionView as TradingSessionAbiView } from "./abi/sessions";
 
@@ -32,6 +30,16 @@ export { EXCHANGE_CONFIG_FIELD, updateExchangeConfig } from "./abi/exchange-conf
 export type { UpdateExchangeConfigFields } from "./abi/exchange-config-instructions";
 export { EVENT_ABI_VERSION, EVENT_HEADER_SIZE, EVENT_KIND_NAMES, EVENT_PAYLOAD_SIZE, EVENT_SIZE, NO_SEAT } from "./abi/events";
 export { TRADING_SESSION_DISCRIMINATOR, TRADING_SESSION_VERSION } from "./abi/sessions";
+export {
+  decodeDelegationPayload, decodeFillPayload, decodeFundingPayload,
+  decodeLiquidationPayload, decodeOraclePayload, decodeOrderPayload,
+  decodePositionPayload, decodeReconciliationPayload, decodeRegistryPayload,
+  decodeSeatAmountPayload, decodeSeatPayload, decodeSessionPayload,
+  decodeStockStreamEvent,
+} from "./abi/event-decoders";
+export type { StockStreamEvent } from "./abi/event-decoders";
+export { decodeBookMetadata, decodeFillEvent } from "./abi/legacy-decoders";
+export type { BookMetadata, FillEventView } from "./abi/legacy-decoders";
 
 export { STOCKSTREAM_PROGRAM_KEY } from "./abi/transaction";
 export type { AddressInput } from "./abi/transaction";
@@ -41,96 +49,6 @@ export { decodeMarketState } from "./abi/accounts";
 export type { MarketStateView } from "./abi/accounts";
 
 /** Account tuple for opcode 46. `parent` is an instrument for `core`, and a V3 core otherwise. */
-
-// ---------------------------------------------------------------------
-// Priority 7: the complete, versioned, binary StockStream event ABI
-// (`programs/stockstream/src/events.rs`). Every event is one real
-// `sol_log_data` syscall call, surfacing in `meta.logMessages` as a single
-// `Program data: <base64>` line carrying exactly `EVENT_SIZE` (100) bytes:
-// a fixed header (discriminator, ABI version, sequence, market, timestamp)
-// followed by a fixed 48-byte payload whose fields depend on the
-// discriminator. This replaced the earlier Priority-4 custody-only
-// `SS:<Kind> ...` text format (`Program log:` lines via `pinocchio_log`)
-// with this single ABI covering every event category.
-// ---------------------------------------------------------------------
-
-export interface StockStreamEvent {
-  discriminator: number;
-  /** Human-readable name for a known discriminator, or `Unknown(<n>)` for
-   * a future/unrecognized one -- the raw discriminator and payload are
-   * still returned so an indexer can preserve the record rather than
-   * dropping it. */
-  kind: string;
-  abiVersion: number;
-  sequence: bigint;
-  /** 64-character lowercase hex market pubkey. */
-  market: string;
-  timestamp: bigint;
-  /** The raw 48-byte payload; use the `decode*Payload` helpers below for
-   * the shape matching this event's `kind`. */
-  payload: Uint8Array;
-}
-
-/**
- * Decodes one StockStream event out of a transaction log line. Returns
- * `null` for a line that isn't a `Program data:` record, that fails to
- * base64-decode, or whose decoded length doesn't exactly match `EVENT_SIZE`
- * (a truncated or foreign record) -- never for an unrecognized
- * discriminator, since a future ABI version's new event kinds should still
- * be preserved (`kind` becomes `Unknown(<n>)`), not silently dropped.
- */
-export function decodeStockStreamEvent(logLine: string): StockStreamEvent | null {
-  return decodeStockStreamEventAbi(logLine);
-}
-
-/** `events::payload_seat`. */
-export function decodeSeatPayload(payload: Uint8Array) {
-  return decodeSeatPayloadAbi(payload);
-}
-/** `events::payload_seat_amount`. */
-export function decodeSeatAmountPayload(payload: Uint8Array) {
-  return decodeSeatAmountPayloadAbi(payload);
-}
-/** `events::payload_order`. */
-export function decodeOrderPayload(payload: Uint8Array) {
-  return decodeOrderPayloadAbi(payload);
-}
-/** `events::payload_fill`. */
-export function decodeFillPayload(payload: Uint8Array) {
-  return decodeFillPayloadAbi(payload);
-}
-/** `events::payload_position`. */
-export function decodePositionPayload(payload: Uint8Array) {
-  return decodePositionPayloadAbi(payload);
-}
-/** `events::payload_funding`. */
-export function decodeFundingPayload(payload: Uint8Array) {
-  return decodeFundingPayloadAbi(payload);
-}
-/** `events::payload_liquidation`. */
-export function decodeLiquidationPayload(payload: Uint8Array) {
-  return decodeLiquidationPayloadAbi(payload);
-}
-/** `events::payload_oracle`. */
-export function decodeOraclePayload(payload: Uint8Array) {
-  return decodeOraclePayloadAbi(payload);
-}
-/** `events::payload_delegation`. */
-export function decodeDelegationPayload(payload: Uint8Array) {
-  return decodeDelegationPayloadAbi(payload);
-}
-/** `events::payload_session`. */
-export function decodeSessionPayload(payload: Uint8Array) {
-  return decodeSessionPayloadAbi(payload);
-}
-/** `events::payload_registry`. */
-export function decodeRegistryPayload(payload: Uint8Array) {
-  return decodeRegistryPayloadAbi(payload);
-}
-/** `events::payload_reconciliation`. */
-export function decodeReconciliationPayload(payload: Uint8Array) {
-  return decodeReconciliationPayloadAbi(payload);
-}
 
 /**
  * The signed Pyth message is embedded at byte offset 4 of this
@@ -154,16 +72,6 @@ export function decodeReconciliationPayload(payload: Uint8Array) {
  * completion are idempotent. The builder validates the target PDA so a
  * client cannot accidentally point this isolated V3 flow at the V2 market.
  */
-export interface BookMetadata { version: number; fixedRoot: number; peggedRoot: number; fixedLeaves: number; peggedLeaves: number; bumpIndex: number; freeHead: number; freeLength: number; }
-export function decodeBookMetadata(data: Uint8Array): BookMetadata {
-  return decodeBookMetadataAbi(data);
-}
-
-export interface FillEventView { sequence: bigint; maker: number; taker: number; price: bigint; quantity: bigint; }
-export function decodeFillEvent(data: Uint8Array): FillEventView {
-  return decodeFillEventAbi(data);
-}
-
 export interface TradingSessionView {
   discriminator: string;
   version: number;
