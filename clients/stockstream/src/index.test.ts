@@ -116,6 +116,11 @@ test("place order serializes little-endian fields and decodes", () => {
   expect(decodeInstruction(ix.data).name).toBe("PlaceOrder");
 });
 
+test("V3 order builders preserve self-trade policy bits", () => {
+  const ix = placeOrder({ market, authority, settlementScratch, seatIndex: 2, side: "bid", quantity: 1, priceOrOffset: 10, clientOrderId: 1, selfTradeBehavior: "decrement-take" });
+  expect(ix.data[3]).toBe(16);
+});
+
 test("V3 trading constructors use the complete 27-account bundle", () => {
   const core = PublicKey.unique();
   const bookPages = Array.from({ length: 18 }, () => PublicKey.unique());
