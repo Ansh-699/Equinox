@@ -1,6 +1,7 @@
 import { getBase58Decoder } from "@solana/kit";
 import type { MagicRouterTransport, SolanaL1Transport } from "./chain-transports";
 import { base64ToBytes } from "./market-state";
+import { STOCKSTREAM_PROGRAM_ID } from "../../clients/stockstream/src/constants";
 
 /** Worker-side V3 shard decoder. It intentionally has no dependency on the
  * web3.js SDK and treats each shard as an independently fetched account. */
@@ -361,6 +362,10 @@ export async function fetchAuthoritativeV3Market(
   const requested = [addresses.core, ...addresses.bookPages, ...addresses.seatShards, ...addresses.eventShards];
   const response = await transport.multipleAccounts(requested);
   if (response.value.length !== requested.length) return null;
+  // Account bytes are untrusted. A correctly-shaped foreign account must not
+  // be accepted as a shard merely because its discriminator happens to match.
+  // Require the deployed StockStream owner on every member of the bundle.
+  if (response.value.some((account) => account === null || account.owner !== STOCKSTREAM_PROGRAM_ID || !account.data)) return null;
   const values = response.value.map((account) => account?.data ? base64ToBytes(account.data[0]) : null);
   if (values.some((value) => value === null)) return null;
   return aggregateV3Market(
