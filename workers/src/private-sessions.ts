@@ -110,7 +110,7 @@ export function decodeTraderSeatProjection(marketBytes: Uint8Array, seatIndex: n
       seatIndex, owner: seat.trader, availableCollateral: seat.availableCollateral,
       reservedMargin: seat.reservedMargin, basePosition: seat.basePosition,
       quoteEntryValue: seat.quoteEntryValue, realizedPnl: seat.realizedPnl,
-      lastFundingAccumulator: 0n, openBidExposure: seat.openBidExposure,
+      lastFundingAccumulator: seat.lastFundingAccumulator, openBidExposure: seat.openBidExposure,
       openAskExposure: seat.openAskExposure, openOrderCount: seat.openOrderCount,
       liquidationState: seat.liquidationState, sequence: seat.sequence,
     };

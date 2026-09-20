@@ -149,7 +149,7 @@ describe("verifyTradingSession", () => {
     };
     const seat = {
       shard: 0, slot: 0, trader: OWNER, availableCollateral: 1n, reservedMargin: 0n,
-      basePosition: 0n, quoteEntryValue: 0n, realizedPnl: 0n, openBidExposure: 0n,
+      basePosition: 0n, quoteEntryValue: 0n, realizedPnl: 0n, lastFundingAccumulator: 0n, openBidExposure: 0n,
       openAskExposure: 0n, openOrderCount: 0, liquidationState: 0, sequence: 1n,
     };
     expect(verifyTradingSession(baseInput({ marketBytes: new Uint8Array(4096), v3: { core, seat } }))).toEqual({ ok: true });

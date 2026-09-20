@@ -73,7 +73,7 @@ export function TradingTerminal() {
   const v3MarketState = useV3MarketState(marketApiUrl, process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS);
   const sessionOrder = useSessionOrder(protocol?.rpc ?? null, session.status, auth, handleSessionResult, session.advanceNonce, executionStatus);
   const canTrade = session.status !== null && isSessionUsable(session.status);
-  const position = usePosition(protocol?.rpc ?? null, marketAddress, 0);
+  const position = usePosition(protocol?.rpc ?? null, marketAddress, 0, { marketApiUrl, core: process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS });
   const openOrdersAdapter = useMemo(
     () => marketApiUrl && process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS
       ? createV3OpenOrdersAdapter({ marketApiUrl, core: process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS })
