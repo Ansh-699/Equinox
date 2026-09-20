@@ -47,14 +47,13 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 produces the counts below from the current checkout; it runs Rust formatting,
 workspace tests, the SBF artifact verifier, ABI parity, frontend/Worker tests and
 typechecks, Playwright fixture E2E, and the secret scan. The last complete run
-finished with `VERIFY-OK` on the current checkout after `5f9fb5a` and
-`2faa492`.
+finished with `VERIFY-OK` on the current checkout after `ef27085` and `c2fa394`.
 
 Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives all 26 child PDAs from the supplied core and returns a bigint-safe aggregate. It is read-only and cannot claim live V3 state until a V3 core is deployed.
 
 - Rust (native + LiteSVM runtime): 290 passing, `cargo fmt --check` clean.
 - Workers (Miniflare/vitest): 351 passing (33 files; relayer risk/version/lifetime guards included).
-- Frontend (vitest): 208 passing.
+- Frontend (vitest): 210 passing (33 files).
 - Frontend (Playwright fixture E2E): 50 passing; opt-in Devnet read-only E2E: 2 passing.
 - Frontend (Playwright production smoke): 6 passing.
 - `tsc --noEmit` clean on both the frontend and workers packages.
@@ -63,7 +62,7 @@ Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives 
 - Client facade audit: `clients/stockstream/src/index.ts` is now a thin compatibility surface (122 lines); instruction construction and canonical decoders live in `clients/stockstream/src/abi/*`, with only the legacy PublicKey session mapping and unsigned preview retained in the facade.
 - V3 continuation: `bash scripts/verify.sh` finished `VERIFY-OK` after V3
   snapshot semantics and session lifecycle changes: Rust workspace tests,
-  `cargo build-sbf`, ABI parity, 208 frontend tests, 351 Worker tests,
+  `cargo build-sbf`, ABI parity, 210 frontend tests, 351 Worker tests,
   Playwright 50/50, TypeScript, lint and secret scan all passed. This is a
   local build, not a live deployment. Current local artifact SHA-256:
   `27b387720a69c2a5d1333addaec249ff71a147782975c68afe2d9e6f1d274aa5`.
