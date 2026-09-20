@@ -51,7 +51,7 @@ typechecks, Playwright fixture E2E, and the secret scan. It emits a
 machine-readable gate record (use
 `VERIFY_SUMMARY_PATH=docs/status/verify-latest.json npm run verify` to refresh
 the tracked copy); the latest continuation run finished with `VERIFY-OK` on
-source commit `d563f28`. The funding clamp correction is committed as
+source commit `15d1a0c`. The funding clamp correction is committed as
 `a89c313`; `d563f28` additionally enforces persisted V3 maximum open interest
 before mutation and session `max_open_orders` during canonical bundle
 authorization.
@@ -74,7 +74,7 @@ Fresh current-HEAD regression evidence: `cargo test -p stockstream --test v3_bun
   `cargo build-sbf`, ABI parity, 210 frontend tests, 354 Worker tests,
   Playwright 54/54, TypeScript, lint and secret scan all passed. This is a
   local build, not a live deployment. Current verified artifact SHA-256:
-  `e68d5782a1e96d96305a68137b2697641561b31fafd6cb8dcf5e5312934bf1db`.
+  `ccf448cd54d8766886f73bf54128ab833bc50e9e273297bef4ef7fb4ce14c3fd`.
 - Fresh liquidation regression: `NO_DNA=1 cargo test -p stockstream --test
   v3_bundle v3_liquidation_updates_open_interest_and_insurance_fee` and the
   full `NO_DNA=1 cargo test -p stockstream --tests` pass after V3 liquidation
