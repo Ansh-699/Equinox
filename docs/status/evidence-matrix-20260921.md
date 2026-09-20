@@ -1,6 +1,6 @@
 # StockStream evidence matrix
 
-This matrix is scoped to current HEAD `8343f1e` (post-V3-cancellation-atomicity, funding-settlement, and liquidation-preflight fixes). “Fresh” means rerun on this checkout; live claims additionally require the cited Devnet artifact. The full local gate is `VERIFY_SUMMARY_PATH=/tmp/stockstream-verify-summary-20260921-funding.json NO_DNA=1 bash scripts/verify.sh` from the preceding source checkpoint; the checked-in summary is `verify-latest.json`. The focused Rust suite and SBF build were rerun after the liquidation fix.
+This matrix is scoped to current HEAD `e132845` (post-V3-cancellation-atomicity, funding-settlement, liquidation-preflight, and cancel-all-preflight fixes). “Fresh” means rerun on this checkout; live claims additionally require the cited Devnet artifact. The full local gate is `VERIFY_SUMMARY_PATH=/tmp/stockstream-verify-summary-20260921-funding.json NO_DNA=1 bash scripts/verify.sh` from the preceding source checkpoint; the checked-in summary is `verify-latest.json`. The focused Rust suite and SBF build were rerun after the source fixes.
 
 | Subsystem | Classification | Source and exact evidence | Fresh on current HEAD |
 |---|---|---|---|
@@ -26,7 +26,7 @@ This matrix is scoped to current HEAD `8343f1e` (post-V3-cancellation-atomicity,
 | reduce-only | locally-tested | `programs/stockstream/src/v3.rs`, `programs/stockstream/src/handlers.rs`; `NO_DNA=1 cargo test -p stockstream --test v3_bundle v3_reduce_only_rejects_an_oversized_direction_flip_before_mutation` plus the full Rust suite | yes |
 | maximum-open-orders | locally-tested | `programs/stockstream/src/v3.rs`, `programs/stockstream/src/session.rs`; commit `d563f28`; `NO_DNA=1 cargo test -p stockstream --tests`, including V3 session actor limit coverage | yes; current HEAD gate |
 | cancel accounting | locally-tested | `programs/stockstream/src/v3.rs`; fresh `v3_bundle` suite (20 tests) uses checked subtraction for maker fills and cancel-all reserve/open-order/exposure release, and cancellation preflights reserve/counter arithmetic before removing a leaf; `v3_owner_place_reserves_collateral_and_writes_paged_book_and_event` verifies malformed counters leave page bytes unchanged | yes |
-| cancel-all accounting | locally-tested | `programs/stockstream/src/v3.rs`; `NO_DNA=1 cargo test -p stockstream --test v3_bundle v3_cancel_all_releases_reserve_and_side_exposure_for_every_tree` covers both trees, checked releases, and stale-oracle cancellation | yes |
+| cancel-all accounting | locally-tested | `programs/stockstream/src/v3.rs`; `NO_DNA=1 cargo test -p stockstream --test v3_bundle v3_cancel_all_releases_reserve_and_side_exposure_for_every_tree` covers both trees, checked releases, stale-oracle cancellation, and malformed-counter rejection with unchanged page bytes | yes |
 | replace accounting | locally-tested | `programs/stockstream/src/v3.rs`; `cargo test -p stockstream --test v3_bundle` | yes |
 | self-trade behavior | locally-tested | `programs/stockstream/src/book.rs`, `programs/stockstream/src/v3.rs`; `cargo test -p stockstream --test self_trade --test v3_bundle` | yes |
 | atomic sharded commit epochs | locally-tested | `programs/stockstream/src/v3.rs`, `scripts/v3-sharded-commit.mjs`; `node --test scripts/v3-sharded-commit-guard.test.mjs scripts/devnet-lifecycle-runner.test.mjs` | yes (local guards only) |
