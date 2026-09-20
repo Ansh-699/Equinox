@@ -346,10 +346,22 @@ pub struct V3Fill {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct V3SelfTradeCancellation {
+    pub maker_handle: u32,
+    pub maker_owner: u32,
+    pub key: u128,
+    pub quantity: u64,
+    pub price: u64,
+    pub side: u8,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct V3MatchPlan {
     pub fills: [V3Fill; crate::book::MAX_FILLS_PER_INSTRUCTION],
     pub fill_count: u8,
     pub taker_remaining: u64,
+    pub cancellations: [V3SelfTradeCancellation; crate::book::MAX_FILLS_PER_INSTRUCTION],
+    pub cancellation_count: u8,
 }
 
 const EMPTY_V3_FILL: V3Fill = V3Fill {
@@ -359,6 +371,14 @@ const EMPTY_V3_FILL: V3Fill = V3Fill {
     price: 0,
     quantity: 0,
     maker_remaining: 0,
+};
+const EMPTY_V3_CANCELLATION: V3SelfTradeCancellation = V3SelfTradeCancellation {
+    maker_handle: NONE,
+    maker_owner: 0,
+    key: 0,
+    quantity: 0,
+    price: 0,
+    side: 0,
 };
 
 impl<'a> PagedBookV3<'a> {
@@ -850,6 +870,8 @@ impl<'a> PagedBookV3<'a> {
         &mut self,
         tree: TreeKind,
         taker_side: crate::book::Side,
+        taker_owner: u32,
+        self_trade_behavior: SelfTradeBehavior,
         taker_price: i64,
         taker_quantity: u64,
         oracle: Option<i64>,
@@ -862,15 +884,17 @@ impl<'a> PagedBookV3<'a> {
             fills: [EMPTY_V3_FILL; crate::book::MAX_FILLS_PER_INSTRUCTION],
             fill_count: 0,
             taker_remaining: taker_quantity,
+            cancellations: [EMPTY_V3_CANCELLATION; crate::book::MAX_FILLS_PER_INSTRUCTION],
+            cancellation_count: 0,
         };
         let mut selected = [NONE; crate::book::MAX_FILLS_PER_INSTRUCTION];
-        while plan.fill_count < crate::book::MAX_FILLS_PER_INSTRUCTION as u8
-            && plan.taker_remaining > 0
-        {
-            let index = plan.fill_count as usize;
+        let mut selected_count = 0usize;
+        while selected_count < crate::book::MAX_FILLS_PER_INSTRUCTION && plan.taker_remaining > 0 {
+            let index = selected_count;
             let Some(handle) = self.best_unselected(tree, &selected, index)? else {
                 break;
             };
+            selected_count += 1;
             let leaf = self.leaf(handle)?;
             let expires = unsafe { core::ptr::addr_of!(leaf.expires_at).read_unaligned() };
             if expires <= now {
@@ -899,7 +923,36 @@ impl<'a> PagedBookV3<'a> {
             let fill_quantity = maker_quantity.min(plan.taker_remaining);
             let key = unsafe { core::ptr::addr_of!(leaf.key).read_unaligned() };
             let owner = leaf.owner;
-            plan.fills[index] = V3Fill {
+            selected[index] = handle;
+            if owner == taker_owner {
+                match self_trade_behavior {
+                    SelfTradeBehavior::AbortTransaction => {
+                        return Err(StockStreamError::SelfTradeAborted.into())
+                    }
+                    SelfTradeBehavior::DecrementTake => {
+                        plan.taker_remaining -= fill_quantity;
+                        continue;
+                    }
+                    SelfTradeBehavior::CancelProvide => {
+                        let count = plan.cancellation_count as usize;
+                        if count >= plan.cancellations.len() {
+                            return Err(StockStreamError::SelfTradeAborted.into());
+                        }
+                        plan.cancellations[count] = V3SelfTradeCancellation {
+                            maker_handle: handle,
+                            maker_owner: owner,
+                            key,
+                            quantity: maker_quantity,
+                            price: maker_price,
+                            side: leaf.side,
+                        };
+                        plan.cancellation_count += 1;
+                        continue;
+                    }
+                }
+            }
+            let fill_index = plan.fill_count as usize;
+            plan.fills[fill_index] = V3Fill {
                 maker_handle: handle,
                 maker_owner: owner,
                 key,
@@ -921,6 +974,17 @@ impl<'a> PagedBookV3<'a> {
     /// owner and quantity still matches. A failed validation performs no
     /// writes, preserving atomic rollback at the instruction boundary.
     pub fn apply_match_plan(&mut self, tree: TreeKind, plan: &V3MatchPlan) -> ProgramResult {
+        for cancel in plan.cancellations[..plan.cancellation_count as usize].iter() {
+            let current = self.leaf(cancel.maker_handle)?;
+            let current_key = unsafe { core::ptr::addr_of!(current.key).read_unaligned() };
+            if current_key != cancel.key
+                || current.owner != cancel.maker_owner
+                || current.quantity != cancel.quantity
+                || self.find(tree, cancel.key)? != cancel.maker_handle
+            {
+                return Err(bundle_error());
+            }
+        }
         for fill in plan.fills[..plan.fill_count as usize].iter() {
             let current = self.leaf(fill.maker_handle)?;
             let current_key = unsafe { core::ptr::addr_of!(current.key).read_unaligned() };
@@ -933,6 +997,9 @@ impl<'a> PagedBookV3<'a> {
             {
                 return Err(bundle_error());
             }
+        }
+        for cancel in plan.cancellations[..plan.cancellation_count as usize].iter() {
+            self.remove(tree, cancel.key)?;
         }
         for fill in plan.fills[..plan.fill_count as usize].iter() {
             if fill.maker_remaining == 0 {
@@ -1834,6 +1901,8 @@ fn place_order_v3_with_action(
             .checked_add(1)
             .ok_or(StockStreamError::ArithmeticOverflow)?
     };
+    let self_trade_behavior = SelfTradeBehavior::from_u8((order.flags >> 3) & 0b11)
+        .ok_or(StockStreamError::InvalidInstruction)?;
     let input = OrderInput {
         side,
         tree,
@@ -1850,7 +1919,7 @@ fn place_order_v3_with_action(
             TimeInForce::GoodTilCancelled
         },
         post_only: order.flags & 1 != 0,
-        self_trade_behavior: SelfTradeBehavior::AbortTransaction,
+        self_trade_behavior,
     };
     let leaf = input.leaf().map_err(|_| bundle_error())?;
     let (core_accounts, tail) = accounts.split_at_mut(1);
@@ -1865,8 +1934,39 @@ fn place_order_v3_with_action(
         &mut bid_book
     };
     let mut remaining = order.quantity;
-    let plan = opposite.plan_crossing(tree, side, effective_price, remaining, oracle, now)?;
+    let plan = opposite.plan_crossing(
+        tree,
+        side,
+        order.seat_index as u32,
+        self_trade_behavior,
+        effective_price,
+        remaining,
+        oracle,
+        now,
+    )?;
     opposite.apply_match_plan(tree, &plan)?;
+    for cancel in plan.cancellations[..plan.cancellation_count as usize].iter() {
+        let (seat, shard, slot) = v3_trade_seat_shards(seat_accounts, cancel.maker_owner as u16)?;
+        let mut updated = seat;
+        let reserve = i128::from(cancel.quantity)
+            .checked_mul(i128::from(cancel.price))
+            .ok_or(StockStreamError::ArithmeticOverflow)?;
+        updated.reserved_margin = updated
+            .reserved_margin
+            .checked_sub(reserve)
+            .ok_or(StockStreamError::RiskViolation)?;
+        updated.open_order_count = updated.open_order_count.saturating_sub(1);
+        if cancel.side == Side::Bid as u8 {
+            updated.open_bid_exposure = updated
+                .open_bid_exposure
+                .saturating_sub(i128::from(cancel.quantity));
+        } else {
+            updated.open_ask_exposure = updated
+                .open_ask_exposure
+                .saturating_sub(i128::from(cancel.quantity));
+        }
+        write_v3_seat_shards(seat_accounts, shard, slot, &updated)?;
+    }
     for fill in plan.fills[..plan.fill_count as usize].iter() {
         settle_v3_fill(seat_accounts, order.seat_index, side, *fill)?;
         remaining = remaining.saturating_sub(fill.quantity);
@@ -1936,6 +2036,23 @@ fn place_order_v3_with_action(
         &payload,
         crate::handlers::event_timestamp(),
     )?;
+    for cancel in plan.cancellations[..plan.cancellation_count as usize].iter() {
+        let payload = crate::events::payload_order(
+            cancel.maker_owner as u16,
+            cancel.key,
+            cancel.side,
+            i64::try_from(cancel.price).map_err(|_| StockStreamError::ArithmeticOverflow)?,
+            cancel.quantity,
+        );
+        append_event_record(
+            program_id,
+            &mut core_accounts[0],
+            &mut event_accounts[..V3_EVENT_SHARDS],
+            crate::events::EventKind::OrderCancelled as u16,
+            &payload,
+            crate::handlers::event_timestamp(),
+        )?;
+    }
     for fill in plan.fills[..plan.fill_count as usize].iter() {
         let payload = crate::events::payload_fill(
             fill.maker_owner,

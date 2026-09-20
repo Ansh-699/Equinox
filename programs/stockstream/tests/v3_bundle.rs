@@ -545,7 +545,16 @@ fn v3_paged_book_preserves_global_handles_across_page_boundaries() {
     }
     assert_eq!(book.node_tag(256).unwrap(), 1);
     let plan = book
-        .plan_crossing(TreeKind::Fixed, Side::Bid, 2_000, 1, None, 0)
+        .plan_crossing(
+            TreeKind::Fixed,
+            Side::Bid,
+            2_000,
+            stockstream::book::SelfTradeBehavior::AbortTransaction,
+            2_000,
+            1,
+            None,
+            0,
+        )
         .unwrap();
     assert_eq!(plan.fill_count, 1);
     assert_eq!(plan.fills[0].maker_handle, 0);
@@ -579,6 +588,60 @@ fn v3_paged_book_preserves_global_handles_across_page_boundaries() {
         .expect("oracle-pegged root uses the same paged storage");
     assert!(book.find(TreeKind::OraclePegged, 7u128 << 64).is_ok());
     assert_eq!(book.node_tag(pegged).unwrap(), 2);
+}
+
+#[test]
+fn v3_self_trade_policies_apply_on_paged_books() {
+    let accounts = bundle();
+    let mut pages = (1..=V3_BOOK_PAGES_PER_SIDE)
+        .map(|index| accounts[index].view.clone())
+        .collect::<Vec<_>>();
+    let mut book = PagedBookV3::new(&mut pages).unwrap();
+    let resting = leaf(7u128 << 64, 7);
+    book.insert(TreeKind::Fixed, resting).unwrap();
+    assert_eq!(
+        book.plan_crossing(
+            TreeKind::Fixed,
+            Side::Bid,
+            7,
+            stockstream::book::SelfTradeBehavior::AbortTransaction,
+            20,
+            1,
+            None,
+            0,
+        )
+        .unwrap_err(),
+        stockstream::error::StockStreamError::SelfTradeAborted.into()
+    );
+    let decrement = book
+        .plan_crossing(
+            TreeKind::Fixed,
+            Side::Bid,
+            7,
+            stockstream::book::SelfTradeBehavior::DecrementTake,
+            20,
+            1,
+            None,
+            0,
+        )
+        .unwrap();
+    assert_eq!(decrement.fill_count, 0);
+    assert_eq!(decrement.taker_remaining, 0);
+    let cancel = book
+        .plan_crossing(
+            TreeKind::Fixed,
+            Side::Bid,
+            7,
+            stockstream::book::SelfTradeBehavior::CancelProvide,
+            20,
+            1,
+            None,
+            0,
+        )
+        .unwrap();
+    assert_eq!(cancel.cancellation_count, 1);
+    book.apply_match_plan(TreeKind::Fixed, &cancel).unwrap();
+    assert!(book.find(TreeKind::Fixed, 7u128 << 64).is_err());
 }
 
 #[test]
