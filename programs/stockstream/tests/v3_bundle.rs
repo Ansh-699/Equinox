@@ -1131,6 +1131,39 @@ fn v3_session_replace_consumes_one_nonce_and_requires_replace_permission() {
     assert_eq!(next_nonce, 3);
     assert_eq!(consumed, 11);
     let replacement_key = ((u64::MAX - 6) as u128) << 64 | 2;
+    // A post-only replacement that would cross the existing bid must reject
+    // before cancelling the old order or consuming the session nonce.
+    let before_post_only_page = unsafe { accounts[1].view.borrow_unchecked().to_vec() };
+    let before_post_only_session = unsafe { session_account.view.borrow_unchecked().to_vec() };
+    let mut post_only_replacement = views(&accounts);
+    post_only_replacement.push(session_signer.view.clone());
+    post_only_replacement.push(session_account.view.clone());
+    assert!(stockstream::v3::replace_order_v3(
+        &ID,
+        &mut post_only_replacement,
+        replacement_key,
+        PlaceOrderData {
+            side: Side::Ask as u8,
+            tree: TreeKind::Fixed as u8,
+            flags: 1,
+            seat_index: 0,
+            quantity: 1,
+            price_or_offset: 5,
+            expires_at: 100,
+            peg_limit: 0,
+            client_order_id: 4,
+            action_nonce: 3,
+        },
+    )
+    .is_err());
+    assert_eq!(
+        unsafe { accounts[1].view.borrow_unchecked() },
+        before_post_only_page
+    );
+    assert_eq!(
+        unsafe { session_account.view.borrow_unchecked() },
+        before_post_only_session
+    );
     let before_rejected_replace_page = unsafe { accounts[1].view.borrow_unchecked().to_vec() };
     let before_rejected_replace_session =
         unsafe { session_account.view.borrow_unchecked().to_vec() };
