@@ -242,6 +242,12 @@ fn v3_owner_place_reserves_collateral_and_writes_paged_book_and_event() {
     unsafe {
         let bytes = accounts[V3_SEAT_START].view.borrow_unchecked_mut();
         bytes[84..100].copy_from_slice(&1_000_000i128.to_le_bytes());
+        // A pending accumulator must be settled before the order's risk
+        // decision, even when the order ultimately rests without a fill.
+        bytes[116..132].copy_from_slice(&10i128.to_le_bytes());
+        bytes[132..148].copy_from_slice(&100i128.to_le_bytes());
+        accounts[0].view.borrow_unchecked_mut()[156..172]
+            .copy_from_slice(&1_000_000i128.to_le_bytes());
         accounts[0].view.borrow_unchecked_mut()[197] = 1;
     }
     let mut trade_accounts = views(&accounts);
@@ -266,6 +272,11 @@ fn v3_owner_place_reserves_collateral_and_writes_paged_book_and_event() {
     let seat = unsafe { accounts[V3_SEAT_START].view.borrow_unchecked() };
     // V3 reserves configured initial margin, not the full notional.
     assert_eq!(i128::from_le_bytes(seat[100..116].try_into().unwrap()), 10);
+    assert_eq!(i128::from_le_bytes(seat[148..164].try_into().unwrap()), -10);
+    assert_eq!(
+        i128::from_le_bytes(seat[164..180].try_into().unwrap()),
+        1_000_000
+    );
     assert_eq!(u32::from_le_bytes(seat[212..216].try_into().unwrap()), 1);
     let before_failed_cancel = unsafe { accounts[1].view.borrow_unchecked().to_vec() };
     unsafe {

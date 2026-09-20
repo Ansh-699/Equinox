@@ -3036,7 +3036,17 @@ fn place_order_v3_with_action(
         unsafe { accounts[0].borrow_unchecked() },
         V3_CORE_ORACLE_TIMESTAMP_OFFSET,
     )?;
-    let (seat_snapshot, _, _) = v3_trade_seat(accounts, order.seat_index)?;
+    let (seat_before, _, _) = v3_trade_seat(accounts, order.seat_index)?;
+    let funding_accumulator = core_i128(
+        unsafe { accounts[0].borrow_unchecked() },
+        V3_CORE_FUNDING_ACCUMULATOR_OFFSET,
+    )?;
+    // Funding is part of every trading risk decision, not only a fill. Keep
+    // the settlement on a copy until all order/session/book preflight checks
+    // pass, then apply its delta exactly once to the affected seat below.
+    let mut seat_snapshot = seat_before;
+    let funding_payment = crate::risk::settle_funding(&mut seat_snapshot, funding_accumulator)
+        .map_err(v3_risk_error)?;
     let side = match order.side {
         0 => Side::Bid,
         1 => Side::Ask,
@@ -3308,6 +3318,21 @@ fn place_order_v3_with_action(
             let (_, ask_pages) = book_accounts.split_at_mut(V3_BOOK_PAGES_PER_SIDE);
             PagedBookV3::new(ask_pages)?.insert_resting_order(tree, resting)?;
         }
+    }
+    // A fill settles funding inside `settle_v3_fill`. If this accepted order
+    // had no fill, or only cancelled a self-trade order, settle the taker's
+    // pending accumulator now without disturbing the reserve/exposure deltas
+    // already applied above.
+    let (current_taker, taker_shard, taker_slot) =
+        v3_trade_seat_shards(seat_accounts, order.seat_index)?;
+    if current_taker.last_funding_accumulator != funding_accumulator {
+        let mut updated = current_taker;
+        updated.realized_pnl = updated
+            .realized_pnl
+            .checked_sub(funding_payment)
+            .ok_or(StockStreamError::ArithmeticOverflow)?;
+        updated.last_funding_accumulator = funding_accumulator;
+        write_v3_seat_shards(seat_accounts, taker_shard, taker_slot, &updated)?;
     }
     {
         let core = unsafe { core_accounts[0].borrow_unchecked_mut() };
