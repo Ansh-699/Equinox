@@ -9,7 +9,8 @@ import fs from "node:fs";
 import { Keypair, PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
 import { validateCheckpoint, validateV3CoreBytes } from "./v3-sharded-commit-guard.mjs";
 
-const state = JSON.parse(fs.readFileSync("/tmp/opencode/v3-lifecycle-state.json", "utf8"));
+const LIFECYCLE_STATE_PATH = process.env.V3_LIFECYCLE_STATE_PATH ?? "/tmp/opencode/v3-lifecycle-state.json";
+const state = JSON.parse(fs.readFileSync(LIFECYCLE_STATE_PATH, "utf8"));
 const authority = Keypair.fromSecretKey(new Uint8Array(JSON.parse(fs.readFileSync(`${process.env.HOME}/.config/solana/id.json`, "utf8"))));
 const PROGRAM = new PublicKey("H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET");
 const MAGIC_CONTEXT = new PublicKey("MagicContext1111111111111111111111111111111");
@@ -57,7 +58,7 @@ async function submit(account, sequence, undelegate) {
 }
 
 const undelegate = mode === "undelegate";
-const path = `/tmp/opencode/v3-sharded-${mode}-state.json`;
+const path = process.env.V3_SHARDED_COMMIT_STATE_PATH ?? `/tmp/opencode/v3-sharded-${mode}-state.json`;
 const checkpoint = load(path, { version: 1, next: 0, events: [] });
 checkpoint.mode ??= mode;
 validateCheckpoint(checkpoint, mode, children);
