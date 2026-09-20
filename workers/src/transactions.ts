@@ -201,6 +201,45 @@ export interface PlaceOrderFields {
   actionNonce?: bigint;
 }
 
+/** Canonical V3 execution accounts. The worker accepts already-derived
+ * addresses from the authoritative V3 facade, but enforces the complete
+ * sharded shape before constructing a write. */
+export interface V3ExecutionAccountMetas {
+  core: AccountMeta;
+  bookPages: readonly AccountMeta[];
+  seatShards: readonly AccountMeta[];
+  eventShards: readonly AccountMeta[];
+  authority: AccountMeta;
+  session?: AccountMeta;
+}
+
+function v3ExecutionMetas(accounts: V3ExecutionAccountMetas, requireSession = false): AccountMeta[] {
+  if (accounts.bookPages.length !== 18 || accounts.seatShards.length !== 4 || accounts.eventShards.length !== 4) {
+    throw new RangeError("V3 execution requires 18 book pages, 4 seat shards and 4 event shards");
+  }
+  if (requireSession && accounts.session === undefined) throw new RangeError("V3 session write requires a session PDA");
+  return [accounts.core, ...accounts.bookPages, ...accounts.seatShards, ...accounts.eventShards, accounts.authority, ...(accounts.session ? [accounts.session] : [])];
+}
+
+export interface V3DepositAccountMetas {
+  core: AccountMeta;
+  seatShard: AccountMeta;
+  eventShards: readonly AccountMeta[];
+  authority: AccountMeta;
+  source: AccountMeta;
+  vault: AccountMeta;
+  mint: AccountMeta;
+  tokenProgram: AccountMeta;
+}
+
+export interface V3WithdrawAccountMetas extends V3ExecutionAccountMetas {
+  destination: AccountMeta;
+  mint: AccountMeta;
+  vault: AccountMeta;
+  vaultAuthority: AccountMeta;
+  tokenProgram: AccountMeta;
+}
+
 function placeOrderData(fields: PlaceOrderFields): DataWriter {
   const side = fields.side === "bid" ? 0 : 1;
   const tree = (fields.tree ?? "fixed") === "fixed" ? 0 : 1;
@@ -264,6 +303,39 @@ export function depositCollateralInstruction(programAddress: string, accounts: A
 export function withdrawCollateralInstruction(programAddress: string, accounts: AccountMeta[], seatIndex: number, amount: bigint): Instruction {
   const data = new DataWriter().u8(OPCODE.withdrawCollateral).u16(seatIndex).u64(amount).build();
   return instruction(programAddress, accounts, data);
+}
+
+/** V3 order writes use the legacy order opcodes with the canonical sharded
+ * execution bundle; these wrappers prevent callers from accidentally passing
+ * the two-account V2 market shape. */
+export function placeOrderV3Instruction(programAddress: string, accounts: V3ExecutionAccountMetas, fields: PlaceOrderFields): Instruction {
+  return placeOrderInstruction(programAddress, v3ExecutionMetas(accounts), fields);
+}
+
+export function cancelOrderV3Instruction(programAddress: string, accounts: V3ExecutionAccountMetas, seatIndex: number, orderKey: bigint, actionNonce = 0n): Instruction {
+  return cancelOrderInstruction(programAddress, v3ExecutionMetas(accounts), seatIndex, orderKey, actionNonce);
+}
+
+export function cancelAllV3Instruction(programAddress: string, accounts: V3ExecutionAccountMetas, seatIndex: number, maxCancellations: number, actionNonce = 0n): Instruction {
+  return cancelAllInstruction(programAddress, v3ExecutionMetas(accounts), seatIndex, maxCancellations, actionNonce);
+}
+
+export function replaceOrderV3Instruction(programAddress: string, accounts: V3ExecutionAccountMetas, oldOrderKey: bigint, fields: PlaceOrderFields): Instruction {
+  return replaceOrderInstruction(programAddress, v3ExecutionMetas(accounts), oldOrderKey, fields);
+}
+
+/** V3 custody writes use distinct opcodes and deliberately do not accept a
+ * session account. The account order mirrors `depositCollateralV3` exactly. */
+export function depositCollateralV3Instruction(programAddress: string, accounts: V3DepositAccountMetas, seatIndex: number, amount: bigint): Instruction {
+  if (accounts.eventShards.length !== 4) throw new RangeError("V3 deposit requires four event shards");
+  const data = new DataWriter().u8(53).u16(seatIndex).u64(amount).build();
+  return instruction(programAddress, [accounts.core, accounts.seatShard, ...accounts.eventShards, accounts.authority, accounts.source, accounts.vault, accounts.mint, accounts.tokenProgram], data);
+}
+
+export function withdrawCollateralV3Instruction(programAddress: string, accounts: V3WithdrawAccountMetas, seatIndex: number, amount: bigint): Instruction {
+  if (accounts.session !== undefined) throw new RangeError("V3 withdrawal cannot include a session PDA");
+  const data = new DataWriter().u8(54).u16(seatIndex).u64(amount).build();
+  return instruction(programAddress, [...v3ExecutionMetas(accounts), accounts.destination, accounts.mint, accounts.vault, accounts.vaultAuthority, accounts.tokenProgram], data);
 }
 
 /** `undefined` index means "no scoped session account": the account list is the keeper's to supply. */
