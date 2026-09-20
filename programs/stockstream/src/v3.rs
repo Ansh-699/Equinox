@@ -1701,6 +1701,7 @@ pub fn validate_v3_session_actor(
     required_actions: u8,
     notional: i128,
     resulting_exposure: u128,
+    resulting_open_orders: u32,
     action_nonce: u64,
     now: u64,
 ) -> Result<V3SessionAuthorization, ProgramError> {
@@ -1774,6 +1775,7 @@ pub fn validate_v3_session_actor(
         || (notional as u128).saturating_add(session_state.consumed_cumulative_notional as u128)
             > session_state.max_cumulative_notional as u128
         || resulting_exposure > session_state.max_exposure as u128
+        || resulting_open_orders > u32::from(session_state.max_open_orders)
     {
         return Err(StockStreamError::RiskViolation.into());
     }
@@ -2494,6 +2496,7 @@ pub fn update_v3_risk_config(
     }
     let authority = accounts[1].address().to_bytes();
     let mut core = unsafe { accounts[0].borrow_unchecked_mut() };
+    let current_open_interest = core_i128(&core, V3_CORE_CURRENT_OPEN_INTEREST_OFFSET)?;
     if core.len() != V3_MARKET_CORE_SIZE
         || core[0..8] != V3_MARKET_CORE_DISCRIMINATOR
         || core[8..10] != V3_LAYOUT_VERSION.to_le_bytes()
@@ -2509,6 +2512,9 @@ pub fn update_v3_risk_config(
         || config.maximum_leverage > 100
         || config.maximum_position < 0
         || config.maximum_open_interest < 0
+        || current_open_interest < 0
+        || (config.maximum_open_interest > 0
+            && current_open_interest > config.maximum_open_interest)
         || config.mark_deviation_bps > 10_000
     {
         return Err(StockStreamError::RiskViolation.into());
@@ -2568,6 +2574,7 @@ fn validate_v3_trade_accounts(
     required_actions: u8,
     notional: i128,
     resulting_exposure: u128,
+    resulting_open_orders: u32,
     action_nonce: u64,
     now: u64,
 ) -> Result<(TraderSeat, Option<V3SessionAuthorization>), ProgramError> {
@@ -2615,6 +2622,7 @@ fn validate_v3_trade_accounts(
         required_actions,
         notional,
         resulting_exposure,
+        resulting_open_orders,
         action_nonce,
         now,
     )?;
@@ -2780,6 +2788,58 @@ fn recompute_v3_open_interest(seat_accounts: &[AccountView]) -> Result<i128, Pro
                     )
                     .ok_or(StockStreamError::ArithmeticOverflow)?;
             }
+        }
+    }
+    Ok(total)
+}
+
+/// Projects open interest from an immutable match plan before any page, seat,
+/// event, or core bytes are mutated. This keeps the maximum-open-interest
+/// rejection path side-effect free even when a transaction is exercised
+/// directly in a harness rather than rolled back by the runtime.
+fn projected_v3_open_interest(
+    seat_accounts: &[AccountView],
+    taker_seat_index: u16,
+    taker_side: Side,
+    plan: &V3MatchPlan,
+) -> Result<i128, ProgramError> {
+    if seat_accounts.len() != V3_SEAT_SHARDS
+        || usize::from(taker_seat_index) >= V3_SEAT_SHARDS * V3_SEATS_PER_SHARD
+    {
+        return Err(StockStreamError::InvalidSeat.into());
+    }
+    let taker_signed = if taker_side == Side::Bid { 1 } else { -1 };
+    let maker_signed = -taker_signed;
+    let taker = usize::from(taker_seat_index);
+    let mut total = 0i128;
+    for shard in 0..V3_SEAT_SHARDS {
+        let bytes = unsafe { seat_accounts[shard].borrow_unchecked() };
+        for slot in 0..V3_SEATS_PER_SHARD {
+            let index = shard * V3_SEATS_PER_SHARD + slot;
+            let seat = read_shard_seat(&bytes, slot)?;
+            let mut position = seat.base_position;
+            for fill in plan.fills[..plan.fill_count as usize].iter() {
+                let quantity = i128::from(fill.quantity);
+                if usize::try_from(fill.maker_owner).map_err(|_| StockStreamError::InvalidSeat)?
+                    == index
+                {
+                    position = position
+                        .checked_add(maker_signed * quantity)
+                        .ok_or(StockStreamError::ArithmeticOverflow)?;
+                }
+                if taker == index {
+                    position = position
+                        .checked_add(taker_signed * quantity)
+                        .ok_or(StockStreamError::ArithmeticOverflow)?;
+                }
+            }
+            total = total
+                .checked_add(
+                    position
+                        .checked_abs()
+                        .ok_or(StockStreamError::ArithmeticOverflow)?,
+                )
+                .ok_or(StockStreamError::ArithmeticOverflow)?;
         }
     }
     Ok(total)
@@ -3030,21 +3090,6 @@ fn place_order_v3_with_action(
     {
         return Err(StockStreamError::RiskViolation.into());
     }
-    let (_, session) = validate_v3_trade_accounts(
-        program_id,
-        accounts,
-        order.seat_index,
-        required_actions
-            | if order.flags & 4 != 0 {
-                crate::session::SESSION_ACTION_REDUCE_ONLY_CLOSE
-            } else {
-                0
-            },
-        notional,
-        resulting_exposure,
-        order.action_nonce,
-        now,
-    )?;
     let sequence = {
         let bytes = unsafe { accounts[0].borrow_unchecked() };
         core_u64(bytes, V3_CORE_GLOBAL_ORDER_SEQUENCE_OFFSET)?
@@ -3072,6 +3117,66 @@ fn place_order_v3_with_action(
         self_trade_behavior,
     };
     let leaf = input.leaf().map_err(|_| bundle_error())?;
+    let plan = {
+        let (book_accounts, _) = accounts[1..].split_at_mut(2 * V3_BOOK_PAGES_PER_SIDE);
+        let (bid_pages, ask_pages) = book_accounts.split_at_mut(V3_BOOK_PAGES_PER_SIDE);
+        let mut bid_book = PagedBookV3::new(bid_pages)?;
+        let mut ask_book = PagedBookV3::new(ask_pages)?;
+        let opposite = if side == Side::Bid {
+            &mut ask_book
+        } else {
+            &mut bid_book
+        };
+        let plan = opposite.plan_crossing_cross_tree(
+            side,
+            order.seat_index as u32,
+            self_trade_behavior,
+            effective_price,
+            order.quantity,
+            oracle,
+            now,
+        )?;
+        if order.flags & 1 != 0 && (plan.fill_count != 0 || plan.cancellation_count != 0) {
+            return Err(StockStreamError::RiskViolation.into());
+        }
+        plan
+    };
+    let projected_open_interest = projected_v3_open_interest(
+        &accounts
+            [1 + (2 * V3_BOOK_PAGES_PER_SIDE)..1 + (2 * V3_BOOK_PAGES_PER_SIDE) + V3_SEAT_SHARDS],
+        order.seat_index,
+        side,
+        &plan,
+    )?;
+    if risk_config.maximum_open_interest > 0
+        && projected_open_interest > risk_config.maximum_open_interest
+    {
+        return Err(StockStreamError::RiskViolation.into());
+    }
+    let resulting_open_orders = seat_snapshot
+        .open_order_count
+        .checked_add(if plan.taker_remaining > 0 && order.flags & 2 == 0 {
+            1
+        } else {
+            0
+        })
+        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    let (_, session) = validate_v3_trade_accounts(
+        program_id,
+        accounts,
+        order.seat_index,
+        required_actions
+            | if order.flags & 4 != 0 {
+                crate::session::SESSION_ACTION_REDUCE_ONLY_CLOSE
+            } else {
+                0
+            },
+        notional,
+        resulting_exposure,
+        resulting_open_orders,
+        order.action_nonce,
+        now,
+    )?;
     let (core_accounts, tail) = accounts.split_at_mut(1);
     let (book_accounts, tail) = tail.split_at_mut(2 * V3_BOOK_PAGES_PER_SIDE);
     let (seat_accounts, event_accounts) = tail.split_at_mut(V3_SEAT_SHARDS);
@@ -3083,19 +3188,6 @@ fn place_order_v3_with_action(
     } else {
         &mut bid_book
     };
-    let mut remaining = order.quantity;
-    let plan = opposite.plan_crossing_cross_tree(
-        side,
-        order.seat_index as u32,
-        self_trade_behavior,
-        effective_price,
-        remaining,
-        oracle,
-        now,
-    )?;
-    if order.flags & 1 != 0 && (plan.fill_count != 0 || plan.cancellation_count != 0) {
-        return Err(StockStreamError::RiskViolation.into());
-    }
     opposite.apply_match_plan(tree, &plan)?;
     for cancel in plan.cancellations[..plan.cancellation_count as usize].iter() {
         let (seat, shard, slot) = v3_trade_seat_shards(seat_accounts, cancel.maker_owner as u16)?;
@@ -3131,7 +3223,7 @@ fn place_order_v3_with_action(
             risk_config,
         )?;
     }
-    remaining = plan.taker_remaining;
+    let remaining = plan.taker_remaining;
     drop(bid_book);
     drop(ask_book);
     if remaining > 0 && order.flags & 2 == 0 {
@@ -3550,6 +3642,7 @@ fn cancel_order_v3_with_action(
         required_actions,
         0,
         seat_snapshot.base_position.unsigned_abs(),
+        seat_snapshot.open_order_count,
         action_nonce,
         now,
     )?;
@@ -3698,6 +3791,7 @@ pub fn cancel_all_v3(
         crate::session::SESSION_ACTION_CANCEL_ALL,
         0,
         seat_snapshot.base_position.unsigned_abs(),
+        seat_snapshot.open_order_count,
         action_nonce,
         now,
     )?;
