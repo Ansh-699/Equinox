@@ -1,7 +1,7 @@
 import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { expect, test } from "vitest";
 import { STOCKSTREAM_PROGRAM_ID } from "./constants";
-import { MAGICBLOCK_DELEGATION_PROGRAM_ID, MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID, STOCKSTREAM_PROGRAM_KEY, cancelAllV3, cancelOrderV3, placeOrderV3, replaceOrderV3, commitV3Shard } from "./index";
+import { MAGICBLOCK_DELEGATION_PROGRAM_ID, MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID, STOCKSTREAM_PROGRAM_KEY, cancelAllV3, cancelOrderV3, placeOrderV3, replaceOrderV3, commitV3Shard, consumeOracleUpdateV3 } from "./index";
 import { authorizeTradingSession, cancelOrder, closeV3TraderSeat, commitMarket, delegateClusterMember, delegateV3Account, deriveClusterMemberPdas, createPerpMarket, createV3Account, createV3TraderSeat, decodeFillPayload, decodeInstruction, decodeMarketState, decodeSeatAmountPayload, decodeStockStreamEvent, delegateMarket, deriveTradingSession, depositCollateral, depositCollateralV3, EVENT_SIZE, initializeExchange, initializeMarket, initializeV3Market, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateExchangeConfig, updateStockInstrument, withdrawCollateral, withdrawCollateralV3, withdrawInsuranceFunds, withdrawProtocolFees, EXCHANGE_CONFIG_FIELD, requestV3Undelegation, rollbackV3Undelegation } from "./index";
 import { STOCKSTREAM_ACCOUNT_SIZE } from "./constants";
 import { deriveBookPageV3, deriveEventShardV3, deriveMarketCoreV3, deriveSeatShardV3 } from "./abi/v3";
@@ -30,6 +30,16 @@ test("V3 custody builders preserve explicit shard account order", () => {
   const withdraw = withdrawCollateralV3(execution, 7, 11n);
   expect(withdraw.data[0]).toBe(54);
   expect(withdraw.keys).toHaveLength(33);
+});
+
+test("V3 oracle builder uses the bounded core plus four event shards", () => {
+  const core = PublicKey.unique();
+  const eventShards = Array.from({ length: 4 }, () => PublicKey.unique());
+  const ix = consumeOracleUpdateV3({ core, eventShards, payer: authority, pythProgram: PublicKey.unique(), storage: PublicKey.unique(), treasury: PublicKey.unique(), systemProgram: SystemProgram.programId, instructionsSysvar: PublicKey.unique() }, new Uint8Array(102), 2, 0);
+  expect(ix.data[0]).toBe(12);
+  expect(ix.keys).toHaveLength(11);
+  expect(ix.keys.slice(0, 5).map((key) => key.pubkey)).toEqual([core, ...eventShards]);
+  expect(ix.keys[5]).toMatchObject({ pubkey: authority, isSigner: true, isWritable: true });
 });
 
 test("instruction constructors use canonical program id and exact account flags", () => {

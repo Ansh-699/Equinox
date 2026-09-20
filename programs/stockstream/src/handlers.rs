@@ -397,7 +397,11 @@ pub fn dispatch(
             withdraw_collateral(program_id, accounts, seat_index as usize, amount)
         }
         StockStreamInstruction::ConsumeOracleUpdate => {
-            consume_oracle_update(program_id, accounts, instruction_data)
+            if accounts.len() == 11 {
+                consume_oracle_update_v3(program_id, accounts, instruction_data)
+            } else {
+                consume_oracle_update(program_id, accounts, instruction_data)
+            }
         }
         StockStreamInstruction::DelegateMarket { validator } => crate::magicblock::delegate_market(
             program_id,
@@ -1788,6 +1792,175 @@ fn consume_oracle_update(
                 verified.session,
             ),
         );
+    }
+    Ok(())
+}
+
+/// V3 variant of opcode 12. Accounts are `[core, event_shard_0..3, payer,
+/// pyth_program, storage, treasury, system_program, instructions_sysvar]`.
+/// The signed envelope and verifier CPI are identical to the V2 path, but
+/// the result is committed into the bounded core and durable event shards.
+fn consume_oracle_update_v3(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    instruction_data: &[u8],
+) -> ProgramResult {
+    if accounts.len() != 11 || instruction_data.len() < 107 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    let ed25519_instruction_index = u16::from_le_bytes(instruction_data[1..3].try_into().unwrap());
+    let signature_index = instruction_data[3];
+    let message = &instruction_data[4..];
+    if message.len() > MAX_PYTH_MESSAGE
+        || !accounts[5].is_signer()
+        || !accounts[5].is_writable()
+        || !accounts[6].executable()
+        || accounts[6].address() != &PYTH_PROGRAM_ID
+        || accounts[7].address() != &PYTH_STORAGE_ID
+        || !accounts[7].owned_by(&PYTH_PROGRAM_ID)
+        || !accounts[8].is_writable()
+        || accounts[9].address() != &SYSTEM_PROGRAM_ID
+        || accounts[10].address() != &INSTRUCTIONS_SYSVAR_ID
+        || accounts[7].address() == accounts[8].address()
+    {
+        return Err(custom(StockStreamError::OracleUnavailable));
+    }
+    {
+        let storage = accounts[7].try_borrow()?;
+        if storage.len() < 72 || storage[40..72] != accounts[8].address().to_bytes() {
+            return Err(custom(StockStreamError::OracleUnavailable));
+        }
+    }
+    {
+        let sysvar = Instructions::try_from(&accounts[10])?;
+        let current_index = sysvar.load_current_index();
+        if ed25519_instruction_index >= current_index {
+            return Err(custom(StockStreamError::OracleUnavailable));
+        }
+        let ed25519_instruction = sysvar.load_instruction_at(ed25519_instruction_index as usize)?;
+        if ed25519_instruction.get_program_id() != &ED25519_PROGRAM_ID {
+            return Err(custom(StockStreamError::OracleUnavailable));
+        }
+        let ed25519_data = ed25519_instruction.get_instruction_data();
+        if ed25519_data.is_empty() || signature_index >= ed25519_data[0] {
+            return Err(custom(StockStreamError::OracleUnavailable));
+        }
+    }
+    let mut verify_data = [0u8; 527];
+    verify_data[..8].copy_from_slice(&VERIFY_MESSAGE_DISCRIMINATOR);
+    verify_data[8..12].copy_from_slice(&(message.len() as u32).to_le_bytes());
+    verify_data[12..12 + message.len()].copy_from_slice(message);
+    verify_data[12 + message.len()..14 + message.len()]
+        .copy_from_slice(&ed25519_instruction_index.to_le_bytes());
+    verify_data[14 + message.len()] = signature_index;
+    let metas = [
+        InstructionAccount::writable_signer(accounts[5].address()),
+        InstructionAccount::readonly(accounts[7].address()),
+        InstructionAccount::writable(accounts[8].address()),
+        InstructionAccount::readonly(accounts[9].address()),
+        InstructionAccount::readonly(accounts[10].address()),
+    ];
+    let cpi_accounts = [
+        &accounts[5],
+        &accounts[7],
+        &accounts[8],
+        &accounts[9],
+        &accounts[10],
+    ];
+    invoke_with_bounds::<5, _>(
+        &InstructionView {
+            program_id: accounts[6].address(),
+            accounts: &metas,
+            data: &verify_data[..15 + message.len()],
+        },
+        &cpi_accounts,
+    )?;
+
+    let verified = parse_verified_oracle(message)?;
+    let now = current_unix_timestamp()?;
+    if verified.feed_update_timestamp_us > verified.envelope_timestamp_us {
+        return Err(custom(StockStreamError::OracleUnavailable));
+    }
+    let timestamp = verified.feed_update_timestamp_us / 1_000_000;
+    let core_data = unsafe { accounts[0].borrow_unchecked() };
+    if !accounts[0].owned_by(program_id)
+        || !accounts[0].is_writable()
+        || core_data.len() != crate::v3::V3_MARKET_CORE_SIZE
+        || core_data[0..8] != crate::v3::V3_MARKET_CORE_DISCRIMINATOR
+        || core_data[8..10] != crate::v3::V3_LAYOUT_VERSION.to_le_bytes()
+        || core_data[10] != 1
+        || core_data
+            [crate::v3::V3_CORE_ORACLE_FEED_ID_OFFSET..crate::v3::V3_CORE_ORACLE_FEED_ID_OFFSET + 4]
+            != verified.feed_id.to_le_bytes()
+        || core_data[crate::v3::V3_CORE_ORACLE_CHANNEL_OFFSET] != verified.channel
+        || i32::from(verified.exponent)
+            != i32::from_le_bytes(
+                core_data[crate::v3::V3_CORE_ORACLE_EXPONENT_OFFSET
+                    ..crate::v3::V3_CORE_ORACLE_EXPONENT_OFFSET + 4]
+                    .try_into()
+                    .map_err(|_| custom(StockStreamError::OracleUnavailable))?,
+            )
+        || verified.price <= 0
+        || verified.confidence < 0
+        || verified.confidence as u64 > verified.price.unsigned_abs() / 5
+        || now < 0
+        || timestamp > now as u64 + 2
+        || now as u64 > timestamp.saturating_add(10)
+        || timestamp
+            <= u64::from_le_bytes(
+                core_data[crate::v3::V3_CORE_ORACLE_TIMESTAMP_OFFSET
+                    ..crate::v3::V3_CORE_ORACLE_TIMESTAMP_OFFSET + 8]
+                    .try_into()
+                    .map_err(|_| custom(StockStreamError::OracleUnavailable))?,
+            )
+    {
+        return Err(custom(StockStreamError::OracleUnavailable));
+    }
+    let previous_mode = core_data[crate::v3::V3_CORE_MODE_OFFSET];
+    {
+        let core = unsafe { accounts[0].borrow_unchecked_mut() };
+        core[crate::v3::V3_CORE_ORACLE_PRICE_OFFSET..crate::v3::V3_CORE_ORACLE_PRICE_OFFSET + 8]
+            .copy_from_slice(&verified.price.to_le_bytes());
+        core[crate::v3::V3_CORE_ORACLE_TIMESTAMP_OFFSET
+            ..crate::v3::V3_CORE_ORACLE_TIMESTAMP_OFFSET + 8]
+            .copy_from_slice(&timestamp.to_le_bytes());
+        core[crate::v3::V3_CORE_ORACLE_VALID_OFFSET] = 1;
+        core[crate::v3::V3_CORE_MODE_OFFSET] = match verified.session {
+            0 | 1 | 2 => MarketMode::Open as u8,
+            3 | 4 => MarketMode::CloseOnly as u8,
+            _ => return Err(custom(StockStreamError::OracleUnavailable)),
+        };
+    }
+    let payload = crate::events::payload_oracle(
+        verified.price,
+        verified.exponent,
+        verified.confidence,
+        verified.session,
+    );
+    let (core_accounts, event_accounts) = accounts.split_at_mut(1);
+    crate::v3::append_event_record(
+        program_id,
+        &mut core_accounts[0],
+        &mut event_accounts[0..4],
+        crate::events::EventKind::OracleUpdated as u16,
+        &payload,
+        timestamp,
+    )?;
+    if previous_mode
+        != match verified.session {
+            0 | 1 | 2 => MarketMode::Open as u8,
+            3 | 4 => MarketMode::CloseOnly as u8,
+            _ => return Err(custom(StockStreamError::OracleUnavailable)),
+        }
+    {
+        crate::v3::append_event_record(
+            program_id,
+            &mut core_accounts[0],
+            &mut event_accounts[0..4],
+            crate::events::EventKind::MarketSessionChanged as u16,
+            &payload,
+            timestamp,
+        )?;
     }
     Ok(())
 }
