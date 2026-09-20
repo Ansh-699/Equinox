@@ -1155,6 +1155,30 @@ fn v3_session_actor_binds_sharded_seat_and_rejects_replay_or_risk() {
         1,
     )
     .is_err());
+    let mut overflow_state = state;
+    overflow_state.consumed_cumulative_notional = u64::MAX;
+    overflow_state.max_cumulative_notional = u64::MAX;
+    overflow_state.next_expected_nonce = 1;
+    session::write_session(
+        &mut unsafe { session_account.view.borrow_unchecked_mut() },
+        &overflow_state,
+    )
+    .unwrap();
+    assert!(validate_v3_session_actor(
+        &ID,
+        &accounts[0].view,
+        &shards,
+        &session_account.view,
+        &session_signer.view,
+        32,
+        SESSION_ACTION_PLACE,
+        1,
+        5,
+        1,
+        1,
+        1,
+    )
+    .is_err());
 }
 
 #[test]
