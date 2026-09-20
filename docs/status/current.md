@@ -38,7 +38,7 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 | Frontend production build | Complete | `npm run build` exit 0; `next start` serves real HTTP 200; production smoke suite 6/6 |
 | Opt-in Devnet browser E2E | Complete (read-only, live) | `npm run test:browser:devnet` runs `playwright.devnet.config.ts` against the real Devnet RPC, deployed Worker and V3 core configuration; 2/2 pass. It verifies app boot, Devnet/AAPL configuration, server-secret non-disclosure and the live Worker V3 404 contract. Signing/relay is intentionally not claimed because Pyth/Privy remain externally blocked. |
 | Repository cleanup / doc classification | Complete | `docs/status/document-classification.md` classifies every `docs/*.md` file as canonical specification, operational runbook/release gate, historical research, or navigation map; this file remains the authoritative implementation snapshot. |
-| `clients/stockstream/src/index.ts` facade reduction | Started, partial | commit `7fba664` removes the duplicated public opcode table in favour of the ABI authority. Instruction encoders and account-meta construction remain in the legacy facade and need incremental, parity-tested extraction. |
+| `clients/stockstream/src/index.ts` facade reduction | In progress | commits `7fba664` and `309a475` remove duplicated opcode and V3-state/open-orders authorities; commit `39e99e5` classifies the documentation surface, and `abi/encoding.ts` now owns shared integer range/serialization primitives. Instruction encoders and account-meta construction remain in the legacy facade and require further parity-tested extraction. |
 
 ## Test counts (latest rerun; scope is stated explicitly)
 
@@ -46,7 +46,7 @@ Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives 
 
 - Rust (native + LiteSVM runtime): 290 passing, `cargo fmt --check` clean.
 - Workers (Miniflare/vitest): 339 passing (33 files).
-- Frontend (vitest): 194 passing.
+- Frontend (vitest): 196 passing.
 - Frontend (Playwright fixture E2E): 50 passing; opt-in Devnet read-only E2E: 2 passing.
 - Frontend (Playwright production smoke): 6 passing.
 - `tsc --noEmit` clean on both the frontend and workers packages.

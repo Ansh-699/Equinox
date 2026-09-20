@@ -1,6 +1,7 @@
 import { PublicKey, SystemProgram, TransactionInstruction, type AccountMeta } from "@solana/web3.js";
 import { STOCKSTREAM_ACCOUNT_SIZE, STOCKSTREAM_INSTRUCTION, STOCKSTREAM_PROGRAM_ID, STOCKSTREAM_TRADING_SESSION_SIZE } from "./constants";
 import { deriveBookPageV3, deriveEventShardV3, deriveMarketCoreV3, deriveSeatShardV3, V3_BOOK_PAGES_PER_SIDE } from "./abi/v3";
+import { checkedSigned, checkedUnsigned, writeSigned, writeUnsigned } from "./abi/encoding";
 
 export const STOCKSTREAM_PROGRAM_KEY = new PublicKey(STOCKSTREAM_PROGRAM_ID);
 export type AddressInput = PublicKey | string;
@@ -106,29 +107,6 @@ export interface V3UndelegationRecoveryAccounts {
 function publicKey(value: AddressInput): PublicKey {
   if (value instanceof PublicKey) return value;
   try { return new PublicKey(value); } catch { throw new RangeError("Invalid Solana public key"); }
-}
-
-function checkedUnsigned(value: bigint | number, bits: number, name: string): bigint {
-  const result = typeof value === "bigint" ? value : Number.isSafeInteger(value) ? BigInt(value) : -1n;
-  if (result < 0n || result >= 1n << BigInt(bits)) throw new RangeError(`${name} is outside u${bits}`);
-  return result;
-}
-
-function checkedSigned(value: bigint | number, bits: number, name: string): bigint {
-  const result = typeof value === "bigint" ? value : Number.isSafeInteger(value) ? BigInt(value) : 0n;
-  const min = -(1n << BigInt(bits - 1));
-  const max = (1n << BigInt(bits - 1)) - 1n;
-  if (result < min || result > max) throw new RangeError(`${name} is outside i${bits}`);
-  return result;
-}
-
-function writeUnsigned(data: Uint8Array, offset: number, value: bigint, bytes: number) {
-  let current = value;
-  for (let i = 0; i < bytes; i += 1) { data[offset + i] = Number(current & 0xffn); current >>= 8n; }
-}
-
-function writeSigned(data: Uint8Array, offset: number, value: bigint, bytes: number) {
-  writeUnsigned(data, offset, value < 0n ? (1n << BigInt(bytes * 8)) + value : value, bytes);
 }
 
 function selfTradeBits(value: SelfTradeBehavior = "abort"): number {
