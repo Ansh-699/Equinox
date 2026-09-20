@@ -8,13 +8,15 @@ use pinocchio::{
 };
 use stockstream::{
     book::{LeafNode, Side, TreeKind},
+    instruction::PlaceOrderData,
     session::{self, TradingSession, SESSION_ACTION_PLACE, TRADING_SESSION_SIZE},
     v3::{
         append_event_record, close_trader_seat, create_trader_seat, derive_book_page_v3,
         derive_event_shard_v3, derive_market_core_v3, derive_seat_shard_v3,
-        initialize_book_page_metadata, validate_execution_bundle, validate_v3_session_actor,
-        validate_v3_withdrawal_readiness, PagedBookV3, V3_BOOK_PAGES_PER_SIDE, V3_BOOK_PAGE_SIZE,
-        V3_EVENT_SHARD_SIZE, V3_EXECUTION_BUNDLE_LEN, V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
+        initialize_book_page_metadata, place_order_v3, validate_execution_bundle,
+        validate_v3_session_actor, validate_v3_withdrawal_readiness, PagedBookV3,
+        V3_BOOK_PAGES_PER_SIDE, V3_BOOK_PAGE_SIZE, V3_EVENT_SHARD_SIZE, V3_EXECUTION_BUNDLE_LEN,
+        V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
     },
     ID,
 };
@@ -144,6 +146,143 @@ fn v3_bundle_requires_all_pages_shards_and_canonical_order() {
     reordered.swap(1, 2);
     assert!(validate_execution_bundle(&ID, &reordered, true).is_err());
     assert!(validate_execution_bundle(&ID, &views(&accounts)[..16], true).is_err());
+}
+
+#[test]
+fn v3_owner_place_reserves_collateral_and_writes_paged_book_and_event() {
+    let mut accounts = bundle();
+    let owner = account(Address::new_from_array([44; 32]), 0, true);
+    let mut seat_call = vec![
+        accounts[0].view.clone(),
+        accounts[V3_SEAT_START].view.clone(),
+        accounts[V3_SEAT_START + 1].view.clone(),
+        accounts[V3_SEAT_START + 2].view.clone(),
+        accounts[V3_SEAT_START + 3].view.clone(),
+        accounts[V3_EVENT_START].view.clone(),
+        accounts[V3_EVENT_START + 1].view.clone(),
+        accounts[V3_EVENT_START + 2].view.clone(),
+        accounts[V3_EVENT_START + 3].view.clone(),
+        owner.view.clone(),
+    ];
+    create_trader_seat(&ID, &mut seat_call, 0).unwrap();
+    unsafe {
+        let bytes = accounts[V3_SEAT_START].view.borrow_unchecked_mut();
+        bytes[84..100].copy_from_slice(&1_000_000i128.to_le_bytes());
+        accounts[0].view.borrow_unchecked_mut()[197] = 1;
+    }
+    let mut trade_accounts = views(&accounts);
+    trade_accounts.push(owner.view.clone());
+    place_order_v3(
+        &ID,
+        &mut trade_accounts,
+        PlaceOrderData {
+            side: Side::Bid as u8,
+            tree: TreeKind::Fixed as u8,
+            flags: 0,
+            seat_index: 0,
+            quantity: 5,
+            price_or_offset: 10,
+            expires_at: u64::MAX,
+            peg_limit: 0,
+            client_order_id: 7,
+            action_nonce: 0,
+        },
+    )
+    .unwrap();
+    let seat = unsafe { accounts[V3_SEAT_START].view.borrow_unchecked() };
+    assert_eq!(i128::from_le_bytes(seat[100..116].try_into().unwrap()), 50);
+    assert_eq!(u32::from_le_bytes(seat[212..216].try_into().unwrap()), 1);
+    let page = unsafe { accounts[1].view.borrow_unchecked() };
+    assert_ne!(
+        u32::from_le_bytes(page[44..48].try_into().unwrap()),
+        u32::MAX
+    );
+    let order_key = ((u64::MAX - 10) as u128) << 64 | 1;
+    let mut cancel_accounts = views(&accounts);
+    cancel_accounts.push(owner.view.clone());
+    stockstream::v3::cancel_order_v3(&ID, &mut cancel_accounts, 0, order_key, 0).unwrap();
+    let seat = unsafe { accounts[V3_SEAT_START].view.borrow_unchecked() };
+    assert_eq!(i128::from_le_bytes(seat[100..116].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(seat[212..216].try_into().unwrap()), 0);
+    let core = unsafe { accounts[0].view.borrow_unchecked() };
+    assert_eq!(u64::from_le_bytes(core[140..148].try_into().unwrap()), 1);
+    assert_eq!(u64::from_le_bytes(core[148..156].try_into().unwrap()), 3);
+}
+
+#[test]
+fn v3_fixed_cross_updates_both_seats_and_consumes_resting_leaf() {
+    let mut accounts = bundle();
+    let owner_a = account(Address::new_from_array([45; 32]), 0, true);
+    let owner_b = account(Address::new_from_array([46; 32]), 0, true);
+    for (seat_index, owner) in [(0u16, &owner_a), (1u16, &owner_b)] {
+        let mut call = vec![
+            accounts[0].view.clone(),
+            accounts[V3_SEAT_START].view.clone(),
+            accounts[V3_SEAT_START + 1].view.clone(),
+            accounts[V3_SEAT_START + 2].view.clone(),
+            accounts[V3_SEAT_START + 3].view.clone(),
+            accounts[V3_EVENT_START].view.clone(),
+            accounts[V3_EVENT_START + 1].view.clone(),
+            accounts[V3_EVENT_START + 2].view.clone(),
+            accounts[V3_EVENT_START + 3].view.clone(),
+            owner.view.clone(),
+        ];
+        create_trader_seat(&ID, &mut call, seat_index).unwrap();
+    }
+    unsafe {
+        let bytes = accounts[V3_SEAT_START].view.borrow_unchecked_mut();
+        bytes[84..100].copy_from_slice(&1_000_000i128.to_le_bytes());
+        let second = 44 + 256;
+        bytes[second + 40..second + 56].copy_from_slice(&1_000_000i128.to_le_bytes());
+        accounts[0].view.borrow_unchecked_mut()[197] = 1;
+    }
+    let mut ask = views(&accounts);
+    ask.push(owner_a.view.clone());
+    place_order_v3(
+        &ID,
+        &mut ask,
+        PlaceOrderData {
+            side: Side::Ask as u8,
+            tree: TreeKind::Fixed as u8,
+            flags: 0,
+            seat_index: 0,
+            quantity: 3,
+            price_or_offset: 10,
+            expires_at: u64::MAX,
+            peg_limit: 0,
+            client_order_id: 1,
+            action_nonce: 0,
+        },
+    )
+    .unwrap();
+    let mut bid = views(&accounts);
+    bid.push(owner_b.view.clone());
+    place_order_v3(
+        &ID,
+        &mut bid,
+        PlaceOrderData {
+            side: Side::Bid as u8,
+            tree: TreeKind::Fixed as u8,
+            flags: 2,
+            seat_index: 1,
+            quantity: 3,
+            price_or_offset: 10,
+            expires_at: u64::MAX,
+            peg_limit: 0,
+            client_order_id: 2,
+            action_nonce: 0,
+        },
+    )
+    .unwrap();
+    let seats = unsafe { accounts[V3_SEAT_START].view.borrow_unchecked() };
+    let first_base = i128::from_le_bytes(seats[44 + 72..44 + 88].try_into().unwrap());
+    let second_base = i128::from_le_bytes(seats[44 + 256 + 72..44 + 256 + 88].try_into().unwrap());
+    assert_eq!(first_base, -3);
+    assert_eq!(second_base, 3);
+    assert_eq!(
+        u32::from_le_bytes(seats[44 + 168..44 + 172].try_into().unwrap()),
+        0
+    );
 }
 
 #[test]

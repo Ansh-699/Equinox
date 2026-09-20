@@ -98,6 +98,6 @@ async function setup() {
 }
 function plan() {
   const state = load(); assertFresh(state);
-  console.log(JSON.stringify({ version: 3, execute, statePath: STATE_PATH, protectedV2Market: PRESERVED_V2_MARKET, stages: { setup: "fresh core + 18 pages + 4 seat shards + 4 event shards", delegation: "blocked until a corrected V3 program is deployed", custody: "blocked until V3 custody handlers exist", trading: "blocked until V3 matching handlers exist" }, state }, null, 2));
+  console.log(JSON.stringify({ version: 3, execute, statePath: STATE_PATH, protectedV2Market: PRESERVED_V2_MARKET, stages: { setup: "fresh core + 18 pages + 4 seat shards + 4 event shards", delegation: "blocked until a corrected V3 program is deployed", custody: "blocked until V3 L1 custody handlers exist", trading: "source handlers exist for place/cancel/cancel-all and main-wallet replace; live blocked until custody/oracle/session-replace completion" }, state }, null, 2));
 }
 if (stage === "plan") plan(); else if (stage === "setup") await setup(); else throw new Error("usage: node scripts/v3-devnet-lifecycle.mjs [--execute] [plan|setup]");
