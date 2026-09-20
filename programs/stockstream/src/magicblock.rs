@@ -55,6 +55,14 @@ use crate::{
 
 use crate::scratch;
 
+#[path = "magicblock_schedule.rs"]
+mod schedule;
+pub use schedule::{
+    encode_schedule_intent_bundle_data, MAX_COMMITTED_ACCOUNTS,
+    SCHEDULE_COMMIT_AND_UNDELEGATE_DATA_MAX_LEN, SCHEDULE_COMMIT_DATA_MAX_LEN,
+    SCHEDULE_DATA_MAX_LEN,
+};
+
 // ---------------------------------------------------------------------
 // Ground-truth constants (see docs/magicblock.md).
 // ---------------------------------------------------------------------
@@ -517,97 +525,6 @@ pub fn parse_delegated_seeds(payload: &[u8]) -> Option<DelegatedAccountKind> {
         }
     }
     None
-}
-
-/// Maximum number of delegated accounts StockStream may include in a V3
-/// commit intent: core + 18 book pages + 4 seat shards + 4 event shards.
-/// The Magic Program ABI carries indices in a `Vec<u8>`; its scheduler applies
-/// its own serialized-transaction size validation, not a 16-account limit.
-/// Keeping this equal to the complete V3 execution bundle prevents a partial
-/// commit helper from accidentally defining an unsafe custody boundary.
-pub const MAX_COMMITTED_ACCOUNTS: usize = v3::V3_EXECUTION_BUNDLE_LEN;
-/// `bincode::serialize(&MagicBlockInstruction::ScheduleIntentBundle(
-///     MagicIntentBundleArgs { commit: Some(CommitTypeArgs::Standalone(indices)),
-///     ..Default::default() }))` with the account order fixed as
-/// `[payer, magic_context, committed_account_0, committed_account_1, ..]` --
-/// the market is always index 2, trailing cluster accounts are 3.. `len()`
-/// bytes are the used prefix; the rest of the buffer is zero. Golden vectors
-/// verified against the real crate's own `bincode` serialization in
-/// `tests/magicblock.rs` (including the historical market-only 29-byte shape).
-/// Structure: variant(4) + Some(1) + Standalone(4) + len(8) + indices(n)
-/// + None(1) + None(1) + None(1) + empty-vec-len(8) = 28 + n.
-pub const SCHEDULE_COMMIT_DATA_MAX_LEN: usize = 28 + MAX_COMMITTED_ACCOUNTS;
-/// Same bundle with `commit_and_undelegate: Some(CommitAndUndelegateArgs {
-/// commit_type: Standalone(indices), undelegate_type: Standalone })`.
-/// Structure: variant(4) + None(1) + Some(1) + Standalone(4) + len(8)
-/// + indices(n) + UndelegateTypeArgs::Standalone(4) + None(1) + None(1)
-/// + empty-vec-len(8) = 32 + n.
-pub const SCHEDULE_COMMIT_AND_UNDELEGATE_DATA_MAX_LEN: usize = 32 + MAX_COMMITTED_ACCOUNTS;
-/// Shared fixed-capacity output buffer for both schedule encoders.
-pub const SCHEDULE_DATA_MAX_LEN: usize = SCHEDULE_COMMIT_AND_UNDELEGATE_DATA_MAX_LEN;
-
-/// Encodes `ScheduleIntentBundle` data committing the `committed_indices`
-/// accounts (u8 indices into the instruction's `[payer, magic_context, ..]`
-/// account list). `undelegate` selects the commit-only or
-/// commit-and-undelegate intent. Returns the used prefix length.
-pub fn encode_schedule_intent_bundle_data(
-    indices: &[u8],
-    undelegate: bool,
-    out: &mut [u8; SCHEDULE_DATA_MAX_LEN],
-) -> Result<usize, StockStreamError> {
-    if indices.is_empty() || indices.len() > MAX_COMMITTED_ACCOUNTS {
-        return Err(StockStreamError::MagicBlockInvalidAccount);
-    }
-    let len = if undelegate {
-        SCHEDULE_COMMIT_AND_UNDELEGATE_DATA_MAX_LEN - MAX_COMMITTED_ACCOUNTS + indices.len()
-    } else {
-        SCHEDULE_COMMIT_DATA_MAX_LEN - MAX_COMMITTED_ACCOUNTS + indices.len()
-    };
-    out.fill(0);
-    out[0..4].copy_from_slice(&11u32.to_le_bytes()); // ScheduleIntentBundle
-    let mut offset = 4usize;
-    if undelegate {
-        out[offset] = 0; // commit: None
-        offset += 1;
-        out[offset] = 1; // commit_and_undelegate: Some
-        offset += 1;
-        out[offset..offset + 4].copy_from_slice(&0u32.to_le_bytes()); // Standalone
-        offset += 4;
-        out[offset..offset + 8].copy_from_slice(&(indices.len() as u64).to_le_bytes());
-        offset += 8;
-        out[offset..offset + indices.len()].copy_from_slice(indices);
-        offset += indices.len();
-        out[offset..offset + 4].copy_from_slice(&0u32.to_le_bytes()); // Standalone
-        offset += 4;
-    } else {
-        out[offset] = 1; // commit: Some
-        offset += 1;
-        out[offset..offset + 4].copy_from_slice(&0u32.to_le_bytes()); // Standalone
-        offset += 4;
-        out[offset..offset + 8].copy_from_slice(&(indices.len() as u64).to_le_bytes());
-        offset += 8;
-        out[offset..offset + indices.len()].copy_from_slice(indices);
-        offset += indices.len();
-    }
-    // Shared tail depends on how many Option fields remain:
-    // - commit-only path has already serialized `commit: Some`, so three
-    //   None-tagged Options follow (commit_and_undelegate, commit_finalize,
-    //   commit_finalize_and_undelegate) plus the empty standalone_actions vec.
-    // - commit-and-undelegate path has consumed both the None commit tag and
-    //   the Some C&U payload, so two None tags follow, then the empty vec.
-    // Both are empirically verified against the real crate's bincode output:
-    // commit-only = 28+n bytes, C&U = 32+n bytes.
-    if undelegate {
-        offset += 2;
-    } else {
-        offset += 3;
-    }
-    out[offset..offset + 8].copy_from_slice(&0u64.to_le_bytes());
-    offset += 8;
-    if offset != len {
-        return Err(StockStreamError::MagicBlockInvalidAccount);
-    }
-    Ok(len)
 }
 
 fn read_scratch_header(data: &[u8]) -> Result<SettlementScratchHeader, ProgramError> {
