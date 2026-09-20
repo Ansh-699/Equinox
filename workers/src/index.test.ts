@@ -1,7 +1,9 @@
 import { SELF, applyD1Migrations, env } from 'cloudflare:test';
 import { beforeAll, expect, it, vi } from 'vitest';
-import { fetchExecutionStatus, runIngestionTick, runKeeperOrchestrationTick } from './index';
+import { fetchExecutionStatus, fetchV3MarketSnapshot, runIngestionTick, runKeeperOrchestrationTick } from './index';
 import { eventLogLine } from './test-event-fixtures';
+import { getBase58Decoder, getBase58Encoder } from '@solana/kit';
+import { STOCKSTREAM_PROGRAM_ID } from '../../clients/stockstream/src/constants';
 
 const bindings = env as Env & { TEST_MIGRATIONS: Parameters<typeof applyD1Migrations>[1] };
 beforeAll(async () => { await applyD1Migrations(bindings.DB!, bindings.TEST_MIGRATIONS); });
@@ -14,6 +16,38 @@ function request(path: string, body: unknown): Request {
     body: JSON.stringify(body),
   });
 }
+
+function base64(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function v3FixtureAccounts(coreAddress: string): Uint8Array[] {
+  const parent = getBase58Encoder().encode(coreAddress);
+  const core = new Uint8Array(4_096); core.set(new TextEncoder().encode('STKMK003')); new DataView(core.buffer).setUint16(8, 3, true); core[10] = 1; core[11] = 1;
+  core.set(parent, 12); core.set(parent, 44);
+  const books = Array.from({ length: 18 }, (_, flat) => { const page = new Uint8Array(10_184); page.set(new TextEncoder().encode('STKBK003')); const view = new DataView(page.buffer); view.setUint16(8, 3, true); page[10] = Math.floor(flat / 9); page[11] = flat % 9; page.set(parent, 12); if (page[11] === 0) { view.setUint32(44, 0xffff_ffff, true); view.setUint32(48, 0xffff_ffff, true); } return page; });
+  const seats = Array.from({ length: 4 }, (_, shard) => { const bytes = new Uint8Array(8_236); bytes.set(new TextEncoder().encode('STKST003')); const view = new DataView(bytes.buffer); view.setUint16(8, 3, true); bytes[10] = shard; bytes.set(parent, 12); return bytes; });
+  const events = Array.from({ length: 4 }, (_, shard) => { const bytes = new Uint8Array(3_244); bytes.set(new TextEncoder().encode('STKEV003')); const view = new DataView(bytes.buffer); view.setUint16(8, 3, true); bytes[10] = shard; bytes.set(parent, 12); return bytes; });
+  return [core, ...books, ...seats, ...events];
+}
+
+it('fetchV3MarketSnapshot performs one atomic 27-account read and preserves its finalized slot', async () => {
+  const coreAddress = getBase58Decoder().decode(new Uint8Array(32).fill(7));
+  const accounts = v3FixtureAccounts(coreAddress);
+  const requests: { method: string; addresses: unknown[] }[] = [];
+  const fetcher = vi.fn(async (_input: unknown, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as { method: string; params: [string[]] };
+    requests.push({ method: body.method, addresses: body.params[0] });
+    return Response.json({ jsonrpc: '2.0', id: 1, result: { context: { slot: 77 }, value: accounts.map((bytes) => ({ data: [base64(bytes), 'base64'], owner: STOCKSTREAM_PROGRAM_ID, lamports: 1 })) } });
+  }) as unknown as typeof fetch;
+  const aggregate = await fetchV3MarketSnapshot({ SOLANA_RPC_URL: 'https://l1.fixture.test' } as unknown as Env, coreAddress, 'l1', fetcher);
+  expect(aggregate).toMatchObject({ asOfSlot: 77, completeBook: true, completeExecutionState: true });
+  expect(requests).toHaveLength(1);
+  expect(requests[0]).toMatchObject({ method: 'getMultipleAccounts' });
+  expect(requests[0].addresses).toHaveLength(27);
+});
 
 it('routes a registered sequenced event through D1 indexing and rejects a sequence gap', async () => {
   const market = {
