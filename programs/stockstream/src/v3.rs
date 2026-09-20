@@ -2531,8 +2531,15 @@ pub fn update_v3_risk_config(
     if !accounts[0].owned_by(program_id) || !accounts[0].is_writable() {
         return Err(bundle_error());
     }
+    // Validate the account length before any offset read.  Then validate the
+    // existing durable ledgers/configuration before accepting a governance
+    // update; a risk update must never succeed on a malformed economic core.
+    if unsafe { accounts[0].borrow_unchecked() }.len() != V3_MARKET_CORE_SIZE {
+        return Err(StockStreamError::InvalidMarketLayout.into());
+    }
     let authority = accounts[1].address().to_bytes();
     let mut core = unsafe { accounts[0].borrow_unchecked_mut() };
+    read_v3_risk_config(&core)?;
     let current_open_interest = core_i128(&core, V3_CORE_CURRENT_OPEN_INTEREST_OFFSET)?;
     if core.len() != V3_MARKET_CORE_SIZE
         || core[0..8] != V3_MARKET_CORE_DISCRIMINATOR
