@@ -4,6 +4,8 @@ const CORE = "47Mx7SZvt7EY6NydsA5krgrqvcDDR1H5BG5xTPDSnhso";
 const MARKET_API = "https://stockstream-market-api.ansht.workers.dev";
 
 test("loads the real Devnet terminal without exposing server credentials", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
   const response = await page.goto("/");
   expect(response?.status()).toBe(200);
   await expect(page.locator(".topbar .network")).toContainText("Devnet");
@@ -14,6 +16,7 @@ test("loads the real Devnet terminal without exposing server credentials", async
   for (const secret of ["PRIVY_APP_SECRET", "PYTH_PRO_API_KEY", "KEEPER_KEYPAIR_JSON", "STOCKSTREAM_RELAYER_TOKEN"]) {
     expect(html).not.toContain(secret);
   }
+  expect(pageErrors).toEqual([]);
 });
 
 test("shows the live Worker V3 aggregate response honestly", async ({ page }) => {
