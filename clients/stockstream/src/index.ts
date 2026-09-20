@@ -1,7 +1,7 @@
 import { PublicKey, SystemProgram, TransactionInstruction, type AccountMeta } from "@solana/web3.js";
 import { STOCKSTREAM_ACCOUNT_SIZE, STOCKSTREAM_INSTRUCTION, STOCKSTREAM_PROGRAM_ID, STOCKSTREAM_TRADING_SESSION_SIZE } from "./constants";
 import { checkedSigned, checkedUnsigned, writeSigned, writeUnsigned } from "./abi/encoding";
-import { accountMeta, instruction, publicKey, STOCKSTREAM_PROGRAM_KEY, type AddressInput } from "./abi/transaction";
+import { accountMeta, instruction, publicKey, type AddressInput } from "./abi/transaction";
 import { cancelAllV3, cancelOrderV3, closeV3TraderSeat, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, createV3Account, createV3TraderSeat, delegateV3Account, depositCollateralV3, initializeV3Market, placeOrderV3, replaceOrderV3, requestV3Undelegation, rollbackV3Undelegation, updateFundingV3, withdrawCollateralV3 } from "./abi/v3-instructions";
 import { authorizeTradingSession, closeTradingSession, deriveTradingSession, revokeTradingSession, updateTradingSessionLimits } from "./abi/session-instructions";
 import { createPerpMarket, initializeExchange, registerStockInstrument, suspendStockInstrument, transitionMarket, updateMarketRisk, updateStockInstrument } from "./abi/registry-instructions";
@@ -10,6 +10,7 @@ import { depositCollateral, initializeVault, reconcileVault, recordBadDebt, reso
 import { cancelAll, cancelOrder, closeTraderSeat, createTraderSeat, initializeMarket, initializeSettlementScratch, liquidate, placeOrder, replaceOrder, updateFunding } from "./abi/order-instructions";
 import type { PlaceOrderParams } from "./abi/order-instructions";
 import { consumeOracleUpdate } from "./abi/oracle-instructions";
+import { commitAndUndelegate, commitMarket, delegateClusterMember, delegateMarket, deriveClusterMemberPdas } from "./abi/magicblock-instructions";
 
 export { cancelAllV3, cancelOrderV3, closeV3TraderSeat, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, createV3Account, createV3TraderSeat, delegateV3Account, depositCollateralV3, initializeV3Market, placeOrderV3, replaceOrderV3, requestV3Undelegation, rollbackV3Undelegation, updateFundingV3, withdrawCollateralV3 } from "./abi/v3-instructions";
 export type { V3AccountKind, V3CommitAccounts, V3CreationAccounts, V3DelegationAccounts, V3DepositAccounts, V3ExecutionAccounts, V3FundingAccounts, V3InitializationAccounts, V3OracleAccounts, V3SeatAccounts, V3ShardCommitAccounts, V3UndelegationRecoveryAccounts, V3WithdrawAccounts } from "./abi/v3-instructions";
@@ -23,6 +24,8 @@ export { cancelAll, cancelOrder, closeTraderSeat, createTraderSeat, initializeMa
 export type { InstructionAccounts, OrderTree, PlaceOrderParams, SelfTradeBehavior, SessionAuthorizedAccounts, Side } from "./abi/order-instructions";
 export { CONSUME_ORACLE_UPDATE_MESSAGE_OFFSET, consumeOracleUpdate } from "./abi/oracle-instructions";
 export type { ConsumeOracleUpdateAccounts } from "./abi/oracle-instructions";
+export { MAGICBLOCK_DELEGATION_PROGRAM_ID, MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID, commitAndUndelegate, commitMarket, delegateClusterMember, delegateMarket, deriveClusterMemberPdas } from "./abi/magicblock-instructions";
+export type { ClusterMemberAccounts, CommitAccounts, DelegationAccounts } from "./abi/magicblock-instructions";
 
 export { STOCKSTREAM_PROGRAM_KEY } from "./abi/transaction";
 export type { AddressInput } from "./abi/transaction";
@@ -31,16 +34,6 @@ export interface InstructionFixture {
   data: Uint8Array;
 }
 
-export interface DelegationAccounts { market: AddressInput; authority: AddressInput; instrument: AddressInput; payer: AddressInput; clusterAccounts?: AddressInput[]; }
-export interface CommitAccounts { market: AddressInput; authority: AddressInput; payer: AddressInput; clusterAccounts?: AddressInput[]; }
-export interface ClusterMemberAccounts { market: AddressInput; authority: AddressInput; member: AddressInput; payer: AddressInput; }
-
-/** MagicBlock Delegation Program: `DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh`. */
-export const MAGICBLOCK_DELEGATION_PROGRAM_ID = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
-/** MagicBlock Magic Program: `Magic11111111111111111111111111111111111111`. */
-export const MAGICBLOCK_MAGIC_PROGRAM_ID = new PublicKey("Magic11111111111111111111111111111111111111");
-/** MagicBlock Magic Context account: `MagicContext1111111111111111111111111111111`. */
-export const MAGICBLOCK_MAGIC_CONTEXT_ID = new PublicKey("MagicContext1111111111111111111111111111111");
 /** Account tuple for opcode 46. `parent` is an instrument for `core`, and a V3 core otherwise. */
 
 /** Mirrors `programs/stockstream/src/instruction.rs::exchange_config_field`
@@ -300,88 +293,6 @@ export function decodeReconciliationPayload(payload: Uint8Array) {
  * Pyth's own `verify_message`, which repeats the check authoritatively).
  * See `handlers::consume_oracle_update` in the Rust program.
  */
-/**
- * Real onchain MagicBlock `DelegateMarket`. Account order and the delegation
- * program/PDA derivations mirror `programs/stockstream/src/magicblock.rs`
- * exactly (which is itself verified against the delegation program's own
- * `magicblock-delegation-program-api` crate and source) -- this is not an
- * independent encoding, it must match the Rust side byte-for-byte.
- */
-export function delegateMarket(accounts: DelegationAccounts, validator: AddressInput): TransactionInstruction {
-  const market = publicKey(accounts.market);
-  const validatorKey = publicKey(validator);
-  const [buffer] = PublicKey.findProgramAddressSync([Buffer.from("buffer"), market.toBuffer()], STOCKSTREAM_PROGRAM_KEY);
-  const [delegationRecord] = PublicKey.findProgramAddressSync([Buffer.from("delegation"), market.toBuffer()], MAGICBLOCK_DELEGATION_PROGRAM_ID);
-  const [delegationMetadata] = PublicKey.findProgramAddressSync([Buffer.from("delegation-metadata"), market.toBuffer()], MAGICBLOCK_DELEGATION_PROGRAM_ID);
-  const data = new Uint8Array(33); data[0] = STOCKSTREAM_INSTRUCTION.delegateMarket; data.set(validatorKey.toBytes(), 1);
-  return instruction(data, [
-    accountMeta(market, false, true),
-    accountMeta(accounts.authority, true, false),
-    accountMeta(accounts.instrument, false, false),
-    accountMeta(accounts.payer, true, true),
-    accountMeta(buffer, false, true),
-    accountMeta(delegationRecord, false, true),
-    accountMeta(delegationMetadata, false, true),
-    accountMeta(MAGICBLOCK_DELEGATION_PROGRAM_ID, false, false),
-    accountMeta(SystemProgram.programId, false, false),
-    accountMeta(STOCKSTREAM_PROGRAM_KEY, false, false),
-    // Trailing cluster accounts are boundary-gated (scratch must be Empty),
-    // not delegated here -- each member is delegated separately by
-    // `delegateClusterMember`, batchable as post-instructions in the same L1
-    // transaction.
-    ...(accounts.clusterAccounts ?? []).map((a) => accountMeta(a, false, true)),
-  ]);
-}
-/**
- * One delegated hot-cluster member: a settlement-scratch PDA (`Empty`) or a
- * `TradingSession` PDA, delegated to the market's validator by the same
- * Delegation-Program `Delegate` CPI the market itself uses, with its own
- * buffer/record/metadata PDAs derived from the member's address. Account
- * order mirrors `programs/stockstream/src/magicblock.rs::delegate_cluster_member`.
- */
-export function delegateClusterMember(accounts: ClusterMemberAccounts, validator: AddressInput): TransactionInstruction {
-  const market = publicKey(accounts.market);
-  const member = publicKey(accounts.member);
-  const validatorKey = publicKey(validator);
-  const [buffer] = PublicKey.findProgramAddressSync([Buffer.from("buffer"), member.toBuffer()], STOCKSTREAM_PROGRAM_KEY);
-  const [delegationRecord] = PublicKey.findProgramAddressSync([Buffer.from("delegation"), member.toBuffer()], MAGICBLOCK_DELEGATION_PROGRAM_ID);
-  const [delegationMetadata] = PublicKey.findProgramAddressSync([Buffer.from("delegation-metadata"), member.toBuffer()], MAGICBLOCK_DELEGATION_PROGRAM_ID);
-  const data = new Uint8Array(33); data[0] = STOCKSTREAM_INSTRUCTION.delegateClusterMember; data.set(validatorKey.toBytes(), 1);
-  return instruction(data, [
-    accountMeta(market, false, false),
-    accountMeta(accounts.authority, true, false),
-    accountMeta(member, false, true),
-    accountMeta(buffer, false, true),
-    accountMeta(delegationRecord, false, true),
-    accountMeta(delegationMetadata, false, true),
-    accountMeta(accounts.payer, true, true),
-    accountMeta(MAGICBLOCK_DELEGATION_PROGRAM_ID, false, false),
-    accountMeta(SystemProgram.programId, false, false),
-    accountMeta(STOCKSTREAM_PROGRAM_KEY, false, false),
-  ]);
-}
-/** A member's own delegate-buffer / record / metadata PDAs (client-side derivation mirror). */
-export function deriveClusterMemberPdas(member: AddressInput): { buffer: PublicKey; delegationRecord: PublicKey; delegationMetadata: PublicKey } {
-  const memberKey = publicKey(member);
-  return {
-    buffer: PublicKey.findProgramAddressSync([Buffer.from("buffer"), memberKey.toBuffer()], STOCKSTREAM_PROGRAM_KEY)[0],
-    delegationRecord: PublicKey.findProgramAddressSync([Buffer.from("delegation"), memberKey.toBuffer()], MAGICBLOCK_DELEGATION_PROGRAM_ID)[0],
-    delegationMetadata: PublicKey.findProgramAddressSync([Buffer.from("delegation-metadata"), memberKey.toBuffer()], MAGICBLOCK_DELEGATION_PROGRAM_ID)[0],
-  };
-}
-function commitInstruction(discriminator: number, accounts: CommitAccounts, sequence: bigint | number): TransactionInstruction {
-  const data = new Uint8Array(9); data[0] = discriminator; writeUnsigned(data, 1, checkedUnsigned(sequence, 64, "sequence"), 8);
-  return instruction(data, [
-    accountMeta(accounts.market, false, true),
-    accountMeta(accounts.authority, true, false),
-    accountMeta(accounts.payer, true, true),
-    accountMeta(MAGICBLOCK_MAGIC_CONTEXT_ID, false, true),
-    accountMeta(MAGICBLOCK_MAGIC_PROGRAM_ID, false, false),
-    ...(accounts.clusterAccounts ?? []).map((a) => accountMeta(a, false, true)),
-  ]);
-}
-export function commitMarket(accounts: CommitAccounts, sequence: bigint | number): TransactionInstruction { return commitInstruction(STOCKSTREAM_INSTRUCTION.commitMarket, accounts, sequence); }
-export function commitAndUndelegate(accounts: CommitAccounts, sequence: bigint | number): TransactionInstruction { return commitInstruction(STOCKSTREAM_INSTRUCTION.commitAndUndelegate, accounts, sequence); }
 // There is no client-side `undelegationCallback` builder: the delegation
 // program itself invokes StockStream via CPI using its own fixed
 // `EXTERNAL_UNDELEGATE_DISCRIMINATOR` wire format
