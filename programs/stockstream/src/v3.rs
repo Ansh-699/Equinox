@@ -4170,9 +4170,83 @@ fn preflight_replace_order_v3(
     {
         return Err(StockStreamError::RiskViolation.into());
     }
+    let self_trade_behavior = SelfTradeBehavior::from_u8((new_order.flags >> 3) & 0b11)
+        .ok_or(StockStreamError::InvalidInstruction)?;
+    let input = OrderInput {
+        side,
+        tree,
+        owner: new_order.seat_index as u32,
+        price_or_offset: new_order.price_or_offset,
+        // The simulation only needs a valid leaf shape; the actual sequence
+        // is assigned by the core during the real placement path.
+        sequence: 1,
+        quantity: new_order.quantity,
+        expires_at: new_order.expires_at,
+        peg_limit: new_order.peg_limit,
+        client_order_id: new_order.client_order_id,
+        time_in_force: if new_order.flags & 2 != 0 {
+            TimeInForce::ImmediateOrCancel
+        } else {
+            TimeInForce::GoodTilCancelled
+        },
+        post_only: new_order.flags & 1 != 0,
+        self_trade_behavior,
+    };
+    let leaf = input.leaf().map_err(|_| bundle_error())?;
+    if tree == TreeKind::OraclePegged
+        && !matches!(
+            crate::book::pegged_state(&leaf, oracle, now),
+            crate::book::PeggedState::Valid(_)
+        )
+    {
+        return Err(StockStreamError::RiskViolation.into());
+    }
+
+    // Simulate the replacement against cloned account views. Planning is
+    // read-only; the actual cancellation remains the only stage that mutates
+    // the account-backed pages.
+    let plan = {
+        let mut bid_pages: [AccountView; V3_BOOK_PAGES_PER_SIDE] =
+            core::array::from_fn(|page| accounts[1 + page].clone());
+        let mut ask_pages: [AccountView; V3_BOOK_PAGES_PER_SIDE] =
+            core::array::from_fn(|page| accounts[1 + V3_BOOK_PAGES_PER_SIDE + page].clone());
+        let mut bid_book = PagedBookV3::new(&mut bid_pages)?;
+        let mut ask_book = PagedBookV3::new(&mut ask_pages)?;
+        let opposite = if side == Side::Bid {
+            &mut ask_book
+        } else {
+            &mut bid_book
+        };
+        opposite.plan_crossing_cross_tree(
+            side,
+            new_order.seat_index as u32,
+            self_trade_behavior,
+            effective_price,
+            new_order.quantity,
+            oracle,
+            now,
+        )?
+    };
+    if new_order.flags & 1 != 0 && (plan.fill_count != 0 || plan.cancellation_count != 0) {
+        return Err(StockStreamError::RiskViolation.into());
+    }
+    let projected_open_interest = projected_v3_open_interest(
+        &accounts
+            [1 + (2 * V3_BOOK_PAGES_PER_SIDE)..1 + (2 * V3_BOOK_PAGES_PER_SIDE) + V3_SEAT_SHARDS],
+        new_order.seat_index,
+        side,
+        &plan,
+    )?;
+    if config.maximum_open_interest > 0 && projected_open_interest > config.maximum_open_interest {
+        return Err(StockStreamError::RiskViolation.into());
+    }
     let resulting_open_orders = adjusted
         .open_order_count
-        .checked_add(1)
+        .checked_add(if plan.taker_remaining > 0 && new_order.flags & 2 == 0 {
+            1
+        } else {
+            0
+        })
         .ok_or(StockStreamError::ArithmeticOverflow)?;
     let required_actions = if new_order.flags & 4 != 0 {
         crate::session::SESSION_ACTION_REPLACE | crate::session::SESSION_ACTION_REDUCE_ONLY_CLOSE
