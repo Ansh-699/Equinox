@@ -8,6 +8,8 @@ import {
   type Transaction,
 } from "@solana/kit";
 import { COMPUTE_BUDGET_PROGRAM_ID, OPCODE, base64ToBytes } from "./transactions";
+import { deriveBookPageV3, deriveEventShardV3, deriveSeatShardV3 } from "./v3-pdas";
+import { deriveTradingSessionAddress } from "./relay-auth";
 import type { Signer } from "./signer";
 import type { SolanaL1Transport, MagicRouterTransport } from "./chain-transports";
 
@@ -45,6 +47,10 @@ export interface RelaySessionTransactionRequest {
   transactionBase64: string;
   expectedProgramAddress: string;
   sessionSignerAddress: string;
+  /** Present on the production relay path. When set, the instruction must
+   * use the complete canonical V3 execution bundle, not a V2 market shape. */
+  expectedMarket?: string;
+  ownerWallet?: string;
 }
 
 export type RelayValidation =
@@ -70,6 +76,38 @@ const FLAGS_OFFSET: Readonly<Record<number, number>> = {
   [OPCODE.placeOrder]: 3,
   [OPCODE.replaceOrder]: 19,
 };
+
+interface CanonicalV3AccountCheck {
+  staticAccounts: readonly string[];
+  accountIndices: readonly number[];
+  header: { numSignerAccounts: number; numReadonlySignerAccounts: number; numReadonlyNonSignerAccounts: number };
+  expectedAccounts: readonly string[];
+}
+
+/** Validates the compiled instruction's exact account vector and privileges.
+ * Account-index decoding is deliberately independent of request JSON: the
+ * caller supplies only the canonical addresses derived from the V3 core. */
+export function validateCanonicalV3Accounts(input: CanonicalV3AccountCheck): string | null {
+  if (input.accountIndices.length !== 29) return "v3_execution_bundle_wrong_length";
+  if (input.expectedAccounts.length !== 29) return "v3_expected_bundle_wrong_length";
+  const actual = input.accountIndices.map((index) => input.staticAccounts[index]);
+  if (actual.some((value) => value === undefined)) return "v3_account_index_out_of_bounds";
+  if (new Set(actual).size !== actual.length) return "v3_duplicate_account";
+  for (let index = 0; index < actual.length; index += 1) {
+    if (actual[index] !== input.expectedAccounts[index]) return `v3_account_order_mismatch:${index}`;
+    const accountIndex = input.accountIndices[index];
+    const signer = accountIndex < input.header.numSignerAccounts;
+    const readonlySignerStart = input.header.numSignerAccounts - input.header.numReadonlySignerAccounts;
+    const readonlyNonSignerStart = input.staticAccounts.length - input.header.numReadonlyNonSignerAccounts;
+    const writable = signer
+      ? accountIndex < readonlySignerStart
+      : accountIndex < readonlyNonSignerStart;
+    const expectedSigner = index === 27;
+    const expectedWritable = index < 27 || index === 28;
+    if (signer !== expectedSigner || writable !== expectedWritable) return `v3_account_privilege_mismatch:${index}`;
+  }
+  return null;
+}
 
 /** Every session-relayable opcode's instruction data ends with `actionNonce`
  * as its final 8 bytes (u64, LE) -- true of `placeOrderData`,
@@ -155,6 +193,25 @@ export async function validateSessionTransaction(request: RelaySessionTransactio
   }
   const flagsOffset = FLAGS_OFFSET[opcode];
   const placeOrderFlags = flagsOffset !== undefined && flagsOffset < data.length ? data[flagsOffset] : 0;
+
+  if (request.expectedMarket !== undefined) {
+    if (!request.ownerWallet) return { ok: false, reason: "v3_owner_wallet_required" };
+    if ((compiled as { addressTableLookups?: readonly unknown[] }).addressTableLookups?.length) {
+      return { ok: false, reason: "v3_address_lookup_tables_not_supported" };
+    }
+    const pages = await Promise.all(Array.from({ length: 18 }, (_, flat) =>
+      deriveBookPageV3(request.expectedMarket!, Math.floor(flat / 9), flat % 9)));
+    const seats = await Promise.all(Array.from({ length: 4 }, (_, shard) => deriveSeatShardV3(request.expectedMarket!, shard)));
+    const events = await Promise.all(Array.from({ length: 4 }, (_, shard) => deriveEventShardV3(request.expectedMarket!, shard)));
+    const session = await deriveTradingSessionAddress(request.ownerWallet, request.expectedMarket, seatIndex, request.sessionSignerAddress, request.expectedProgramAddress);
+    const reason = validateCanonicalV3Accounts({
+      staticAccounts,
+      accountIndices: instruction.accountIndices ?? [],
+      header: compiled.header,
+      expectedAccounts: [request.expectedMarket, ...pages, ...seats, ...events, request.sessionSignerAddress, session],
+    });
+    if (reason) return { ok: false, reason };
+  }
 
   return { ok: true, transaction, opcode, seatIndex, actionNonce, placeOrderFlags };
 }
