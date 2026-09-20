@@ -372,6 +372,54 @@ fn v3_place_rejects_negative_available_margin_before_mutation() {
 }
 
 #[test]
+fn v3_place_uses_configured_leverage_instead_of_a_hardcoded_one_x_cap() {
+    let mut accounts = bundle();
+    let owner = account(Address::new_from_array([44; 32]), 0, true);
+    let mut seat_call = vec![
+        accounts[0].view.clone(),
+        accounts[V3_SEAT_START].view.clone(),
+        accounts[V3_SEAT_START + 1].view.clone(),
+        accounts[V3_SEAT_START + 2].view.clone(),
+        accounts[V3_SEAT_START + 3].view.clone(),
+        accounts[V3_EVENT_START].view.clone(),
+        accounts[V3_EVENT_START + 1].view.clone(),
+        accounts[V3_EVENT_START + 2].view.clone(),
+        accounts[V3_EVENT_START + 3].view.clone(),
+        owner.view.clone(),
+    ];
+    create_trader_seat(&ID, &mut seat_call, 0).unwrap();
+    unsafe {
+        accounts[V3_SEAT_START].view.borrow_unchecked_mut()[84..100]
+            .copy_from_slice(&100i128.to_le_bytes());
+        let core = accounts[0].view.borrow_unchecked_mut();
+        core[197] = 1;
+        core[371] = 1;
+        core[228..232].copy_from_slice(&2u32.to_le_bytes());
+    }
+    let mut trade_accounts = views(&accounts);
+    trade_accounts.push(owner.view.clone());
+    place_order_v3(
+        &ID,
+        &mut trade_accounts,
+        PlaceOrderData {
+            side: Side::Bid as u8,
+            tree: TreeKind::Fixed as u8,
+            flags: 0,
+            seat_index: 0,
+            quantity: 15,
+            price_or_offset: 10,
+            expires_at: u64::MAX,
+            peg_limit: 0,
+            client_order_id: 9,
+            action_nonce: 0,
+        },
+    )
+    .unwrap();
+    let seat = unsafe { accounts[V3_SEAT_START].view.borrow_unchecked() };
+    assert_eq!(u32::from_le_bytes(seat[212..216].try_into().unwrap()), 1);
+}
+
+#[test]
 fn v3_risk_config_rejects_negative_economic_ledgers() {
     let accounts = bundle();
     let mut core = unsafe { accounts[0].view.borrow_unchecked().to_vec() };
