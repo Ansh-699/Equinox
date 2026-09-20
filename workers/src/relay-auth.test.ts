@@ -50,12 +50,18 @@ function buildSession(options: {
   expiresAt?: bigint;
   actions?: number;
   nextExpectedNonce?: bigint;
+  maxOrderNotional?: bigint;
+  maxCumulativeNotional?: bigint;
+  consumedCumulativeNotional?: bigint;
+  maxExposure?: bigint;
+  maxOpenOrders?: number;
 } = {}): Uint8Array {
   const {
     initialized = true, revoked = false, owner = OWNER, sessionSigner = SESSION_SIGNER,
     targetProgram = PROGRAM_ID, market = MARKET, seatIndex = 0,
     expiresAt = BigInt(Math.floor(Date.now() / 1000) + 3600), actions = SESSION_ACTION.place,
-    nextExpectedNonce = 1n,
+    nextExpectedNonce = 1n, maxOrderNotional = 1_000n, maxCumulativeNotional = 5_000n,
+    consumedCumulativeNotional = 0n, maxExposure = 100n, maxOpenOrders = 4,
   } = options;
   const bytes = new Uint8Array(256);
   bytes.set(new TextEncoder().encode("STKSES02"), 0);
@@ -70,6 +76,11 @@ function buildSession(options: {
   view.setUint16(140, seatIndex, true);
   view.setBigUint64(150, expiresAt, true);
   bytes[158] = actions;
+  view.setBigUint64(159, maxOrderNotional, true);
+  view.setBigUint64(167, maxCumulativeNotional, true);
+  view.setBigUint64(175, consumedCumulativeNotional, true);
+  view.setBigUint64(183, maxExposure, true);
+  view.setUint16(199, maxOpenOrders, true);
   view.setBigUint64(201, nextExpectedNonce, true);
   return bytes;
 }
@@ -153,6 +164,26 @@ describe("verifyTradingSession", () => {
       openAskExposure: 0n, openOrderCount: 0, liquidationState: 0, sequence: 1n,
     };
     expect(verifyTradingSession(baseInput({ marketBytes: new Uint8Array(4096), v3: { core, seat } }))).toEqual({ ok: true });
+  });
+
+  it("applies signed V3 order limits before sponsorship", () => {
+    const core = {
+      kind: "v3" as const, instrument: MARKET, marketAuthority: OWNER, mode: 1,
+      oracleValid: true, lastVerifiedOraclePrice: 100n, lastVerifiedOracleTimestamp: 1n,
+      oracleFeedId: 922, oracleChannel: 0, oracleExponent: -2, delegationStatus: 0,
+      expectedCommitSequence: 0n, lastCommittedSequence: 0n, validator: OWNER,
+    };
+    const seat = {
+      shard: 0, slot: 0, trader: OWNER, availableCollateral: 1_000n, reservedMargin: 0n,
+      basePosition: 2n, quoteEntryValue: 0n, realizedPnl: 0n, lastFundingAccumulator: 0n, openBidExposure: 0n,
+      openAskExposure: 0n, openOrderCount: 1, liquidationState: 0, sequence: 1n,
+    };
+    const v3 = { core, seat };
+    const orderIntent = { quantity: 2n, priceOrOffset: 100n, side: 1 as const, tree: 0 as const, reduceOnly: true, replace: false };
+    expect(verifyTradingSession(baseInput({ marketBytes: new Uint8Array(4096), v3, orderIntent }))).toEqual({ ok: true });
+    expect(verifyTradingSession(baseInput({ marketBytes: new Uint8Array(4096), v3, orderIntent: { ...orderIntent, quantity: 20n, reduceOnly: false } }))).toEqual({ ok: false, reason: "session_notional_limit" });
+    expect(verifyTradingSession(baseInput({ marketBytes: new Uint8Array(4096), v3, orderIntent: { ...orderIntent, side: 0, reduceOnly: false }, sessionBytes: buildSession({ maxExposure: 2n }) }))).toEqual({ ok: false, reason: "session_exposure_limit" });
+    expect(verifyTradingSession(baseInput({ marketBytes: new Uint8Array(4096), v3, orderIntent: { ...orderIntent, quantity: 1n, side: 1, reduceOnly: false }, sessionBytes: buildSession({ maxOpenOrders: 1 }) }))).toEqual({ ok: false, reason: "session_open_order_limit" });
   });
 
   it("fails closed instead of applying V2 offsets to a V3 core", () => {

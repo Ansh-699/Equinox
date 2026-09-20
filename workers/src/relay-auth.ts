@@ -143,6 +143,11 @@ export interface VerifyTradingSessionInput {
    * shard. When present, this is the only seat source accepted; omitting it
    * for a V3 core fails closed rather than interpreting V3 bytes as V2. */
   v3?: { core: V3CoreState; seat: V3SeatPositionState | null };
+  domain?: "l1" | "er";
+  /** Order fields decoded from the signed instruction. Required for V3
+   * PlaceOrder/ReplaceOrder so sponsorship applies the same limits as the
+   * on-chain handler before paying fees. */
+  orderIntent?: { quantity: bigint; priceOrOffset: bigint; side: 0 | 1; tree: 0 | 1; reduceOnly: boolean; replace: boolean };
 }
 
 /** Full authoritative chain: market sanity, seat ownership, and a real
@@ -209,6 +214,41 @@ export function verifyTradingSession(input: VerifyTradingSessionInput): { ok: tr
 
   const nextExpectedNonce = view.getBigUint64(201, true);
   if (nextExpectedNonce !== input.actionNonce) return { ok: false, reason: "session_nonce_mismatch" };
+
+  if (input.v3 && input.orderIntent) {
+    const { core, seat } = input.v3;
+    if (!seat) return { ok: false, reason: "seat_not_occupied" };
+    const { quantity, priceOrOffset, side, tree, reduceOnly, replace } = input.orderIntent;
+    const effectivePrice = tree === 0 ? priceOrOffset : core.lastVerifiedOraclePrice + priceOrOffset;
+    if (effectivePrice <= 0n) return { ok: false, reason: "order_price_invalid" };
+    const notional = quantity * effectivePrice;
+    if (notional <= 0n || notional > BigInt(Number.MAX_SAFE_INTEGER)) return { ok: false, reason: "order_notional_invalid" };
+    const signedQuantity = side === 0 ? quantity : -quantity;
+    const resultingPosition = seat.basePosition + signedQuantity;
+    const resultingExposure = resultingPosition < 0n ? -resultingPosition : resultingPosition;
+    if (reduceOnly && (seat.basePosition === 0n || resultingExposure >= (seat.basePosition < 0n ? -seat.basePosition : seat.basePosition))) {
+      return { ok: false, reason: "reduce_only_would_not_reduce" };
+    }
+    const maxOrderNotional = view.getBigUint64(159, true);
+    const maxCumulativeNotional = view.getBigUint64(167, true);
+    const consumedCumulativeNotional = view.getBigUint64(175, true);
+    const maxExposure = (() => {
+      const raw = view.getBigUint64(183, true) | (view.getBigUint64(191, true) << 64n);
+      return raw >= (1n << 127n) ? raw - (1n << 128n) : raw;
+    })();
+    const maxOpenOrders = view.getUint16(199, true);
+    if (notional > maxOrderNotional || notional + consumedCumulativeNotional > maxCumulativeNotional) {
+      return { ok: false, reason: "session_notional_limit" };
+    }
+    if (maxExposure < 0n || resultingExposure > maxExposure) return { ok: false, reason: "session_exposure_limit" };
+    const projectedOpenOrders = seat.openOrderCount - (replace && seat.openOrderCount > 0 ? 1 : 0);
+    if (projectedOpenOrders >= maxOpenOrders) return { ok: false, reason: "session_open_order_limit" };
+  }
+
+  if (input.v3 && input.domain) {
+    const delegated = input.v3.core.delegationStatus === 1 || input.v3.core.delegationStatus === 2;
+    if ((input.domain === "er") !== delegated) return { ok: false, reason: "relay_domain_mismatch" };
+  }
 
   return { ok: true };
 }

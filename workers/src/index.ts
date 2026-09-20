@@ -440,6 +440,9 @@ export default {
       if (!body?.transactionBase64 || !body.sessionSignerAddress || !body.ownerWallet || !body.expectedMarket) {
         return json({ error: "invalid_request" }, 400);
       }
+      if (body.domain !== undefined && body.domain !== "l1" && body.domain !== "er") {
+        return json({ error: "invalid_domain" }, 400);
+      }
       // Rate limits first: per-IP, per-wallet, per-signer -- before paying
       // for Privy verification or any RPC round trip.
       const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
@@ -464,7 +467,7 @@ export default {
       // opcode/seatIndex/actionNonce below are extracted from the real,
       // cryptographically-signed instruction bytes -- not client claims.
       const shapeCheck = await validateSessionTransaction(
-        { transactionBase64: body.transactionBase64, expectedProgramAddress: STOCKSTREAM_PROGRAM_ID, sessionSignerAddress: body.sessionSignerAddress, expectedMarket: body.expectedMarket, ownerWallet: body.ownerWallet },
+        { transactionBase64: body.transactionBase64, expectedProgramAddress: STOCKSTREAM_PROGRAM_ID, sessionSignerAddress: body.sessionSignerAddress, expectedMarket: body.expectedMarket, ownerWallet: body.ownerWallet, expectedDomain: body.domain === "er" ? "er" : "l1", recentBlockhashValid: async (blockhash) => (await transport.isBlockhashValid(blockhash, "confirmed")).value },
         relayerAddress,
       );
       if (!shapeCheck.ok) return json({ error: shapeCheck.reason }, 400);
@@ -530,7 +533,9 @@ export default {
         actionNonce: shapeCheck.actionNonce,
         opcode: shapeCheck.opcode,
         placeOrderFlags: shapeCheck.placeOrderFlags,
+        orderIntent: shapeCheck.orderIntent,
         now: new Date(),
+        domain: body.domain === "er" ? "er" : "l1",
         v3: v3Core ? { core: v3Core, seat: v3Seat } : undefined,
       });
       if (!chainCheck.ok) return json({ error: chainCheck.reason }, 403);

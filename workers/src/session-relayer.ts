@@ -51,11 +51,22 @@ export interface RelaySessionTransactionRequest {
    * use the complete canonical V3 execution bundle, not a V2 market shape. */
   expectedMarket?: string;
   ownerWallet?: string;
+  expectedDomain?: "l1" | "er";
+  recentBlockhashValid?: (blockhash: string) => Promise<boolean>;
 }
 
 export type RelayValidation =
-  | { ok: true; transaction: Transaction; opcode: number; seatIndex: number; actionNonce: bigint; placeOrderFlags: number }
+  | { ok: true; transaction: Transaction; opcode: number; seatIndex: number; actionNonce: bigint; placeOrderFlags: number; orderIntent?: RelayOrderIntent }
   | { ok: false; reason: string };
+
+export interface RelayOrderIntent {
+  quantity: bigint;
+  priceOrOffset: bigint;
+  side: 0 | 1;
+  tree: 0 | 1;
+  reduceOnly: boolean;
+  replace: boolean;
+}
 
 /** Byte offset of `seat_index` (u16, LE) within each session-relayable
  * opcode's own instruction data -- mirrors `workers/src/transactions.ts`'s
@@ -117,6 +128,34 @@ function extractActionNonce(data: Uint8Array): bigint | null {
   if (data.length < 8) return null;
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   return view.getBigUint64(data.length - 8, true);
+}
+
+function readSigned64(data: Uint8Array, offset: number): bigint | null {
+  if (offset < 0 || offset + 8 > data.length) return null;
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  return view.getBigInt64(offset, true);
+}
+
+function readUnsigned64(data: Uint8Array, offset: number): bigint | null {
+  if (offset < 0 || offset + 8 > data.length) return null;
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  return view.getBigUint64(offset, true);
+}
+
+/** Decodes the order fields needed for the Worker-side sponsorship guard.
+ * The offsets mirror the V3 program's `PlaceOrderData`; this is deliberately
+ * derived from the instruction bytes, never from JSON claims. */
+function extractOrderIntent(opcode: number, data: Uint8Array): RelayOrderIntent | null {
+  if (opcode !== OPCODE.placeOrder && opcode !== OPCODE.replaceOrder) return null;
+  const base = opcode === OPCODE.replaceOrder ? 17 : 1;
+  if (data.length < base + 45 + 8) return null;
+  const side = data[base];
+  const tree = data[base + 1];
+  if ((side !== 0 && side !== 1) || (tree !== 0 && tree !== 1)) return null;
+  const quantity = readUnsigned64(data, base + 5);
+  const priceOrOffset = readSigned64(data, base + 13);
+  if (quantity === null || priceOrOffset === null || quantity === 0n) return null;
+  return { quantity, priceOrOffset, side: side as 0 | 1, tree: tree as 0 | 1, reduceOnly: (data[base + 2] & 4) !== 0, replace: opcode === OPCODE.replaceOrder };
 }
 
 /**
@@ -193,11 +232,24 @@ export async function validateSessionTransaction(request: RelaySessionTransactio
   }
   const flagsOffset = FLAGS_OFFSET[opcode];
   const placeOrderFlags = flagsOffset !== undefined && flagsOffset < data.length ? data[flagsOffset] : 0;
+  const orderIntent = extractOrderIntent(opcode, data);
+  if ((opcode === OPCODE.placeOrder || opcode === OPCODE.replaceOrder) && !orderIntent) {
+    return { ok: false, reason: "malformed_order_fields" };
+  }
 
   if (request.expectedMarket !== undefined) {
     if (!request.ownerWallet) return { ok: false, reason: "v3_owner_wallet_required" };
+    if (compiled.version !== 0) return { ok: false, reason: "v3_transaction_version_unsupported" };
     if ((compiled as { addressTableLookups?: readonly unknown[] }).addressTableLookups?.length) {
       return { ok: false, reason: "v3_address_lookup_tables_not_supported" };
+    }
+    const lifetimeToken = (compiled as { lifetimeToken?: string }).lifetimeToken;
+    const lifetimeBytes = lifetimeToken ? getBase58Encoder().encode(lifetimeToken) as Uint8Array : null;
+    if (!lifetimeToken || !lifetimeBytes || lifetimeBytes.length !== 32 || lifetimeBytes.every((value) => value === 0)) {
+      return { ok: false, reason: "v3_recent_blockhash_missing" };
+    }
+    if (request.recentBlockhashValid && !(await request.recentBlockhashValid(lifetimeToken))) {
+      return { ok: false, reason: "v3_recent_blockhash_expired" };
     }
     const pages = await Promise.all(Array.from({ length: 18 }, (_, flat) =>
       deriveBookPageV3(request.expectedMarket!, Math.floor(flat / 9), flat % 9)));
@@ -213,7 +265,7 @@ export async function validateSessionTransaction(request: RelaySessionTransactio
     if (reason) return { ok: false, reason };
   }
 
-  return { ok: true, transaction, opcode, seatIndex, actionNonce, placeOrderFlags };
+  return { ok: true, transaction, opcode, seatIndex, actionNonce, placeOrderFlags, orderIntent: orderIntent ?? undefined };
 }
 
 /** Real Ed25519 verification, not merely "a signature-shaped blob is
