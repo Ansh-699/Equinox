@@ -78,6 +78,15 @@ export interface V3CommitAccounts extends V3ExecutionAccounts {
   magicContext: AddressInput;
   magicProgram: AddressInput;
 }
+/** One-shard commit ABI used when MagicBlock rejects a full 27-account intent. */
+export interface V3ShardCommitAccounts {
+  shard: AddressInput;
+  core: AddressInput;
+  authority: AddressInput;
+  payer: AddressInput;
+  magicContext: AddressInput;
+  magicProgram: AddressInput;
+}
 
 function publicKey(value: AddressInput): PublicKey {
   if (value instanceof PublicKey) return value;
@@ -290,6 +299,16 @@ export function commitMarketV3(accounts: V3CommitAccounts, sequence: bigint | nu
   const data = new Uint8Array(9); data[0] = undelegate ? STOCKSTREAM_INSTRUCTION.commitAndUndelegate : STOCKSTREAM_INSTRUCTION.commitMarket;
   writeUnsigned(data, 1, checkedUnsigned(sequence, 64, "sequence"), 8);
   return instruction(data, v3CommitMetas(accounts));
+}
+
+export function commitV3Shard(accounts: V3ShardCommitAccounts, sequence: bigint | number, undelegate = false): TransactionInstruction {
+  const data = new Uint8Array(9); data[0] = undelegate ? STOCKSTREAM_INSTRUCTION.commitAndUndelegate : STOCKSTREAM_INSTRUCTION.commitMarket;
+  writeUnsigned(data, 1, checkedUnsigned(sequence, 64, "sequence"), 8);
+  return instruction(data, [
+    accountMeta(accounts.shard, false, true), accountMeta(accounts.authority, true, false),
+    accountMeta(accounts.payer, true, true), accountMeta(accounts.magicContext, false, true),
+    accountMeta(accounts.magicProgram, false, false), accountMeta(accounts.core, false, true),
+  ]);
 }
 
 export function updateFunding(accounts: InstructionAccounts, accumulator: bigint, timestamp: bigint | number): TransactionInstruction {

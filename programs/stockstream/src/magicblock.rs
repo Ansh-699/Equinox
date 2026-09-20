@@ -1791,6 +1791,12 @@ pub fn commit_market(
     if is_v3_commit_accounts(accounts) {
         return commit_v3_bundle(program_id, accounts, sequence, CommitKind::CommitOnly);
     }
+    if is_v3_member_commit_accounts(accounts) {
+        return commit_v3_member(program_id, accounts, sequence, CommitKind::CommitOnly);
+    }
+    if is_v3_core_commit_accounts(accounts) {
+        return commit_v3_core(program_id, accounts, sequence, CommitKind::CommitOnly);
+    }
     commit_market_inner(program_id, accounts, sequence, CommitKind::CommitOnly)
 }
 
@@ -1801,6 +1807,22 @@ pub fn commit_and_undelegate_market(
 ) -> ProgramResult {
     if is_v3_commit_accounts(accounts) {
         return commit_v3_bundle(
+            program_id,
+            accounts,
+            sequence,
+            CommitKind::CommitAndUndelegate,
+        );
+    }
+    if is_v3_member_commit_accounts(accounts) {
+        return commit_v3_member(
+            program_id,
+            accounts,
+            sequence,
+            CommitKind::CommitAndUndelegate,
+        );
+    }
+    if is_v3_core_commit_accounts(accounts) {
+        return commit_v3_core(
             program_id,
             accounts,
             sequence,
@@ -1819,6 +1841,23 @@ fn is_v3_commit_accounts(accounts: &[AccountView]) -> bool {
     accounts.len() >= 5 + v3::V3_EXECUTION_BUNDLE_LEN - 1
         && accounts[0].data_len() == v3::V3_MARKET_CORE_SIZE
         && unsafe { accounts[0].borrow_unchecked() }[0..8] == v3::V3_MARKET_CORE_DISCRIMINATOR
+}
+
+fn is_v3_core_commit_accounts(accounts: &[AccountView]) -> bool {
+    accounts.len() == 5
+        && accounts[0].data_len() == v3::V3_MARKET_CORE_SIZE
+        && unsafe { accounts[0].borrow_unchecked() }[0..8] == v3::V3_MARKET_CORE_DISCRIMINATOR
+}
+
+fn is_v3_member_commit_accounts(accounts: &[AccountView]) -> bool {
+    if accounts.len() != 6 || accounts[5].data_len() != v3::V3_MARKET_CORE_SIZE {
+        return false;
+    }
+    let bytes = unsafe { accounts[0].borrow_unchecked() };
+    bytes.len() >= 12
+        && (bytes[0..8] == v3::V3_BOOK_PAGE_DISCRIMINATOR
+            || bytes[0..8] == v3::V3_SEAT_SHARD_DISCRIMINATOR
+            || bytes[0..8] == v3::V3_EVENT_SHARD_DISCRIMINATOR)
 }
 
 /// Magic Program commit path for the complete V3 execution bundle.  The
@@ -1938,6 +1977,201 @@ fn commit_v3_bundle(
     )
 }
 
+/// Commit one V3 child shard without putting the complete 27-account bundle
+/// into a single scheduled intent. MagicBlock's deployed validator can reject
+/// a large intent even when every account is individually committable. The
+/// core is supplied as a validation/bookkeeping account but is intentionally
+/// omitted from the Magic CPI; this keeps the scheduled intent to one child.
+/// Callers commit all children, then use the five-account core form below.
+fn commit_v3_member(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    sequence: u64,
+    kind: CommitKind,
+) -> ProgramResult {
+    if accounts.len() != 6
+        || !accounts[1].is_signer()
+        || !accounts[2].is_signer()
+        || !accounts[2].is_writable()
+        || !accounts[0].is_writable()
+        || !accounts[5].is_writable()
+    {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    if *accounts[3].address() != MAGIC_CONTEXT_ID
+        || !accounts[3].is_writable()
+        || *accounts[4].address() != MAGIC_PROGRAM_ID
+        || accounts[0].address() == accounts[5].address()
+    {
+        return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+    }
+    if sequence == 0 {
+        return Err(custom(StockStreamError::MagicBlockSequenceReplay));
+    }
+
+    let core_bytes = unsafe { accounts[5].borrow_unchecked() };
+    if core_bytes.len() != v3::V3_MARKET_CORE_SIZE
+        || core_bytes[0..8] != v3::V3_MARKET_CORE_DISCRIMINATOR
+        || core_bytes[8..10] != v3::V3_LAYOUT_VERSION.to_le_bytes()
+        || core_bytes[v3::V3_CORE_DELEGATION_STATUS_OFFSET]
+            != DelegationStatus::Delegated as u8
+        || core_u64(core_bytes, v3::V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET)? != sequence
+        || core_bytes[v3::V3_CORE_MARKET_AUTHORITY_OFFSET
+            ..v3::V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
+            != accounts[1].address().to_bytes()
+    {
+        return Err(custom(StockStreamError::MagicBlockSequenceReplay));
+    }
+    let core_key = *accounts[5].address();
+    let bytes = unsafe { accounts[0].borrow_unchecked() };
+    if bytes.len() < 44 || bytes[12..44] != core_key.to_bytes() {
+        return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+    }
+    let valid_address = if bytes[0..8] == v3::V3_BOOK_PAGE_DISCRIMINATOR {
+        bytes[10] < 2
+            && bytes[11] < v3::V3_BOOK_PAGES_PER_SIDE as u8
+            && *accounts[0].address()
+                == v3::derive_book_page_v3(
+                    program_id,
+                    &core_key,
+                    bytes[10],
+                    bytes[11],
+                )
+    } else if bytes[0..8] == v3::V3_SEAT_SHARD_DISCRIMINATOR {
+        bytes[10] < v3::V3_SEAT_SHARDS as u8
+            && *accounts[0].address()
+                == v3::derive_seat_shard_v3(program_id, &core_key, bytes[10])
+    } else if bytes[0..8] == v3::V3_EVENT_SHARD_DISCRIMINATOR {
+        bytes[10] < v3::V3_EVENT_SHARDS as u8
+            && *accounts[0].address()
+                == v3::derive_event_shard_v3(program_id, &core_key, bytes[10])
+    } else {
+        false
+    };
+    if !valid_address {
+        return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+    }
+
+    let mut data_buf = [0u8; SCHEDULE_DATA_MAX_LEN];
+    let data_len = encode_schedule_intent_bundle_data(
+        &[2],
+        matches!(kind, CommitKind::CommitAndUndelegate),
+        &mut data_buf,
+    )
+    .map_err(custom)?;
+    let commit_accounts = [
+        InstructionAccount::writable_signer(accounts[2].address()),
+        InstructionAccount::writable(accounts[3].address()),
+        InstructionAccount::writable(accounts[0].address()),
+    ];
+    let commit_ix = InstructionView {
+        program_id: &MAGIC_PROGRAM_ID,
+        accounts: &commit_accounts,
+        data: &data_buf[..data_len],
+    };
+    let commit_views: [&AccountView; 3] = [&accounts[2], &accounts[3], &accounts[0]];
+    invoke_signed_with_bounds::<3, _>(&commit_ix, &commit_views, &[])?;
+
+    let core = unsafe { accounts[5].borrow_unchecked_mut() };
+    core[v3::V3_CORE_LAST_COMMITTED_SEQUENCE_OFFSET
+        ..v3::V3_CORE_LAST_COMMITTED_SEQUENCE_OFFSET + 8]
+        .copy_from_slice(&sequence.to_le_bytes());
+    core[v3::V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET
+        ..v3::V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET + 8]
+        .copy_from_slice(&sequence.saturating_add(1).to_le_bytes());
+    Ok(())
+}
+
+/// Commit the V3 core alone after all child shards have been committed. This
+/// is also the final undelegation request for the core; child undelegations are
+/// submitted independently through `commit_v3_member`.
+fn commit_v3_core(
+    _program_id: &Address,
+    accounts: &mut [AccountView],
+    sequence: u64,
+    kind: CommitKind,
+) -> ProgramResult {
+    if accounts.len() != 5
+        || !accounts[1].is_signer()
+        || !accounts[2].is_signer()
+        || !accounts[2].is_writable()
+        || !accounts[0].is_writable()
+    {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    if *accounts[3].address() != MAGIC_CONTEXT_ID
+        || !accounts[3].is_writable()
+        || *accounts[4].address() != MAGIC_PROGRAM_ID
+    {
+        return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+    }
+    if sequence == 0 {
+        return Err(custom(StockStreamError::MagicBlockSequenceReplay));
+    }
+    {
+        let bytes = unsafe { accounts[0].borrow_unchecked() };
+        if bytes.len() != v3::V3_MARKET_CORE_SIZE
+            || bytes[0..8] != v3::V3_MARKET_CORE_DISCRIMINATOR
+            || bytes[8..10] != v3::V3_LAYOUT_VERSION.to_le_bytes()
+            || (bytes[v3::V3_CORE_DELEGATION_STATUS_OFFSET] != DelegationStatus::Delegated as u8
+                && !(matches!(kind, CommitKind::CommitAndUndelegate)
+                    && bytes[v3::V3_CORE_DELEGATION_STATUS_OFFSET]
+                        == DelegationStatus::Undelegating as u8))
+        {
+            return Err(custom(StockStreamError::MagicBlockSequenceReplay));
+        }
+        if core_u64(bytes, v3::V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET)? != sequence {
+            return Err(custom(StockStreamError::MagicBlockSequenceReplay));
+        }
+        if bytes[v3::V3_CORE_MARKET_AUTHORITY_OFFSET
+            ..v3::V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
+            != accounts[1].address().to_bytes()
+        {
+            return Err(custom(StockStreamError::MagicBlockSequenceReplay));
+        }
+    }
+    // An account included in an undelegation intent becomes externally
+    // owned by the MagicBlock scheduler during the CPI. Write the final
+    // state before invoking it; if scheduling fails the transaction rolls
+    // back, so no partially-undelegated state can persist.
+    if matches!(kind, CommitKind::CommitAndUndelegate) {
+        let bytes = unsafe { accounts[0].borrow_unchecked_mut() };
+        bytes[v3::V3_CORE_LAST_COMMITTED_SEQUENCE_OFFSET
+            ..v3::V3_CORE_LAST_COMMITTED_SEQUENCE_OFFSET + 8]
+            .copy_from_slice(&sequence.to_le_bytes());
+        bytes[v3::V3_CORE_DELEGATION_STATUS_OFFSET] = DelegationStatus::Undelegating as u8;
+    }
+    let mut data_buf = [0u8; SCHEDULE_DATA_MAX_LEN];
+    let data_len = encode_schedule_intent_bundle_data(
+        &[2],
+        matches!(kind, CommitKind::CommitAndUndelegate),
+        &mut data_buf,
+    )
+    .map_err(custom)?;
+    let commit_accounts = [
+        InstructionAccount::writable_signer(accounts[2].address()),
+        InstructionAccount::writable(accounts[3].address()),
+        InstructionAccount::writable(accounts[0].address()),
+    ];
+    let commit_ix = InstructionView {
+        program_id: &MAGIC_PROGRAM_ID,
+        accounts: &commit_accounts,
+        data: &data_buf[..data_len],
+    };
+    let commit_views: [&AccountView; 3] = [&accounts[2], &accounts[3], &accounts[0]];
+    invoke_signed_with_bounds::<3, _>(&commit_ix, &commit_views, &[])?;
+    let bytes = unsafe { accounts[0].borrow_unchecked_mut() };
+    if matches!(kind, CommitKind::CommitOnly) {
+        bytes[v3::V3_CORE_LAST_COMMITTED_SEQUENCE_OFFSET
+            ..v3::V3_CORE_LAST_COMMITTED_SEQUENCE_OFFSET + 8]
+            .copy_from_slice(&sequence.to_le_bytes());
+        bytes[v3::V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET
+            ..v3::V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET + 8]
+            .copy_from_slice(&sequence.saturating_add(1).to_le_bytes());
+    }
+    Ok(())
+}
+
 fn core_u64(bytes: &[u8], offset: usize) -> Result<u64, ProgramError> {
     bytes
         .get(offset..offset + 8)
@@ -1975,7 +2209,9 @@ pub fn external_undelegate(
     }
     // The seeds payload length selects which delegated account kind this
     // callback restores (market 55 / scratch 60 / session 137 seed bytes).
-    if data.len() < 8 + MARKET_SEEDS_PAYLOAD_LEN
+    // V3 core seed payloads are shorter than the legacy market payload; the
+    // parser below is the discriminator/shape gate for every supported kind.
+    if data.len() < 8 + 1
         || data.len() > EXTERNAL_UNDELEGATE_DATA_LEN
         || data[0..8] != EXTERNAL_UNDELEGATE_DISCRIMINATOR
     {

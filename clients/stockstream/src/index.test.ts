@@ -1,7 +1,7 @@
 import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { expect, test } from "vitest";
 import { STOCKSTREAM_PROGRAM_ID } from "./constants";
-import { MAGICBLOCK_DELEGATION_PROGRAM_ID, MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID, STOCKSTREAM_PROGRAM_KEY, cancelAllV3, cancelOrderV3, placeOrderV3, replaceOrderV3 } from "./index";
+import { MAGICBLOCK_DELEGATION_PROGRAM_ID, MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID, STOCKSTREAM_PROGRAM_KEY, cancelAllV3, cancelOrderV3, placeOrderV3, replaceOrderV3, commitV3Shard } from "./index";
 import { authorizeTradingSession, cancelOrder, closeV3TraderSeat, commitMarket, delegateClusterMember, delegateV3Account, deriveClusterMemberPdas, createPerpMarket, createV3Account, createV3TraderSeat, decodeFillPayload, decodeInstruction, decodeMarketState, decodeSeatAmountPayload, decodeStockStreamEvent, delegateMarket, deriveTradingSession, depositCollateral, EVENT_SIZE, initializeExchange, initializeMarket, initializeV3Market, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateExchangeConfig, updateStockInstrument, withdrawCollateral, withdrawInsuranceFunds, withdrawProtocolFees, EXCHANGE_CONFIG_FIELD } from "./index";
 import { STOCKSTREAM_ACCOUNT_SIZE } from "./constants";
 import { deriveBookPageV3, deriveEventShardV3, deriveMarketCoreV3, deriveSeatShardV3 } from "./abi/v3";
@@ -107,6 +107,16 @@ test("V3 trading constructors use the complete 27-account bundle", () => {
   expect(cancelOrderV3(v3, 0, 1n).keys).toHaveLength(28);
   expect(cancelAllV3(v3, 0, 2).keys).toHaveLength(28);
   expect(replaceOrderV3({ ...v3, oldOrderKey: 1n, seatIndex: 0, side: "bid", quantity: 1n, priceOrOffset: 10n, clientOrderId: 2n }).keys).toHaveLength(28);
+});
+
+test("V3 shard commit keeps the core outside the Magic intent", () => {
+  const shard = PublicKey.unique();
+  const core = PublicKey.unique();
+  const ix = commitV3Shard({ shard, core, authority, payer: authority, magicContext: MAGICBLOCK_MAGIC_CONTEXT_ID, magicProgram: MAGICBLOCK_MAGIC_PROGRAM_ID }, 3n);
+  expect(ix.keys).toHaveLength(6);
+  expect(ix.keys[0]).toEqual({ pubkey: shard, isSigner: false, isWritable: true });
+  expect(ix.keys[5]).toEqual({ pubkey: core, isSigner: false, isWritable: true });
+  expect(ix.data[0]).toBe(14);
 });
 
 test("cancel order encodes a full 128-bit key", () => {
