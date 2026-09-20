@@ -1,6 +1,6 @@
 # StockStream evidence matrix
 
-This matrix is scoped to current HEAD `0a2e2b2` (post-V3-cancellation-atomicity and funding-settlement fixes). “Fresh” means rerun on this checkout; live claims additionally require the cited Devnet artifact. The full local gate is `VERIFY_SUMMARY_PATH=/tmp/stockstream-verify-summary-20260921-funding.json NO_DNA=1 bash scripts/verify.sh` and the checked-in summary is `verify-latest.json`.
+This matrix is scoped to current HEAD `8343f1e` (post-V3-cancellation-atomicity, funding-settlement, and liquidation-preflight fixes). “Fresh” means rerun on this checkout; live claims additionally require the cited Devnet artifact. The full local gate is `VERIFY_SUMMARY_PATH=/tmp/stockstream-verify-summary-20260921-funding.json NO_DNA=1 bash scripts/verify.sh` from the preceding source checkpoint; the checked-in summary is `verify-latest.json`. The focused Rust suite and SBF build were rerun after the liquidation fix.
 
 | Subsystem | Classification | Source and exact evidence | Fresh on current HEAD |
 |---|---|---|---|
@@ -19,7 +19,7 @@ This matrix is scoped to current HEAD `0a2e2b2` (post-V3-cancellation-atomicity 
 | V3 fee accounting | locally-tested | `programs/stockstream/src/v3.rs`; `cargo test -p stockstream --test v3_bundle` | yes |
 | V3 funding accounting | locally-tested | `programs/stockstream/src/risk.rs`, `programs/stockstream/src/v3.rs`; `cargo test -p stockstream --test v3_bundle` verifies funding-aware liquidation, pegged funding marks, and pending-funding settlement before a resting order's risk decision | yes |
 | V3 open-interest accounting | locally-tested | `programs/stockstream/src/v3.rs`; commit `d563f28`; `NO_DNA=1 cargo test -p stockstream --tests`, including `v3_place_rejects_maximum_open_interest_before_mutation` | yes; current HEAD gate |
-| V3 liquidation | locally-tested | `programs/stockstream/src/v3.rs`, `programs/stockstream/src/handlers.rs`; `NO_DNA=1 cargo test -p stockstream --test v3_bundle v3_liquidation_updates_open_interest_and_insurance_fee` verifies funding settlement before health evaluation, exactly-once funding application, position/open-interest reduction, insurance fee, and recognized bad debt | yes; no live liquidation |
+| V3 liquidation | locally-tested | `programs/stockstream/src/v3.rs`, `programs/stockstream/src/handlers.rs`; `NO_DNA=1 cargo test -p stockstream --test v3_bundle v3_liquidation_updates_open_interest_and_insurance_fee` verifies funding settlement before health evaluation, preflight rejection without seat/core mutation, exactly-once funding application, position/open-interest reduction, insurance fee, and recognized bad debt | yes; no live liquidation |
 | Fixed/OraclePegged matching | locally-tested | `programs/stockstream/src/book.rs`, `programs/stockstream/src/v3.rs`; `NO_DNA=1 cargo test -p stockstream --test v3_bundle v3_place_rejects_an_invalid_oracle_peg_before_mutation` plus `cargo test -p stockstream --test order_book` | yes |
 | post-only | locally-tested | `programs/stockstream/src/book.rs`, `programs/stockstream/src/v3.rs`; `cargo test -p stockstream --test order_book` | yes |
 | IOC | locally-tested | `programs/stockstream/src/book.rs`; `cargo test -p stockstream --test order_book --test account_settlement` | yes |
