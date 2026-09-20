@@ -9,6 +9,7 @@ import type { RegistryAccounts } from "./abi/registry-instructions";
 import { depositCollateral, initializeVault, reconcileVault, recordBadDebt, resolveBadDebt, transferToInsuranceFund, withdrawCollateral, withdrawInsuranceFunds, withdrawProtocolFees } from "./abi/custody-instructions";
 import { cancelAll, cancelOrder, closeTraderSeat, createTraderSeat, initializeMarket, initializeSettlementScratch, liquidate, placeOrder, replaceOrder, updateFunding } from "./abi/order-instructions";
 import type { PlaceOrderParams } from "./abi/order-instructions";
+import { consumeOracleUpdate } from "./abi/oracle-instructions";
 
 export { cancelAllV3, cancelOrderV3, closeV3TraderSeat, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, createV3Account, createV3TraderSeat, delegateV3Account, depositCollateralV3, initializeV3Market, placeOrderV3, replaceOrderV3, requestV3Undelegation, rollbackV3Undelegation, updateFundingV3, withdrawCollateralV3 } from "./abi/v3-instructions";
 export type { V3AccountKind, V3CommitAccounts, V3CreationAccounts, V3DelegationAccounts, V3DepositAccounts, V3ExecutionAccounts, V3FundingAccounts, V3InitializationAccounts, V3OracleAccounts, V3SeatAccounts, V3ShardCommitAccounts, V3UndelegationRecoveryAccounts, V3WithdrawAccounts } from "./abi/v3-instructions";
@@ -20,6 +21,8 @@ export { depositCollateral, initializeVault, reconcileVault, recordBadDebt, reso
 export type { BadDebtAccounts, CustodyAccounts, InsuranceTransferAccounts, LedgerWithdrawalAccounts, ReconcileAccounts, VaultAccounts } from "./abi/custody-instructions";
 export { cancelAll, cancelOrder, closeTraderSeat, createTraderSeat, initializeMarket, initializeSettlementScratch, liquidate, placeOrder, replaceOrder, updateFunding } from "./abi/order-instructions";
 export type { InstructionAccounts, OrderTree, PlaceOrderParams, SelfTradeBehavior, SessionAuthorizedAccounts, Side } from "./abi/order-instructions";
+export { CONSUME_ORACLE_UPDATE_MESSAGE_OFFSET, consumeOracleUpdate } from "./abi/oracle-instructions";
+export type { ConsumeOracleUpdateAccounts } from "./abi/oracle-instructions";
 
 export { STOCKSTREAM_PROGRAM_KEY } from "./abi/transaction";
 export type { AddressInput } from "./abi/transaction";
@@ -297,28 +300,6 @@ export function decodeReconciliationPayload(payload: Uint8Array) {
  * Pyth's own `verify_message`, which repeats the check authoritatively).
  * See `handlers::consume_oracle_update` in the Rust program.
  */
-export const CONSUME_ORACLE_UPDATE_MESSAGE_OFFSET = 4;
-
-export function consumeOracleUpdate(
-  accounts: { market: AddressInput; payer: AddressInput; pythProgram: AddressInput; storage: AddressInput; treasury: AddressInput; systemProgram: AddressInput; instructionsSysvar: AddressInput },
-  message: Uint8Array,
-  ed25519InstructionIndex: number,
-  signatureIndex: number,
-): TransactionInstruction {
-  if (message.length < 102 || message.length > 512) throw new RangeError('Invalid signed Pyth message length');
-  if (!Number.isInteger(ed25519InstructionIndex) || ed25519InstructionIndex < 0 || ed25519InstructionIndex > 0xffff) throw new RangeError('ed25519InstructionIndex must be a u16');
-  if (!Number.isInteger(signatureIndex) || signatureIndex < 0 || signatureIndex > 0xff) throw new RangeError('signatureIndex must be a u8');
-  const data = new Uint8Array(CONSUME_ORACLE_UPDATE_MESSAGE_OFFSET + message.length);
-  data[0] = STOCKSTREAM_INSTRUCTION.consumeOracleUpdate;
-  new DataView(data.buffer).setUint16(1, ed25519InstructionIndex, true);
-  data[3] = signatureIndex;
-  data.set(message, CONSUME_ORACLE_UPDATE_MESSAGE_OFFSET);
-  return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.payer, true, true),
-    accountMeta(accounts.pythProgram, false, false), accountMeta(accounts.storage, false, false),
-    accountMeta(accounts.treasury, false, true), accountMeta(accounts.systemProgram, false, false),
-    accountMeta(accounts.instructionsSysvar, false, false)]);
-}
-
 /**
  * Real onchain MagicBlock `DelegateMarket`. Account order and the delegation
  * program/PDA derivations mirror `programs/stockstream/src/magicblock.rs`
