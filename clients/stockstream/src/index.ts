@@ -7,6 +7,8 @@ import { authorizeTradingSession, closeTradingSession, deriveTradingSession, rev
 import { createPerpMarket, initializeExchange, registerStockInstrument, suspendStockInstrument, transitionMarket, updateMarketRisk, updateStockInstrument } from "./abi/registry-instructions";
 import type { RegistryAccounts } from "./abi/registry-instructions";
 import { depositCollateral, initializeVault, reconcileVault, recordBadDebt, resolveBadDebt, transferToInsuranceFund, withdrawCollateral, withdrawInsuranceFunds, withdrawProtocolFees } from "./abi/custody-instructions";
+import { cancelAll, cancelOrder, closeTraderSeat, createTraderSeat, initializeMarket, initializeSettlementScratch, liquidate, placeOrder, replaceOrder, updateFunding } from "./abi/order-instructions";
+import type { PlaceOrderParams } from "./abi/order-instructions";
 
 export { cancelAllV3, cancelOrderV3, closeV3TraderSeat, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, createV3Account, createV3TraderSeat, delegateV3Account, depositCollateralV3, initializeV3Market, placeOrderV3, replaceOrderV3, requestV3Undelegation, rollbackV3Undelegation, updateFundingV3, withdrawCollateralV3 } from "./abi/v3-instructions";
 export type { V3AccountKind, V3CommitAccounts, V3CreationAccounts, V3DelegationAccounts, V3DepositAccounts, V3ExecutionAccounts, V3FundingAccounts, V3InitializationAccounts, V3OracleAccounts, V3SeatAccounts, V3ShardCommitAccounts, V3UndelegationRecoveryAccounts, V3WithdrawAccounts } from "./abi/v3-instructions";
@@ -16,45 +18,15 @@ export { createPerpMarket, initializeExchange, registerStockInstrument, suspendS
 export type { InstrumentAccounts, MarketAuthorityAccounts, MarketTransition, PerpMarketAccounts, RegistryAccounts } from "./abi/registry-instructions";
 export { depositCollateral, initializeVault, reconcileVault, recordBadDebt, resolveBadDebt, transferToInsuranceFund, withdrawCollateral, withdrawInsuranceFunds, withdrawProtocolFees } from "./abi/custody-instructions";
 export type { BadDebtAccounts, CustodyAccounts, InsuranceTransferAccounts, LedgerWithdrawalAccounts, ReconcileAccounts, VaultAccounts } from "./abi/custody-instructions";
+export { cancelAll, cancelOrder, closeTraderSeat, createTraderSeat, initializeMarket, initializeSettlementScratch, liquidate, placeOrder, replaceOrder, updateFunding } from "./abi/order-instructions";
+export type { InstructionAccounts, OrderTree, PlaceOrderParams, SelfTradeBehavior, SessionAuthorizedAccounts, Side } from "./abi/order-instructions";
 
 export { STOCKSTREAM_PROGRAM_KEY } from "./abi/transaction";
 export type { AddressInput } from "./abi/transaction";
-export type Side = "bid" | "ask";
-export type OrderTree = "fixed" | "oracle-pegged";
-export type SelfTradeBehavior = "abort" | "cancel-provide" | "decrement-take";
-
-export interface InstructionAccounts {
-  market: AddressInput;
-  authority: AddressInput;
-}
-
-export interface PlaceOrderParams extends InstructionAccounts {
-  /** Per-market/per-seat PDA: ["settlement", market, seat_index_le]. */
-  settlementScratch: AddressInput;
-  seatIndex: number;
-  side: Side;
-  tree?: OrderTree;
-  quantity: bigint | number;
-  priceOrOffset: bigint | number;
-  expiresAt?: bigint | number;
-  pegLimit?: bigint | number;
-  clientOrderId: bigint | number;
-  /** Required for scoped-session actions. Main-wallet actions must use zero. */
-  actionNonce?: bigint | number;
-  postOnly?: boolean;
-  immediateOrCancel?: boolean;
-  reduceOnly?: boolean;
-  /** Self-trade prevention mode, encoded in flags bits 3-4. */
-  selfTradeBehavior?: SelfTradeBehavior;
-  /** Program-owned TradingSession account when authority is a scoped signer. */
-  session?: AddressInput;
-}
-
 export interface InstructionFixture {
   name: string;
   data: Uint8Array;
 }
-export interface SessionAuthorizedAccounts extends InstructionAccounts { session?: AddressInput; }
 
 export interface DelegationAccounts { market: AddressInput; authority: AddressInput; instrument: AddressInput; payer: AddressInput; clusterAccounts?: AddressInput[]; }
 export interface CommitAccounts { market: AddressInput; authority: AddressInput; payer: AddressInput; clusterAccounts?: AddressInput[]; }
@@ -67,104 +39,6 @@ export const MAGICBLOCK_MAGIC_PROGRAM_ID = new PublicKey("Magic11111111111111111
 /** MagicBlock Magic Context account: `MagicContext1111111111111111111111111111111`. */
 export const MAGICBLOCK_MAGIC_CONTEXT_ID = new PublicKey("MagicContext1111111111111111111111111111111");
 /** Account tuple for opcode 46. `parent` is an instrument for `core`, and a V3 core otherwise. */
-
-function selfTradeBits(value: SelfTradeBehavior = "abort"): number {
-  return value === "abort" ? 0 : value === "cancel-provide" ? 1 << 3 : value === "decrement-take" ? 2 << 3 : (() => { throw new RangeError("Invalid self-trade behavior"); })();
-}
-
-export function initializeMarket(accounts: InstructionAccounts): TransactionInstruction {
-  return instruction(Uint8Array.of(STOCKSTREAM_INSTRUCTION.initializeMarket), [
-    accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false),
-  ]);
-}
-
-export function createTraderSeat(accounts: InstructionAccounts, seatIndex: number): TransactionInstruction {
-  const data = new Uint8Array(3); data[0] = STOCKSTREAM_INSTRUCTION.createTraderSeat; writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2);
-  return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]);
-}
-
-export function initializeSettlementScratch(accounts: InstructionAccounts & { settlementScratch: AddressInput }, seatIndex: number): TransactionInstruction {
-  const data = new Uint8Array(3); data[0] = STOCKSTREAM_INSTRUCTION.initializeSettlementScratch; writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2);
-  return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false), accountMeta(accounts.settlementScratch, false, true)]);
-}
-
-export function closeTraderSeat(accounts: InstructionAccounts, seatIndex: number): TransactionInstruction {
-  const data = new Uint8Array(3); data[0] = STOCKSTREAM_INSTRUCTION.closeTraderSeat; writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2);
-  return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]);
-}
-
-export function placeOrder(params: PlaceOrderParams): TransactionInstruction {
-  const data = new Uint8Array(54);
-  data[0] = STOCKSTREAM_INSTRUCTION.placeOrder;
-  data[1] = params.side === "bid" ? 0 : params.side === "ask" ? 1 : 255;
-  data[2] = (params.tree ?? "fixed") === "fixed" ? 0 : 1;
-  data[3] = (params.postOnly ? 1 : 0) | (params.immediateOrCancel ? 2 : 0) | (params.reduceOnly ? 4 : 0) | selfTradeBits(params.selfTradeBehavior);
-  if (data[1] > 1) throw new RangeError("Invalid order side");
-  writeUnsigned(data, 4, checkedUnsigned(params.seatIndex, 16, "seatIndex"), 2);
-  writeUnsigned(data, 6, checkedUnsigned(params.quantity, 64, "quantity"), 8);
-  writeSigned(data, 14, checkedSigned(params.priceOrOffset, 64, "priceOrOffset"), 8);
-  writeUnsigned(data, 22, checkedUnsigned(params.expiresAt ?? 0, 64, "expiresAt"), 8);
-  writeSigned(data, 30, checkedSigned(params.pegLimit ?? 0, 64, "pegLimit"), 8);
-  writeUnsigned(data, 38, checkedUnsigned(params.clientOrderId, 64, "clientOrderId"), 8);
-  const actionNonce = params.actionNonce ?? 0;
-  if (!params.session && actionNonce !== 0) throw new RangeError("Main-wallet actions must use actionNonce zero");
-  writeUnsigned(data, 46, checkedUnsigned(actionNonce, 64, "actionNonce"), 8);
-  const accounts = [accountMeta(params.market, false, true), accountMeta(params.authority, true, false), accountMeta(params.settlementScratch, false, true)];
-  if (params.session) accounts.push(accountMeta(params.session, false, true));
-  return instruction(data, accounts);
-}
-
-/**
- * Atomically cancels `oldOrderKey` and places a new order in its place. The
- * new order always receives a fresh sequence number, so a replacement
- * always loses book time priority. If the new order fails validation
- * (margin, session notional, ...), the whole instruction reverts, leaving
- * the original order, its reserve, and the session's nonce/notional
- * untouched -- see `handlers::replace_order` in the Rust program.
- */
-export function replaceOrder(params: PlaceOrderParams & { oldOrderKey: bigint }): TransactionInstruction {
-  const data = new Uint8Array(70);
-  data[0] = STOCKSTREAM_INSTRUCTION.replaceOrder;
-  writeUnsigned(data, 1, checkedUnsigned(params.oldOrderKey, 128, "oldOrderKey"), 16);
-  data[17] = params.side === "bid" ? 0 : params.side === "ask" ? 1 : 255;
-  data[18] = (params.tree ?? "fixed") === "fixed" ? 0 : 1;
-  data[19] = (params.postOnly ? 1 : 0) | (params.immediateOrCancel ? 2 : 0) | (params.reduceOnly ? 4 : 0) | selfTradeBits(params.selfTradeBehavior);
-  if (data[17] > 1) throw new RangeError("Invalid order side");
-  writeUnsigned(data, 20, checkedUnsigned(params.seatIndex, 16, "seatIndex"), 2);
-  writeUnsigned(data, 22, checkedUnsigned(params.quantity, 64, "quantity"), 8);
-  writeSigned(data, 30, checkedSigned(params.priceOrOffset, 64, "priceOrOffset"), 8);
-  writeUnsigned(data, 38, checkedUnsigned(params.expiresAt ?? 0, 64, "expiresAt"), 8);
-  writeSigned(data, 46, checkedSigned(params.pegLimit ?? 0, 64, "pegLimit"), 8);
-  writeUnsigned(data, 54, checkedUnsigned(params.clientOrderId, 64, "clientOrderId"), 8);
-  const actionNonce = params.actionNonce ?? 0;
-  if (!params.session && actionNonce !== 0) throw new RangeError("Main-wallet actions must use actionNonce zero");
-  writeUnsigned(data, 62, checkedUnsigned(actionNonce, 64, "actionNonce"), 8);
-  const accounts = [accountMeta(params.market, false, true), accountMeta(params.authority, true, false), accountMeta(params.settlementScratch, false, true)];
-  if (params.session) accounts.push(accountMeta(params.session, false, true));
-  return instruction(data, accounts);
-}
-
-export function cancelOrder(accounts: SessionAuthorizedAccounts, seatIndex: number, orderKey: bigint, actionNonce: bigint | number = 0): TransactionInstruction {
-  if (!accounts.session && actionNonce !== 0) throw new RangeError("Main-wallet actions must use actionNonce zero");
-  const data = new Uint8Array(27); data[0] = STOCKSTREAM_INSTRUCTION.cancelOrder; writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2); writeUnsigned(data, 3, checkedUnsigned(orderKey, 128, "orderKey"), 16); writeUnsigned(data, 19, checkedUnsigned(actionNonce, 64, "actionNonce"), 8);
-  const metas = [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]; if (accounts.session) metas.push(accountMeta(accounts.session, false, true)); return instruction(data, metas);
-}
-
-export function cancelAll(accounts: SessionAuthorizedAccounts, seatIndex: number, maxCancellations: number, actionNonce: bigint | number = 0): TransactionInstruction {
-  if (!accounts.session && actionNonce !== 0) throw new RangeError("Main-wallet actions must use actionNonce zero");
-  const data = new Uint8Array(12); data[0] = STOCKSTREAM_INSTRUCTION.cancelAll; writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2); data[3] = Number(checkedUnsigned(maxCancellations, 8, "maxCancellations")); writeUnsigned(data, 4, checkedUnsigned(actionNonce, 64, "actionNonce"), 8);
-  const metas = [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]; if (accounts.session) metas.push(accountMeta(accounts.session, false, true)); return instruction(data, metas);
-}
-
-export function updateFunding(accounts: InstructionAccounts, accumulator: bigint, timestamp: bigint | number): TransactionInstruction {
-  const data = new Uint8Array(25); data[0] = STOCKSTREAM_INSTRUCTION.updateFunding; writeSigned(data, 1, checkedSigned(accumulator, 128, "accumulator"), 16); writeUnsigned(data, 17, checkedUnsigned(timestamp, 64, "timestamp"), 8);
-  return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]);
-}
-
-export function liquidate(accounts: InstructionAccounts, seatIndex: number, maxQuantity: bigint | number): TransactionInstruction {
-  const data = new Uint8Array(11); data[0] = STOCKSTREAM_INSTRUCTION.liquidate; writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2); writeUnsigned(data, 3, checkedUnsigned(maxQuantity, 64, "maxQuantity"), 8);
-  return instruction(data, [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]);
-}
 
 /** Mirrors `programs/stockstream/src/instruction.rs::exchange_config_field`
  * exactly -- one bit per `UpdateExchangeConfig` field. */
