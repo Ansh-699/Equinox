@@ -21,9 +21,9 @@ use stockstream::{
         read_v3_risk_config, update_funding_v3, update_v3_risk_config, validate_execution_bundle,
         validate_v3_session_actor, validate_v3_withdrawal_readiness, withdraw_collateral_v3,
         PagedBookV3, V3RiskConfig, V3_BOOK_PAGES_PER_SIDE, V3_BOOK_PAGE_SIZE,
-        V3_CORE_PROTOCOL_FEE_BALANCE_OFFSET, V3_CORE_VAULT_SURPLUS_OFFSET,
-        V3_CORE_WITHDRAWAL_BUFFER_OFFSET, V3_EVENT_SHARD_SIZE, V3_EXECUTION_BUNDLE_LEN,
-        V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
+        V3_CORE_INSURANCE_BALANCE_OFFSET, V3_CORE_PROTOCOL_FEE_BALANCE_OFFSET,
+        V3_CORE_VAULT_SURPLUS_OFFSET, V3_CORE_WITHDRAWAL_BUFFER_OFFSET, V3_EVENT_SHARD_SIZE,
+        V3_EXECUTION_BUNDLE_LEN, V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
     },
     ID,
 };
@@ -490,6 +490,41 @@ fn v3_risk_update_writes_surplus_and_withdrawal_buffer_atomically() {
         ),
         25
     );
+}
+
+#[test]
+fn v3_risk_update_rejects_malformed_existing_ledger_without_mutation() {
+    let mut accounts = bundle();
+    let authority = account(Address::new_from_array([89; 32]), 0, true);
+    unsafe {
+        let core = accounts[0].view.borrow_unchecked_mut();
+        core[44..76].copy_from_slice(authority.view.address().as_ref());
+        core[V3_CORE_INSURANCE_BALANCE_OFFSET..V3_CORE_INSURANCE_BALANCE_OFFSET + 16]
+            .copy_from_slice(&(-1i128).to_le_bytes());
+    }
+    let before = unsafe { accounts[0].view.borrow_unchecked().to_vec() };
+    let mut call = vec![accounts[0].view.clone(), authority.view.clone()];
+    let result = update_v3_risk_config(
+        &ID,
+        &mut call,
+        V3RiskConfig {
+            initial_margin_bps: 2_000,
+            maintenance_margin_bps: 1_000,
+            liquidation_fee_bps: 50,
+            maker_fee_bps: 2,
+            taker_fee_bps: 5,
+            maximum_leverage: 5,
+            maximum_position: 0,
+            maximum_open_interest: 0,
+            mark_deviation_bps: 250,
+            vault_surplus: 400,
+            withdrawal_buffer: 25,
+        },
+    );
+    assert!(result.is_err());
+    assert_eq!(before, unsafe {
+        accounts[0].view.borrow_unchecked().to_vec()
+    });
 }
 
 #[test]
