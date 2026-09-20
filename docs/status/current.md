@@ -46,7 +46,7 @@ Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives 
 
 - Rust (native + LiteSVM runtime): 290 passing, `cargo fmt --check` clean.
 - Workers (Miniflare/vitest): 345 passing (33 files).
-- Frontend (vitest): 202 passing.
+- Frontend (vitest): 203 passing.
 - Frontend (Playwright fixture E2E): 50 passing; opt-in Devnet read-only E2E: 2 passing.
 - Frontend (Playwright production smoke): 6 passing.
 - `tsc --noEmit` clean on both the frontend and workers packages.
