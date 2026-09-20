@@ -52,6 +52,7 @@ Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives 
 - `tsc --noEmit` clean on both the frontend and workers packages.
 - `eslint .` clean.
 - ABI manifest parity: `ABI-OK`.
+- Client facade audit: `clients/stockstream/src/index.ts` is now a thin compatibility surface (122 lines); instruction construction and canonical decoders live in `clients/stockstream/src/abi/*`, with only the legacy PublicKey session mapping and unsigned preview retained in the facade.
 - V3 continuation: targeted Rust instruction/bundle tests and all 187 root
   TypeScript tests passed after `5482c9a`; `npx tsc --noEmit` and ABI parity
   passed. `cargo build-sbf --manifest-path programs/stockstream/Cargo.toml
