@@ -8,7 +8,7 @@ import {
   decodeV3BookPage, decodeV3MarketCore,
   decodeV3EventShard, decodeV3SeatShard,
 } from "./v3";
-import { commitMarketV3, commitV3Shard, deriveV3ExecutionAccounts, placeOrderV3 } from "./v3-instructions";
+import { authorizeTradingSessionV3, closeTradingSessionV3, commitMarketV3, commitV3Shard, deriveV3ExecutionAccounts, placeOrderV3, revokeTradingSessionV3, updateTradingSessionV3 } from "./v3-instructions";
 
 function key(seed: number): PublicKey {
   return new PublicKey(Uint8Array.from({ length: 32 }, (_, index) => (seed + index) & 0xff));
@@ -87,6 +87,24 @@ describe("V3 sharded ABI", () => {
     expect(ix.keys).toHaveLength(29);
     expect(ix.keys.at(-2)?.isSigner).toBe(true);
     expect(ix.keys.at(-1)?.isWritable).toBe(true);
+  });
+
+  it("builds V3 session authorization with the full bundle and owner payer", () => {
+    const market = deriveMarketCoreV3(instrument);
+    const accounts = deriveV3ExecutionAccounts(market, key(82));
+    const ix = authorizeTradingSessionV3({ ...accounts, session: key(83), sessionSigner: key(84) }, 1000, {
+      seatIndex: 0, actions: 1, maxOrderNotional: 10, maxCumulativeNotional: 20, maximumExposure: 100, maximumOpenOrders: 4,
+    });
+    expect(ix.keys).toHaveLength(31);
+    expect(ix.keys[0].isWritable).toBe(true);
+    expect(ix.keys[27]).toMatchObject({ isSigner: true, isWritable: true });
+    expect(ix.keys[28]).toMatchObject({ isSigner: false, isWritable: true });
+    expect(ix.keys[29]).toMatchObject({ isSigner: false, isWritable: false });
+    expect(revokeTradingSessionV3({ ...accounts, session: key(83), sessionSigner: key(84) }, 0).keys).toHaveLength(30);
+    expect(updateTradingSessionV3({ ...accounts, session: key(83), sessionSigner: key(84) }, 1100, {
+      seatIndex: 0, actions: 1, maxOrderNotional: 10, maxCumulativeNotional: 20, maximumExposure: 100, maximumOpenOrders: 4,
+    }).keys).toHaveLength(30);
+    expect(closeTradingSessionV3({ ...accounts, session: key(83), sessionSigner: key(84) }, 0).keys.at(-3)).toMatchObject({ isSigner: true, isWritable: true });
   });
 
   it("decodes V3 bytes without interpreting them as a V2 header", () => {

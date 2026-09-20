@@ -1907,6 +1907,10 @@ fn commit_v3_bundle(
             return Err(custom(StockStreamError::MagicBlockSequenceReplay));
         }
     }
+    let mut child_digests = [[0u8; 32]; v3::V3_CHILD_COUNT];
+    for (index, child) in bundle[1..].iter().enumerate() {
+        child_digests[index] = v3::snapshot_digest(unsafe { child.borrow_unchecked() });
+    }
     let mut indices = [0u8; v3::V3_EXECUTION_BUNDLE_LEN];
     for (offset, index) in indices.iter_mut().enumerate() {
         *index = (2 + offset) as u8;
@@ -1946,10 +1950,21 @@ fn commit_v3_bundle(
         core[v3::V3_CORE_LAST_COMMITTED_SEQUENCE_OFFSET
             ..v3::V3_CORE_LAST_COMMITTED_SEQUENCE_OFFSET + 8]
             .copy_from_slice(&sequence.to_le_bytes());
+        core[v3::V3_CORE_SNAPSHOT_EPOCH_OFFSET..v3::V3_CORE_SNAPSHOT_EPOCH_OFFSET + 8]
+            .copy_from_slice(&sequence.to_le_bytes());
+        core[v3::V3_CORE_SNAPSHOT_CHILD_COUNT_OFFSET..v3::V3_CORE_SNAPSHOT_CHILD_COUNT_OFFSET + 4]
+            .copy_from_slice(&(v3::V3_CHILD_COUNT as u32).to_le_bytes());
+        for (index, digest) in child_digests.iter().enumerate() {
+            let offset = v3_record_offset(index)?;
+            core[offset..offset + 8].copy_from_slice(&sequence.to_le_bytes());
+            core[offset + 8..offset + 16].copy_from_slice(&sequence.to_le_bytes());
+            core[offset + 16..offset + 48].copy_from_slice(digest);
+        }
         if matches!(kind, CommitKind::CommitOnly) {
             core[v3::V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET
                 ..v3::V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET + 8]
                 .copy_from_slice(&sequence.saturating_add(1).to_le_bytes());
+            core[v3::V3_CORE_COMMIT_PHASE_OFFSET] = v3::V3_COMMIT_PHASE_IDLE;
         } else {
             core[v3::V3_CORE_DELEGATION_STATUS_OFFSET] = DelegationStatus::Undelegating as u8;
         }
@@ -1963,7 +1978,7 @@ fn commit_v3_bundle(
     let (core_bundle, rest_bundle) = bundle.split_at_mut(1);
     let (_, event_bundle) =
         rest_bundle.split_at_mut((2 * v3::V3_BOOK_PAGES_PER_SIDE) + v3::V3_SEAT_SHARDS);
-    v3::append_event_record(
+    let result = v3::append_event_record(
         program_id,
         &mut core_bundle[0],
         &mut event_bundle[..v3::V3_EVENT_SHARDS],
@@ -1974,7 +1989,12 @@ fn commit_v3_bundle(
         },
         &payload,
         event_timestamp(),
-    )
+    );
+    if result.is_ok() && matches!(kind, CommitKind::CommitAndUndelegate) {
+        let core = unsafe { bundle[0].borrow_unchecked_mut() };
+        core[v3::V3_CORE_COMMIT_PHASE_OFFSET] = v3::V3_COMMIT_PHASE_UNDELEGATING;
+    }
+    result
 }
 
 /// Commit one V3 child shard without putting the complete 27-account bundle
@@ -2042,6 +2062,37 @@ fn commit_v3_member(
     if !valid_address {
         return Err(custom(StockStreamError::MagicBlockInvalidAccount));
     }
+    let child_index =
+        v3_child_index(&bytes).map_err(|_| custom(StockStreamError::MagicBlockInvalidAccount))?;
+    let digest = v3::snapshot_digest(&bytes);
+    let phase = core_bytes[v3::V3_CORE_COMMIT_PHASE_OFFSET];
+    if phase == v3::V3_COMMIT_PHASE_UNDELEGATING {
+        return Err(custom(StockStreamError::MagicBlockSequenceReplay));
+    }
+    let snapshot_epoch = if phase == v3::V3_COMMIT_PHASE_IDLE {
+        sequence
+    } else {
+        core_u64(core_bytes, v3::V3_CORE_SNAPSHOT_EPOCH_OFFSET)?
+    };
+    if snapshot_epoch == 0 {
+        return Err(custom(StockStreamError::MagicBlockSequenceReplay));
+    }
+    if phase == v3::V3_COMMIT_PHASE_SNAPSHOT {
+        let count = u32::from_le_bytes(
+            core_bytes[v3::V3_CORE_SNAPSHOT_CHILD_COUNT_OFFSET
+                ..v3::V3_CORE_SNAPSHOT_CHILD_COUNT_OFFSET + 4]
+                .try_into()
+                .map_err(|_| ProgramError::InvalidAccountData)?,
+        ) as usize;
+        let record = v3_record_offset(child_index)?;
+        if count >= v3::V3_CHILD_COUNT
+            || core_bytes[record..record + v3::V3_CORE_CHILD_RECORD_SIZE]
+                .iter()
+                .any(|byte| *byte != 0)
+        {
+            return Err(custom(StockStreamError::MagicBlockSequenceReplay));
+        }
+    }
 
     let mut data_buf = [0u8; SCHEDULE_DATA_MAX_LEN];
     let data_len = encode_schedule_intent_bundle_data(
@@ -2064,6 +2115,26 @@ fn commit_v3_member(
     invoke_signed_with_bounds::<3, _>(&commit_ix, &commit_views, &[])?;
 
     let core = unsafe { accounts[5].borrow_unchecked_mut() };
+    if core[v3::V3_CORE_COMMIT_PHASE_OFFSET] == v3::V3_COMMIT_PHASE_IDLE {
+        core[v3::V3_CORE_COMMIT_PHASE_OFFSET] = v3::V3_COMMIT_PHASE_SNAPSHOT;
+        core[v3::V3_CORE_SNAPSHOT_EPOCH_OFFSET..v3::V3_CORE_SNAPSHOT_EPOCH_OFFSET + 8]
+            .copy_from_slice(&snapshot_epoch.to_le_bytes());
+        core[v3::V3_CORE_SNAPSHOT_CHILD_COUNT_OFFSET..v3::V3_CORE_SNAPSHOT_CHILD_COUNT_OFFSET + 4]
+            .copy_from_slice(&0u32.to_le_bytes());
+    }
+    let record = v3_record_offset(child_index)?;
+    core[record..record + 8].copy_from_slice(&snapshot_epoch.to_le_bytes());
+    core[record + 8..record + 16].copy_from_slice(&sequence.to_le_bytes());
+    core[record + 16..record + 48].copy_from_slice(&digest);
+    let count = u32::from_le_bytes(
+        core[v3::V3_CORE_SNAPSHOT_CHILD_COUNT_OFFSET..v3::V3_CORE_SNAPSHOT_CHILD_COUNT_OFFSET + 4]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidAccountData)?,
+    )
+    .checked_add(1)
+    .ok_or(ProgramError::InvalidAccountData)?;
+    core[v3::V3_CORE_SNAPSHOT_CHILD_COUNT_OFFSET..v3::V3_CORE_SNAPSHOT_CHILD_COUNT_OFFSET + 4]
+        .copy_from_slice(&count.to_le_bytes());
     core[v3::V3_CORE_LAST_COMMITTED_SEQUENCE_OFFSET
         ..v3::V3_CORE_LAST_COMMITTED_SEQUENCE_OFFSET + 8]
         .copy_from_slice(&sequence.to_le_bytes());
@@ -2104,15 +2175,34 @@ fn commit_v3_core(
         if bytes.len() != v3::V3_MARKET_CORE_SIZE
             || bytes[0..8] != v3::V3_MARKET_CORE_DISCRIMINATOR
             || bytes[8..10] != v3::V3_LAYOUT_VERSION.to_le_bytes()
-            || (bytes[v3::V3_CORE_DELEGATION_STATUS_OFFSET] != DelegationStatus::Delegated as u8
-                && !(matches!(kind, CommitKind::CommitAndUndelegate)
-                    && bytes[v3::V3_CORE_DELEGATION_STATUS_OFFSET]
-                        == DelegationStatus::Undelegating as u8))
+            || bytes[v3::V3_CORE_DELEGATION_STATUS_OFFSET] != DelegationStatus::Delegated as u8
+            || bytes[v3::V3_CORE_COMMIT_PHASE_OFFSET] != v3::V3_COMMIT_PHASE_SNAPSHOT
         {
             return Err(custom(StockStreamError::MagicBlockSequenceReplay));
         }
         if core_u64(bytes, v3::V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET)? != sequence {
             return Err(custom(StockStreamError::MagicBlockSequenceReplay));
+        }
+        let epoch = core_u64(bytes, v3::V3_CORE_SNAPSHOT_EPOCH_OFFSET)?;
+        let count = u32::from_le_bytes(
+            bytes[v3::V3_CORE_SNAPSHOT_CHILD_COUNT_OFFSET
+                ..v3::V3_CORE_SNAPSHOT_CHILD_COUNT_OFFSET + 4]
+                .try_into()
+                .map_err(|_| ProgramError::InvalidAccountData)?,
+        );
+        if epoch == 0 || count as usize != v3::V3_CHILD_COUNT {
+            return Err(custom(StockStreamError::MagicBlockSequenceReplay));
+        }
+        for child in 0..v3::V3_CHILD_COUNT {
+            let offset = v3_record_offset(child)?;
+            if bytes[offset..offset + 8] != epoch.to_le_bytes()
+                || bytes[offset + 8..offset + 16] == [0; 8]
+                || bytes[offset + 16..offset + 48]
+                    .iter()
+                    .all(|byte| *byte == 0)
+            {
+                return Err(custom(StockStreamError::MagicBlockSequenceReplay));
+            }
         }
         if bytes[v3::V3_CORE_MARKET_AUTHORITY_OFFSET..v3::V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
             != accounts[1].address().to_bytes()
@@ -2130,6 +2220,7 @@ fn commit_v3_core(
             ..v3::V3_CORE_LAST_COMMITTED_SEQUENCE_OFFSET + 8]
             .copy_from_slice(&sequence.to_le_bytes());
         bytes[v3::V3_CORE_DELEGATION_STATUS_OFFSET] = DelegationStatus::Undelegating as u8;
+        bytes[v3::V3_CORE_COMMIT_PHASE_OFFSET] = v3::V3_COMMIT_PHASE_UNDELEGATING;
     }
     let mut data_buf = [0u8; SCHEDULE_DATA_MAX_LEN];
     let data_len = encode_schedule_intent_bundle_data(
@@ -2158,6 +2249,13 @@ fn commit_v3_core(
         bytes[v3::V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET
             ..v3::V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET + 8]
             .copy_from_slice(&sequence.saturating_add(1).to_le_bytes());
+        bytes[v3::V3_CORE_COMMIT_PHASE_OFFSET] = v3::V3_COMMIT_PHASE_IDLE;
+        bytes[v3::V3_CORE_SNAPSHOT_CHILD_COUNT_OFFSET..v3::V3_CORE_SNAPSHOT_CHILD_COUNT_OFFSET + 4]
+            .copy_from_slice(&0u32.to_le_bytes());
+        bytes[v3::V3_CORE_CHILD_RECORDS_OFFSET
+            ..v3::V3_CORE_CHILD_RECORDS_OFFSET
+                + v3::V3_CHILD_COUNT * v3::V3_CORE_CHILD_RECORD_SIZE]
+            .fill(0);
     }
     Ok(())
 }
@@ -2168,6 +2266,35 @@ fn core_u64(bytes: &[u8], offset: usize) -> Result<u64, ProgramError> {
         .ok_or(ProgramError::InvalidAccountData)
         .and_then(|raw| raw.try_into().map_err(|_| ProgramError::InvalidAccountData))
         .map(u64::from_le_bytes)
+}
+
+fn v3_child_index(bytes: &[u8]) -> Result<usize, ProgramError> {
+    if bytes.len() < 12 {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    let index = if bytes[0..8] == v3::V3_BOOK_PAGE_DISCRIMINATOR {
+        if bytes[10] >= 2 || bytes[11] >= v3::V3_BOOK_PAGES_PER_SIDE as u8 {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        usize::from(bytes[10]) * v3::V3_BOOK_PAGES_PER_SIDE + usize::from(bytes[11])
+    } else if bytes[0..8] == v3::V3_SEAT_SHARD_DISCRIMINATOR {
+        if bytes[10] >= v3::V3_SEAT_SHARDS as u8 {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        2 * v3::V3_BOOK_PAGES_PER_SIDE + usize::from(bytes[10])
+    } else if bytes[0..8] == v3::V3_EVENT_SHARD_DISCRIMINATOR {
+        if bytes[10] >= v3::V3_EVENT_SHARDS as u8 {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        2 * v3::V3_BOOK_PAGES_PER_SIDE + v3::V3_SEAT_SHARDS + usize::from(bytes[10])
+    } else {
+        return Err(ProgramError::InvalidAccountData);
+    };
+    Ok(index)
+}
+
+fn v3_record_offset(index: usize) -> Result<usize, ProgramError> {
+    v3::child_record_offset(index).ok_or(ProgramError::InvalidAccountData)
 }
 
 /// Owner-program request which changes the delegation metadata requester to

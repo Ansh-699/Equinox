@@ -100,6 +100,16 @@ export class SolanaRpcTransport implements L1Transport {
     if (!state.initialized) throw new RpcFailure('getAccountInfo','uninitialized_market');
     return { state, bytes, eventSequence:bytes.readBigUInt64LE(262), commitSequence:bytes.readBigUInt64LE(330), restoredSequence:bytes.readBigUInt64LE(338) };
   }
+  /** Reads raw program-owned account bytes for versioned V3 decoders. */
+  async accountBytes(address: string, commitment: 'confirmed'|'finalized' = 'confirmed'): Promise<Buffer> {
+    const response = object(await this.request('getAccountInfo',[key(address),{encoding:'base64',commitment}]));
+    const value = response.value;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RpcFailure('getAccountInfo','account_not_found');
+    const record = object(value);
+    if (record.owner !== STOCKSTREAM_PROGRAM_ID || record.executable !== false || !Array.isArray(record.data) || record.data[1] !== 'base64' || typeof record.data[0] !== 'string')
+      throw new RpcFailure('getAccountInfo','invalid_program_owner_or_data');
+    return Buffer.from(record.data[0], 'base64');
+  }
   /** Reads back an AuthorizeTradingSession/RevokeTradingSession result.
    * Returns null if the PDA has never been created (not yet authorized),
    * and throws if an account exists but is not a StockStream-owned
