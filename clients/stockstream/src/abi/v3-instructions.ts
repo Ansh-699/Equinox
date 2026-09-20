@@ -34,6 +34,16 @@ export interface V3OrderParams extends V3ExecutionAccounts {
 }
 
 export interface V3FundingAccounts extends V3ExecutionAccounts { }
+export interface V3OracleAccounts {
+  core: AddressInput;
+  eventShards: readonly AddressInput[];
+  payer: AddressInput;
+  pythProgram: AddressInput;
+  storage: AddressInput;
+  treasury: AddressInput;
+  systemProgram: AddressInput;
+  instructionsSysvar: AddressInput;
+}
 
 function selfTradeBits(value: V3SelfTradeBehavior = "abort"): number {
   return value === "abort" ? 0 : value === "cancel-provide" ? 1 << 3 : value === "decrement-take" ? 2 << 3 : (() => { throw new RangeError("Invalid self-trade behavior"); })();
@@ -107,4 +117,21 @@ export function updateFundingV3(accounts: V3FundingAccounts, accumulator: bigint
   writeSigned(data, 1, checkedSigned(accumulator, 128, "accumulator"), 16);
   writeUnsigned(data, 17, checkedUnsigned(timestamp, 64, "timestamp"), 8);
   return instruction(data, [...metas, accountMeta(accounts.authority, true, false)]);
+}
+
+export function consumeOracleUpdateV3(accounts: V3OracleAccounts, message: Uint8Array, ed25519InstructionIndex: number, signatureIndex: number): TransactionInstruction {
+  if (accounts.eventShards.length !== 4) throw new RangeError("V3 oracle update requires four event shards");
+  if (message.length < 102 || message.length > 512) throw new RangeError("Invalid signed Pyth message length");
+  if (!Number.isInteger(ed25519InstructionIndex) || ed25519InstructionIndex < 0 || ed25519InstructionIndex > 0xffff) throw new RangeError("ed25519InstructionIndex must be a u16");
+  if (!Number.isInteger(signatureIndex) || signatureIndex < 0 || signatureIndex > 0xff) throw new RangeError("signatureIndex must be a u8");
+  const data = new Uint8Array(4 + message.length);
+  data[0] = OPCODE.consumeOracleUpdate;
+  new DataView(data.buffer).setUint16(1, ed25519InstructionIndex, true);
+  data[3] = signatureIndex;
+  data.set(message, 4);
+  return instruction(data, [accountMeta(accounts.core, false, true),
+    ...accounts.eventShards.map((shard) => accountMeta(shard, false, true)),
+    accountMeta(accounts.payer, true, true), accountMeta(accounts.pythProgram, false, false),
+    accountMeta(accounts.storage, false, false), accountMeta(accounts.treasury, false, true),
+    accountMeta(accounts.systemProgram, false, false), accountMeta(accounts.instructionsSysvar, false, false)]);
 }
