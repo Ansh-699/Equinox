@@ -50,15 +50,15 @@ typechecks, Playwright fixture E2E, and the secret scan. It emits a
 machine-readable gate record (use
 `VERIFY_SUMMARY_PATH=docs/status/verify-latest.json npm run verify` to refresh
 the tracked copy); the latest continuation run finished with `VERIFY-OK` on
-commit `0a9d454`. The frontend-only session rehydration fixes (`c585022`,
-`f75c0da`) and documentation updates do not change the Rust artifact.
+commit `8c17794`. The frontend-only session rehydration and guarded V3 seat
+write changes (`c585022`, `f75c0da`, `8c17794`) do not change the Rust artifact.
 
 Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives all 26 child PDAs from the supplied core and returns a bigint-safe aggregate. It is read-only and cannot claim live V3 state until a V3 core is deployed.
 
 - Rust (native + LiteSVM runtime): 238 passing, `cargo fmt --check` clean.
 - Workers (Miniflare/vitest): 353 passing (34 files; relayer risk/version/lifetime guards included).
 - Frontend (vitest): 210 passing (33 files).
-- Frontend (Playwright fixture E2E): 53 passing, including V3 deposit, seat creation, session authorization, place/cancel/replace/reduce-only, commit-pending blocking and restored withdrawal; opt-in Devnet read-only E2E: 2 passing.
+- Frontend (Playwright fixture E2E): 54 passing, including V3 deposit, confirmed L1 seat creation, ER-owned seat-write blocking, session authorization, place/cancel/replace/reduce-only, commit-pending blocking and restored withdrawal; opt-in Devnet read-only E2E: 2 passing.
 - Frontend (Playwright production smoke): 6 passing.
 - `tsc --noEmit` clean on both the frontend and workers packages.
 - `eslint .` clean.
