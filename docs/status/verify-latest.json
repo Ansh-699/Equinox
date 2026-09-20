@@ -1,12 +1,12 @@
 {
   "schema": 1,
-  "generatedAt": "2026-09-20T21:49:27.786Z",
-  "commit": "f5f6a7b91f395bde5e4c9e5cdf828c431ed275b2",
+  "generatedAt": "2026-09-20T21:55:23.513Z",
+  "commit": "5f7d9c22cebcb1f3f61f7ea7ec8dbf725a9c2548",
   "checks": {
     "rustFormat": true,
     "rustTests": 249,
     "abiParity": true,
-    "frontendTests": 210,
+    "frontendTests": 213,
     "workerTests": 354,
     "typescript": true,
     "lint": true,
