@@ -23,7 +23,7 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 | DepositCollateral account ABI | Complete | commit `8abc245`; 254+ Rust tests; live Devnet vault balance matched exactly (800,000 = 2x400,000 deposits) |
 | CreateVaultAccount account ABI | Complete | commit `54cd92b`; 8 new LiteSVM tests incl. a proven CPI-rollback case |
 | CreateScratchAccount (op45) | Complete | commit `00c4fb7`; 6 LiteSVM tests; live on Devnet |
-| Session-relayer authorization chain | Complete (V2 compatibility + V3 bundle guard locally verified) | commit `8c4d624`; the relayer now derives and validates the canonical 29-account V3 execution bundle (core, 18 pages, 4 seats, 4 events, session signer, session PDA), rejects address-table lookups, duplicate/reordered/substituted accounts, and signer/writable mismatches before co-signing (`5f9fb5a`). Worker tests: 350 passing. Live Privy/nonce success remains externally blocked. |
+| Session-relayer authorization chain | Complete (V2 compatibility + V3 bundle/risk guard locally verified) | commits `8c4d624`, `ef27085`; the relayer now derives and validates the canonical 29-account V3 execution bundle (core, 18 pages, 4 seats, 4 events, session signer, session PDA), rejects address-table lookups, duplicate/reordered/substituted accounts, signer/writable mismatches, unsupported transaction versions, expired blockhashes, and signed-order notional/exposure/open-order limit violations before co-signing. Worker tests: 351 passing. Live Privy/nonce success remains externally blocked. |
 | Worker deployment | Complete, live-reverified; config hardened | `https://stockstream-market-api.ansht.workers.dev`; real D1 database (`1dced396-c76a-4147-8a4f-70465e9aff55`, 7 migrations applied). Version `d71e3bdf-bd49-4a73-a19-4266c51d69bc` deploys the native `@solana/kit` V3 PDA facade and batched 27-account reads. The read-only `GET /v1/v3/markets/:core?domain=l1|er` route derives core + 18 book + 4 seat + 4 event shards; its live absent-core probe now returns the intended structured 404, not an internal error. `workers/wrangler.jsonc` now declares non-secret Pyth feed vars (`922`, `fixed_rate@50ms`) and explicitly carries D1/DO bindings plus required production secret names across staging/production; `wrangler deploy --dry-run --env production` and `--env staging` confirm the bindings, while `wrangler check startup --env production` reports a 21.2 ms local startup profile. Worker V3 aggregate snapshots now expose an executable mark computed from validated paged Patricia leaves (`6d2ea54`, `80e8557`) instead of V2 arena offsets; malformed, cyclic, or missing Patricia child handles now fail closed (`2206762`), and the finalized atomic RPC context slot is carried through to the API/open-orders adapter (`77a95e2`). Funding decisions now accept that validated V3 mark while retaining a safe index-price fallback (`9e0bddf`). The session relayer and private-session projection path now require explicit V3 core + seat-shard validation and fail closed instead of applying V2 monolithic offsets (`0e2bea6`). The aggregate reader now rejects foreign-owned shard accounts (`6a387c8`). Actual secret deployment remains auth-gated. The frontend V3 open-orders adapter consumes Patricia tree attribution, its readiness strip surfaces shard counts, position/event counts, delegation status, and commit cursor state, and portfolio/trading position reads now use the V3 aggregate when configured. |
 | E2E auth-bypass parity (Worker <-> Next.js) | Complete | commit `822ec18`; double-gated, Miniflare-tested, confirmed inert on the live deployment |
 | Devnet lifecycle script correctness | Complete | commit `25a1b0e` + follow-ups; matches the corrected ABI everywhere |
@@ -53,7 +53,7 @@ finished with `VERIFY-OK` on the current checkout after `5f9fb5a` and
 Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives all 26 child PDAs from the supplied core and returns a bigint-safe aggregate. It is read-only and cannot claim live V3 state until a V3 core is deployed.
 
 - Rust (native + LiteSVM runtime): 290 passing, `cargo fmt --check` clean.
-- Workers (Miniflare/vitest): 350 passing (33 files; after `5f9fb5a`).
+- Workers (Miniflare/vitest): 351 passing (33 files; relayer risk/version/lifetime guards included).
 - Frontend (vitest): 208 passing.
 - Frontend (Playwright fixture E2E): 50 passing; opt-in Devnet read-only E2E: 2 passing.
 - Frontend (Playwright production smoke): 6 passing.
@@ -63,7 +63,7 @@ Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives 
 - Client facade audit: `clients/stockstream/src/index.ts` is now a thin compatibility surface (122 lines); instruction construction and canonical decoders live in `clients/stockstream/src/abi/*`, with only the legacy PublicKey session mapping and unsigned preview retained in the facade.
 - V3 continuation: `bash scripts/verify.sh` finished `VERIFY-OK` after V3
   snapshot semantics and session lifecycle changes: Rust workspace tests,
-  `cargo build-sbf`, ABI parity, 208 frontend tests, 350 Worker tests,
+  `cargo build-sbf`, ABI parity, 208 frontend tests, 351 Worker tests,
   Playwright 50/50, TypeScript, lint and secret scan all passed. This is a
   local build, not a live deployment. Current local artifact SHA-256:
   `27b387720a69c2a5d1333addaec249ff71a147782975c68afe2d9e6f1d274aa5`.
