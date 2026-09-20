@@ -2,6 +2,7 @@ import { Clock3, Radio, ShieldAlert, ShieldCheck, TriangleAlert } from "lucide-r
 import { PERP_MARKETS } from "@/lib/markets";
 import { describeExecutionStatus, type ExecutionDisplayState } from "@/lib/execution-status";
 import { ORACLE_SAFETY_LABEL, type OracleSafetyState } from "@/lib/oracle-safety";
+import type { V3MarketReadiness } from "@/features/magicblock/use-v3-market-state";
 
 /** MagicBlock/session status is real, polled data (features/magicblock/
  * use-execution-status.ts) once a market API URL is configured; it shows
@@ -28,11 +29,14 @@ export function ProtocolStatusStrip({
   marketSymbol,
   onMarketSymbolChange,
   authenticated,
+  v3,
 }: {
   marketSymbol: string;
   onMarketSymbolChange: (symbol: string) => void;
   authenticated: boolean;
+  v3: V3MarketReadiness;
 }) {
+  const v3Label = v3.state === "available" ? (v3.withdrawalReady ? "withdrawal ready" : "execution state incomplete") : v3.state.replace("_", " ");
   return (
     <section className="status-strip" aria-label="StockStream status">
       <label>
@@ -46,6 +50,7 @@ export function ProtocolStatusStrip({
       <div><strong>Program</strong><span>local build available</span></div>
       <div><strong>Collateral</strong><span>test-only/not connected</span></div>
       <div><strong>Session</strong><span>{authenticated ? "authenticated" : "not authenticated"}</span></div>
+      <div><strong>V3 bundle</strong><span>{v3Label}</span></div>
     </section>
   );
 }
