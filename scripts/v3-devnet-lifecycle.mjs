@@ -2,9 +2,10 @@
 /**
  * Fresh, resumable V3 Devnet bootstrap. This intentionally has a separate
  * checkpoint from `devnet-lifecycle.mjs` and refuses the preserved V2 market.
- * It creates/activates only V3 state supported by the deployed program ABI;
- * custody/trading/commit stages remain unavailable until their V3 handlers
- * are implemented, so this runner never pretends otherwise.
+ * It creates/activates only V3 state supported by the deployed program ABI.
+ * Custody uses explicit V3 opcodes 53/54, but execution remains opt-in after
+ * a restored/reconciled checkpoint; this runner never treats a pending
+ * MagicBlock callback as a completed withdrawal.
  *
  * `node scripts/v3-devnet-lifecycle.mjs plan` is read-only.
  * `node scripts/v3-devnet-lifecycle.mjs --execute setup` sends Devnet txs.
@@ -98,6 +99,6 @@ async function setup() {
 }
 function plan() {
   const state = load(); assertFresh(state);
-  console.log(JSON.stringify({ version: 3, execute, statePath: STATE_PATH, protectedV2Market: PRESERVED_V2_MARKET, stages: { setup: "complete on Devnet: fresh core + 18 pages + 4 seat shards + 4 event shards", delegation: "complete on Devnet: all 27 accounts delegated to MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57", commit: "complete through one-account shard intents; full 27-account intent remains rejected with Magic error 0xa0000002", undelegation: "source runner: node scripts/v3-sharded-commit.mjs undelegate; restore depends on external callback", custody: "blocked until V3 L1 custody handlers exist", trading: "source handlers exist for place/cancel/cancel-all and main-wallet replace; live blocked until custody/oracle/session-replace completion" }, state }, null, 2));
+  console.log(JSON.stringify({ version: 3, execute, statePath: STATE_PATH, protectedV2Market: PRESERVED_V2_MARKET, stages: { setup: "complete on Devnet: fresh core + 18 pages + 4 seat shards + 4 event shards", delegation: "complete on Devnet: all 27 accounts delegated to MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57", commit: "complete through one-account shard intents; full 27-account intent remains rejected with Magic error 0xa0000002", undelegation: "source runner: node scripts/v3-sharded-commit.mjs undelegate; restore depends on external callback", custody: "source complete: op53 deposit and op54 full-bundle restored/reconciled flat-seat withdrawal; live submit waits for restore", trading: "source handlers exist for place/cancel/cancel-all and main-wallet replace; live blocked until oracle/session-replace completion" }, state }, null, 2));
 }
 if (stage === "plan") plan(); else if (stage === "setup") await setup(); else throw new Error("usage: node scripts/v3-devnet-lifecycle.mjs [--execute] [plan|setup]");
