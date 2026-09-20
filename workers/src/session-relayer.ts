@@ -51,7 +51,6 @@ export interface RelaySessionTransactionRequest {
    * use the complete canonical V3 execution bundle, not a V2 market shape. */
   expectedMarket?: string;
   ownerWallet?: string;
-  expectedDomain?: "l1" | "er";
   recentBlockhashValid?: (blockhash: string) => Promise<boolean>;
 }
 
