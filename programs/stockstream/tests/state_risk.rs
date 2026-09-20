@@ -62,6 +62,27 @@ fn short_reduction_and_fees_are_symmetric() {
 }
 
 #[test]
+fn repeated_partial_closes_preserve_fractional_entry_value() {
+    let mut seat = TraderSeat::empty();
+    apply_fill(&mut seat, 3, 100, 0).unwrap();
+    apply_fill(&mut seat, 1, 101, 0).unwrap();
+    apply_fill(&mut seat, -1, 102, 0).unwrap();
+    let position = seat.base_position;
+    let entry = seat.quote_entry_value;
+    let realized = seat.realized_pnl;
+    assert_eq!(position, 3);
+    assert_eq!(entry, 301);
+    assert_eq!(realized, 2);
+    apply_fill(&mut seat, -3, 102, 0).unwrap();
+    let position = seat.base_position;
+    let entry = seat.quote_entry_value;
+    let realized = seat.realized_pnl;
+    assert_eq!(position, 0);
+    assert_eq!(entry, 0);
+    assert_eq!(realized, 7);
+}
+
+#[test]
 fn funding_equity_margin_and_liquidation_are_checked() {
     let mut seat = TraderSeat::empty();
     seat.available_collateral = 100;

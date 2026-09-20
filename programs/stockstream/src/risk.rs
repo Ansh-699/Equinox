@@ -59,15 +59,18 @@ pub fn apply_fill(
         seat.quote_entry_value = add(seat.quote_entry_value, mul(signed_quantity, price)?)?;
     } else {
         let close_qty = old_abs.min(trade_abs);
-        let direction = if old > 0 { 1 } else { -1 };
-        let entry = if old_abs == 0 {
-            0
+        // Allocate the signed entry value proportionally to the quantity being
+        // closed.  Dividing by the position first truncates the average entry
+        // price and loses residual quote value on repeated partial closes.
+        let allocated_entry = mul(seat.quote_entry_value, close_qty)?
+            .checked_div(old_abs)
+            .ok_or(RiskError::Overflow)?;
+        let close_proceeds = mul(close_qty, price)?;
+        realized = if old > 0 {
+            sub(close_proceeds, allocated_entry)?
         } else {
-            seat.quote_entry_value
-                .checked_div(old)
-                .ok_or(RiskError::Overflow)?
+            sub(-allocated_entry, close_proceeds)?
         };
-        realized = mul(mul(close_qty, sub(price, entry)?)?, direction)?;
         let remaining = sub(trade_abs, close_qty)?;
         if remaining == 0 {
             seat.base_position = if old > 0 {
@@ -78,7 +81,7 @@ pub fn apply_fill(
             seat.quote_entry_value = if seat.base_position == 0 {
                 0
             } else {
-                mul(seat.base_position, entry)?
+                sub(seat.quote_entry_value, allocated_entry)?
             };
         } else {
             let new_direction = if signed_quantity > 0 { 1 } else { -1 };
