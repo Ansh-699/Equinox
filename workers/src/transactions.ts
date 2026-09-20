@@ -183,6 +183,7 @@ export const OPCODE = {
   reconcileVault: 39,
   depositCollateralV3: 53,
   withdrawCollateralV3: 54,
+  reconcileVaultV3: 55,
 } as const;
 
 /** Deposit/withdraw reduce-only flag bits (`place_order`'s `flags` byte). */
@@ -245,6 +246,15 @@ export interface V3WithdrawAccountMetas extends V3ExecutionAccountMetas {
   mint: AccountMeta;
   vault: AccountMeta;
   vaultAuthority: AccountMeta;
+  tokenProgram: AccountMeta;
+}
+export interface V3ReconcileAccountMetas {
+  core: AccountMeta;
+  bookPages: readonly AccountMeta[];
+  seatShards: readonly AccountMeta[];
+  eventShards: readonly AccountMeta[];
+  vault: AccountMeta;
+  mint: AccountMeta;
   tokenProgram: AccountMeta;
 }
 
@@ -348,6 +358,13 @@ export function withdrawCollateralV3Instruction(programAddress: string, accounts
   if (accounts.session !== undefined) throw new RangeError("V3 withdrawal cannot include a session PDA");
   const data = new DataWriter().u8(OPCODE.withdrawCollateralV3).u16(seatIndex).u64(amount).build();
   return instruction(programAddress, [...v3ExecutionMetas(accounts), accounts.destination, accounts.mint, accounts.vault, accounts.vaultAuthority, accounts.tokenProgram], data);
+}
+
+export function reconcileVaultV3Instruction(programAddress: string, accounts: V3ReconcileAccountMetas): Instruction {
+  if (accounts.bookPages.length !== 18 || accounts.seatShards.length !== 4 || accounts.eventShards.length !== 4) {
+    throw new RangeError("V3 reconciliation requires 18 book pages, 4 seat shards and 4 event shards");
+  }
+  return instruction(programAddress, [accounts.core, ...accounts.bookPages, ...accounts.seatShards, ...accounts.eventShards, accounts.vault, accounts.mint, accounts.tokenProgram], Uint8Array.of(OPCODE.reconcileVaultV3));
 }
 
 /** `undefined` index means "no scoped session account": the account list is the keeper's to supply. */
