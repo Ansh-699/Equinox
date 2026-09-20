@@ -45,7 +45,7 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives all 26 child PDAs from the supplied core and returns a bigint-safe aggregate. It is read-only and cannot claim live V3 state until a V3 core is deployed.
 
 - Rust (native + LiteSVM runtime): 290 passing, `cargo fmt --check` clean.
-- Workers (Miniflare/vitest): 339 passing (33 files).
+- Workers (Miniflare/vitest): 340 passing (33 files).
 - Frontend (vitest): 196 passing.
 - Frontend (Playwright fixture E2E): 50 passing; opt-in Devnet read-only E2E: 2 passing.
 - Frontend (Playwright production smoke): 6 passing.

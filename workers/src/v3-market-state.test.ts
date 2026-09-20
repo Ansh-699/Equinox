@@ -12,7 +12,9 @@ function core(): Uint8Array {
   bytes[12] = 1; bytes[44] = 2; bytes[180] = 1; bytes[197] = 3; return bytes;
 }
 function page(side: number, index: number): Uint8Array {
-  const bytes = new Uint8Array(V3_BOOK_PAGE_SIZE); write(bytes, "STKBK003"); u16(bytes, 8, 3); bytes[10] = side; bytes[11] = index; bytes.set(new Uint8Array(32).fill(7), 12); return bytes;
+  const bytes = new Uint8Array(V3_BOOK_PAGE_SIZE); write(bytes, "STKBK003"); u16(bytes, 8, 3); bytes[10] = side; bytes[11] = index; bytes.set(new Uint8Array(32).fill(7), 12);
+  if (index === 0) { new DataView(bytes.buffer).setUint32(44, 0xffff_ffff, true); new DataView(bytes.buffer).setUint32(48, 0xffff_ffff, true); }
+  return bytes;
 }
 function leafPage(side: number, index: number): Uint8Array {
   const bytes = page(side, index); const at = 64; bytes[at] = 2; bytes[at + 1] = side; bytes[at + 4] = 1;
@@ -55,6 +57,15 @@ describe("V3 worker shard aggregation", () => {
     const seats = Array.from({ length: 4 }, (_, value) => shard(false, value));
     const events = Array.from({ length: 4 }, (_, value) => shard(true, value));
     expect(aggregateV3Market(core(), books, seats, events, coreAddress)?.orderBook.bids[0]).toMatchObject({ tree: "fixed" });
+  });
+
+  it("does not attribute an ambiguous shared non-empty root", () => {
+    const bytes = leafPage(0, 0); const view = new DataView(bytes.buffer);
+    view.setUint32(44, 0, true); view.setUint32(48, 0, true);
+    const books = [bytes, ...Array.from({ length: 2 * V3_BOOK_PAGES_PER_SIDE - 1 }, (_, value) => page(Math.floor((value + 1) / V3_BOOK_PAGES_PER_SIDE), (value + 1) % V3_BOOK_PAGES_PER_SIDE))];
+    const seats = Array.from({ length: 4 }, (_, value) => shard(false, value));
+    const events = Array.from({ length: 4 }, (_, value) => shard(true, value));
+    expect(aggregateV3Market(core(), books, seats, events, coreAddress)?.orderBook.bids[0].tree).toBeUndefined();
   });
   it("decodes complete persisted event records", () => {
     const bytes = shard(true, 0);

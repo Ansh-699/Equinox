@@ -130,7 +130,7 @@ const NONE_HANDLE = 0xffff_ffff;
  * Walk each root separately so a leaf retains its fixed/oracle-pegged tree
  * identity when pages are flattened for API consumers. Invalid/cyclic links
  * are ignored; aggregate validation still requires the page ABI itself. */
-function annotateBookTrees(pages: readonly V3BookPageState[]): void {
+function annotateBookTrees(pages: readonly V3BookPageState[]): boolean {
   for (const side of [0, 1] as const) {
     const sidePages = pages.filter((page) => page.side === side);
     const byHandle = new Map<number, V3BookNodeState>();
@@ -139,6 +139,11 @@ function annotateBookTrees(pages: readonly V3BookPageState[]): void {
       ["fixed", sidePages.find((page) => page.page === 0)?.fixedRoot ?? NONE_HANDLE],
       ["oracle-pegged", sidePages.find((page) => page.page === 0)?.peggedRoot ?? NONE_HANDLE],
     ]);
+    if (roots.get("fixed") !== NONE_HANDLE && roots.get("fixed") === roots.get("oracle-pegged")) {
+      // A live initializer sets empty roots to NONE. A shared non-empty root
+      // cannot identify which Patricia tree owns its leaves, so fail closed.
+      return false;
+    }
     for (const [tree, root] of roots) {
       const seen = new Set<number>();
       const walk = (handle: number): void => {
@@ -165,6 +170,7 @@ function annotateBookTrees(pages: readonly V3BookPageState[]): void {
       walk(root);
     }
   }
+  return true;
 }
 
 export function decodeV3BookPage(bytes: Uint8Array): V3BookPageState | null {
@@ -269,7 +275,7 @@ export function aggregateV3Market(
   if (!unique(bookPages.map((page) => page.side * V3_BOOK_PAGES_PER_SIDE + page.page))
     || !unique(seatShards.map((shard) => shard.shard))
     || !unique(eventShards.map((shard) => shard.shard))) return null;
-  annotateBookTrees(bookPages);
+  if (!annotateBookTrees(bookPages)) return null;
   const leaves = bookPages.flatMap((page) => page.nodes).filter((node) => node.tag === 2);
   return {
     core, bookPages, seatShards, eventShards, completeBook, completeExecutionState,
