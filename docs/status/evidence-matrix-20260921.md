@@ -1,6 +1,6 @@
 # StockStream evidence matrix
 
-This matrix is scoped to current HEAD `79722cf` (post-V3-cancellation-atomicity, funding-settlement, liquidation-preflight, cancel-all-preflight, replacement-preflight, available-margin, economic-ledger validation, configured-leverage, and adversarial cross-tree matching fixes). “Fresh” means rerun on this checkout; live claims additionally require the cited Devnet artifact. The fresh full local gate is `VERIFY_SUMMARY_PATH=/tmp/stockstream-verify-summary-20260921-cross-tree.json NO_DNA=1 bash scripts/verify.sh` at source checkpoint `f5f6a7b`; the checked-in summary is `verify-latest.json`.
+This matrix is scoped to current HEAD `5f7d9c2` (post-V3-cancellation-atomicity, funding-settlement, liquidation-preflight, cancel-all-preflight, replacement-preflight, available-margin, economic-ledger validation, configured-leverage, adversarial cross-tree matching, and fail-closed V3 frontend boundary fixes). “Fresh” means rerun on this checkout; live claims additionally require the cited Devnet artifact. The fresh full local gate is `VERIFY_SUMMARY_PATH=/tmp/stockstream-verify-summary-20260921-v3-boundary.json NO_DNA=1 bash scripts/verify.sh` at source checkpoint `5f7d9c2`; the checked-in summary is `verify-latest.json`.
 
 | Subsystem | Classification | Source and exact evidence | Fresh on current HEAD |
 |---|---|---|---|
@@ -31,7 +31,7 @@ This matrix is scoped to current HEAD `79722cf` (post-V3-cancellation-atomicity,
 | self-trade behavior | locally-tested | `programs/stockstream/src/book.rs`, `programs/stockstream/src/v3.rs`; `cargo test -p stockstream --test self_trade --test v3_bundle` | yes |
 | atomic sharded commit epochs | locally-tested | `programs/stockstream/src/v3.rs`, `scripts/v3-sharded-commit.mjs`; `node --test scripts/v3-sharded-commit-guard.test.mjs scripts/devnet-lifecycle-runner.test.mjs` | yes (local guards only) |
 | relayer 27-account validation | locally-tested | `workers/src/session-relayer.ts`, `clients/stockstream/src/abi/v3.ts`; Worker tests in `verify-latest.json` | yes |
-| frontend V3 order writes | locally-tested | `features/sessions/use-session-order.ts`, `clients/stockstream/src/abi/`; `npm test`, Playwright fixture E2E 54/54 | yes; not live-signed |
+| frontend V3 order writes | locally-tested | `features/sessions/use-session-order.ts`, `clients/stockstream/src/abi/`; `npm test` (213), including explicit configured-V3/missing-bundle rejection, and Playwright fixture E2E 54/54 | yes; not live-signed |
 | frontend V3 custody writes | locally-tested | `features/collateral/`, `clients/stockstream/src/abi/`; `npm test`, Playwright fixture E2E 54/54 | yes; Devnet custody preserved/not attempted |
 | Worker V3 writes | locally-tested | `workers/src/transactions.ts` now exposes typed V3 order/cancel/replace wrappers plus opcode-53/54 custody builders; `workers/src/transactions.test.ts` verifies the 28-account execution shape, 11-account deposit shape, 33-account withdrawal shape, and session-PDA rejection. Live secret-backed write deployment remains unverified. | yes |
 | Pyth live ingestion | externally-blocked | `scripts/pyth-catalog-discovery.mjs`, `scripts/pyth-live-smoke.mjs`; `docs/status/external-blocker-probe-20260921.json` | yes (entitlement rejection) |
