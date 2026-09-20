@@ -58,7 +58,7 @@ Worker V3 read-path checkpoint: `GET /v1/v3/markets/:core?domain=l1|er` derives 
 Fresh current-HEAD regression evidence: `cargo test -p stockstream --test v3_bundle v3_cancel_all_releases_reserve_and_side_exposure_for_every_tree` passes after `cancel_all_v3` was corrected to decrement the owning seat's bid/ask exposure counters along with reserved margin and open-order count. This is local Pinocchio/LiteSVM-style evidence only; no Devnet account was mutated.
 
 - Rust (native + LiteSVM runtime): 241 passing, `cargo fmt --check` clean; fresh `NO_DNA=1 cargo test -p stockstream --tests` on the current checkout passed 241/241 across 29 suites. The risk engine's repeated-partial-close regression and V3 liquidation ledger regression are covered by `repeated_partial_closes_preserve_fractional_entry_value` and `v3_liquidation_updates_open_interest_and_insurance_fee`.
-- Workers (Miniflare/vitest): 353 passing (34 files; relayer risk/version/lifetime guards included).
+- Workers (Miniflare/vitest): 354 passing (34 files; relayer risk/version/lifetime guards and typed V3 write-builder vectors included).
 - Frontend (vitest): 210 passing (33 files).
 - Frontend (Playwright fixture E2E): 54 passing, including V3 deposit, confirmed L1 seat creation, ER-owned seat-write blocking, session authorization, place/cancel/replace/reduce-only, commit-pending blocking and restored withdrawal; opt-in Devnet read-only E2E: 2 passing.
 - Frontend (Playwright production smoke): 6 passing.
