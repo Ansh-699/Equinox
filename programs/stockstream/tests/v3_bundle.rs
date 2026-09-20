@@ -339,6 +339,56 @@ fn v3_place_rejects_maximum_open_interest_before_mutation() {
 }
 
 #[test]
+fn v3_reduce_only_rejects_an_oversized_direction_flip_before_mutation() {
+    let mut accounts = bundle();
+    let owner = account(Address::new_from_array([49; 32]), 0, true);
+    let mut seat_call = vec![
+        accounts[0].view.clone(),
+        accounts[V3_SEAT_START].view.clone(),
+        accounts[V3_SEAT_START + 1].view.clone(),
+        accounts[V3_SEAT_START + 2].view.clone(),
+        accounts[V3_SEAT_START + 3].view.clone(),
+        accounts[V3_EVENT_START].view.clone(),
+        accounts[V3_EVENT_START + 1].view.clone(),
+        accounts[V3_EVENT_START + 2].view.clone(),
+        accounts[V3_EVENT_START + 3].view.clone(),
+        owner.view.clone(),
+    ];
+    create_trader_seat(&ID, &mut seat_call, 0).unwrap();
+    unsafe {
+        let seat = accounts[V3_SEAT_START].view.borrow_unchecked_mut();
+        seat[84..100].copy_from_slice(&1_000_000i128.to_le_bytes());
+        seat[116..132].copy_from_slice(&10i128.to_le_bytes());
+        accounts[0].view.borrow_unchecked_mut()[197] = 1;
+    }
+    let before_page = unsafe { accounts[1].view.borrow_unchecked().to_vec() };
+    let mut trade_accounts = views(&accounts);
+    trade_accounts.push(owner.view.clone());
+    let result = place_order_v3(
+        &ID,
+        &mut trade_accounts,
+        PlaceOrderData {
+            side: Side::Ask as u8,
+            tree: TreeKind::Fixed as u8,
+            flags: 4,
+            seat_index: 0,
+            quantity: 15,
+            price_or_offset: 10,
+            expires_at: u64::MAX,
+            peg_limit: 0,
+            client_order_id: 9,
+            action_nonce: 0,
+        },
+    );
+    assert!(result.is_err());
+    let seat = unsafe { accounts[V3_SEAT_START].view.borrow_unchecked() };
+    assert_eq!(i128::from_le_bytes(seat[116..132].try_into().unwrap()), 10);
+    assert_eq!(unsafe { accounts[1].view.borrow_unchecked() }, before_page);
+    let core = unsafe { accounts[0].view.borrow_unchecked() };
+    assert_eq!(u64::from_le_bytes(core[140..148].try_into().unwrap()), 0);
+}
+
+#[test]
 fn v3_cancel_all_releases_reserve_and_side_exposure_for_every_tree() {
     let mut accounts = bundle();
     let owner = account(Address::new_from_array([47; 32]), 0, true);

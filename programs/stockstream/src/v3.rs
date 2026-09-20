@@ -3066,11 +3066,18 @@ fn place_order_v3_with_action(
         .checked_add(signed)
         .ok_or(StockStreamError::ArithmeticOverflow)?
         .unsigned_abs();
-    if order.flags & 4 != 0
-        && (seat_snapshot.base_position == 0
-            || resulting_exposure >= seat_snapshot.base_position.unsigned_abs())
-    {
-        return Err(StockStreamError::RiskViolation.into());
+    if order.flags & 4 != 0 {
+        let current_exposure = seat_snapshot.base_position.unsigned_abs();
+        // A reduce-only order must oppose a non-zero position and cannot
+        // consume more than that position. Checking the requested quantity
+        // itself is essential: an oversized order can otherwise reduce the
+        // absolute exposure while still flipping the seat's direction.
+        if seat_snapshot.base_position == 0
+            || u128::from(order.quantity) > current_exposure
+            || resulting_exposure >= current_exposure
+        {
+            return Err(StockStreamError::RiskViolation.into());
+        }
     }
     if resulting_exposure
         .checked_mul(u128::from(effective_price as u64))
