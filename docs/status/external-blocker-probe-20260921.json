@@ -1,0 +1,25 @@
+{
+  "date": "2026-09-21",
+  "runtime": "ignored .env.local loaded with node --env-file; secret values omitted",
+  "pyth": {
+    "catalogCommand": "node --env-file=.env.local scripts/pyth-catalog-discovery.mjs AAPL",
+    "catalogResult": "authenticated; Equity.US.AAPL/USD=922, Equity.Index.AAPL/USD=3191; fixed_rate@50ms",
+    "streamCommand": "node --env-file=.env.local scripts/pyth-live-smoke.mjs",
+    "streamResult": "feed 922 rejected on all 3 endpoints with Not entitled; 0/3 subscribed; no payload submitted"
+  },
+  "privy": {
+    "command": "node --env-file=.env.local scripts/privy-relay-live.mjs",
+    "result": "preflight did not run: runtime lacks PRIVY_ACCESS_TOKEN and PRIVY_EXPECTED_WALLET; no relay request or transaction submitted",
+    "submitReplay": "not attempted"
+  },
+  "magicblock": {
+    "command": "node scripts/magicblock-dlp-discriminator-repro.mjs",
+    "program": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh",
+    "requestUndelegationDiscriminator": 26,
+    "requestUndelegationResult": "InvalidInstructionData; Failed to read and parse discriminator",
+    "delegateControlDiscriminator": 0,
+    "delegateControlResult": "InvalidAccountOwner after handler entry",
+    "safety": "simulation only; no transaction submitted"
+  },
+  "safety": "No credentials, signed payloads, private keys, or transaction signatures are stored in this evidence."
+}
