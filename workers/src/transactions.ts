@@ -221,6 +221,12 @@ function v3ExecutionMetas(accounts: V3ExecutionAccountMetas, requireSession = fa
   return [accounts.core, ...accounts.bookPages, ...accounts.seatShards, ...accounts.eventShards, accounts.authority, ...(accounts.session ? [accounts.session] : [])];
 }
 
+function assertV3ActionNonce(accounts: V3ExecutionAccountMetas, actionNonce: bigint): void {
+  if (!accounts.session && actionNonce !== 0n) {
+    throw new RangeError("Main-wallet V3 actions must use actionNonce zero");
+  }
+}
+
 export interface V3DepositAccountMetas {
   core: AccountMeta;
   seatShard: AccountMeta;
@@ -309,18 +315,22 @@ export function withdrawCollateralInstruction(programAddress: string, accounts: 
  * execution bundle; these wrappers prevent callers from accidentally passing
  * the two-account V2 market shape. */
 export function placeOrderV3Instruction(programAddress: string, accounts: V3ExecutionAccountMetas, fields: PlaceOrderFields): Instruction {
+  assertV3ActionNonce(accounts, fields.actionNonce ?? 0n);
   return placeOrderInstruction(programAddress, v3ExecutionMetas(accounts), fields);
 }
 
 export function cancelOrderV3Instruction(programAddress: string, accounts: V3ExecutionAccountMetas, seatIndex: number, orderKey: bigint, actionNonce = 0n): Instruction {
+  assertV3ActionNonce(accounts, actionNonce);
   return cancelOrderInstruction(programAddress, v3ExecutionMetas(accounts), seatIndex, orderKey, actionNonce);
 }
 
 export function cancelAllV3Instruction(programAddress: string, accounts: V3ExecutionAccountMetas, seatIndex: number, maxCancellations: number, actionNonce = 0n): Instruction {
+  assertV3ActionNonce(accounts, actionNonce);
   return cancelAllInstruction(programAddress, v3ExecutionMetas(accounts), seatIndex, maxCancellations, actionNonce);
 }
 
 export function replaceOrderV3Instruction(programAddress: string, accounts: V3ExecutionAccountMetas, oldOrderKey: bigint, fields: PlaceOrderFields): Instruction {
+  assertV3ActionNonce(accounts, fields.actionNonce ?? 0n);
   return replaceOrderInstruction(programAddress, v3ExecutionMetas(accounts), oldOrderKey, fields);
 }
 
