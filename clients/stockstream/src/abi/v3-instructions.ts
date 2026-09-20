@@ -1,7 +1,7 @@
-import { TransactionInstruction, type AccountMeta } from "@solana/web3.js";
+import { PublicKey, SystemProgram, TransactionInstruction, type AccountMeta } from "@solana/web3.js";
 import { OPCODE } from "./instructions";
 import { checkedSigned, checkedUnsigned, writeSigned, writeUnsigned } from "./encoding";
-import { accountMeta, instruction, type AddressInput } from "./transaction";
+import { accountMeta, instruction, STOCKSTREAM_PROGRAM_KEY, type AddressInput } from "./transaction";
 import { V3_BOOK_PAGES_PER_SIDE } from "./v3";
 
 export type V3OrderSide = "bid" | "ask";
@@ -44,6 +44,31 @@ export interface V3OracleAccounts {
   systemProgram: AddressInput;
   instructionsSysvar: AddressInput;
 }
+export interface V3CommitAccounts extends V3ExecutionAccounts {
+  payer: AddressInput;
+  magicContext: AddressInput;
+  magicProgram: AddressInput;
+}
+export interface V3ShardCommitAccounts {
+  shard: AddressInput;
+  core: AddressInput;
+  authority: AddressInput;
+  payer: AddressInput;
+  magicContext: AddressInput;
+  magicProgram: AddressInput;
+}
+export interface V3UndelegationRecoveryAccounts {
+  core: AddressInput;
+  payer: AddressInput;
+  request: AddressInput;
+  record: AddressInput;
+  metadata: AddressInput;
+  state?: AddressInput;
+  commitRecord?: AddressInput;
+  reimbursement?: AddressInput;
+}
+
+const MAGICBLOCK_DELEGATION_PROGRAM_ID = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
 
 function selfTradeBits(value: V3SelfTradeBehavior = "abort"): number {
   return value === "abort" ? 0 : value === "cancel-provide" ? 1 << 3 : value === "decrement-take" ? 2 << 3 : (() => { throw new RangeError("Invalid self-trade behavior"); })();
@@ -134,4 +159,48 @@ export function consumeOracleUpdateV3(accounts: V3OracleAccounts, message: Uint8
     accountMeta(accounts.payer, true, true), accountMeta(accounts.pythProgram, false, false),
     accountMeta(accounts.storage, false, false), accountMeta(accounts.treasury, false, true),
     accountMeta(accounts.systemProgram, false, false), accountMeta(accounts.instructionsSysvar, false, false)]);
+}
+
+function v3CommitMetas(accounts: V3CommitAccounts): AccountMeta[] {
+  if (accounts.bookPages.length !== 2 * V3_BOOK_PAGES_PER_SIDE || accounts.seatShards.length !== 4 || accounts.eventShards.length !== 4) {
+    throw new RangeError("V3 commit requires the complete execution bundle");
+  }
+  return [accountMeta(accounts.core, false, true), accountMeta(accounts.authority, true, false),
+    accountMeta(accounts.payer, true, true), accountMeta(accounts.magicContext, false, true),
+    accountMeta(accounts.magicProgram, false, false),
+    ...accounts.bookPages.map((address) => accountMeta(address, false, true)),
+    ...accounts.seatShards.map((address) => accountMeta(address, false, true)),
+    ...accounts.eventShards.map((address) => accountMeta(address, false, true))];
+}
+
+export function commitMarketV3(accounts: V3CommitAccounts, sequence: bigint | number, undelegate = false): TransactionInstruction {
+  const data = new Uint8Array(9); data[0] = undelegate ? OPCODE.commitAndUndelegate : OPCODE.commitMarket;
+  writeUnsigned(data, 1, checkedUnsigned(sequence, 64, "sequence"), 8);
+  return instruction(data, v3CommitMetas(accounts));
+}
+
+export function commitV3Shard(accounts: V3ShardCommitAccounts, sequence: bigint | number, undelegate = false): TransactionInstruction {
+  const data = new Uint8Array(9); data[0] = undelegate ? OPCODE.commitAndUndelegate : OPCODE.commitMarket;
+  writeUnsigned(data, 1, checkedUnsigned(sequence, 64, "sequence"), 8);
+  return instruction(data, [accountMeta(accounts.shard, false, true), accountMeta(accounts.authority, true, false),
+    accountMeta(accounts.payer, true, true), accountMeta(accounts.magicContext, false, true),
+    accountMeta(accounts.magicProgram, false, false), accountMeta(accounts.core, false, true)]);
+}
+
+export function requestV3Undelegation(accounts: V3UndelegationRecoveryAccounts): TransactionInstruction {
+  return instruction(Uint8Array.of(OPCODE.requestV3Undelegation), [
+    accountMeta(accounts.payer, true, true), accountMeta(accounts.core, false, false),
+    accountMeta(STOCKSTREAM_PROGRAM_KEY, false, false), accountMeta(accounts.request, false, true),
+    accountMeta(accounts.record, false, false), accountMeta(accounts.metadata, false, true),
+    accountMeta(SystemProgram.programId, false, false), accountMeta(MAGICBLOCK_DELEGATION_PROGRAM_ID, false, false)]);
+}
+
+export function rollbackV3Undelegation(accounts: V3UndelegationRecoveryAccounts): TransactionInstruction {
+  if (!accounts.state || !accounts.commitRecord || !accounts.reimbursement) throw new RangeError("rollback requires state, commitRecord and reimbursement");
+  return instruction(Uint8Array.of(OPCODE.rollbackV3Undelegation), [
+    accountMeta(accounts.core, false, true), accountMeta(STOCKSTREAM_PROGRAM_KEY, false, false),
+    accountMeta(accounts.request, false, true), accountMeta(accounts.record, false, true),
+    accountMeta(accounts.metadata, false, true), accountMeta(accounts.payer, false, true),
+    accountMeta(accounts.state, false, true), accountMeta(accounts.commitRecord, false, true),
+    accountMeta(accounts.reimbursement, false, true), accountMeta(MAGICBLOCK_DELEGATION_PROGRAM_ID, false, false)]);
 }

@@ -3,9 +3,10 @@ import { STOCKSTREAM_ACCOUNT_SIZE, STOCKSTREAM_INSTRUCTION, STOCKSTREAM_PROGRAM_
 import { deriveBookPageV3, deriveEventShardV3, deriveMarketCoreV3, deriveSeatShardV3, V3_BOOK_PAGES_PER_SIDE } from "./abi/v3";
 import { checkedSigned, checkedUnsigned, writeSigned, writeUnsigned } from "./abi/encoding";
 import { accountMeta, instruction, publicKey, STOCKSTREAM_PROGRAM_KEY, type AddressInput } from "./abi/transaction";
-import { cancelAllV3, cancelOrderV3, consumeOracleUpdateV3, placeOrderV3, replaceOrderV3, updateFundingV3 } from "./abi/v3-instructions";
+import { cancelAllV3, cancelOrderV3, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, placeOrderV3, replaceOrderV3, requestV3Undelegation, rollbackV3Undelegation, updateFundingV3 } from "./abi/v3-instructions";
 
-export { cancelAllV3, cancelOrderV3, consumeOracleUpdateV3, placeOrderV3, replaceOrderV3, updateFundingV3 } from "./abi/v3-instructions";
+export { cancelAllV3, cancelOrderV3, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, placeOrderV3, replaceOrderV3, requestV3Undelegation, rollbackV3Undelegation, updateFundingV3 } from "./abi/v3-instructions";
+export type { V3CommitAccounts, V3OracleAccounts, V3ShardCommitAccounts, V3UndelegationRecoveryAccounts } from "./abi/v3-instructions";
 
 export { STOCKSTREAM_PROGRAM_KEY } from "./abi/transaction";
 export type { AddressInput } from "./abi/transaction";
@@ -83,30 +84,6 @@ export interface V3ExecutionAccounts {
   eventShards: readonly AddressInput[];
   authority: AddressInput;
   session?: AddressInput;
-}
-export interface V3CommitAccounts extends V3ExecutionAccounts {
-  payer: AddressInput;
-  magicContext: AddressInput;
-  magicProgram: AddressInput;
-}
-/** One-shard commit ABI used when MagicBlock rejects a full 27-account intent. */
-export interface V3ShardCommitAccounts {
-  shard: AddressInput;
-  core: AddressInput;
-  authority: AddressInput;
-  payer: AddressInput;
-  magicContext: AddressInput;
-  magicProgram: AddressInput;
-}
-export interface V3UndelegationRecoveryAccounts {
-  core: AddressInput;
-  payer: AddressInput;
-  request: AddressInput;
-  record: AddressInput;
-  metadata: AddressInput;
-  state?: AddressInput;
-  commitRecord?: AddressInput;
-  reimbursement?: AddressInput;
 }
 
 function selfTradeBits(value: SelfTradeBehavior = "abort"): number {
@@ -209,58 +186,6 @@ export function cancelAll(accounts: SessionAuthorizedAccounts, seatIndex: number
   if (!accounts.session && actionNonce !== 0) throw new RangeError("Main-wallet actions must use actionNonce zero");
   const data = new Uint8Array(12); data[0] = STOCKSTREAM_INSTRUCTION.cancelAll; writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2); data[3] = Number(checkedUnsigned(maxCancellations, 8, "maxCancellations")); writeUnsigned(data, 4, checkedUnsigned(actionNonce, 64, "actionNonce"), 8);
   const metas = [accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]; if (accounts.session) metas.push(accountMeta(accounts.session, false, true)); return instruction(data, metas);
-}
-
-function v3CommitMetas(accounts: V3CommitAccounts): AccountMeta[] {
-  if (accounts.bookPages.length !== 2 * V3_BOOK_PAGES_PER_SIDE || accounts.seatShards.length !== 4 || accounts.eventShards.length !== 4) {
-    throw new RangeError("V3 commit requires the complete execution bundle");
-  }
-  return [
-    accountMeta(accounts.core, false, true), accountMeta(accounts.authority, true, false),
-    accountMeta(accounts.payer, true, true), accountMeta(accounts.magicContext, false, true),
-    accountMeta(accounts.magicProgram, false, false),
-    ...accounts.bookPages.map((address) => accountMeta(address, false, true)),
-    ...accounts.seatShards.map((address) => accountMeta(address, false, true)),
-    ...accounts.eventShards.map((address) => accountMeta(address, false, true)),
-  ];
-}
-
-export function commitMarketV3(accounts: V3CommitAccounts, sequence: bigint | number, undelegate = false): TransactionInstruction {
-  const data = new Uint8Array(9); data[0] = undelegate ? STOCKSTREAM_INSTRUCTION.commitAndUndelegate : STOCKSTREAM_INSTRUCTION.commitMarket;
-  writeUnsigned(data, 1, checkedUnsigned(sequence, 64, "sequence"), 8);
-  return instruction(data, v3CommitMetas(accounts));
-}
-
-export function commitV3Shard(accounts: V3ShardCommitAccounts, sequence: bigint | number, undelegate = false): TransactionInstruction {
-  const data = new Uint8Array(9); data[0] = undelegate ? STOCKSTREAM_INSTRUCTION.commitAndUndelegate : STOCKSTREAM_INSTRUCTION.commitMarket;
-  writeUnsigned(data, 1, checkedUnsigned(sequence, 64, "sequence"), 8);
-  return instruction(data, [
-    accountMeta(accounts.shard, false, true), accountMeta(accounts.authority, true, false),
-    accountMeta(accounts.payer, true, true), accountMeta(accounts.magicContext, false, true),
-    accountMeta(accounts.magicProgram, false, false), accountMeta(accounts.core, false, true),
-  ]);
-}
-
-/** Requests owner-controlled recovery for a V3 core whose validator callback timed out. */
-export function requestV3Undelegation(accounts: V3UndelegationRecoveryAccounts): TransactionInstruction {
-  return instruction(Uint8Array.of(STOCKSTREAM_INSTRUCTION.requestV3Undelegation), [
-    accountMeta(accounts.payer, true, true), accountMeta(accounts.core, false, false),
-    accountMeta(STOCKSTREAM_PROGRAM_KEY, false, false), accountMeta(accounts.request, false, true),
-    accountMeta(accounts.record, false, false), accountMeta(accounts.metadata, false, true),
-    accountMeta(SystemProgram.programId, false, false), accountMeta(MAGICBLOCK_DELEGATION_PROGRAM_ID, false, false),
-  ]);
-}
-
-/** Rolls back an expired owner recovery request and restores the V3 core bytes. */
-export function rollbackV3Undelegation(accounts: V3UndelegationRecoveryAccounts): TransactionInstruction {
-  if (!accounts.state || !accounts.commitRecord || !accounts.reimbursement) throw new RangeError("rollback requires state, commitRecord and reimbursement");
-  return instruction(Uint8Array.of(STOCKSTREAM_INSTRUCTION.rollbackV3Undelegation), [
-    accountMeta(accounts.core, false, true), accountMeta(STOCKSTREAM_PROGRAM_KEY, false, false),
-    accountMeta(accounts.request, false, true), accountMeta(accounts.record, false, true),
-    accountMeta(accounts.metadata, false, true), accountMeta(accounts.payer, false, true),
-    accountMeta(accounts.state, false, true), accountMeta(accounts.commitRecord, false, true),
-    accountMeta(accounts.reimbursement, false, true), accountMeta(MAGICBLOCK_DELEGATION_PROGRAM_ID, false, false),
-  ]);
 }
 
 export function updateFunding(accounts: InstructionAccounts, accumulator: bigint, timestamp: bigint | number): TransactionInstruction {
