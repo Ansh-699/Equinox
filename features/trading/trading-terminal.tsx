@@ -108,7 +108,13 @@ export function TradingTerminal() {
       // for the oracle safety banner. Never gated on a "book" event being
       // present in this same batch -- these are independent event kinds.
       for (const event of events) {
-        const kind = event.payload.kind;
+        // The live Worker can legitimately forward an undecodable/legacy
+        // event with no payload (for example while a V3 shard is absent).
+        // Treat that record as non-lifecycle data instead of allowing a
+        // malformed stream message to tear down the terminal effect.
+        const payload = event?.payload;
+        if (!payload || typeof payload !== "object") continue;
+        const kind = payload.kind;
         if (!kind || typeof event.sequence !== "number" || !ORACLE_LIFECYCLE_EVENT_KINDS.has(kind)) continue;
         if (!lifecycleEventRef.current || event.sequence > lifecycleEventRef.current.sequence) {
           lifecycleEventRef.current = { sequence: event.sequence, kind };
