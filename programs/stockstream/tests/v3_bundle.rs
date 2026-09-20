@@ -776,10 +776,14 @@ fn v3_cancel_all_releases_reserve_and_side_exposure_for_every_tree() {
         accounts[V3_SEAT_START].view.borrow_unchecked_mut()[212..216]
             .copy_from_slice(&2u32.to_le_bytes());
     }
-    // Existing pegged orders remain cancellable when the current oracle is
-    // stale/temporarily invalid; the last stored price is used only to release
-    // their reservation, never to admit a new pegged order.
-    unsafe { accounts[0].view.borrow_unchecked_mut()[180] = 0 };
+    // Existing pegged orders remain cancellable when the current oracle moves
+    // or becomes stale; their admission price is used to release the exact
+    // reservation, never a newly recomputed oracle price.
+    unsafe {
+        let core = accounts[0].view.borrow_unchecked_mut();
+        core[180] = 0;
+        core[181..189].copy_from_slice(&200i64.to_le_bytes());
+    }
     let mut cancel_accounts = views(&accounts);
     cancel_accounts.push(owner.view.clone());
     cancel_all_v3(&ID, &mut cancel_accounts, 0, 10, 0).unwrap();

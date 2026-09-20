@@ -424,6 +424,9 @@ pub struct V3Fill {
     pub maker_owner: u32,
     pub key: u128,
     pub price: u64,
+    /// The reservation price captured when the maker order was admitted.
+    /// Oracle movement must not change the margin released for that order.
+    pub reserve_price: u64,
     pub quantity: u64,
     pub maker_remaining: u64,
 }
@@ -436,6 +439,7 @@ pub struct V3SelfTradeCancellation {
     pub key: u128,
     pub quantity: u64,
     pub price: u64,
+    pub reserve_price: u64,
     pub side: u8,
 }
 
@@ -454,6 +458,7 @@ const EMPTY_V3_FILL: V3Fill = V3Fill {
     maker_owner: 0,
     key: 0,
     price: 0,
+    reserve_price: 0,
     quantity: 0,
     maker_remaining: 0,
 };
@@ -464,6 +469,7 @@ const EMPTY_V3_CANCELLATION: V3SelfTradeCancellation = V3SelfTradeCancellation {
     key: 0,
     quantity: 0,
     price: 0,
+    reserve_price: 0,
     side: 0,
 };
 
@@ -1182,6 +1188,11 @@ impl<'a> PagedBookV3<'a> {
                         if count >= plan.cancellations.len() {
                             return Err(StockStreamError::SelfTradeAborted.into());
                         }
+                        let reserve_price = match stored_v3_reserve_price(&leaf) {
+                            Some(price) => u64::try_from(price)
+                                .map_err(|_| StockStreamError::ArithmeticOverflow)?,
+                            None => maker_price,
+                        };
                         plan.cancellations[count] = V3SelfTradeCancellation {
                             maker_tree: maker_tree as u8,
                             maker_handle: handle,
@@ -1189,6 +1200,7 @@ impl<'a> PagedBookV3<'a> {
                             key,
                             quantity: maker_quantity,
                             price: maker_price,
+                            reserve_price,
                             side: leaf.side,
                         };
                         plan.cancellation_count += 1;
@@ -1197,12 +1209,19 @@ impl<'a> PagedBookV3<'a> {
                 }
             }
             let fill_index = plan.fill_count as usize;
+            let reserve_price = match stored_v3_reserve_price(&leaf) {
+                Some(price) => {
+                    u64::try_from(price).map_err(|_| StockStreamError::ArithmeticOverflow)?
+                }
+                None => maker_price,
+            };
             plan.fills[fill_index] = V3Fill {
                 maker_tree: maker_tree as u8,
                 maker_handle: handle,
                 maker_owner: owner,
                 key,
                 price: maker_price,
+                reserve_price,
                 quantity: fill_quantity,
                 maker_remaining: maker_quantity - fill_quantity,
             };
@@ -2735,9 +2754,6 @@ fn settle_v3_fill(
     } else {
         Side::Bid
     };
-    let notional = u128::from(fill.quantity)
-        .checked_mul(u128::from(fill.price))
-        .ok_or(StockStreamError::ArithmeticOverflow)?;
     let funding_accumulator = core_i128(
         unsafe { core.borrow_unchecked() },
         V3_CORE_FUNDING_ACCUMULATOR_OFFSET,
@@ -2770,11 +2786,11 @@ fn settle_v3_fill(
         risk_config.taker_fee_bps,
     )
     .map_err(v3_risk_error)?;
-    let margin = crate::risk::initial_margin(
-        i128::try_from(notional).map_err(|_| StockStreamError::ArithmeticOverflow)?,
-        risk_config.initial_margin_bps,
-    )
-    .map_err(v3_risk_error)?;
+    let reserve_notional = i128::from(fill.quantity)
+        .checked_mul(i128::from(fill.reserve_price))
+        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    let margin = crate::risk::initial_margin(reserve_notional, risk_config.initial_margin_bps)
+        .map_err(v3_risk_error)?;
     maker.reserved_margin = maker
         .reserved_margin
         .checked_sub(margin)
@@ -2818,10 +2834,12 @@ fn v3_order_reserve(
 ) -> Result<i128, ProgramError> {
     let price = match tree {
         TreeKind::Fixed => leaf.price_or_offset,
-        TreeKind::OraclePegged => oracle
-            .ok_or(StockStreamError::OracleUnavailable)?
-            .checked_add(leaf.price_or_offset)
-            .ok_or(StockStreamError::ArithmeticOverflow)?,
+        TreeKind::OraclePegged => stored_v3_reserve_price(leaf).unwrap_or(
+            oracle
+                .ok_or(StockStreamError::OracleUnavailable)?
+                .checked_add(leaf.price_or_offset)
+                .ok_or(StockStreamError::ArithmeticOverflow)?,
+        ),
     };
     if price <= 0 {
         return Err(StockStreamError::InvalidInstruction.into());
@@ -2830,6 +2848,22 @@ fn v3_order_reserve(
         .checked_mul(i128::from(price))
         .ok_or(StockStreamError::ArithmeticOverflow)?;
     crate::risk::initial_margin(notional, config.initial_margin_bps).map_err(v3_risk_error)
+}
+
+/// Captures the effective price used to reserve an OraclePegged order in the
+/// leaf's existing reserved bytes. This keeps the fixed 88-byte leaf ABI while
+/// making later fills/cancellations independent of oracle movement.
+fn stored_v3_reserve_price(leaf: &LeafNode) -> Option<i64> {
+    let price = i64::from_le_bytes(leaf._reserved[..8].try_into().ok()?);
+    (price > 0).then_some(price)
+}
+
+fn set_v3_reserve_price(leaf: &mut LeafNode, price: i64) -> ProgramResult {
+    if price <= 0 {
+        return Err(StockStreamError::InvalidInstruction.into());
+    }
+    leaf._reserved[..8].copy_from_slice(&price.to_le_bytes());
+    Ok(())
 }
 
 /// Enforces the configured maximum leverage against the post-order position
@@ -2860,10 +2894,11 @@ fn enforce_v3_leverage(
     Ok(())
 }
 
-/// Returns the last stored oracle price for reserve accounting. Cancellation
-/// must remain available during a stale/temporarily invalid oracle window; the
-/// validity flag gates new pegged orders, while the stored price lets existing
-/// reservations be released deterministically.
+/// Returns the last stored oracle price for legacy reserve fallback. New V3
+/// pegged leaves persist their admission price in the leaf's reserved bytes,
+/// so cancellation/fill accounting remains stable even after oracle movement.
+/// Legacy leaves without that marker still use this value and remain
+/// cancellable during a stale/temporarily invalid oracle window.
 fn v3_reserve_oracle(core: &[u8]) -> Result<Option<i64>, ProgramError> {
     let price = i64::from_le_bytes(
         core[V3_CORE_ORACLE_PRICE_OFFSET..V3_CORE_ORACLE_PRICE_OFFSET + 8]
@@ -3262,7 +3297,7 @@ fn place_order_v3_with_action(
         post_only: order.flags & 1 != 0,
         self_trade_behavior,
     };
-    let leaf = input.leaf().map_err(|_| bundle_error())?;
+    let mut leaf = input.leaf().map_err(|_| bundle_error())?;
     if tree == TreeKind::OraclePegged
         && !matches!(
             crate::book::pegged_state(&leaf, oracle, now),
@@ -3270,6 +3305,9 @@ fn place_order_v3_with_action(
         )
     {
         return Err(StockStreamError::RiskViolation.into());
+    }
+    if tree == TreeKind::OraclePegged {
+        set_v3_reserve_price(&mut leaf, effective_price)?;
     }
     let plan = {
         let (book_accounts, _) = accounts[1..].split_at_mut(2 * V3_BOOK_PAGES_PER_SIDE);
@@ -3347,7 +3385,7 @@ fn place_order_v3_with_action(
         let (seat, shard, slot) = v3_trade_seat_shards(seat_accounts, cancel.maker_owner as u16)?;
         let mut updated = seat;
         let reserve_notional = i128::from(cancel.quantity)
-            .checked_mul(i128::from(cancel.price))
+            .checked_mul(i128::from(cancel.reserve_price))
             .ok_or(StockStreamError::ArithmeticOverflow)?;
         let reserve = crate::risk::initial_margin(reserve_notional, risk_config.initial_margin_bps)
             .map_err(v3_risk_error)?;
