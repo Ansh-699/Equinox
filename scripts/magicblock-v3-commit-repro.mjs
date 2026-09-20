@@ -6,14 +6,24 @@
 import fs from "node:fs";
 import { Keypair, PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
 
-const state = JSON.parse(fs.readFileSync("/tmp/opencode/v3-lifecycle-state.json", "utf8"));
+const statePath = process.env.MAGICBLOCK_V3_REPRO_STATE_PATH ?? "/tmp/opencode/v3-lifecycle-state.json";
+const state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, "utf8")) : {};
 const authority = Keypair.fromSecretKey(new Uint8Array(JSON.parse(fs.readFileSync(`${process.env.HOME}/.config/solana/id.json`, "utf8"))));
 const program = new PublicKey("H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET");
 const context = new PublicKey("MagicContext1111111111111111111111111111111");
 const magic = new PublicKey("Magic11111111111111111111111111111111111111");
 const endpoint = "https://devnet-as.magicblock.app/";
-const core = new PublicKey(state.core);
-const members = [...state.v3Accounts.bookPages, ...state.v3Accounts.seatShards, ...state.v3Accounts.eventShards].map((key) => new PublicKey(key));
+const core = new PublicKey(process.env.MAGICBLOCK_V3_REPRO_CORE ?? state.core ?? "47Mx7SZvt7EY6NydsA5krgrqvcDDR1H5BG5xTPDSnhso");
+const derive = (seeds) => PublicKey.findProgramAddressSync(seeds, program)[0];
+const members = state.v3Accounts
+  ? [...state.v3Accounts.bookPages, ...state.v3Accounts.seatShards, ...state.v3Accounts.eventShards].map((key) => new PublicKey(key))
+  : [
+      ...[0, 1].flatMap((side) => [0, 1, 2, 3, 4, 5, 6, 7, 8].map((page) => derive([
+        Buffer.from("book-page-v3"), core.toBuffer(), Buffer.from([side]), Buffer.from([page]),
+      ]))),
+      ...[0, 1, 2, 3].map((index) => derive([Buffer.from("seat-shard-v3"), core.toBuffer(), Buffer.from([index])])),
+      ...[0, 1, 2, 3].map((index) => derive([Buffer.from("event-shard-v3"), core.toBuffer(), Buffer.from([index])])),
+    ];
 
 async function rpc(method, params) {
   const response = await fetch(endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
