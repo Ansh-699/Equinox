@@ -14,6 +14,15 @@
     "result": "preflight did not run: runtime lacks PRIVY_ACCESS_TOKEN, PRIVY_EXPECTED_WALLET, and/or required app credentials; command exited 1; no relay request or transaction submitted",
     "submitReplay": "not attempted"
   },
+  "runtimeProbe": {
+    "asOf": "2026-09-21",
+    "pythCommand": "NO_DNA=1 node scripts/pyth-live-smoke.mjs",
+    "pythResult": "PYTH_PRO_API_KEY is not set in the environment; no stream attempted",
+    "privyCommand": "NO_DNA=1 node scripts/privy-relay-live.mjs",
+    "privyResult": "missing PRIVY_ACCESS_TOKEN, PRIVY_EXPECTED_WALLET, PRIVY_APP_ID/NEXT_PUBLIC_PRIVY_APP_ID, or PRIVY_APP_SECRET; no relay attempted",
+    "magicblockCommand": "NO_DNA=1 node scripts/magicblock-dlp-discriminator-repro.mjs",
+    "magicblockResult": "discriminator 26 InvalidInstructionData; discriminator 0 reaches handler then InvalidAccountOwner; simulation only"
+  },
   "magicblock": {
     "command": "node scripts/magicblock-dlp-discriminator-repro.mjs",
     "program": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh",
