@@ -38,6 +38,11 @@ pub const DELEGATE_V3_ACCOUNT: u8 = 48;
 pub const CREATE_V3_TRADER_SEAT: u8 = 49;
 /// Closes an empty V3 trader seat. Data: `[50, seat_index:u16]`.
 pub const CLOSE_V3_TRADER_SEAT: u8 = 50;
+/// Owner-program recovery request for a V3 core whose validator undelegation
+/// callback has timed out. Data is `[51]`; the owner may then use `[52]` after
+/// the request expiry to roll back safely through the delegation program.
+pub const REQUEST_V3_UNDELEGATION: u8 = 51;
+pub const ROLLBACK_V3_UNDELEGATION: u8 = 52;
 pub const COMMIT_MARKET: u8 = 14;
 pub const COMMIT_AND_UNDELEGATE: u8 = 15;
 /// Reserved: the real external-undelegate callback uses the delegation
@@ -214,6 +219,8 @@ pub enum StockStreamInstruction {
     CloseV3TraderSeat {
         seat_index: u16,
     },
+    RequestV3Undelegation,
+    RollbackV3Undelegation,
     CommitMarket {
         sequence: u64,
     },
@@ -477,6 +484,8 @@ impl StockStreamInstruction {
             Some(CLOSE_V3_TRADER_SEAT) if data.len() == 3 => Ok(Self::CloseV3TraderSeat {
                 seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
             }),
+            Some(REQUEST_V3_UNDELEGATION) if data.len() == 1 => Ok(Self::RequestV3Undelegation),
+            Some(ROLLBACK_V3_UNDELEGATION) if data.len() == 1 => Ok(Self::RollbackV3Undelegation),
             Some(COMMIT_AND_UNDELEGATE) if data.len() == 9 => Ok(Self::CommitAndUndelegate {
                 sequence: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
             }),

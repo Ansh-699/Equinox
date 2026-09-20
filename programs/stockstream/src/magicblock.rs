@@ -2180,6 +2180,166 @@ fn core_u64(bytes: &[u8], offset: usize) -> Result<u64, ProgramError> {
         .map(u64::from_le_bytes)
 }
 
+/// Owner-program request which changes the delegation metadata requester to
+/// the owner. This is the safe escape hatch for a validator undelegation
+/// callback that never completes; it does not mutate the hot account.
+pub fn request_v3_undelegation(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+) -> ProgramResult {
+    if accounts.len() != 8
+        || !accounts[0].is_signer()
+        || !accounts[0].is_writable()
+        || *accounts[2].address() != *program_id
+        || *accounts[6].address() != pinocchio_system::ID
+        || *accounts[7].address() != DELEGATION_PROGRAM_ID
+    {
+        return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+    }
+    let instrument = {
+        let core = unsafe { accounts[1].borrow_unchecked() };
+        if core.len() != v3::V3_MARKET_CORE_SIZE
+            || core[0..8] != v3::V3_MARKET_CORE_DISCRIMINATOR
+            || core[8..10] != v3::V3_LAYOUT_VERSION.to_le_bytes()
+        {
+            return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+        }
+        Address::new_from_array(core[12..44].try_into().unwrap())
+    };
+    let (expected_request, _) = Address::find_program_address(
+        &[b"undelegation-request", accounts[1].address().as_ref()],
+        &DELEGATION_PROGRAM_ID,
+    );
+    let (expected_record, _) = Address::find_program_address(
+        &[DELEGATION_RECORD_TAG, accounts[1].address().as_ref()],
+        &DELEGATION_PROGRAM_ID,
+    );
+    let (expected_metadata, _) = Address::find_program_address(
+        &[DELEGATION_METADATA_TAG, accounts[1].address().as_ref()],
+        &DELEGATION_PROGRAM_ID,
+    );
+    if expected_request != *accounts[3].address()
+        || expected_record != *accounts[4].address()
+        || expected_metadata != *accounts[5].address()
+    {
+        return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+    }
+    let (_, bump) = Address::find_program_address(
+        &[v3::V3_MARKET_CORE_SEED, instrument.as_ref()],
+        program_id,
+    );
+    let bump_slice = [bump];
+    let seeds = [
+        Seed::from(v3::V3_MARKET_CORE_SEED),
+        Seed::from(instrument.as_ref()),
+        Seed::from(&bump_slice),
+    ];
+    let cpi_accounts = [
+        InstructionAccount::writable_signer(accounts[0].address()),
+        InstructionAccount::readonly_signer(accounts[1].address()),
+        InstructionAccount::readonly(accounts[2].address()),
+        InstructionAccount::writable(accounts[3].address()),
+        InstructionAccount::readonly(accounts[4].address()),
+        InstructionAccount::writable(accounts[5].address()),
+        InstructionAccount::readonly(accounts[6].address()),
+    ];
+    let data = 26u64.to_le_bytes();
+    let ix = InstructionView { program_id: &DELEGATION_PROGRAM_ID, accounts: &cpi_accounts, data: &data };
+    let views: [&AccountView; 7] = [
+        &accounts[0], &accounts[1], &accounts[2], &accounts[3], &accounts[4], &accounts[5], &accounts[6],
+    ];
+    invoke_signed_with_bounds::<7, _>(&ix, &views, &[Signer::from(&seeds)])
+}
+
+/// Owner-program timeout rollback for a V3 core. The delegation program
+/// requires the core PDA to sign and checks the owner-created request expiry.
+/// Only the compact active core prefix is retained; the remaining reserved
+/// bytes are deterministic zeroes, so no order-book or custody state is lost.
+pub fn rollback_v3_undelegation(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+) -> ProgramResult {
+    if accounts.len() != 10
+        || !accounts[0].is_writable()
+        || !accounts[1].is_writable()
+        || *accounts[1].address() != *program_id
+        || *accounts[9].address() != DELEGATION_PROGRAM_ID
+    {
+        return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+    }
+    let mut saved = [0u8; v3::V3_CORE_VALIDATOR_OFFSET + 32];
+    let saved_len = saved.len();
+    {
+        let core = unsafe { accounts[0].borrow_unchecked() };
+        if core.len() != v3::V3_MARKET_CORE_SIZE || core[0..8] != v3::V3_MARKET_CORE_DISCRIMINATOR {
+            return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+        }
+        saved.copy_from_slice(&core[..saved_len]);
+    }
+    let instrument = Address::new_from_array(saved[12..44].try_into().unwrap());
+    let (request, _) = Address::find_program_address(
+        &[b"undelegation-request", accounts[0].address().as_ref()],
+        &DELEGATION_PROGRAM_ID,
+    );
+    let (record, _) = Address::find_program_address(
+        &[DELEGATION_RECORD_TAG, accounts[0].address().as_ref()],
+        &DELEGATION_PROGRAM_ID,
+    );
+    let (metadata, _) = Address::find_program_address(
+        &[DELEGATION_METADATA_TAG, accounts[0].address().as_ref()],
+        &DELEGATION_PROGRAM_ID,
+    );
+    let (state, _) = Address::find_program_address(
+        &[b"state-diff", accounts[0].address().as_ref()],
+        &DELEGATION_PROGRAM_ID,
+    );
+    let (commit_record, _) = Address::find_program_address(
+        &[b"commit-state-record", accounts[0].address().as_ref()],
+        &DELEGATION_PROGRAM_ID,
+    );
+    if request != *accounts[2].address()
+        || record != *accounts[3].address()
+        || metadata != *accounts[4].address()
+        || state != *accounts[6].address()
+        || commit_record != *accounts[7].address()
+    {
+        return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+    }
+    let (_, bump) = Address::find_program_address(
+        &[v3::V3_MARKET_CORE_SEED, instrument.as_ref()],
+        program_id,
+    );
+    let bump_slice = [bump];
+    let seeds = [
+        Seed::from(v3::V3_MARKET_CORE_SEED),
+        Seed::from(instrument.as_ref()),
+        Seed::from(&bump_slice),
+    ];
+    let cpi_accounts = [
+        InstructionAccount::writable_signer(accounts[0].address()),
+        InstructionAccount::readonly(accounts[1].address()),
+        InstructionAccount::writable(accounts[2].address()),
+        InstructionAccount::writable(accounts[3].address()),
+        InstructionAccount::writable(accounts[4].address()),
+        InstructionAccount::writable(accounts[5].address()),
+        InstructionAccount::writable(accounts[6].address()),
+        InstructionAccount::writable(accounts[7].address()),
+        InstructionAccount::writable(accounts[8].address()),
+    ];
+    let data = 27u64.to_le_bytes();
+    let ix = InstructionView { program_id: &DELEGATION_PROGRAM_ID, accounts: &cpi_accounts, data: &data };
+    let views: [&AccountView; 9] = [
+        &accounts[0], &accounts[1], &accounts[2], &accounts[3], &accounts[4],
+        &accounts[5], &accounts[6], &accounts[7], &accounts[8],
+    ];
+    invoke_signed_with_bounds::<9, _>(&ix, &views, &[Signer::from(&seeds)])?;
+    let restored = unsafe { accounts[0].borrow_unchecked_mut() };
+    restored.fill(0);
+    restored[..saved.len()].copy_from_slice(&saved);
+    restored[v3::V3_CORE_DELEGATION_STATUS_OFFSET] = DelegationStatus::Restored as u8;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------
 // External-undelegate callback
 // ---------------------------------------------------------------------

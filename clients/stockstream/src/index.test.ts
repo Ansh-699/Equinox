@@ -2,13 +2,21 @@ import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { expect, test } from "vitest";
 import { STOCKSTREAM_PROGRAM_ID } from "./constants";
 import { MAGICBLOCK_DELEGATION_PROGRAM_ID, MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID, STOCKSTREAM_PROGRAM_KEY, cancelAllV3, cancelOrderV3, placeOrderV3, replaceOrderV3, commitV3Shard } from "./index";
-import { authorizeTradingSession, cancelOrder, closeV3TraderSeat, commitMarket, delegateClusterMember, delegateV3Account, deriveClusterMemberPdas, createPerpMarket, createV3Account, createV3TraderSeat, decodeFillPayload, decodeInstruction, decodeMarketState, decodeSeatAmountPayload, decodeStockStreamEvent, delegateMarket, deriveTradingSession, depositCollateral, EVENT_SIZE, initializeExchange, initializeMarket, initializeV3Market, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateExchangeConfig, updateStockInstrument, withdrawCollateral, withdrawInsuranceFunds, withdrawProtocolFees, EXCHANGE_CONFIG_FIELD } from "./index";
+import { authorizeTradingSession, cancelOrder, closeV3TraderSeat, commitMarket, delegateClusterMember, delegateV3Account, deriveClusterMemberPdas, createPerpMarket, createV3Account, createV3TraderSeat, decodeFillPayload, decodeInstruction, decodeMarketState, decodeSeatAmountPayload, decodeStockStreamEvent, delegateMarket, deriveTradingSession, depositCollateral, EVENT_SIZE, initializeExchange, initializeMarket, initializeV3Market, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateExchangeConfig, updateStockInstrument, withdrawCollateral, withdrawInsuranceFunds, withdrawProtocolFees, EXCHANGE_CONFIG_FIELD, requestV3Undelegation, rollbackV3Undelegation } from "./index";
 import { STOCKSTREAM_ACCOUNT_SIZE } from "./constants";
 import { deriveBookPageV3, deriveEventShardV3, deriveMarketCoreV3, deriveSeatShardV3 } from "./abi/v3";
 
 const market = PublicKey.unique();
 const authority = PublicKey.unique();
 const settlementScratch = PublicKey.unique();
+
+test("V3 recovery instructions preserve one-byte ABI", () => {
+  const keys = { core: PublicKey.unique(), payer: PublicKey.unique(), request: PublicKey.unique(), record: PublicKey.unique(), metadata: PublicKey.unique(), state: PublicKey.unique(), commitRecord: PublicKey.unique(), reimbursement: PublicKey.unique() };
+  expect(Array.from(requestV3Undelegation(keys).data)).toEqual([51]);
+  expect(Array.from(rollbackV3Undelegation(keys).data)).toEqual([52]);
+  expect(decodeInstruction(Uint8Array.of(51)).name).toBe("RequestV3Undelegation");
+  expect(decodeInstruction(Uint8Array.of(52)).name).toBe("RollbackV3Undelegation");
+});
 
 test("instruction constructors use canonical program id and exact account flags", () => {
   const ix = initializeMarket({ market, authority });

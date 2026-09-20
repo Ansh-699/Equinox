@@ -446,6 +446,12 @@ pub fn dispatch(
         StockStreamInstruction::CloseV3TraderSeat { seat_index } => {
             crate::v3::close_trader_seat(program_id, accounts, seat_index)
         }
+        StockStreamInstruction::RequestV3Undelegation => {
+            crate::magicblock::request_v3_undelegation(program_id, accounts)
+        }
+        StockStreamInstruction::RollbackV3Undelegation => {
+            crate::magicblock::rollback_v3_undelegation(program_id, accounts)
+        }
         StockStreamInstruction::CommitMarket { sequence } => {
             crate::magicblock::commit_market(program_id, accounts, sequence)
         }

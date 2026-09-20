@@ -1,0 +1,28 @@
+{
+  "asOf": "2026-09-20T14:18:03+05:30",
+  "program": "H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET",
+  "upgrade": {
+    "signature": "2RMhLWkopgUA8EzEVDW2TM7xQeaUzjgzhdgstw3RnT1kM18PfUsKAbLb4aELkHv4nkvtpQaxJxKRSiD4fmsFR211",
+    "slot": 501300663,
+    "deployedElfLen": 412728,
+    "sha256": "65597b7859515225b5393e80f8560a18a99049e9016353d60884e16eb8c1509f",
+    "byteEqual": true
+  },
+  "core": "47Mx7SZvt7EY6NydsA5krgrqvcDDR1H5BG5xTPDSnhso",
+  "requestPda": "8nrwr7zyfxSorLmGqEcKSxd1qqJ994Uin1nvQAJ6qaLu",
+  "requestOpcode": 51,
+  "requestSimulation": {
+    "endpoint": "https://devnet-as.magicblock.app/",
+    "error": { "InstructionError": [0, "InvalidInstructionData"] },
+    "logs": [
+      "Program H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET invoke [1]",
+      "Program DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh invoke [2]",
+      "Program log: Failed to read and parse discriminator",
+      "Program log: fast_process_instruction: Error: InvalidInstructionData",
+      "Program DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh consumed 501 of 185951 compute units"
+    ],
+    "unitsConsumed": 14550,
+    "stateMutation": false
+  },
+  "rollback": { "attempted": false, "reason": "request discriminator was rejected by the live DLP; wait/rollback would be unsafe without a compatible DLP wire contract" }
+}

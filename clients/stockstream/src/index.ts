@@ -87,6 +87,16 @@ export interface V3ShardCommitAccounts {
   magicContext: AddressInput;
   magicProgram: AddressInput;
 }
+export interface V3UndelegationRecoveryAccounts {
+  core: AddressInput;
+  payer: AddressInput;
+  request: AddressInput;
+  record: AddressInput;
+  metadata: AddressInput;
+  state?: AddressInput;
+  commitRecord?: AddressInput;
+  reimbursement?: AddressInput;
+}
 
 function publicKey(value: AddressInput): PublicKey {
   if (value instanceof PublicKey) return value;
@@ -308,6 +318,28 @@ export function commitV3Shard(accounts: V3ShardCommitAccounts, sequence: bigint 
     accountMeta(accounts.shard, false, true), accountMeta(accounts.authority, true, false),
     accountMeta(accounts.payer, true, true), accountMeta(accounts.magicContext, false, true),
     accountMeta(accounts.magicProgram, false, false), accountMeta(accounts.core, false, true),
+  ]);
+}
+
+/** Requests owner-controlled recovery for a V3 core whose validator callback timed out. */
+export function requestV3Undelegation(accounts: V3UndelegationRecoveryAccounts): TransactionInstruction {
+  return instruction(Uint8Array.of(STOCKSTREAM_INSTRUCTION.requestV3Undelegation), [
+    accountMeta(accounts.payer, true, true), accountMeta(accounts.core, false, false),
+    accountMeta(STOCKSTREAM_PROGRAM_KEY, false, false), accountMeta(accounts.request, false, true),
+    accountMeta(accounts.record, false, false), accountMeta(accounts.metadata, false, true),
+    accountMeta(SystemProgram.programId, false, false), accountMeta(MAGICBLOCK_DELEGATION_PROGRAM_ID, false, false),
+  ]);
+}
+
+/** Rolls back an expired owner recovery request and restores the V3 core bytes. */
+export function rollbackV3Undelegation(accounts: V3UndelegationRecoveryAccounts): TransactionInstruction {
+  if (!accounts.state || !accounts.commitRecord || !accounts.reimbursement) throw new RangeError("rollback requires state, commitRecord and reimbursement");
+  return instruction(Uint8Array.of(STOCKSTREAM_INSTRUCTION.rollbackV3Undelegation), [
+    accountMeta(accounts.core, false, true), accountMeta(STOCKSTREAM_PROGRAM_KEY, false, false),
+    accountMeta(accounts.request, false, true), accountMeta(accounts.record, false, true),
+    accountMeta(accounts.metadata, false, true), accountMeta(accounts.payer, false, true),
+    accountMeta(accounts.state, false, true), accountMeta(accounts.commitRecord, false, true),
+    accountMeta(accounts.reimbursement, false, true), accountMeta(MAGICBLOCK_DELEGATION_PROGRAM_ID, false, false),
   ]);
 }
 
@@ -939,7 +971,7 @@ export function transitionMarket(accounts: InstructionAccounts, mode: "pause" | 
 
 export function decodeInstruction(data: Uint8Array): InstructionFixture {
   if (data.length === 0) throw new RangeError("Empty instruction");
-  const names: Record<number, string> = { 0: "InitializeMarket", 1: "CreateTraderSeat", 2: "CloseTraderSeat", 3: "PlaceOrder", 4: "CancelOrder", 5: "CancelAll", 6: "UpdateFunding", 7: "Liquidate", 8: "InitializeSettlementScratch", 9: "InitializeVault", 10: "DepositCollateral", 11: "WithdrawCollateral", 12: "ConsumeOracleUpdate", 13: "DelegateMarket", 14: "CommitMarket", 15: "CommitAndUndelegate", 16: "UndelegationCallback", 17: "AuthorizeTradingSession", 18: "RevokeTradingSession", 19: "InitializeExchange", 20: "RegisterStockInstrument", 21: "CreatePerpMarket", 22: "UpdateStockInstrument", 23: "SuspendStockInstrument", 24: "UpdateMarketRisk", 25: "PauseMarket", 26: "ResumeMarket", 27: "SetCloseOnly", 28: "EnterCorporateAction", 29: "ResolveCorporateAction", 30: "CloseMarket", 31: "UpdateTradingSessionLimits", 32: "CloseTradingSession", 33: "ReplaceOrder", 34: "TransferToInsuranceFund", 35: "WithdrawProtocolFees", 36: "WithdrawInsuranceFunds", 37: "RecordBadDebt", 38: "ResolveBadDebt", 39: "ReconcileVault", 40: "UpdateExchangeConfig", 41: "DelegateClusterMember", 42: "CreateMarketAccount", 43: "CreateInstrumentAccount", 44: "CreateVaultAccount", 45: "CreateScratchAccount", 46: "CreateV3Account", 47: "InitializeV3Market", 48: "DelegateV3Account", 49: "CreateV3TraderSeat", 50: "CloseV3TraderSeat" };
+  const names: Record<number, string> = { 0: "InitializeMarket", 1: "CreateTraderSeat", 2: "CloseTraderSeat", 3: "PlaceOrder", 4: "CancelOrder", 5: "CancelAll", 6: "UpdateFunding", 7: "Liquidate", 8: "InitializeSettlementScratch", 9: "InitializeVault", 10: "DepositCollateral", 11: "WithdrawCollateral", 12: "ConsumeOracleUpdate", 13: "DelegateMarket", 14: "CommitMarket", 15: "CommitAndUndelegate", 16: "UndelegationCallback", 17: "AuthorizeTradingSession", 18: "RevokeTradingSession", 19: "InitializeExchange", 20: "RegisterStockInstrument", 21: "CreatePerpMarket", 22: "UpdateStockInstrument", 23: "SuspendStockInstrument", 24: "UpdateMarketRisk", 25: "PauseMarket", 26: "ResumeMarket", 27: "SetCloseOnly", 28: "EnterCorporateAction", 29: "ResolveCorporateAction", 30: "CloseMarket", 31: "UpdateTradingSessionLimits", 32: "CloseTradingSession", 33: "ReplaceOrder", 34: "TransferToInsuranceFund", 35: "WithdrawProtocolFees", 36: "WithdrawInsuranceFunds", 37: "RecordBadDebt", 38: "ResolveBadDebt", 39: "ReconcileVault", 40: "UpdateExchangeConfig", 41: "DelegateClusterMember", 42: "CreateMarketAccount", 43: "CreateInstrumentAccount", 44: "CreateVaultAccount", 45: "CreateScratchAccount", 46: "CreateV3Account", 47: "InitializeV3Market", 48: "DelegateV3Account", 49: "CreateV3TraderSeat", 50: "CloseV3TraderSeat", 51: "RequestV3Undelegation", 52: "RollbackV3Undelegation" };
   const name = names[data[0]];
   if (!name) throw new RangeError("Unknown instruction");
   return { name, data: data.slice() };
