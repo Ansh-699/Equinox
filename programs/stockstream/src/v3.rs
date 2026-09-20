@@ -3898,17 +3898,29 @@ pub fn cancel_all_v3(
         } else {
             &mut book_accounts[V3_BOOK_PAGES_PER_SIDE..]
         };
-        let leaf = PagedBookV3::new(pages)?.cancel_owned_order(tree, key, seat_index as u32)?;
+        // Read the leaf and preflight every ledger delta before removing it;
+        // malformed counters/reserves must not leave cancel-all with a
+        // partially mutated paged book.
+        let mut book = PagedBookV3::new(pages)?;
+        let handle = book.find(tree, key)?;
+        let leaf = book.leaf(handle)?;
         let (seat, shard, slot) = v3_trade_seat_shards(seat_accounts, seat_index)?;
         let mut updated = seat;
-        let core_bytes = unsafe { core_accounts[0].borrow_unchecked() };
-        let oracle = v3_reserve_oracle(&core_bytes)?;
-        let config = read_v3_risk_config(&core_bytes)?;
+        let (oracle, config) = {
+            let core_bytes = unsafe { core_accounts[0].borrow_unchecked() };
+            (
+                v3_reserve_oracle(&core_bytes)?,
+                read_v3_risk_config(&core_bytes)?,
+            )
+        };
         updated.reserved_margin = updated
             .reserved_margin
             .checked_sub(v3_order_reserve(&leaf, tree, oracle, config)?)
             .ok_or(StockStreamError::RiskViolation)?;
-        updated.open_order_count = updated.open_order_count.saturating_sub(1);
+        updated.open_order_count = updated
+            .open_order_count
+            .checked_sub(1)
+            .ok_or(StockStreamError::RiskViolation)?;
         if leaf.side == Side::Bid as u8 {
             updated.open_bid_exposure = updated
                 .open_bid_exposure
@@ -3920,6 +3932,7 @@ pub fn cancel_all_v3(
                 .checked_sub(i128::from(leaf.quantity))
                 .ok_or(StockStreamError::RiskViolation)?;
         }
+        book.cancel_owned_order(tree, key, seat_index as u32)?;
         write_v3_seat_shards(seat_accounts, shard, slot, &updated)?;
         let payload = crate::events::payload_order(
             seat_index,
@@ -3936,7 +3949,9 @@ pub fn cancel_all_v3(
             &payload,
             crate::handlers::event_timestamp(),
         )?;
-        cancelled = cancelled.saturating_add(1);
+        cancelled = cancelled
+            .checked_add(1)
+            .ok_or(StockStreamError::ArithmeticOverflow)?;
     }
     if let Some(auth) = session {
         crate::handlers::consume_session_action(
