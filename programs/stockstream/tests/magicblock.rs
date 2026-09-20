@@ -79,7 +79,9 @@ fn schedule_commit_data_matches_real_bincode_instruction() {
 
     // Market-only (historical 29-byte shape) and multi-account (market plus
     // two committed cluster members) commit intents.
-    for indices in [vec![2u8], vec![2u8, 3, 4]] {
+    let complete_v3_bundle =
+        (2..(2 + stockstream::v3::V3_EXECUTION_BUNDLE_LEN as u8)).collect::<Vec<_>>();
+    for indices in [vec![2u8], vec![2u8, 3, 4], complete_v3_bundle] {
         let args = MagicIntentBundleArgs {
             commit: Some(CommitTypeArgs::Standalone(indices.clone())),
             commit_and_undelegate: None,
@@ -1311,7 +1313,7 @@ fn parse_delegated_seeds_round_trips_every_kind_and_rejects_foreign_shapes() {
     // Valid V3 tag with an out-of-range page cannot be interpreted as an
     // adjacent page through a flattened-index wrap.
     let mut invalid_page = page_seeds;
-    *invalid_page.last_mut().unwrap() = 4;
+    *invalid_page.last_mut().unwrap() = 9;
     assert_eq!(parse_delegated_seeds(&invalid_page), None);
     assert_eq!(parse_delegated_seeds(&[]), None);
 }

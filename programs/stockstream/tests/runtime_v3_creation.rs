@@ -3,8 +3,8 @@
 //!
 //! This deliberately uses a fresh registered-instrument fixture, never the
 //! existing V2 Devnet market. It proves the program signs the System CPIs for
-//! its own core PDA and resumes a 22,592-byte book page across the 10,240-byte
-//! runtime data-growth boundary.
+//! its own core PDA and creates a 10,184-byte book page below both the runtime
+//! data-growth boundary and MagicBlock's current commit limit.
 
 use std::path::PathBuf;
 
@@ -173,8 +173,7 @@ fn creates_core_and_resumable_book_page_with_real_system_cpis() {
 
     let pinocchio_core = pinocchio::Address::new_from_array(core.to_bytes());
     let page = solana_address(derive_book_page_v3(&ID, &pinocchio_core, 1, 3));
-    // 22,592 bytes needs three calls: 10,240 + 10,240 + 2,112.
-    for expected_len in [10_240, 20_480, V3_BOOK_PAGE_SIZE] {
+    for expected_len in [V3_BOOK_PAGE_SIZE] {
         send(&mut svm, &authority, core, page, 1, 7).expect("resume V3 book-page creation");
         assert_eq!(
             svm.get_account(&page).expect("page exists").data.len(),

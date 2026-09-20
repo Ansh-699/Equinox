@@ -4,10 +4,10 @@
 //! V3 never reinterprets a V2 account: every V3 PDA is separately derived
 //! from the V3 core address and has an explicit discriminator/version.
 //!
-//! The MagicBlock committor's buffered delivery uses a `u16` state length.
-//! `65_535` is therefore the largest representable account.  We deliberately
-//! keep all pages at 24,640 bytes: that is also comfortably below the
-//! vendored committor's exercised 50,000-byte buffered commit path.
+//! MagicBlock's deployed scheduler rejects a committed account larger than
+//! Solana's `MAX_PERMITTED_DATA_INCREASE` (10,240 bytes).  The V3 hot state
+//! therefore uses only accounts below that *actual* commit limit, not merely
+//! below the wire-level `u16` state-length ceiling.
 
 use core::{
     mem::{size_of, MaybeUninit},
@@ -25,8 +25,10 @@ use crate::{
 
 pub const V3_LAYOUT_VERSION: u16 = 3;
 pub const V3_COMMIT_ACCOUNT_HARD_MAX: usize = u16::MAX as usize;
-pub const V3_COMMIT_ACCOUNT_SAFE_MAX: usize = 50_000;
-pub const V3_PAGE_ACCOUNT_SIZE: usize = 24_640;
+/// `magicblock-program::validate_commit_type_accounts` currently rejects a
+/// delegated account whose data length exceeds this value.
+pub const V3_COMMIT_ACCOUNT_SAFE_MAX: usize = 10_240;
+pub const V3_PAGE_ACCOUNT_SIZE: usize = V3_COMMIT_ACCOUNT_SAFE_MAX;
 
 pub const V3_MARKET_CORE_SEED: &[u8] = b"market-v3";
 pub const V3_BOOK_PAGE_SEED: &[u8] = b"book-page-v3";
@@ -49,9 +51,12 @@ pub const V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET: usize = 198;
 pub const V3_CORE_LAST_COMMITTED_SEQUENCE_OFFSET: usize = 206;
 pub const V3_CORE_VALIDATOR_OFFSET: usize = 214;
 
-pub const V3_BOOK_NODES_PER_PAGE: usize = 256;
-pub const V3_BOOK_PAGES_PER_SIDE: usize = 4;
-pub const V3_BOOK_SLOTS_PER_SIDE: usize = V3_BOOK_NODES_PER_PAGE * V3_BOOK_PAGES_PER_SIDE;
+/// `64 + 115 * 88 = 10,184`, safely below the scheduler's 10,240-byte
+/// per-account limit. Nine pages provide physical room for 1,035 nodes; the
+/// allocator is intentionally capped at the protocol's exact 1,024 slots.
+pub const V3_BOOK_NODES_PER_PAGE: usize = 115;
+pub const V3_BOOK_PAGES_PER_SIDE: usize = 9;
+pub const V3_BOOK_SLOTS_PER_SIDE: usize = 1_024;
 pub const V3_SEATS_PER_SHARD: usize = 32;
 pub const V3_SEAT_SHARDS: usize = 4;
 pub const V3_EVENTS_PER_SHARD: usize = 32;
@@ -70,9 +75,10 @@ pub const V3_SEAT_OPEN_ASK_EXPOSURE_OFFSET: usize = 152;
 pub const V3_SEAT_OPEN_ORDER_COUNT_OFFSET: usize = 168;
 pub const V3_SEAT_LIQUIDATION_STATE_OFFSET: usize = 172;
 pub const V3_SEAT_SEQUENCE_OFFSET: usize = 176;
-/// One fully hot V3 execution domain: core, 8 pages, 4 seat shards, and 4
+/// One fully hot V3 execution domain: core, 18 pages, 4 seat shards, and 4
 /// event shards. Vaults remain outside this bundle on L1 by design.
-pub const V3_EXECUTION_BUNDLE_LEN: usize = 1 + 8 + V3_SEAT_SHARDS + V3_EVENT_SHARDS;
+pub const V3_EXECUTION_BUNDLE_LEN: usize =
+    1 + (2 * V3_BOOK_PAGES_PER_SIDE) + V3_SEAT_SHARDS + V3_EVENT_SHARDS;
 const V3_CORE_GLOBAL_EVENT_SEQUENCE_OFFSET: usize = 148;
 const V3_SHARD_HEADER_SIZE: usize = 44;
 const V3_BOOK_HEADER_SIZE: usize = 64;
@@ -112,7 +118,7 @@ impl V3AccountKind {
     pub const fn max_index(self) -> u8 {
         match self {
             Self::MarketCore => 0,
-            Self::BookPage => 7,
+            Self::BookPage => (2 * V3_BOOK_PAGES_PER_SIDE - 1) as u8,
             Self::SeatShard => 3,
             Self::EventShard => 3,
         }
@@ -154,9 +160,9 @@ pub struct MarketCoreV3 {
 }
 pub const V3_MARKET_CORE_SIZE: usize = size_of::<MarketCoreV3>();
 
-/// An order-book page stores exactly 256 V2-compatible 88-byte node slots.
+/// An order-book page stores 115 V2-compatible 88-byte node slots.
 /// Roots/free lists stay in page zero metadata; nodes use stable global
-/// indices (`page * 256 + local`) so PATRICIA traversal remains deterministic.
+/// indices (`page * 115 + local`) so PATRICIA traversal remains deterministic.
 #[repr(C, packed(1))]
 #[derive(Clone, Copy)]
 pub struct BookPageV3 {
@@ -199,7 +205,7 @@ pub struct EventShardV3 {
 pub const V3_EVENT_SHARD_SIZE: usize = size_of::<EventShardV3>();
 
 const _: [(); 4_096] = [(); V3_MARKET_CORE_SIZE];
-const _: [(); 22_592] = [(); V3_BOOK_PAGE_SIZE];
+const _: [(); 10_184] = [(); V3_BOOK_PAGE_SIZE];
 const _: [(); 8_236] = [(); V3_SEAT_SHARD_SIZE];
 const _: [(); 3_244] = [(); V3_EVENT_SHARD_SIZE];
 
@@ -298,7 +304,7 @@ pub fn derive_v3_account(
 }
 
 /// A page-aware PATRICIA store for exactly one V3 side. Nodes retain the V2
-/// 88-byte representation and use side-global handles (`page * 256 + slot`),
+/// 88-byte representation and use side-global handles (`page * 115 + slot`),
 /// so an inner node may point into any page without a caller-selectable
 /// translation layer. Page zero owns both roots and the global free/bump
 /// metadata; pages 1..3 contain node slots only.
@@ -359,9 +365,12 @@ impl<'a> PagedBookV3<'a> {
 
     fn meta_u32(&mut self, offset: usize) -> Result<u32, ProgramError> {
         let data = unsafe { self.pages[0].borrow_unchecked() };
-        data.get(offset..offset + 4)
-            .ok_or_else(bundle_error)
-            .map(|raw| u32::from_le_bytes(raw.try_into().unwrap()))
+        let raw: [u8; 4] = data
+            .get(offset..offset + 4)
+            .ok_or_else(bundle_error)?
+            .try_into()
+            .map_err(|_| bundle_error())?;
+        Ok(u32::from_le_bytes(raw))
     }
 
     fn set_meta_u32(&mut self, offset: usize, value: u32) -> ProgramResult {
@@ -1015,7 +1024,7 @@ fn bundle_error() -> ProgramError {
 }
 
 /// Validates the exact account order required by future V3 trading handlers:
-/// `[core, book(side 0/page 0..3), book(side 1/page 0..3), seat(0..3),
+/// `[core, book(side 0/page 0..8), book(side 1/page 0..8), seat(0..3),
 /// event(0..3)]`. No handler may accept caller-selected page ordering or a
 /// partial bundle, since that would make cross-page PATRICIA traversal and
 /// atomic matching ambiguous. `require_writable` is true for mutations and
@@ -1056,7 +1065,8 @@ pub fn validate_execution_bundle(
         return Err(bundle_error());
     }
     let core_key = *core.address();
-    for flat in 0..8usize {
+    let book_account_count = 2 * V3_BOOK_PAGES_PER_SIDE;
+    for flat in 0..book_account_count {
         let account = &accounts[1 + flat];
         let side = (flat / V3_BOOK_PAGES_PER_SIDE) as u8;
         let page = (flat % V3_BOOK_PAGES_PER_SIDE) as u8;
@@ -1081,7 +1091,7 @@ pub fn validate_execution_bundle(
         }
     }
     for shard in 0..V3_SEAT_SHARDS {
-        let account = &accounts[9 + shard];
+        let account = &accounts[1 + book_account_count + shard];
         if *account.address() != derive_seat_shard_v3(program_id, &core_key, shard as u8) {
             return Err(bundle_error());
         }
@@ -1097,7 +1107,7 @@ pub fn validate_execution_bundle(
         }
     }
     for shard in 0..V3_EVENT_SHARDS {
-        let account = &accounts[9 + V3_SEAT_SHARDS + shard];
+        let account = &accounts[1 + book_account_count + V3_SEAT_SHARDS + shard];
         if *account.address() != derive_event_shard_v3(program_id, &core_key, shard as u8) {
             return Err(bundle_error());
         }
@@ -1469,7 +1479,12 @@ mod tests {
     fn v3_pages_preserve_capacity_and_fit_magicblock_commit_bounds() {
         assert!(v3_layout_is_committable());
         assert_eq!(V3_BOOK_SLOTS_PER_SIDE, 1_024);
+        // Current MagicBlock scheduler source rejects an account whose data
+        // grows by more than 10,240 bytes during a commit. Keep a margin
+        // below that exact boundary; the next byte must be rejected locally.
+        assert_eq!(V3_BOOK_PAGE_SIZE, 10_184);
         assert!(V3_BOOK_PAGE_SIZE < V3_COMMIT_ACCOUNT_SAFE_MAX);
+        assert!(!committable_account_size(V3_COMMIT_ACCOUNT_SAFE_MAX + 1));
         assert!(V3_BOOK_PAGE_SIZE < V3_COMMIT_ACCOUNT_HARD_MAX);
     }
 
@@ -1484,7 +1499,7 @@ mod tests {
         let id = Address::new_from_array([7; 32]);
         let market = derive_market_core_v3(&id, &Address::new_from_array([8; 32]));
         assert_eq!(V3AccountKind::BookPage.account_size(), V3_BOOK_PAGE_SIZE);
-        assert!(derive_v3_account(&id, &market, V3AccountKind::BookPage, 8).is_none());
+        assert!(derive_v3_account(&id, &market, V3AccountKind::BookPage, 18).is_none());
         assert_ne!(
             derive_v3_account(&id, &market, V3AccountKind::BookPage, 0),
             derive_v3_account(&id, &market, V3AccountKind::BookPage, 1)

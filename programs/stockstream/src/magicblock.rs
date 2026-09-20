@@ -361,9 +361,8 @@ pub fn parse_delegated_seeds(payload: &[u8]) -> Option<DelegatedAccountKind> {
             .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
     };
     let read_address = |offset: usize| -> Option<Address> {
-        payload
-            .get(offset..offset + 32)
-            .map(|b| Address::new_from_array(b.try_into().unwrap()))
+        let bytes: [u8; 32] = payload.get(offset..offset + 32)?.try_into().ok()?;
+        Some(Address::new_from_array(bytes))
     };
     let expect_vec = |offset: usize, expected: &[u8]| -> Option<usize> {
         let len = read_u32(offset)? as usize;
@@ -520,10 +519,13 @@ pub fn parse_delegated_seeds(payload: &[u8]) -> Option<DelegatedAccountKind> {
     None
 }
 
-/// Maximum number of delegated accounts one commit intent bundle commits
-/// (market plus trailing cluster accounts). `CommitTypeArgs::Standalone` carries
-/// `u8` indices, so this also bounds the intent's account indexes.
-pub const MAX_COMMITTED_ACCOUNTS: usize = 16;
+/// Maximum number of delegated accounts StockStream may include in a V3
+/// commit intent: core + 18 book pages + 4 seat shards + 4 event shards.
+/// The Magic Program ABI carries indices in a `Vec<u8>`; its scheduler applies
+/// its own serialized-transaction size validation, not a 16-account limit.
+/// Keeping this equal to the complete V3 execution bundle prevents a partial
+/// commit helper from accidentally defining an unsafe custody boundary.
+pub const MAX_COMMITTED_ACCOUNTS: usize = v3::V3_EXECUTION_BUNDLE_LEN;
 /// `bincode::serialize(&MagicBlockInstruction::ScheduleIntentBundle(
 ///     MagicIntentBundleArgs { commit: Some(CommitTypeArgs::Standalone(indices)),
 ///     ..Default::default() }))` with the account order fixed as

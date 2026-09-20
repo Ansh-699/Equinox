@@ -1,6 +1,6 @@
 import { PublicKey, SystemProgram, TransactionInstruction, type AccountMeta } from "@solana/web3.js";
 import { STOCKSTREAM_ACCOUNT_SIZE, STOCKSTREAM_INSTRUCTION, STOCKSTREAM_PROGRAM_ID, STOCKSTREAM_TRADING_SESSION_SIZE } from "./constants";
-import { deriveBookPageV3, deriveEventShardV3, deriveMarketCoreV3, deriveSeatShardV3 } from "./abi/v3";
+import { deriveBookPageV3, deriveEventShardV3, deriveMarketCoreV3, deriveSeatShardV3, V3_BOOK_PAGES_PER_SIDE } from "./abi/v3";
 
 export const STOCKSTREAM_PROGRAM_KEY = new PublicKey(STOCKSTREAM_PROGRAM_ID);
 export type AddressInput = PublicKey | string;
@@ -717,8 +717,8 @@ export function registerStockInstrument(accounts: InstrumentAccounts, instrument
 export function createPerpMarket(accounts: PerpMarketAccounts, instrumentId: Uint8Array): TransactionInstruction { return identifierInstruction(STOCKSTREAM_INSTRUCTION.createPerpMarket, instrumentId, [accountMeta(accounts.instrument, false, false), accountMeta(accounts.market, false, true), accountMeta(accounts.authority, true, false)]); }
 /**
  * Creates or resumes exactly one committable V3 account. For a book page,
- * call this three times to grow 10,240 -> 20,480 -> 22,592 bytes; retries
- * after completion are idempotent. The builder validates the target PDA so a
+ * the target is 10,184 bytes and completes in one System CPI; retries after
+ * completion are idempotent. The builder validates the target PDA so a
  * client cannot accidentally point this isolated V3 flow at the V2 market.
  */
 export function createV3Account(accounts: V3CreationAccounts, kind: V3AccountKind, index = 0): TransactionInstruction {
@@ -731,9 +731,9 @@ export function createV3Account(accounts: V3CreationAccounts, kind: V3AccountKin
     "event-shard": [3, index],
   };
   const [kindByte, flattenedIndex] = kindAndIndex[kind];
-  if (!Number.isInteger(flattenedIndex) || flattenedIndex < 0 || flattenedIndex > (kindByte === 1 ? 7 : kindByte === 0 ? 0 : 3)) throw new RangeError("invalid V3 account index");
+  if (!Number.isInteger(flattenedIndex) || flattenedIndex < 0 || flattenedIndex > (kindByte === 1 ? 2 * V3_BOOK_PAGES_PER_SIDE - 1 : kindByte === 0 ? 0 : 3)) throw new RangeError("invalid V3 account index");
   const expected = kindByte === 0 ? deriveMarketCoreV3(parent)
-    : kindByte === 1 ? deriveBookPageV3(parent, Math.floor(flattenedIndex / 4), flattenedIndex % 4)
+    : kindByte === 1 ? deriveBookPageV3(parent, Math.floor(flattenedIndex / V3_BOOK_PAGES_PER_SIDE), flattenedIndex % V3_BOOK_PAGES_PER_SIDE)
       : kindByte === 2 ? deriveSeatShardV3(parent, flattenedIndex)
         : deriveEventShardV3(parent, flattenedIndex);
   if (!target.equals(expected)) throw new RangeError("target is not the derived V3 account PDA");
@@ -765,9 +765,9 @@ export function delegateV3Account(accounts: V3DelegationAccounts, kind: V3Accoun
     core: [0, 0], "book-page": [1, index], "seat-shard": [2, index], "event-shard": [3, index],
   };
   const [kindByte, flattenedIndex] = kindAndIndex[kind];
-  if (!Number.isInteger(flattenedIndex) || flattenedIndex < 0 || flattenedIndex > (kindByte === 1 ? 7 : kindByte === 0 ? 0 : 3)) throw new RangeError("invalid V3 account index");
+  if (!Number.isInteger(flattenedIndex) || flattenedIndex < 0 || flattenedIndex > (kindByte === 1 ? 2 * V3_BOOK_PAGES_PER_SIDE - 1 : kindByte === 0 ? 0 : 3)) throw new RangeError("invalid V3 account index");
   const expected = kindByte === 0 ? deriveMarketCoreV3(parent)
-    : kindByte === 1 ? deriveBookPageV3(parent, Math.floor(flattenedIndex / 4), flattenedIndex % 4)
+    : kindByte === 1 ? deriveBookPageV3(parent, Math.floor(flattenedIndex / V3_BOOK_PAGES_PER_SIDE), flattenedIndex % V3_BOOK_PAGES_PER_SIDE)
       : kindByte === 2 ? deriveSeatShardV3(parent, flattenedIndex) : deriveEventShardV3(parent, flattenedIndex);
   if (!target.equals(expected)) throw new RangeError("target is not the derived V3 account PDA");
   const [buffer] = PublicKey.findProgramAddressSync([Buffer.from("buffer"), target.toBuffer()], STOCKSTREAM_PROGRAM_KEY);

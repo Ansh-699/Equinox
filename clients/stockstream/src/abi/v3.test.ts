@@ -14,13 +14,14 @@ describe("V3 sharded ABI", () => {
 
   it("keeps the required 1,024 slots per side below MagicBlock commit limits", () => {
     expect(V3_BOOK_SLOTS_PER_SIDE).toBe(1_024);
-    expect(V3_EXECUTION_BUNDLE_LEN).toBe(17);
+    expect(V3_EXECUTION_BUNDLE_LEN).toBe(27);
     for (const size of [V3_MARKET_CORE_SIZE, V3_BOOK_PAGE_SIZE, V3_SEAT_SHARD_SIZE, V3_EVENT_SHARD_SIZE]) {
       expect(v3AccountIsCommittable(size)).toBe(true);
       expect(size).toBeLessThan(V3_COMMIT_ACCOUNT_SAFE_MAX);
       expect(size).toBeLessThan(V3_COMMIT_ACCOUNT_HARD_MAX);
     }
     expect(v3AccountIsCommittable(222_752)).toBe(false);
+    expect(v3AccountIsCommittable(10_241)).toBe(false);
   });
 
   it("derives distinct page and shard PDAs from the V3 core", () => {
