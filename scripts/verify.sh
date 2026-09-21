@@ -29,6 +29,9 @@ run_logged sbf-build bash -c 'NO_DNA=1 cargo build-sbf --manifest-path programs/
 step "ABI parity"
 run_logged abi npm run check:stockstream-abi
 
+step "V3 revision-2 layout fixture parity (Rust writer vs committed TS fixture)"
+run_logged v3-layout-fixture npm run check:v3-layout-fixture
+
 step "Frontend tests, types, lint and production build"
 run_logged frontend-tests npm test
 run_logged frontend-types npx tsc --noEmit

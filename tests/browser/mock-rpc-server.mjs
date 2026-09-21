@@ -92,15 +92,16 @@ function v3CoreBytes() {
   bytes[197] = 0;
   bytes.writeBigUInt64LE(1n, 198);
   bytes.writeBigUInt64LE(1n, 206);
-  bytes.writeUInt16LE(1_000, 218);
-  bytes.writeUInt16LE(500, 220);
-  bytes.writeUInt16LE(50, 222);
-  bytes.writeUInt16LE(2, 224);
-  bytes.writeUInt16LE(4, 226);
-  bytes.writeUInt32LE(10, 228);
+  bytes[371] = 2;
+  bytes.writeUInt16LE(1_000, 1672);
+  bytes.writeUInt16LE(500, 1674);
+  bytes.writeUInt16LE(50, 1676);
+  bytes.writeUInt16LE(2, 1678);
+  bytes.writeUInt16LE(4, 1680);
+  bytes.writeUInt32LE(10, 1682);
   bytes.writeUInt16LE(1_000, 304);
   bytes[370] = 0;
-  bytes[371] = 1;
+  bytes[371] = 2;
   bytes[372] = 0;
   return bytes;
 }

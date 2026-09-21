@@ -33,7 +33,11 @@ const INITIALIZE_V3_MARKET: u8 = 47;
 const SYSTEM_PROGRAM: Address = Address::new_from_array([0; 32]);
 
 fn program_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/deploy/stockstream.so")
+    std::env::var_os("STOCKSTREAM_TEST_SBF")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/deploy/stockstream.so")
+        })
 }
 
 fn solana_address(address: pinocchio::Address) -> Address {

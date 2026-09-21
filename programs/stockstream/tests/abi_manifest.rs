@@ -148,8 +148,24 @@ fn build_manifest() -> String {
   ,"V3_CORE_VAULT_SURPLUS_OFFSET": {v3_core_vault_surplus_offset}
   ,"V3_CORE_WITHDRAWAL_BUFFER_OFFSET": {v3_core_withdrawal_buffer_offset}
   ,"V3_EXECUTION_BUNDLE_LEN": {v3_execution_bundle_len}
+  ,"V3_RISK_CONFIG_VERSION": {risk_revision}
+  ,"V3_CORE_VALIDATOR_OFFSET": {validator_v3}
+  ,"V3_CORE_INITIAL_MARGIN_BPS_OFFSET": {initial_margin_v3}
+  ,"V3_CORE_MAINTENANCE_MARGIN_BPS_OFFSET": {maintenance_margin_v3}
+  ,"V3_CORE_LIQUIDATION_FEE_BPS_OFFSET": {liquidation_fee_v3}
+  ,"V3_CORE_MAKER_FEE_BPS_OFFSET": {maker_fee_v3}
+  ,"V3_CORE_TAKER_FEE_BPS_OFFSET": {taker_fee_v3}
+  ,"V3_CORE_MAXIMUM_LEVERAGE_OFFSET": {leverage_v3}
 }}
 "#,
+        risk_revision = stockstream::v3::V3_RISK_CONFIG_VERSION,
+        validator_v3 = offset_of!(stockstream::v3::MarketCoreV3, delegation_validator),
+        initial_margin_v3 = stockstream::v3::V3_CORE_INITIAL_MARGIN_BPS_OFFSET,
+        maintenance_margin_v3 = stockstream::v3::V3_CORE_MAINTENANCE_MARGIN_BPS_OFFSET,
+        liquidation_fee_v3 = stockstream::v3::V3_CORE_LIQUIDATION_FEE_BPS_OFFSET,
+        maker_fee_v3 = stockstream::v3::V3_CORE_MAKER_FEE_BPS_OFFSET,
+        taker_fee_v3 = stockstream::v3::V3_CORE_TAKER_FEE_BPS_OFFSET,
+        leverage_v3 = stockstream::v3::V3_CORE_MAXIMUM_LEVERAGE_OFFSET,
         market_version = stockstream::state::MARKET_VERSION,
         market_header_size = stockstream::state::MARKET_HEADER_SIZE,
         market_account_size = stockstream::state::MARKET_ACCOUNT_SIZE,

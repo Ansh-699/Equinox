@@ -25,7 +25,7 @@ function base64(bytes: Uint8Array): string {
 
 function v3FixtureAccounts(coreAddress: string): Uint8Array[] {
   const parent = getBase58Encoder().encode(coreAddress);
-  const core = new Uint8Array(4_096); core.set(new TextEncoder().encode('STKMK003')); new DataView(core.buffer).setUint16(8, 3, true); core[10] = 1; core[11] = 1;
+  const core = new Uint8Array(4_096); core.set(new TextEncoder().encode('STKMK003')); new DataView(core.buffer).setUint16(8, 3, true); core[10] = 1; core[11] = 1; core[371] = 2;
   core.set(parent, 12); core.set(parent, 44);
   const books = Array.from({ length: 18 }, (_, flat) => { const page = new Uint8Array(10_184); page.set(new TextEncoder().encode('STKBK003')); const view = new DataView(page.buffer); view.setUint16(8, 3, true); page[10] = Math.floor(flat / 9); page[11] = flat % 9; page.set(parent, 12); if (page[11] === 0) { view.setUint32(44, 0xffff_ffff, true); view.setUint32(48, 0xffff_ffff, true); } return page; });
   const seats = Array.from({ length: 4 }, (_, shard) => { const bytes = new Uint8Array(8_236); bytes.set(new TextEncoder().encode('STKST003')); const view = new DataView(bytes.buffer); view.setUint16(8, 3, true); bytes[10] = shard; bytes.set(parent, 12); return bytes; });

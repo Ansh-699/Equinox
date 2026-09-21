@@ -76,8 +76,15 @@ fn bundle() -> Vec<TestAccount> {
     let core_key = derive_market_core_v3(&ID, &instrument);
     let mut core = account(core_key, V3_MARKET_CORE_SIZE, false);
     header(&mut core, b"STKMK003", 1, Some(instrument));
+    stockstream::v3::initialize_v3_risk_config(unsafe { core.view.borrow_unchecked_mut() })
+        .unwrap();
     unsafe {
         core.view.borrow_unchecked_mut()[11] = 1;
+        let data = core.view.borrow_unchecked_mut();
+        data[180] = 1;
+        data[181..189].copy_from_slice(&5i64.to_le_bytes());
+        data[189..197]
+            .copy_from_slice(&(stockstream::handlers::OFF_CHAIN_TEST_NOW as u64).to_le_bytes());
     }
     let mut accounts = vec![core];
     for flat in 0..V3_BOOK_ACCOUNT_COUNT as u8 {
@@ -164,7 +171,8 @@ fn v3_funding_recomputes_mark_from_pages_and_emits_event() {
         core[44..76].copy_from_slice(authority.view.address().as_ref());
         core[180] = 1;
         core[181..189].copy_from_slice(&100i64.to_le_bytes());
-        core[189..197].copy_from_slice(&10u64.to_le_bytes());
+        core[189..197]
+            .copy_from_slice(&(stockstream::handlers::OFF_CHAIN_TEST_NOW as u64).to_le_bytes());
     }
     let mut page_views = views(&accounts);
     let mut bid_book = PagedBookV3::new(&mut page_views[1..1 + V3_BOOK_PAGES_PER_SIDE]).unwrap();
@@ -199,9 +207,10 @@ fn v3_funding_uses_configured_mark_deviation_clamp() {
         core[44..76].copy_from_slice(authority.view.address().as_ref());
         core[180] = 1;
         core[181..189].copy_from_slice(&100i64.to_le_bytes());
-        core[189..197].copy_from_slice(&10u64.to_le_bytes());
+        core[189..197]
+            .copy_from_slice(&(stockstream::handlers::OFF_CHAIN_TEST_NOW as u64).to_le_bytes());
         core[304..306].copy_from_slice(&100u16.to_le_bytes());
-        core[371] = 1;
+        core[371] = stockstream::v3::V3_RISK_CONFIG_VERSION;
     }
     let mut page_views = views(&accounts);
     let mut bid_book = PagedBookV3::new(&mut page_views[1..1 + V3_BOOK_PAGES_PER_SIDE]).unwrap();
@@ -395,8 +404,8 @@ fn v3_place_uses_configured_leverage_instead_of_a_hardcoded_one_x_cap() {
             .copy_from_slice(&100i128.to_le_bytes());
         let core = accounts[0].view.borrow_unchecked_mut();
         core[197] = 1;
-        core[371] = 1;
-        core[228..232].copy_from_slice(&2u32.to_le_bytes());
+        core[371] = stockstream::v3::V3_RISK_CONFIG_VERSION;
+        core[1682..1686].copy_from_slice(&2u32.to_le_bytes());
     }
     let mut trade_accounts = views(&accounts);
     trade_accounts.push(owner.view.clone());
@@ -574,7 +583,7 @@ fn v3_place_rejects_maximum_open_interest_before_mutation() {
             .copy_from_slice(&2i128.to_le_bytes());
         let core = accounts[0].view.borrow_unchecked_mut();
         core[197] = 1;
-        core[371] = 1;
+        core[371] = stockstream::v3::V3_RISK_CONFIG_VERSION;
         core[272..288].copy_from_slice(&1i128.to_le_bytes());
     }
     let before_page = unsafe { accounts[1].view.borrow_unchecked().to_vec() };
@@ -677,7 +686,8 @@ fn v3_place_rejects_an_invalid_oracle_peg_before_mutation() {
         let core = accounts[0].view.borrow_unchecked_mut();
         core[180] = 1;
         core[181..189].copy_from_slice(&100i64.to_le_bytes());
-        core[189..197].copy_from_slice(&10u64.to_le_bytes());
+        core[189..197]
+            .copy_from_slice(&(stockstream::handlers::OFF_CHAIN_TEST_NOW as u64).to_le_bytes());
         core[197] = 1;
     }
     let before_page = unsafe { accounts[1].view.borrow_unchecked().to_vec() };
@@ -828,7 +838,7 @@ fn v3_session_cancel_all_consumes_one_nonce_and_rejects_replay() {
             seat_index: 0,
             quantity: 2,
             price_or_offset: 5,
-            expires_at: 100,
+            expires_at: stockstream::handlers::OFF_CHAIN_TEST_NOW as u64 + 100,
             peg_limit: 0,
             client_order_id: 54,
             action_nonce: 0,
@@ -852,7 +862,7 @@ fn v3_session_cancel_all_consumes_one_nonce_and_rejects_replay() {
     state.target_program = ID.to_bytes();
     state.market = core_key.to_bytes();
     state.trader_seat_index = 0;
-    state.expires_at = 100;
+    state.expires_at = stockstream::handlers::OFF_CHAIN_TEST_NOW as u64 + 100;
     state.actions = SESSION_ACTION_CANCEL_ALL;
     state.max_order_notional = 100;
     state.max_cumulative_notional = 100;
@@ -1076,7 +1086,7 @@ fn v3_session_actor_binds_sharded_seat_and_rejects_replay_or_risk() {
     state.target_program = ID.to_bytes();
     state.market = core_key.to_bytes();
     state.trader_seat_index = 32;
-    state.expires_at = 100;
+    state.expires_at = stockstream::handlers::OFF_CHAIN_TEST_NOW as u64 + 100;
     state.actions = SESSION_ACTION_PLACE;
     state.max_order_notional = 10;
     state.max_cumulative_notional = 20;
@@ -1220,7 +1230,7 @@ fn v3_session_replace_consumes_one_nonce_and_requires_replace_permission() {
     state.target_program = ID.to_bytes();
     state.market = core_key.to_bytes();
     state.trader_seat_index = 0;
-    state.expires_at = 100;
+    state.expires_at = stockstream::handlers::OFF_CHAIN_TEST_NOW as u64 + 100;
     state.actions = SESSION_ACTION_PLACE | SESSION_ACTION_REPLACE;
     state.max_order_notional = 100;
     state.max_cumulative_notional = 500;
@@ -1244,7 +1254,7 @@ fn v3_session_replace_consumes_one_nonce_and_requires_replace_permission() {
             seat_index: 0,
             quantity: 1,
             price_or_offset: 5,
-            expires_at: 100,
+            expires_at: stockstream::handlers::OFF_CHAIN_TEST_NOW as u64 + 100,
             peg_limit: 0,
             client_order_id: 1,
             action_nonce: 1,
@@ -1266,7 +1276,7 @@ fn v3_session_replace_consumes_one_nonce_and_requires_replace_permission() {
             seat_index: 0,
             quantity: 1,
             price_or_offset: 6,
-            expires_at: 100,
+            expires_at: stockstream::handlers::OFF_CHAIN_TEST_NOW as u64 + 100,
             peg_limit: 0,
             client_order_id: 2,
             action_nonce: 2,
@@ -1298,7 +1308,7 @@ fn v3_session_replace_consumes_one_nonce_and_requires_replace_permission() {
             seat_index: 0,
             quantity: 1,
             price_or_offset: 5,
-            expires_at: 100,
+            expires_at: stockstream::handlers::OFF_CHAIN_TEST_NOW as u64 + 100,
             peg_limit: 0,
             client_order_id: 4,
             action_nonce: 3,
@@ -1330,7 +1340,7 @@ fn v3_session_replace_consumes_one_nonce_and_requires_replace_permission() {
             seat_index: 0,
             quantity: 1_000,
             price_or_offset: 6,
-            expires_at: 100,
+            expires_at: stockstream::handlers::OFF_CHAIN_TEST_NOW as u64 + 100,
             peg_limit: 0,
             client_order_id: 3,
             action_nonce: 3,

@@ -11,6 +11,7 @@
  * `node scripts/v3-devnet-lifecycle.mjs --execute setup` sends Devnet txs.
  */
 import fs from "node:fs";
+import { V3_LIFECYCLE_ORDER } from "./v3-lifecycle-readiness.mjs";
 import { Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction, sendAndConfirmTransaction } from "@solana/web3.js";
 
 const RPC = "https://api.devnet.solana.com";
@@ -47,6 +48,7 @@ function selectedOracle() {
 const SELECTED_ORACLE = selectedOracle();
 const connection = new Connection(RPC, "confirmed");
 const execute = process.argv.includes("--execute");
+if (execute) throw new Error("Live mutations disabled pending layout revision 2 deployment review");
 const stage = process.argv.filter((value) => !value.startsWith("--")).at(-1) ?? "plan";
 
 const load = () => fs.existsSync(STATE_PATH) ? JSON.parse(fs.readFileSync(STATE_PATH, "utf8")) : {};
@@ -197,12 +199,13 @@ function plan() {
     version: 3, execute, statePath: STATE_PATH,
     protectedAccounts: [PRESERVED_AAPL_CORE, FRESH_AAPL_CORE, PRESERVED_V2_MARKET],
     oracle: SELECTED_ORACLE,
+    requiredOrder: V3_LIFECYCLE_ORDER,
     stages: {
       setup: setupComplete ? "complete: fresh core + 18 pages + 4 seat shards + 4 event shards" : "pending: run --execute setup (existing accounts are resumed, never recreated)",
       delegation: delegated ? "complete: checkpoint proves all 27 accounts delegated" : "pending: delegation checkpoint is absent or incomplete",
       commit: committed ? "complete: sharded commit checkpoint finalized" : "blocked/pending: commit checkpoint incomplete; full 27-account intent remains rejected with Magic error 0xa0000002",
       undelegation: committed ? "available: node scripts/v3-sharded-commit.mjs undelegate; restore still depends on external callback" : "blocked: commit/finality checkpoint required before undelegation",
-      custody: "source complete: op53 deposit and op54 full-bundle restored/reconciled flat-seat withdrawal; live submit waits for restore",
+      custody: "L1 seat + op53 test deposit + collateral readback required BEFORE delegation; op54 withdrawal requires restore/reconciliation",
       trading: "source handlers exist for place/cancel/cancel-all and main-wallet replace; live blocked until oracle/session-replace completion",
     }, state,
   }, null, 2));

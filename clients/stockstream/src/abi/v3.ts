@@ -68,6 +68,7 @@ export interface V3MarketCoreView {
 }
 export function decodeV3MarketCore(bytes: Uint8Array): V3MarketCoreView {
   if (!versioned(bytes, "STKMK003", V3_MARKET_CORE_SIZE) || bytes[10] !== 1) throw new RangeError("Invalid V3 market core");
+  if (bytes[371] !== 2) throw new RangeError("Unsupported V3 risk layout: revision 2 required");
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   return {
     mode: bytes[11], instrument: key(bytes, 12), marketAuthority: key(bytes, 44), oracleValid: bytes[180] === 1,
@@ -75,9 +76,9 @@ export function decodeV3MarketCore(bytes: Uint8Array): V3MarketCoreView {
     oracleFeedId: view.getUint32(246, true), oracleChannel: bytes[250], oracleExponent: view.getInt32(251, true),
     delegationStatus: bytes[197], expectedCommitSequence: view.getBigUint64(198, true),
     lastCommittedSequence: view.getBigUint64(206, true), validator: key(bytes, 214),
-    initialMarginBps: view.getUint16(218, true), maintenanceMarginBps: view.getUint16(220, true),
-    liquidationFeeBps: view.getUint16(222, true), makerFeeBps: view.getUint16(224, true),
-    takerFeeBps: view.getUint16(226, true), maximumLeverage: view.getUint32(228, true),
+    initialMarginBps: view.getUint16(1672, true), maintenanceMarginBps: view.getUint16(1674, true),
+    liquidationFeeBps: view.getUint16(1676, true), makerFeeBps: view.getUint16(1678, true),
+    takerFeeBps: view.getUint16(1680, true), maximumLeverage: view.getUint32(1682, true),
     maximumPosition: signed128(view, 256), maximumOpenInterest: signed128(view, 272),
     currentOpenInterest: signed128(view, 288), markDeviationBps: view.getUint16(304, true),
     protocolFeeBalance: signed128(view, 306), insuranceBalance: signed128(view, 322),
