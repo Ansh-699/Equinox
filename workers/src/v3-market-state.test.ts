@@ -27,7 +27,7 @@ function shard(event: boolean, index: number): Uint8Array {
 describe("V3 worker shard aggregation", () => {
   it("rejects a correctly-shaped shard owned by a foreign program", async () => {
     const bytes = [core(), ...Array.from({ length: 18 }, (_, value) => page(Math.floor(value / 9), value % 9)), ...Array.from({ length: 4 }, (_, value) => shard(false, value)), ...Array.from({ length: 4 }, (_, value) => shard(true, value))];
-    const transport = { multipleAccounts: async () => ({ context: { slot: 1 }, value: bytes.map((data, index) => ({ data: [btoa(String.fromCharCode(...data)), "base64"] as [string, string], owner: index === 0 ? "foreign-program" : "H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET", lamports: 1 })) }) } as never;
+    const transport = { multipleAccounts: async () => ({ context: { slot: 1 }, value: bytes.map((data, index) => ({ data: [btoa(String.fromCharCode(...data)), "base64"] as [string, string], owner: index === 0 ? "foreign-program" : "Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ", lamports: 1 })) }) } as never;
     expect(await fetchAuthoritativeV3Market(transport, { core: coreAddress, bookPages: Array.from({ length: 18 }, (_, i) => `page-${i}`), seatShards: Array.from({ length: 4 }, (_, i) => `seat-${i}`), eventShards: Array.from({ length: 4 }, (_, i) => `event-${i}`) })).toBeNull();
   });
 

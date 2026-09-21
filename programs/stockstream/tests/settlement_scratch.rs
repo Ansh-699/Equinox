@@ -73,13 +73,13 @@ fn scratch_regions_are_physically_aligned() {
 #[test]
 fn rust_client_and_pda_derivation_use_the_canonical_program_id() {
     const EXPECTED: Address = Address::new_from_array([
-        238, 93, 151, 107, 197, 15, 150, 255, 50, 108, 58, 155, 4, 9, 32, 48, 102, 97, 106, 199,
-        17, 221, 77, 89, 193, 85, 47, 160, 102, 163, 179, 240,
+        231, 219, 3, 72, 253, 30, 57, 81, 174, 212, 9, 131, 185, 251, 17, 113, 226, 244, 242, 239,
+        18, 92, 34, 5, 81, 240, 155, 47, 2, 17, 152, 78,
     ]);
     assert_eq!(ID, EXPECTED);
     assert!(
         include_str!("../../../clients/stockstream/src/constants.ts")
-            .contains("H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET")
+            .contains("Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ")
     );
     let market = Address::new_from_array([9; 32]);
     assert_ne!(

@@ -3,7 +3,7 @@ import { PublicKey } from '@solana/web3.js';
 import { MagicRouterTransport, RpcFailure, SolanaRpcTransport } from './rpc-transport';
 import { STOCKSTREAM_ACCOUNT_SIZE, STOCKSTREAM_PROGRAM_ID, STOCKSTREAM_TRADING_SESSION_SIZE } from '../clients/stockstream/src/constants';
 
-const marketAddress = 'H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET';
+const marketAddress = 'Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ';
 function sessionBytes({ revoked = false } = {}) {
   const bytes = Buffer.alloc(STOCKSTREAM_TRADING_SESSION_SIZE);
   bytes.write('STKSES02'); bytes.writeUInt16LE(1, 8); bytes[10] = 1; bytes[11] = revoked ? 1 : 0;
