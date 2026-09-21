@@ -190,11 +190,20 @@ Fresh current-HEAD regression evidence: `cargo test -p stockstream --test v3_bun
    blocked by the deployed DLP version mismatch recorded above.
 
 The V3 layout avoids the identified account-size boundary and does not
-retrofit the preserved V2 market. Its full trading and five-account
-delegation/commit lifecycle still requires Pyth/Privy credentials and a
-compatible DLP restore path before this blocker can be cleared.
+retrofit the preserved V2 market. A fresh identity-correct V3 deployment and
+all 27 core/child accounts now exist, but activation is blocked by the live
+Pyth entitlement gate. Its full trading and five-account delegation/commit
+lifecycle still requires Pyth/Privy credentials and a compatible DLP restore
+path before this blocker can be cleared.
 
 ## Live evidence artifacts
+
+- `docs/status/fresh-deployment-20260921.json` -- identity-correct fresh
+  program deployment and fresh V3 account-bundle evidence. The new ELF is
+  hash-equivalent to the local artifact and the new program is upgradeable;
+  activation is still blocked by Pyth feed 922 entitlement (`OracleUnavailable
+  0x6004`). No live trading or MagicBlock lifecycle claim follows from this
+  account bootstrap.
 
 - `docs/status/devnet-lifecycle-evidence-20260919.json` -- every real
   transaction signature/slot from this session's Devnet lifecycle run.
@@ -208,6 +217,10 @@ compatible DLP restore path before this blocker can be cleared.
   `24ee8e881c9909fb56b89571756f01e080e4c64758a8a2af176f98adc97a4bc7`)
   (finalized upgrade signature
   `4La3hXgViTtJ3uFrnRHZXmdwbGyDWitQXJj4Czfg2T69hqXBg1wiHQZtcfsLAyhR9DtFjU5htt9ZXN7cTk2xc9MS`, slot `501407453`).
+- Fresh identity-correct program: `Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ`,
+  upgrade signature `4dZxMMQzTS69zqgr55oVaPTb7AiwjZ6CQBuWdjZFBTsdzdNTjhJbPBGaq6sETPiSkxstAUcj1XH7yNKCxEQVYtcv`,
+  slot `501840717`, artifact SHA-256
+  `c878d70b13864c6a8d51170a67129867e64484bec8395ae455fa3c6132014b97`.
 - Live Worker: `https://stockstream-market-api.ansht.workers.dev`
   (D1 database `1dced396-c76a-4147-8a4f-70465e9aff55`).
 - `docs/status/magicblock-commit-simulation-20260919.json` -- sanitized,

@@ -1,0 +1,29 @@
+{
+  "sourceCommit": "f1a3902",
+  "repositoryHead": "7c018421db13680db2b98775cbf17ae9ac78159e",
+  "programId": "Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ",
+  "upgradeAuthority": "6GBRDrFuWxEXqc7z9CgpeygK999wWhPxfW8XJhokvRf1",
+  "upgradeSignature": "4dZxMMQzTS69zqgr55oVaPTb7AiwjZ6CQBuWdjZFBTsdzdNTjhJbPBGaq6sETPiSkxstAUcj1XH7yNKCxEQVYtcv",
+  "upgradeSlot": 501840717,
+  "localArtifactHash": "c878d70b13864c6a8d51170a67129867e64484bec8395ae455fa3c6132014b97",
+  "deployedArtifactHash": "c878d70b13864c6a8d51170a67129867e64484bec8395ae455fa3c6132014b97",
+  "artifactMatch": true,
+  "freshLifecycle": {
+    "exchange": "D9uUpey6Fo2DqrvCoVw7RRs5tELzBFSw1G7cfk33jE9a",
+    "instrument": "8bdjCFnuH9eA44n6oy9zDRTnSspafZmk1vsfmhHSBY9X",
+    "core": "7gP2YAqf6TNMqfkDkSdjb2Y1peLzoXadBnzL2LDzhFei",
+    "bookPages": 18,
+    "seatShards": 4,
+    "eventShards": 4,
+    "accountCount": 29,
+    "allOwnedByProgram": true,
+    "activation": "blocked: OracleUnavailable 0x6004",
+    "checkpoint": "/tmp/stockstream-fresh-v3-state-20260921.json"
+  },
+  "protocolSemanticsChanged": false,
+  "liveTrading": "blocked",
+  "pyth": "blocked: feed 922 Not entitled on all three streams",
+  "privy": "blocked: no fresh access token and linked wallet",
+  "cloudflare": "authorized, but relay deployment secrets incomplete",
+  "magicblock": "not attempted; DLP restoration remains externally blocked"
+}
