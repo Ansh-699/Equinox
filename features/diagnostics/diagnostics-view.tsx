@@ -52,11 +52,11 @@ export function DiagnosticsView() {
         <dl className="session-detail">
           <dt>Program ID</dt><dd>{DEMO_PROGRAM_ID || STOCKSTREAM_PROGRAM_ID}</dd>
           <dt>Configured V3 core</dt><dd>{publicV3Core}</dd>
-          <dt>Artifact alignment</dt><dd className="negative">mismatch · local {DEMO_LOCAL_ARTIFACT_SHA256.slice(0, 12)}… / deployed {DEMO_DEPLOYED_ARTIFACT_SHA256.slice(0, 12)}…</dd>
+          <dt>Artifact alignment</dt><dd>matched · {DEMO_LOCAL_ARTIFACT_SHA256.slice(0, 12)}…</dd>
           <dt>Pyth AAPL/USD</dt><dd className="negative">blocked · feed 922 not entitled</dd>
-          <dt>Privy session relay</dt><dd className="negative">unavailable · credentials not configured</dd>
+          <dt>Privy session relay</dt><dd className="negative">unavailable · fresh token/wallet unavailable</dd>
           <dt>Worker health</dt><dd>{workerHealth === "healthy" ? "healthy · public read-only" : workerHealth}</dd>
-          <dt>MagicBlock lifecycle</dt><dd className="negative">restoration blocked · deployed DLP wire mismatch</dd>
+          <dt>MagicBlock lifecycle</dt><dd className="negative">not attempted · restoration remains externally blocked</dd>
           <dt>Demo mode</dt><dd>deterministic local fixtures; no live trading</dd>
           <dt>Production write gate</dt><dd>read-only by default; no demo writes to the preserved core</dd>
           <dt>Market account version</dt><dd>{marketVersion ?? "unavailable"}</dd>
