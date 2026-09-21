@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const APP_PORT = 4175;
-const CORE = "47Mx7SZvt7EY6NydsA5krgrqvcDDR1H5BG5xTPDSnhso";
+const CORE = "7gP2YAqf6TNMqfkDkSdjb2Y1peLzoXadBnzL2LDzhFei";
 const MARKET_API = "https://stockstream-market-api.ansht.workers.dev";
 
 if (process.env.RUN_DEVNET_E2E !== "1") {

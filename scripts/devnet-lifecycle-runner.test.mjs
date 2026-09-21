@@ -16,6 +16,7 @@ try {
   fs.writeFileSync(statePath, "{}", { mode: 0o600 });
   let plan = run();
   assert.equal(plan.version, 3);
+  assert.deepEqual(plan.oracle, { feedId: 922, channel: 2, channelName: "fixed_rate@50ms", exponent: -5, symbol: "Equity.US.AAPL/USD" });
   assert.match(plan.stages.setup, /pending/);
   assert.match(plan.stages.delegation, /pending/);
   assert.match(plan.stages.commit, /blocked\/pending/);
@@ -27,8 +28,14 @@ try {
   assert.match(plan.stages.delegation, /complete/);
   assert.match(plan.stages.commit, /blocked\/pending/);
 
-  fs.writeFileSync(statePath, JSON.stringify({ version: 3, core: "9d75hK8GyfqajxcijLa35bEh8SYUtobqi6eSdtF42RuS" }), { mode: 0o600 });
-  assert.throws(run, /refusing preserved V2 market/);
+  for (const core of [
+    "47Mx7SZvt7EY6NydsA5krgrqvcDDR1H5BG5xTPDSnhso",
+    "7gP2YAqf6TNMqfkDkSdjb2Y1peLzoXadBnzL2LDzhFei",
+    "9d75hK8GyfqajxcijLa35bEh8SYUtobqi6eSdtF42RuS",
+  ]) {
+    fs.writeFileSync(statePath, JSON.stringify({ version: 3, core }), { mode: 0o600 });
+    assert.throws(run, /refusing preserved AAPL\/V2 market or core/);
+  }
 } finally {
   fs.rmSync(directory, { recursive: true, force: true });
 }

@@ -8,7 +8,7 @@ const APP_PORT = 4173;
 // The fixture suite exercises the same V3 write branches as production. The
 // mock RPC serves valid V3 core/shard bytes for this deterministic address;
 // Devnet keeps its own separate opt-in configuration.
-const V3_CORE_ADDRESS = "47Mx7SZvt7EY6NydsA5krgrqvcDDR1H5BG5xTPDSnhso";
+const V3_CORE_ADDRESS = "7gP2YAqf6TNMqfkDkSdjb2Y1peLzoXadBnzL2LDzhFei";
 
 export default defineConfig({
   testDir: "./tests/browser",
