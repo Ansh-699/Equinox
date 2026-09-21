@@ -2,18 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { loadPythKeeperConfig, PythKeeper, pythHealth, type PythClient } from './pyth-keeper';
 
 const address='11111111111111111111111111111111';
-const env={PYTH_PRO_API_KEY:'server-only',PYTH_PRO_FEED_ID:'123',PYTH_PRO_ENDPOINTS:'wss://one,wss://two',STOCKSTREAM_MARKET_ADDRESS:address,KEEPER_PUBLIC_KEY:address,PYTH_PROGRAM_ADDRESS:address,PYTH_STORAGE_ADDRESS:address,PYTH_TREASURY_ADDRESS:address};
+const env={PYTH_PRO_API_KEY:'server-only',PYTH_PRO_FEED_ID:'123',PYTH_PRO_MIN_CHANNEL:'fixed_rate@50ms',PYTH_PRO_ENDPOINTS:'wss://one,wss://two',STOCKSTREAM_MARKET_ADDRESS:address,KEEPER_PUBLIC_KEY:address,PYTH_PROGRAM_ADDRESS:address,PYTH_STORAGE_ADDRESS:address,PYTH_TREASURY_ADDRESS:address};
 function message(){const data=new Uint8Array(103);new DataView(data.buffer).setUint16(100,1,true);data[102]=9;return data;}
 describe('server-side Pyth keeper',()=>{
   it('requires server credentials, numeric catalog feed, and TLS websocket endpoints',()=>{
     expect(()=>loadPythKeeperConfig({})).toThrow('PYTH_PRO_API_KEY');
     expect(()=>loadPythKeeperConfig({...env,PYTH_PRO_FEED_ID:'Core-feed-hash'})).toThrow('numeric Pyth Pro ID');
     expect(()=>loadPythKeeperConfig({...env,PYTH_PRO_ENDPOINTS:'http://insecure'})).toThrow('wss');
+    expect(()=>loadPythKeeperConfig({...env,PYTH_PRO_MIN_CHANNEL:'fixed_rate@25ms'})).toThrow('documented Pyth Pro channel');
+    expect(loadPythKeeperConfig(env).channel).toBe('fixed_rate@50ms');
     expect(pythHealth({})).toEqual({configured:false,liveVerification:false,feedIdConfigured:false});
   });
   it('uses the SDK response and binds Ed25519 offsets to the following consumer instruction',async()=>{
     const client:PythClient={getLatestPrice:async input=>{
       expect(input.priceFeedIds).toEqual([123]);
+      expect(input.channel).toBe('fixed_rate@50ms');
       expect(input.properties).toEqual(['price','exponent','confidence','marketSession','feedUpdateTimestamp']);
       return {solana:{encoding:'base64',data:Buffer.from(message()).toString('base64')},parsed:{timestampUs:'1000000000',priceFeeds:[{priceFeedId:123,price:'100',exponent:-2,confidence:1,marketSession:'regular',feedUpdateTimestamp:1_000_000_000}]}};
     }};
