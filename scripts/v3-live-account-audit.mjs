@@ -8,7 +8,7 @@
  */
 import { PublicKey } from "@solana/web3.js";
 
-const PROGRAM = new PublicKey("H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET");
+const PROGRAM = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? "H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET");
 const DEFAULT_CORE = "47Mx7SZvt7EY6NydsA5krgrqvcDDR1H5BG5xTPDSnhso";
 const L1 = "https://api.devnet.solana.com";
 const ER = "https://devnet-as.magicblock.app/";
