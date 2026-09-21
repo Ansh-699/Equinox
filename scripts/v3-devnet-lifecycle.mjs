@@ -18,7 +18,7 @@ const PROGRAM = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? "Gc4shx8j29n
 const STATE_PATH = process.env.V3_LIFECYCLE_STATE_PATH ?? "/tmp/opencode/v3-lifecycle-state.json";
 const DELEGATION_STATE_PATH = process.env.V3_DELEGATION_STATE_PATH ?? "/tmp/opencode/v3-delegation-state.json";
 const SHARDED_COMMIT_STATE_PATH = process.env.V3_SHARDED_COMMIT_STATE_PATH ?? "/tmp/opencode/v3-sharded-commit-state.json";
-const EXCHANGE_KEY_PATH = "/tmp/opencode/v3-lifecycle-exchange.json";
+const EXCHANGE_KEY_PATH = process.env.V3_EXCHANGE_KEY_PATH ?? "/tmp/opencode/v3-lifecycle-exchange.json";
 const PRESERVED_V2_MARKET = "9d75hK8GyfqajxcijLa35bEh8SYUtobqi6eSdtF42RuS";
 const SIZES = { core: 4_096, book: 10_184, seat: 8_236, event: 3_244 };
 const BOOK_PAGES_PER_SIDE = 9;
@@ -84,7 +84,15 @@ async function setup() {
   if (!instrumentInfo?.data[10]) await send("register V3 instrument", [ix(20, [ro(exchange.publicKey), wr(instrument), sg(payer.publicKey)], [...instrumentId])], [payer]);
   await ensureV3Account("V3 core", instrument, core, 0, 0, SIZES.core, payer);
   const coreInfo = await connection.getAccountInfo(core, "confirmed");
-  if (!coreInfo?.data[11]) await send("activate V3 core", [ix(47, [ro(exchange.publicKey), ro(instrument), wr(core), sg(payer.publicKey)])], [payer]);
+  if (!coreInfo?.data[11]) {
+    try {
+      await send("activate V3 core", [ix(47, [ro(exchange.publicKey), ro(instrument), wr(core), sg(payer.publicKey)])], [payer]);
+    } catch (error) {
+      if (!String(error?.transactionMessage ?? error).includes("0x6004")) throw error;
+      save({ activationBlocked: "oracle_unavailable" });
+      console.log("activate V3 core: blocked by OracleUnavailable (0x6004); continuing account bootstrap without activation");
+    }
+  }
   const accounts = { bookPages: [], seatShards: [], eventShards: [] };
   for (let side = 0; side < 2; side += 1) for (let page = 0; page < BOOK_PAGES_PER_SIDE; page += 1) {
     const index = side * BOOK_PAGES_PER_SIDE + page; const target = PublicKey.findProgramAddressSync([Buffer.from("book-page-v3"), core.toBuffer(), Buffer.from([side]), Buffer.from([page])], PROGRAM)[0];
