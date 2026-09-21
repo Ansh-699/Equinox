@@ -12,7 +12,7 @@ import fs from "node:fs";
 import { Connection, PublicKey } from "@solana/web3.js";
 
 const RPC = "https://api.devnet.solana.com";
-const PROGRAM_ID = new PublicKey("H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET");
+const PROGRAM_ID = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? "Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ");
 const OWNER = new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111");
 const conn = new Connection("https://api.devnet.solana.com", "confirmed");
 const statePath = process.argv[2] ?? "/tmp/opencode/lifecycle-state.json";

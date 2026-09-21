@@ -84,7 +84,7 @@ test("session-signed trade transaction: relayer fee payer unsigned, session sign
     // A PlaceOrder-family instruction signed by the session signer: the
     // session signer must be a required (readonly signer) account for the
     // message to declare two signature slots.
-    programAddress: "H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET" as never,
+    programAddress: "Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ" as never,
     accounts: [
       { address: "91Wxz2Nn4yvtjHEoYrDSMfyZYG86twVEMnCBwCZFFZE" as never, role: 3 as never }, // market writable
       { address: created.sessionSignerAddress as never, role: 2 as never }, // session signer readonly signer

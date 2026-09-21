@@ -31,8 +31,8 @@ use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
 use crate::instruction::StockStreamInstruction;
 
 pub const ID: Address = Address::new_from_array([
-    238, 93, 151, 107, 197, 15, 150, 255, 50, 108, 58, 155, 4, 9, 32, 48, 102, 97, 106, 199, 17,
-    221, 77, 89, 193, 85, 47, 160, 102, 163, 179, 240,
+    231, 219, 3, 72, 253, 30, 57, 81, 174, 212, 9, 131, 185, 251, 17, 113, 226, 244, 242, 239, 18,
+    92, 34, 5, 81, 240, 155, 47, 2, 17, 152, 78,
 ]);
 
 // The Phase 2 `#[used] static STOCKSTREAM_ARENA_VALIDATOR` that used to live
