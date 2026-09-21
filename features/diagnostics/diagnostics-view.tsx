@@ -58,6 +58,7 @@ export function DiagnosticsView() {
           <dt>Worker health</dt><dd>{workerHealth === "healthy" ? "healthy · public read-only" : workerHealth}</dd>
           <dt>MagicBlock lifecycle</dt><dd className="negative">restoration blocked · deployed DLP wire mismatch</dd>
           <dt>Demo mode</dt><dd>deterministic local fixtures; no live trading</dd>
+          <dt>Production write gate</dt><dd>read-only by default; no demo writes to the preserved core</dd>
           <dt>Market account version</dt><dd>{marketVersion ?? "unavailable"}</dd>
           <dt>Market address</dt><dd>{marketAddress ?? "unconfigured"}</dd>
           <dt>Seat index</dt><dd>0 (seats are embedded in the market account, not separate PDAs)</dd>
