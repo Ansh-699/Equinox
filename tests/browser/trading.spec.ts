@@ -42,7 +42,8 @@ test.beforeEach(async () => {
 
 test("opens on Devnet with a visible risk indicator", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByText("Devnet")).toBeVisible();
+  // The read-only demo banner also contains "Devnet", so pin the network label.
+  await expect(page.getByText("Devnet", { exact: true })).toBeVisible();
 });
 
 test("login shows the active wallet, matching the test-mode signer's address", async ({ page }) => {
