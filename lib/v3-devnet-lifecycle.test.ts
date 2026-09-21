@@ -41,6 +41,9 @@ describe("V3 lifecycle runner", () => {
 
   it("configures instrument metadata before activation and refuses conflicting metadata", () => {
     const source = fs.readFileSync("scripts/v3-devnet-lifecycle.mjs", "utf8");
+    expect(source.indexOf("simulateTransaction")).toBeGreaterThan(-1);
+    expect(source.indexOf("simulateTransaction")).toBeLessThan(source.indexOf("sendAndConfirmTransaction(connection"));
+    expect(source).toContain("simulation rejected");
     expect(source.indexOf("configure V3 instrument oracle")).toBeGreaterThan(-1);
     expect(source.indexOf("configure V3 instrument oracle")).toBeLessThan(source.indexOf("activate V3 core"));
     expect(source).toContain("instrument oracle metadata conflict");
