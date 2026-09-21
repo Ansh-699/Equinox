@@ -19,21 +19,22 @@ const endpoints = process.argv.includes("--local")
         "wss://pyth-lazer-2.dourolabs.app/v1/stream",
       ];
 // Lazer subscription IDs are provider configuration, not Hermes feed hashes
-// and not a safe hard-coded default.  In particular, the former fallback
-// (33) is a crypto spot feed, so it could never prove the required AAPL/USD
-// equity path.  Require the entitled, catalog-verified numeric Lazer ID.
+// and not a safe hard-coded default. Require an explicitly selected,
+// catalog-verified numeric Lazer ID. PYTH_PRO_SYMBOL is diagnostic-only and
+// never sent to the provider; it makes captured smoke output unambiguous.
 const rawFeedId = process.env.PYTH_PRO_FEED_ID;
 if (!rawFeedId || !/^\d+$/.test(rawFeedId)) {
-  console.error("PYTH_PRO_FEED_ID must be the catalog-verified numeric Lazer ID for Equity.US.AAPL/USD");
+  console.error("PYTH_PRO_FEED_ID must be a catalog-verified numeric Pyth Pro ID");
   process.exit(1);
 }
 const feedId = Number(rawFeedId);
+const symbol = process.env.PYTH_PRO_SYMBOL ?? "unlabeled";
 const channel = process.env.PYTH_PRO_MIN_CHANNEL ?? "fixed_rate@200ms";
 if (!new Set(["real_time", "fixed_rate@50ms", "fixed_rate@200ms", "fixed_rate@1000ms"]).has(channel)) {
   console.error("PYTH_PRO_MIN_CHANNEL must be a documented Pyth Pro channel");
   process.exit(1);
 }
-console.log(`connecting to ${endpoints.length} endpoints, feed ${feedId}, channel ${channel}...`);
+console.log(`connecting to ${endpoints.length} endpoints, ${symbol} feed ${feedId}, channel ${channel}...`);
 
 const sockets = [];
 let accepted = null;

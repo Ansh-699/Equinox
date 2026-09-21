@@ -19,10 +19,30 @@ const STATE_PATH = process.env.V3_LIFECYCLE_STATE_PATH ?? "/tmp/opencode/v3-life
 const DELEGATION_STATE_PATH = process.env.V3_DELEGATION_STATE_PATH ?? "/tmp/opencode/v3-delegation-state.json";
 const SHARDED_COMMIT_STATE_PATH = process.env.V3_SHARDED_COMMIT_STATE_PATH ?? "/tmp/opencode/v3-sharded-commit-state.json";
 const EXCHANGE_KEY_PATH = process.env.V3_EXCHANGE_KEY_PATH ?? "/tmp/opencode/v3-lifecycle-exchange.json";
+const OLD_PROGRAM = "H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET";
+const PRESERVED_AAPL_CORE = "47Mx7SZvt7EY6NydsA5krgrqvcDDR1H5BG5xTPDSnhso";
+const FRESH_AAPL_CORE = "7gP2YAqf6TNMqfkDkSdjb2Y1peLzoXadBnzL2LDzhFei";
 const PRESERVED_V2_MARKET = "9d75hK8GyfqajxcijLa35bEh8SYUtobqi6eSdtF42RuS";
 const SIZES = { core: 4_096, book: 10_184, seat: 8_236, event: 3_244 };
 const BOOK_PAGES_PER_SIDE = 9;
-const AAPL_ORACLE = { feedId: 922, channel: 2, exponent: -5 };
+const ORACLE_CHANNELS = new Map([
+  ["real_time", 1],
+  ["fixed_rate@50ms", 2],
+  ["fixed_rate@200ms", 3],
+  ["fixed_rate@1000ms", 4],
+]);
+function selectedOracle() {
+  const feedId = Number(process.env.V3_ORACLE_FEED_ID ?? 922);
+  const channelName = process.env.V3_ORACLE_CHANNEL ?? "fixed_rate@50ms";
+  const channel = ORACLE_CHANNELS.get(channelName);
+  const exponent = Number(process.env.V3_ORACLE_EXPONENT ?? -5);
+  const symbol = process.env.V3_ORACLE_SYMBOL ?? "Equity.US.AAPL/USD";
+  if (!Number.isSafeInteger(feedId) || feedId <= 0) throw new Error("V3_ORACLE_FEED_ID must be a positive integer");
+  if (channel === undefined) throw new Error("V3_ORACLE_CHANNEL must be a documented Pyth Pro channel");
+  if (!Number.isSafeInteger(exponent) || exponent < -12 || exponent > 0) throw new Error("V3_ORACLE_EXPONENT must be an integer between -12 and 0");
+  return { feedId, channel, channelName, exponent, symbol };
+}
+const SELECTED_ORACLE = selectedOracle();
 const connection = new Connection(RPC, "confirmed");
 const execute = process.argv.includes("--execute");
 const stage = process.argv.filter((value) => !value.startsWith("--")).at(-1) ?? "plan";
@@ -44,7 +64,11 @@ function exchangeKeypair() {
   return keypair;
 }
 function assertFresh(state) {
-  if (state.market === PRESERVED_V2_MARKET || state.core === PRESERVED_V2_MARKET) throw new Error("refusing preserved V2 market");
+  if (PROGRAM.toBase58() === OLD_PROGRAM) throw new Error("refusing old StockStream program");
+  if ([PRESERVED_AAPL_CORE, FRESH_AAPL_CORE, PRESERVED_V2_MARKET].includes(state.market)
+    || [PRESERVED_AAPL_CORE, FRESH_AAPL_CORE, PRESERVED_V2_MARKET].includes(state.core)) {
+    throw new Error("refusing preserved AAPL/V2 market or core");
+  }
   if (state.version !== undefined && state.version !== 3) throw new Error("checkpoint is not V3");
 }
 async function send(name, ixs, signers) {
@@ -56,7 +80,7 @@ async function send(name, ixs, signers) {
 }
 function ix(opcode, keys, data = []) { return new TransactionInstruction({ programId: PROGRAM, keys, data: Buffer.from([opcode, ...data]) }); }
 function updateInstrumentIx(exchange, instrument, payer, instrumentId) {
-  const data = Buffer.alloc(41); instrumentId.copy(data, 0); data.writeUInt32LE(AAPL_ORACLE.feedId, 32); data[36] = AAPL_ORACLE.channel; data.writeInt32LE(AAPL_ORACLE.exponent, 37);
+  const data = Buffer.alloc(41); instrumentId.copy(data, 0); data.writeUInt32LE(SELECTED_ORACLE.feedId, 32); data[36] = SELECTED_ORACLE.channel; data.writeInt32LE(SELECTED_ORACLE.exponent, 37);
   return new TransactionInstruction({ programId: PROGRAM, keys: [ro(exchange), wr(instrument), sg(payer.publicKey)], data: Buffer.concat([Buffer.from([22]), data]) });
 }
 function instrumentMetadata(info) {
@@ -94,9 +118,9 @@ async function setup() {
   const configuredInstrument = await connection.getAccountInfo(instrument, "confirmed");
   const metadata = instrumentMetadata(configuredInstrument);
   const isUnset = metadata.feedId === 0 && metadata.channel === 0 && metadata.exponent === 0;
-  const matchesAapl = metadata.feedId === AAPL_ORACLE.feedId && metadata.channel === AAPL_ORACLE.channel && metadata.exponent === AAPL_ORACLE.exponent;
+  const matchesSelectedOracle = metadata.feedId === SELECTED_ORACLE.feedId && metadata.channel === SELECTED_ORACLE.channel && metadata.exponent === SELECTED_ORACLE.exponent;
   if (isUnset) await send("configure V3 instrument oracle", [updateInstrumentIx(exchange.publicKey, instrument, payer, instrumentId)], [payer]);
-  else if (!matchesAapl) throw new Error(`instrument oracle metadata conflict: ${JSON.stringify(metadata)}`);
+  else if (!matchesSelectedOracle) throw new Error(`instrument oracle metadata conflict: ${JSON.stringify(metadata)}`);
   await ensureV3Account("V3 core", instrument, core, 0, 0, SIZES.core, payer);
   const coreInfo = await connection.getAccountInfo(core, "confirmed");
   if (!coreInfo?.data[11]) {
@@ -139,7 +163,9 @@ function plan() {
   const delegated = delegation?.complete === true || state.delegationComplete === true;
   const committed = commit?.complete === true;
   console.log(JSON.stringify({
-    version: 3, execute, statePath: STATE_PATH, protectedV2Market: PRESERVED_V2_MARKET,
+    version: 3, execute, statePath: STATE_PATH,
+    protectedAccounts: [PRESERVED_AAPL_CORE, FRESH_AAPL_CORE, PRESERVED_V2_MARKET],
+    oracle: SELECTED_ORACLE,
     stages: {
       setup: setupComplete ? "complete: fresh core + 18 pages + 4 seat shards + 4 event shards" : "pending: run --execute setup (existing accounts are resumed, never recreated)",
       delegation: delegated ? "complete: checkpoint proves all 27 accounts delegated" : "pending: delegation checkpoint is absent or incomplete",

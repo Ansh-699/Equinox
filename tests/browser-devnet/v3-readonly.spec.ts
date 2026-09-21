@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-const CORE = "47Mx7SZvt7EY6NydsA5krgrqvcDDR1H5BG5xTPDSnhso";
+const CORE = "7gP2YAqf6TNMqfkDkSdjb2Y1peLzoXadBnzL2LDzhFei";
 const MARKET_API = "https://stockstream-market-api.ansht.workers.dev";
 
 test("loads the real Devnet terminal without exposing server credentials", async ({ page }) => {

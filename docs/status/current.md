@@ -25,6 +25,10 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 - Fresh account set: 29 (`1 exchange + 1 instrument + 27 V3 execution accounts`)
 - Activation metadata: fixed; feed `922`, channel `2` (`fixed_rate@50ms`), exponent `-5`
 - Fresh core activation: verified at slot `501862266`; live Pyth updates remain entitlement-blocked
+- Entitled alternative verified read-only: `Equity.US.TSLA/USD`, feed `1435`,
+  channel `fixed_rate@50ms`, exponent `-5`; the live smoke received redacted
+  updates from all three endpoints. TSLA is not configured on the activated
+  AAPL core and no TSLA market/account bundle has been created.
 - Live trading: blocked; ER lifecycle not started
 - Privy relay: blocked; Worker relay secrets incomplete
 - MagicBlock restoration: not attempted
@@ -209,19 +213,22 @@ Fresh current-HEAD regression evidence: `cargo test -p stockstream --test v3_bun
 
 The V3 layout avoids the identified account-size boundary and does not
 retrofit the preserved V2 market. A fresh identity-correct V3 deployment and
-all 27 core/child accounts now exist, but activation is blocked by the live
-Pyth entitlement gate. Its full trading and five-account delegation/commit
-lifecycle still requires Pyth/Privy credentials and a compatible DLP restore
-path before this blocker can be cleared.
+all 27 core/child accounts now exist. Instrument metadata is configured for
+feed 922, channel 2 (`fixed_rate@50ms`), and exponent -5, and fresh-core
+activation is verified at slot `501862266`. Live oracle updates and trading
+remain blocked because all three Pyth streams reject feed 922 as `Not
+entitled`. The ER lifecycle has not started; it still requires an entitled
+Pyth update, Privy credentials, and a compatible DLP restore path.
 
 ## Live evidence artifacts
 
 - `docs/status/fresh-deployment-20260921.json` -- identity-correct fresh
   program deployment and fresh V3 account-bundle evidence. The new ELF is
   hash-equivalent to the local artifact and the new program is upgradeable;
-  activation is still blocked by Pyth feed 922 entitlement (`OracleUnavailable
-  0x6004`). No live trading or MagicBlock lifecycle claim follows from this
-  account bootstrap.
+  instrument metadata configuration and core activation are verified. Pyth
+  feed 922 entitlement remains the live-oracle and live-trading blocker. No
+  live trading or MagicBlock lifecycle claim follows from this account
+  bootstrap and activation.
 
 - `docs/status/devnet-lifecycle-evidence-20260919.json` -- every real
   transaction signature/slot from this session's Devnet lifecycle run.
