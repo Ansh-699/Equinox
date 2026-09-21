@@ -1,0 +1,74 @@
+{
+  "cluster": "devnet",
+  "submitted": false,
+  "programId": "Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ",
+  "core": "AN7JHGoaiQ4cbB4pxeigVjSEwLsTdtRBCJsFmcmG5XBs",
+  "feePayer": "A5sV4PkkVM4gm3rejACvKFgxEMmj8ouGsffSKT5qYVc8",
+  "smoke": {
+    "subscribedEndpoints": 3,
+    "requiredEndpoints": 2,
+    "payloadsRedacted": true
+  },
+  "oracle": {
+    "symbol": "Equity.US.TSLA/USD",
+    "feedId": 1435,
+    "channel": "fixed_rate@50ms",
+    "channelId": 2,
+    "exponent": -5,
+    "price": "36980004",
+    "confidence": 12004,
+    "marketSession": "preMarket",
+    "feedUpdateTimestampUs": "1789991974850000",
+    "ageMsAtSimulation": 140,
+    "payloadHash": "9ce9d2bab2e4d384324b1bd1b8c556afbfe45697c481aadf835be6144aa28d81",
+    "payloadBytes": 155,
+    "payload": "redacted"
+  },
+  "instructions": [
+    {
+      "index": 0,
+      "name": "Ed25519 signature verification",
+      "programId": "Ed25519SigVerify111111111111111111111111111",
+      "dataBytes": 16,
+      "accounts": []
+    },
+    {
+      "index": 1,
+      "name": "ConsumeOracleUpdateV3",
+      "opcode": 12,
+      "programId": "Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ",
+      "dataBytes": 159,
+      "accounts": [
+        { "address": "AN7JHGoaiQ4cbB4pxeigVjSEwLsTdtRBCJsFmcmG5XBs", "signer": false, "writable": true, "role": "core" },
+        { "address": "6HsYsaAHZp9P9QQgLZMABhcfxQzf314qc59fQCxZMfZb", "signer": false, "writable": true, "role": "eventShard0" },
+        { "address": "EweGu79e5rXAkE1kTdjAec96sjuKVd97moSfVs1yaCQj", "signer": false, "writable": true, "role": "eventShard1" },
+        { "address": "6JTVv79gcSCS77o5UbkvJ5WjgwMf1hkFX518Zf3HLthK", "signer": false, "writable": true, "role": "eventShard2" },
+        { "address": "G96EwQLZ14k4AJhwD3CqMopE5RSYZD4DzQbxHK7CjKc6", "signer": false, "writable": true, "role": "eventShard3" },
+        { "address": "A5sV4PkkVM4gm3rejACvKFgxEMmj8ouGsffSKT5qYVc8", "signer": true, "writable": true, "role": "payer" },
+        { "address": "pytd2yyk641x7ak7mkaasSJVXh6YYZnC7wTmtgAyxPt", "signer": false, "writable": false, "role": "pythProgram" },
+        { "address": "3rdJbqfnagQ4yx9HXJViD4zc4xpiSqmFsKpPuSCQVyQL", "signer": false, "writable": false, "role": "pythStorage" },
+        { "address": "opsLibxVY7Vz5eYMmSfX8cLFCFVYTtH6fr6MiifMpA7", "signer": false, "writable": true, "role": "pythTreasury" },
+        { "address": "11111111111111111111111111111111", "signer": false, "writable": false, "role": "systemProgram" },
+        { "address": "Sysvar1nstructions1111111111111111111111111", "signer": false, "writable": false, "role": "instructionsSysvar" }
+      ]
+    }
+  ],
+  "simulation": {
+    "error": null,
+    "unitsConsumed": 35440,
+    "pythVerifyMessageSucceeded": true,
+    "stockStreamConsumeOracleUpdateV3Succeeded": true
+  },
+  "diagnosticAttempt": {
+    "submitted": false,
+    "error": "OracleUnavailable (0x6004)",
+    "classification": "invalid account: the documented treasury address was absent on Devnet",
+    "resolution": "derive the authoritative treasury from bytes 40..72 of the deployed Pyth storage account and verify it exists"
+  },
+  "coreBeforeSubmission": {
+    "oracleValid": false,
+    "feedId": 1435,
+    "channelId": 2,
+    "exponent": -5
+  }
+}
