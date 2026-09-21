@@ -37,6 +37,14 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
   with TSLA metadata, while `oracle_valid` remains false because signed Pyth
   submission was explicitly outside the authorized setup batch. Evidence:
   `docs/status/tsla-setup-evidence-20260921.json`.
+- TSLA signed Pyth update is prepared but not submitted. A fresh real payload
+  for feed `1435` (channel `2`, exponent `-5`) passed the native Ed25519 check,
+  deployed Pyth `VerifyMessage` CPI, and `ConsumeOracleUpdateV3` simulation
+  with `35,440` compute units and no error. The deployed storage account points
+  to treasury `opsLibxVY7Vz5eYMmSfX8cLFCFVYTtH6fr6MiifMpA7`; using the stale
+  documented treasury failed closed with `OracleUnavailable`. Payload bytes
+  remain redacted. Submission awaits explicit approval, so `oracle_valid`
+  remains false. Evidence: `docs/status/tsla-pyth-simulation-20260921.json`.
 - Live trading: blocked; ER lifecycle not started
 - Privy relay: blocked; Worker relay secrets incomplete
 - MagicBlock restoration: not attempted
