@@ -6,7 +6,7 @@ import {
   sendAndConfirmTransaction,
 } from "@solana/web3.js";
 
-const PROGRAM_ID = process.env.STOCKSTREAM_PROGRAM_ID ?? "Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ";
+const PROGRAM_ID = process.env.STOCKSTREAM_PROGRAM_ID ?? "BY81jGEfzwuqGkJbyYaGBty5Pn6oZLfntYUFkV85XZfo";
 const authority = Keypair.fromSecretKey(new Uint8Array(JSON.parse(fs.readFileSync(process.env.HOME + "/.config/solana/id.json", "utf8"))));
 const market = Keypair.generate();
 const conn = new Connection("https://api.devnet.solana.com", "confirmed");

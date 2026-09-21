@@ -18,9 +18,9 @@ function transaction(logMessages: string[], overrides: Partial<RawTransactionRes
 describe("decodeCustodyEvents", () => {
   it("decodes a real binary event line into a sequenced MarketEvent", () => {
     const tx = transaction([
-      "Program Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ invoke [1]",
+      "Program BY81jGEfzwuqGkJbyYaGBty5Pn6oZLfntYUFkV85XZfo invoke [1]",
       eventLogLine(401, 7, seatAmountPayload(4, 1000, 1000)), // 401 = CollateralDeposited
-      "Program Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ success",
+      "Program BY81jGEfzwuqGkJbyYaGBty5Pn6oZLfntYUFkV85XZfo success",
     ]);
     const events = decodeCustodyEvents(tx, "l1", 999);
     expect(events).toHaveLength(1);

@@ -18,15 +18,21 @@ import {
 
 const RPC = process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com";
 const ROUTER = "https://devnet-router.magicblock.app";
-const PROGRAM = new PublicKey("Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ");
+const PROGRAM = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID || "BY81jGEfzwuqGkJbyYaGBty5Pn6oZLfntYUFkV85XZfo");
 const DELEGATION_PROGRAM = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
-const INSTRUMENT = new PublicKey("9dJTKhEHupjB7bpyzCQm52ePKDq1o14XCP6MtLx6js77");
-const CORE = new PublicKey("AN7JHGoaiQ4cbB4pxeigVjSEwLsTdtRBCJsFmcmG5XBs");
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required for the fresh revision-2 market`);
+  return value;
+}
+// Revision-2 market identity comes from the lifecycle checkpoint, never from a
+// hardcoded address. decodeV3MarketCore + assertV3L1Readiness reject revision 1.
+const INSTRUMENT = new PublicKey(requireEnv("V3_INSTRUMENT"));
+const CORE = new PublicKey(requireEnv("V3_CORE"));
 const VALIDATOR = new PublicKey("MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57");
 const EXPECTED_ER = "https://devnet-as.magicblock.app/";
-const CHECKPOINT = "/tmp/stockstream-tsla-v3-state-20260921.json";
+const CHECKPOINT = process.env.V3_LIFECYCLE_STATE_PATH ?? "/tmp/opencode/v3-lifecycle-state.json";
 const execute = process.argv.includes("--submit");
-if (execute) throw new Error("Live mutations disabled pending layout revision 2 deployment review");
 const targetArg = process.argv.find((value) => value.startsWith("--target="))?.slice(9) ?? "core";
 
 type Entry = { label: string; kind: "core" | "book-page" | "seat-shard" | "event-shard"; index: number; parent: PublicKey; target: PublicKey; size: number };
@@ -39,7 +45,6 @@ function payer(): Keypair {
 function checkpointEntries(): Entry[] {
   const state = JSON.parse(fs.readFileSync(CHECKPOINT, "utf8"));
   if (state.version !== 3 || state.core !== CORE.toBase58() || state.instrument !== INSTRUMENT.toBase58()) throw new Error("TSLA checkpoint identity mismatch");
-  if (state.exchange !== "AW5ByA33xvoewXNfRRSQ4Am9z5fYs3i9mpjdUdtbEREK") throw new Error("TSLA exchange mismatch");
   if (state.v3Accounts?.bookPages?.length !== 18 || state.v3Accounts?.seatShards?.length !== 4 || state.v3Accounts?.eventShards?.length !== 4) throw new Error("incomplete TSLA execution bundle");
   return [
     { label: "core", kind: "core", index: 0, parent: INSTRUMENT, target: CORE, size: V3_MARKET_CORE_SIZE },

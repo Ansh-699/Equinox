@@ -11,9 +11,9 @@ import {
 import { loadPythKeeperConfig, PythKeeper } from "../lib/server/pyth-keeper";
 
 const RPC = process.env.SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
-const PROGRAM = "Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ";
-const CORE = "AN7JHGoaiQ4cbB4pxeigVjSEwLsTdtRBCJsFmcmG5XBs";
-const STATE_PATH = process.env.V3_LIFECYCLE_STATE_PATH ?? "/tmp/stockstream-tsla-v3-state-20260921.json";
+const PROGRAM = "BY81jGEfzwuqGkJbyYaGBty5Pn6oZLfntYUFkV85XZfo";
+const CORE = process.env.V3_CORE;
+const STATE_PATH = process.env.V3_LIFECYCLE_STATE_PATH ?? "/tmp/opencode/v3-lifecycle-state.json";
 const PYTH_PROGRAM = "pytd2yyk641x7ak7mkaasSJVXh6YYZnC7wTmtgAyxPt";
 const PYTH_STORAGE = "3rdJbqfnagQ4yx9HXJViD4zc4xpiSqmFsKpPuSCQVyQL";
 const EXPECTED = { symbol: "Equity.US.TSLA/USD", feedId: 1435, channel: "fixed_rate@50ms", channelId: 2, exponent: -5 } as const;
@@ -22,6 +22,7 @@ const execute = process.argv.includes("--submit");
 if (execute && process.env.CONFIRM_TSLA_PYTH_UPDATE !== "1") {
   throw new Error("submission requires CONFIRM_TSLA_PYTH_UPDATE=1 after explicit transaction approval");
 }
+if (!CORE) throw new Error("V3_CORE is required (the fresh revision-2 core address)");
 if (!fs.existsSync(STATE_PATH)) throw new Error(`missing TSLA lifecycle checkpoint: ${STATE_PATH}`);
 const state = JSON.parse(fs.readFileSync(STATE_PATH, "utf8"));
 if (state.core !== CORE || state.v3Accounts?.eventShards?.length !== 4) throw new Error("checkpoint is not the verified isolated TSLA bundle");

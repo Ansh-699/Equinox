@@ -1,4 +1,4 @@
-export const STOCKSTREAM_PROGRAM_ID = "Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ";
+export const STOCKSTREAM_PROGRAM_ID = "BY81jGEfzwuqGkJbyYaGBty5Pn6oZLfntYUFkV85XZfo";
 
 // Compatibility export for the public client facade. The ABI module is the
 // only opcode authority, so this cannot silently drift from generated parity.

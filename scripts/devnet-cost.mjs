@@ -16,7 +16,7 @@ import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram } from 
 
 const RPC = "https://api.devnet.solana.com";
 const conn = new Connection(RPC, "confirmed");
-const PROGRAM_ID = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? "Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ");
+const PROGRAM_ID = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? "BY81jGEfzwuqGkJbyYaGBty5Pn6oZLfntYUFkV85XZfo");
 const DELEGATION_PROGRAM = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
 const statePath = process.argv[2] ?? "/tmp/opencode/lifecycle-state.json";
 const state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, "utf8")) : {};

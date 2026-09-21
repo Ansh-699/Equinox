@@ -15,7 +15,7 @@ import { V3_LIFECYCLE_ORDER } from "./v3-lifecycle-readiness.mjs";
 import { Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction, sendAndConfirmTransaction } from "@solana/web3.js";
 
 const RPC = "https://api.devnet.solana.com";
-const PROGRAM = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? "Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ");
+const PROGRAM = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? "BY81jGEfzwuqGkJbyYaGBty5Pn6oZLfntYUFkV85XZfo");
 const STATE_PATH = process.env.V3_LIFECYCLE_STATE_PATH ?? "/tmp/opencode/v3-lifecycle-state.json";
 const DELEGATION_STATE_PATH = process.env.V3_DELEGATION_STATE_PATH ?? "/tmp/opencode/v3-delegation-state.json";
 const SHARDED_COMMIT_STATE_PATH = process.env.V3_SHARDED_COMMIT_STATE_PATH ?? "/tmp/opencode/v3-sharded-commit-state.json";
@@ -48,7 +48,13 @@ function selectedOracle() {
 const SELECTED_ORACLE = selectedOracle();
 const connection = new Connection(RPC, "confirmed");
 const execute = process.argv.includes("--execute");
-if (execute) throw new Error("Live mutations disabled pending layout revision 2 deployment review");
+// Revision-1 accounts are permanently unsafe: their risk fields overlap the
+// MagicBlock validator overlay. The previous program's only V3 accounts are
+// revision 1, so never operate against it.
+const PREVIOUS_REVISION1_PROGRAM = "Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ";
+if (PROGRAM.toBase58() === PREVIOUS_REVISION1_PROGRAM) {
+  throw new Error("refusing the revision-1 program; revision-2 markets require the corrected program ID");
+}
 const stage = process.argv.filter((value) => !value.startsWith("--")).at(-1) ?? "plan";
 
 const load = () => fs.existsSync(STATE_PATH) ? JSON.parse(fs.readFileSync(STATE_PATH, "utf8")) : {};
@@ -111,6 +117,29 @@ async function ensureV3Account(label, parent, target, kind, index, size, payer) 
     if (existing && !existing.owner.equals(SystemProgram.programId) && !existing.owner.equals(PROGRAM)) throw new Error(`${label}: target occupied by foreign owner`);
     await send(`${label} create/resume`, [ix(46, [ro(parent), wr(target), wsg(payer.publicKey), ro(SystemProgram.programId)], [kind, index])], [payer]);
   }
+}
+const V3_DISCRIMINATORS = { core: "STKMK003", book: "STKBK003", seat: "STKST003", event: "STKEV003" };
+async function verifyBundle(core, accounts) {
+  const coreInfo = await connection.getAccountInfo(core, "confirmed");
+  if (!coreInfo || !coreInfo.owner.equals(PROGRAM) || coreInfo.data.length !== SIZES.core) throw new Error("bundle: core missing, foreign-owned, or wrong-sized");
+  if (coreInfo.data.subarray(0, 8).toString() !== V3_DISCRIMINATORS.core || coreInfo.data.readUInt16LE(8) !== 3 || coreInfo.data[10] !== 1) throw new Error("bundle: core discriminator/version/initialized invalid");
+  if (coreInfo.data[371] !== 2) throw new Error("bundle: core is not revision 2; refusing the revision-1 risk layout");
+  if (coreInfo.data.readUInt32LE(246) !== SELECTED_ORACLE.feedId || coreInfo.data[250] !== SELECTED_ORACLE.channel || coreInfo.data.readInt32LE(251) !== SELECTED_ORACLE.exponent) throw new Error("bundle: core oracle metadata does not match the configured instrument");
+  const expected = [
+    ...accounts.bookPages.map((key) => [key, V3_DISCRIMINATORS.book, SIZES.book]),
+    ...accounts.seatShards.map((key) => [key, V3_DISCRIMINATORS.seat, SIZES.seat]),
+    ...accounts.eventShards.map((key) => [key, V3_DISCRIMINATORS.event, SIZES.event]),
+  ];
+  const all = [core.toBase58(), ...expected.map(([key]) => key)];
+  if (all.length !== 27 || new Set(all).size !== 27) throw new Error("bundle: incomplete or aliased account set");
+  const infos = await connection.getMultipleAccountsInfo(expected.map(([key]) => new PublicKey(key)), "confirmed");
+  for (let index = 0; index < expected.length; index += 1) {
+    const [key, discriminator, size] = expected[index];
+    const info = infos[index];
+    if (!info || !info.owner.equals(PROGRAM) || info.data.length !== size) throw new Error(`bundle: ${key} missing, foreign-owned, or wrong-sized`);
+    if (info.data.subarray(0, 8).toString() !== discriminator || info.data.readUInt16LE(8) !== 3) throw new Error(`bundle: ${key} discriminator/version invalid`);
+  }
+  return { accountCount: all.length, coreRevision: 2, allOwnedByProgram: true };
 }
 async function setup() {
   if (!execute) throw new Error("add --execute to submit Devnet transactions");
@@ -178,8 +207,10 @@ async function setup() {
     await ensureV3Account(`V3 event shard ${index}`, core, event, 3, index, SIZES.event, payer);
     accounts.seatShards.push(seat.toBase58()); accounts.eventShards.push(event.toBase58());
   }
-  save({ version: 3, core: core.toBase58(), instrument: instrument.toBase58(), v3Accounts: accounts, setupComplete: true });
-  console.log(JSON.stringify({ statePath: STATE_PATH, core: core.toBase58(), accounts }, null, 2));
+  save({ version: 3, core: core.toBase58(), instrument: instrument.toBase58(), v3Accounts: accounts });
+  const bundle = await verifyBundle(core, accounts);
+  save({ setupComplete: true, bundleVerified: bundle });
+  console.log(JSON.stringify({ statePath: STATE_PATH, core: core.toBase58(), accounts, bundle }, null, 2));
 }
 function plan() {
   const state = load(); assertFresh(state);

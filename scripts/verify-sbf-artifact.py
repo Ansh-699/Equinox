@@ -19,13 +19,33 @@ shows up in CI output instead of silently regressing the header.
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
-PROGRAM_ID = bytes([
-    231, 219, 3, 72, 253, 30, 57, 81, 174, 212, 9, 131, 185, 251, 17, 113,
-    226, 244, 242, 239, 18, 92, 34, 5, 81, 240, 155, 47, 2, 17, 152, 78,
-])
+# Derived from the Rust-generated ABI manifest so this gate cannot drift from
+# `programs/stockstream/src/lib.rs`'s `ID` (a second hardcoded pin silently
+# passed the old program ID after the identity moved).
+_B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+
+def _b58decode(text: str) -> bytes:
+    number = 0
+    for character in text:
+        number = number * 58 + _B58_ALPHABET.index(character)
+    raw = number.to_bytes((number.bit_length() + 7) // 8, "big") if number else b""
+    return b"\0" * (len(text) - len(text.lstrip("1"))) + raw
+
+
+def _program_id_bytes() -> bytes:
+    manifest = (
+        Path(__file__).resolve().parent.parent
+        / "clients/stockstream/src/abi/layout.json"
+    )
+    return _b58decode(json.loads(manifest.read_text())["PROGRAM_ID"])
+
+
+PROGRAM_ID = _program_id_bytes()
 MIN_PLAUSIBLE_BYTES = 50_000
 EM_SBPF = 0x107
 EF_SBPF_V0 = 0x0
