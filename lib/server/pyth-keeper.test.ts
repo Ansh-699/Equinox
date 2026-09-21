@@ -1,3 +1,4 @@
+import { PublicKey, SystemProgram } from '@solana/web3.js';
 import { describe, expect, it } from 'vitest';
 import { loadPythKeeperConfig, PythKeeper, pythHealth, type PythClient } from './pyth-keeper';
 
@@ -29,6 +30,12 @@ describe('server-side Pyth keeper',()=>{
     expect(consumerData.getUint16(1,true)).toBe(0); // ed25519_instruction_index (baseIndex=0)
     expect(instructions[1].data[3]).toBe(0); // signature_index
     expect(Buffer.from(instructions[1].data.slice(4))).toEqual(Buffer.from(message())); expect(keeper.health.lastTimestamp).toBe(1000);
+    const core=PublicKey.unique(); const payer=PublicKey.unique();
+    const v3=keeper.buildV3Transaction(update,{core,eventShards:Array.from({length:4},()=>PublicKey.unique()),payer,pythProgram:PublicKey.unique(),storage:PublicKey.unique(),treasury:PublicKey.unique(),systemProgram:SystemProgram.programId,instructionsSysvar:new PublicKey('Sysvar1nstructions1111111111111111111111111')});
+    expect(v3).toHaveLength(2);
+    expect(v3[1].keys[0]).toMatchObject({pubkey:core,isWritable:true,isSigner:false});
+    expect(v3[1].keys.slice(1,5).every(meta=>meta.isWritable&&!meta.isSigner)).toBe(true);
+    expect(v3[1].keys[5]).toMatchObject({pubkey:payer,isWritable:true,isSigner:true});
     await expect(keeper.fetchSignedUpdate()).rejects.toThrow('Duplicate');
   });
   it('rejects malformed signed-message framing before transaction construction',()=>{
