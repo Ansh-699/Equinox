@@ -22,6 +22,7 @@ const EXCHANGE_KEY_PATH = process.env.V3_EXCHANGE_KEY_PATH ?? "/tmp/opencode/v3-
 const PRESERVED_V2_MARKET = "9d75hK8GyfqajxcijLa35bEh8SYUtobqi6eSdtF42RuS";
 const SIZES = { core: 4_096, book: 10_184, seat: 8_236, event: 3_244 };
 const BOOK_PAGES_PER_SIDE = 9;
+const AAPL_ORACLE = { feedId: 922, channel: 2, exponent: -5 };
 const connection = new Connection(RPC, "confirmed");
 const execute = process.argv.includes("--execute");
 const stage = process.argv.filter((value) => !value.startsWith("--")).at(-1) ?? "plan";
@@ -54,6 +55,14 @@ async function send(name, ixs, signers) {
   console.log(`${name}: ${signature} slot=${slot}`); return { signature, slot };
 }
 function ix(opcode, keys, data = []) { return new TransactionInstruction({ programId: PROGRAM, keys, data: Buffer.from([opcode, ...data]) }); }
+function updateInstrumentIx(exchange, instrument, payer, instrumentId) {
+  const data = Buffer.alloc(41); instrumentId.copy(data, 0); data.writeUInt32LE(AAPL_ORACLE.feedId, 32); data[36] = AAPL_ORACLE.channel; data.writeInt32LE(AAPL_ORACLE.exponent, 37);
+  return new TransactionInstruction({ programId: PROGRAM, keys: [ro(exchange), wr(instrument), sg(payer.publicKey)], data: Buffer.concat([Buffer.from([22]), data]) });
+}
+function instrumentMetadata(info) {
+  if (!info || info.data.length !== 128) throw new Error("fresh instrument account has an unexpected layout");
+  return { feedId: info.data.readUInt32LE(75), channel: info.data[79], exponent: info.data.readInt32LE(107) };
+}
 async function ensureV3Account(label, parent, target, kind, index, size, payer) {
   for (;;) {
     const existing = await connection.getAccountInfo(target, "confirmed");
@@ -82,11 +91,18 @@ async function setup() {
   if (!exchangeInfo?.data[10]) await send("initialize V3 exchange", [ix(19, [wr(exchange.publicKey), sg(payer.publicKey)])], [payer]);
   const instrumentInfo = await connection.getAccountInfo(instrument, "confirmed");
   if (!instrumentInfo?.data[10]) await send("register V3 instrument", [ix(20, [ro(exchange.publicKey), wr(instrument), sg(payer.publicKey)], [...instrumentId])], [payer]);
+  const configuredInstrument = await connection.getAccountInfo(instrument, "confirmed");
+  const metadata = instrumentMetadata(configuredInstrument);
+  const isUnset = metadata.feedId === 0 && metadata.channel === 0 && metadata.exponent === 0;
+  const matchesAapl = metadata.feedId === AAPL_ORACLE.feedId && metadata.channel === AAPL_ORACLE.channel && metadata.exponent === AAPL_ORACLE.exponent;
+  if (isUnset) await send("configure V3 instrument oracle", [updateInstrumentIx(exchange.publicKey, instrument, payer, instrumentId)], [payer]);
+  else if (!matchesAapl) throw new Error(`instrument oracle metadata conflict: ${JSON.stringify(metadata)}`);
   await ensureV3Account("V3 core", instrument, core, 0, 0, SIZES.core, payer);
   const coreInfo = await connection.getAccountInfo(core, "confirmed");
   if (!coreInfo?.data[11]) {
     try {
       await send("activate V3 core", [ix(47, [ro(exchange.publicKey), ro(instrument), wr(core), sg(payer.publicKey)])], [payer]);
+      save({ activationBlocked: null, activationComplete: true });
     } catch (error) {
       if (!String(error?.transactionMessage ?? error).includes("0x6004")) throw error;
       save({ activationBlocked: "oracle_unavailable" });

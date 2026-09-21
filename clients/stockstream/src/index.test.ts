@@ -289,6 +289,9 @@ test("registry constructors preserve market-scoped account order", () => {
   const update = updateStockInstrument({ exchange, instrument, authority }, id, 77, 1, -6);
   expect(Array.from(update.data.slice(33))).toEqual([77, 0, 0, 0, 1, 250, 255, 255, 255]);
   expect(() => updateStockInstrument({ exchange, instrument, authority }, id, 0, 1, -6)).toThrow(/non-zero/);
+  expect(() => updateStockInstrument({ exchange, instrument, authority }, id, 922, 0, -5)).toThrow(/between 1 and 4/);
+  expect(() => updateStockInstrument({ exchange, instrument, authority }, id, 922, 2, -13)).toThrow(/between -12 and 0/);
+  expect(() => updateStockInstrument({ exchange, instrument, authority }, id, 922, 2, 1)).toThrow(/between -12 and 0/);
 });
 
 test("updateExchangeConfig derives the field mask from provided keys and writes every field at its exact offset", () => {

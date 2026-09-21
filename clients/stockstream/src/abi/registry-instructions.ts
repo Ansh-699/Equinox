@@ -28,6 +28,7 @@ export function createPerpMarket(accounts: PerpMarketAccounts, instrumentId: Uin
 export function updateStockInstrument(accounts: InstrumentAccounts, instrumentId: Uint8Array, pythFeedId: number, oracleChannel: number, priceExponent: number): TransactionInstruction {
   if (!Number.isInteger(pythFeedId) || pythFeedId <= 0 || pythFeedId > 0xffff_ffff) throw new RangeError("pythFeedId must be a non-zero u32");
   if (!Number.isInteger(oracleChannel) || oracleChannel < 1 || oracleChannel > 4) throw new RangeError("oracleChannel must be between 1 and 4");
+  if (!Number.isInteger(priceExponent) || priceExponent < -12 || priceExponent > 0) throw new RangeError("priceExponent must be between -12 and 0");
   const data = new Uint8Array(42); const view = new DataView(data.buffer);
   data[0] = OPCODE.updateStockInstrument; data.set(instrumentId, 1); view.setUint32(33, pythFeedId, true); data[37] = oracleChannel; view.setInt32(38, priceExponent, true);
   return instruction(data, [accountMeta(accounts.exchange, false, false), accountMeta(accounts.instrument, false, true), accountMeta(accounts.authority, true, false)]);
