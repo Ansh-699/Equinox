@@ -972,6 +972,10 @@ pub fn delegate_v3_account(
     // buffer. A child cannot be handed to a different ER validator later.
     if kind == v3::V3AccountKind::MarketCore {
         let bytes = unsafe { accounts[1].borrow_unchecked_mut() };
+        if bytes[v3::V3_CORE_RISK_CONFIG_VERSION_OFFSET] != v3::V3_RISK_CONFIG_VERSION {
+            return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+        }
+        v3::read_v3_risk_config(bytes)?;
         bytes[v3::V3_CORE_DELEGATION_STATUS_OFFSET] = DelegationStatus::Delegated as u8;
         bytes[v3::V3_CORE_VALIDATOR_OFFSET..v3::V3_CORE_VALIDATOR_OFFSET + 32]
             .copy_from_slice(validator.as_ref());

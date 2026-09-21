@@ -1908,6 +1908,8 @@ fn consume_oracle_update_v3(
         || core_data[0..8] != crate::v3::V3_MARKET_CORE_DISCRIMINATOR
         || core_data[8..10] != crate::v3::V3_LAYOUT_VERSION.to_le_bytes()
         || core_data[10] != 1
+        || core_data[crate::v3::V3_CORE_RISK_CONFIG_VERSION_OFFSET]
+            != crate::v3::V3_RISK_CONFIG_VERSION
         || core_data
             [crate::v3::V3_CORE_ORACLE_FEED_ID_OFFSET..crate::v3::V3_CORE_ORACLE_FEED_ID_OFFSET + 4]
             != verified.feed_id.to_le_bytes()
@@ -1944,6 +1946,11 @@ fn consume_oracle_update_v3(
             ..crate::v3::V3_CORE_ORACLE_TIMESTAMP_OFFSET + 8]
             .copy_from_slice(&timestamp.to_le_bytes());
         core[crate::v3::V3_CORE_ORACLE_VALID_OFFSET] = 1;
+        core[crate::v3::V3_CORE_ORACLE_SESSION_OFFSET] = u8::try_from(verified.session)
+            .map_err(|_| custom(StockStreamError::OracleUnavailable))?;
+        core[crate::v3::V3_CORE_ORACLE_CONFIDENCE_OFFSET
+            ..crate::v3::V3_CORE_ORACLE_CONFIDENCE_OFFSET + 8]
+            .copy_from_slice(&(verified.confidence as u64).to_le_bytes());
         core[crate::v3::V3_CORE_MODE_OFFSET] = match verified.session {
             0 | 1 | 2 => MarketMode::Open as u8,
             3 | 4 => MarketMode::CloseOnly as u8,

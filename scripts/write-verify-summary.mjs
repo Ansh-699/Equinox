@@ -10,7 +10,10 @@ import { execFileSync } from "node:child_process";
 
 const [logDir, outputPath] = process.argv.slice(2);
 if (!logDir || !outputPath) throw new Error("usage: write-verify-summary.mjs LOG_DIR OUTPUT_PATH");
-const read = (name) => fs.readFileSync(`${logDir}/${name}.log`, "utf8");
+// Vitest colorizes its summary when a TTY is inferred, which would otherwise
+// break the count regexes below. Strip ANSI SGR sequences before parsing.
+const stripAnsi = (text) => text.replace(/\x1b\[[0-9;]*m/g, "");
+const read = (name) => stripAnsi(fs.readFileSync(`${logDir}/${name}.log`, "utf8"));
 const first = (text, pattern, label) => {
   const match = text.match(pattern);
   if (!match) throw new Error(`could not derive ${label} from verification log`);
@@ -28,8 +31,10 @@ const artifactPath = `${process.cwd()}/target/deploy/stockstream.so`;
 const artifactSha256 = crypto.createHash("sha256").update(fs.readFileSync(artifactPath)).digest("hex");
 const commit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 const abiOk = read("abi").includes("ABI-OK");
+const v3LayoutFixture = read("v3-layout-fixture").includes("V3-LAYOUT-FIXTURE-OK");
 const secretScanOk = read("secrets").includes("secret-scan: OK");
-if (!abiOk || !secretScanOk) throw new Error("verification logs do not contain ABI-OK and secret-scan: OK");
+if (!abiOk || !v3LayoutFixture || !secretScanOk)
+  throw new Error("verification logs do not contain ABI-OK, V3-LAYOUT-FIXTURE-OK and secret-scan: OK");
 
 const summary = {
   schema: 1,
@@ -39,6 +44,7 @@ const summary = {
     rustFormat: read("rust-format").includes("error:") === false,
     rustTests,
     abiParity: abiOk,
+    v3LayoutFixtureParity: v3LayoutFixture,
     frontendTests,
     workerTests,
     typescript: true,

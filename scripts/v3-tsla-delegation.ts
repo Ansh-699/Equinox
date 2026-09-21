@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import { assertV3L1Readiness } from "./v3-lifecycle-readiness.mjs";
 import {
   Connection,
   Keypair,
@@ -25,6 +26,7 @@ const VALIDATOR = new PublicKey("MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57");
 const EXPECTED_ER = "https://devnet-as.magicblock.app/";
 const CHECKPOINT = "/tmp/stockstream-tsla-v3-state-20260921.json";
 const execute = process.argv.includes("--submit");
+if (execute) throw new Error("Live mutations disabled pending layout revision 2 deployment review");
 const targetArg = process.argv.find((value) => value.startsWith("--target="))?.slice(9) ?? "core";
 
 type Entry = { label: string; kind: "core" | "book-page" | "seat-shard" | "event-shard"; index: number; parent: PublicKey; target: PublicKey; size: number };
@@ -69,6 +71,10 @@ for (let index = 0; index < entries.length; index += 1) {
   if (!info || !info.owner.equals(expectedOwner) || info.data.length !== entry.size) throw new Error(`${entry.label}: missing, wrong-sized, or not in the required canonical delegation state`);
 }
 const coreView = decodeV3MarketCore(infos[0]!.data);
+if (selectedPosition === 0) assertV3L1Readiness({
+  core: infos[0]!.data, seatShards: infos.slice(19, 23).map(info => info!.data),
+  accountCount: entries.length, nowSeconds: Math.floor(Date.now() / 1000),
+});
 if (!coreView.instrument.equals(INSTRUMENT) || !coreView.marketAuthority.equals(signer.publicKey) || coreView.mode !== 1) throw new Error("TSLA core authority/instrument/mode mismatch");
 const statuses = await Promise.all(entries.map(({ target }) => routerStatus(target)));
 for (let index = 0; index < statuses.length; index += 1) {

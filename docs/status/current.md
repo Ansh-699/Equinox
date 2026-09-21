@@ -1,5 +1,31 @@
 # StockStream status (2026-09-21, continuation)
 
+TSLA delegation hold: the previously successful opcode-48 simulation does
+not establish risk preservation. Source inspection found validator bytes
+214–245 overlap risk configuration at bytes 218–231. The selected validator
+would overwrite maker/taker fees with values rejected by the risk reader.
+The L1 deposit handler also rejects a delegated core, so collateral must
+be prepared before delegation under the current custody path. See
+`docs/status/tsla-delegation-blockers-20260921.md`. The prior delegation
+approval proposal is withdrawn pending resolution. No transaction was
+submitted in this review. `oracle_valid=true` records historical acceptance;
+the stored TSLA update was 2005 seconds old at the new readback.
+
+Local revision-2 layout fix (2026-09-21, not deployed): the collision is
+resolved in source by moving V3 risk configuration out of bytes 214–245 and
+making those bytes an explicit `delegation_validator` overlay. Risk config now
+lives at 1672–1685, with accepted oracle session/confidence at 1686–1694.
+`V3_RISK_CONFIG_VERSION` is 2; every V3 reader, the delegation guard, and the
+client/Worker decoders reject revision 1 instead of reinterpreting it, so no
+existing account is silently migrated. Execution now fails closed on stale,
+future, or session-invalid oracle data (`V3_MAX_ORACLE_AGE_SECONDS = 10`), and
+the lifecycle runner enforces L1 custody before ER delegation. Offset table,
+migration boundary, and evidence: `docs/status/v3-layout-correction.md`. Full
+local gate re-run passed (Rust, ABI + layout-fixture parity, frontend,
+Worker, SBF artifact, lint, secret scan) and the live Pyth smoke again
+returned redacted fresh TSLA updates. No program, account, or delegation
+mutation was performed.
+
 The single authoritative snapshot of verified state. Superseded historical
 reports live in `docs/` alongside their original names; this file is the
 one to read first. Update it (don't create a new dated file) the next time

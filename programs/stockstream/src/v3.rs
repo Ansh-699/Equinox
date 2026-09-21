@@ -85,12 +85,12 @@ pub const V3_CORE_ORACLE_EXPONENT_OFFSET: usize = 251;
 // Durable risk/economic configuration lives in the versioned core reserve;
 // keeping these offsets explicit preserves the 4,096-byte MagicBlock-safe
 // account size while making V3 economics independent of V2 arena offsets.
-pub const V3_CORE_INITIAL_MARGIN_BPS_OFFSET: usize = 218;
-pub const V3_CORE_MAINTENANCE_MARGIN_BPS_OFFSET: usize = 220;
-pub const V3_CORE_LIQUIDATION_FEE_BPS_OFFSET: usize = 222;
-pub const V3_CORE_MAKER_FEE_BPS_OFFSET: usize = 224;
-pub const V3_CORE_TAKER_FEE_BPS_OFFSET: usize = 226;
-pub const V3_CORE_MAXIMUM_LEVERAGE_OFFSET: usize = 228;
+pub const V3_CORE_INITIAL_MARGIN_BPS_OFFSET: usize = 1672;
+pub const V3_CORE_MAINTENANCE_MARGIN_BPS_OFFSET: usize = 1674;
+pub const V3_CORE_LIQUIDATION_FEE_BPS_OFFSET: usize = 1676;
+pub const V3_CORE_MAKER_FEE_BPS_OFFSET: usize = 1678;
+pub const V3_CORE_TAKER_FEE_BPS_OFFSET: usize = 1680;
+pub const V3_CORE_MAXIMUM_LEVERAGE_OFFSET: usize = 1682;
 pub const V3_CORE_MAXIMUM_POSITION_OFFSET: usize = 256;
 pub const V3_CORE_MAXIMUM_OPEN_INTEREST_OFFSET: usize = 272;
 pub const V3_CORE_CURRENT_OPEN_INTEREST_OFFSET: usize = 288;
@@ -119,7 +119,39 @@ pub const V3_COMMIT_PHASE_IDLE: u8 = 0;
 pub const V3_COMMIT_PHASE_SNAPSHOT: u8 = 1;
 pub const V3_COMMIT_PHASE_UNDELEGATING: u8 = 2;
 
-pub const V3_RISK_CONFIG_VERSION: u8 = 1;
+pub const V3_RISK_CONFIG_VERSION: u8 = 2;
+pub const V3_MAX_ORACLE_AGE_SECONDS: u64 = 10;
+pub const V3_CORE_ORACLE_SESSION_OFFSET: usize = 1686;
+pub const V3_CORE_ORACLE_CONFIDENCE_OFFSET: usize = 1687;
+
+/// Validate stored provider-verified data against the execution clock, never
+/// against its own publication time. Closed/restricted modes fail closed.
+pub fn validate_v3_oracle_freshness(bytes: &[u8], now: u64) -> ProgramResult {
+    if bytes.len() != V3_MARKET_CORE_SIZE {
+        return Err(bundle_error());
+    }
+    let timestamp = core_u64(bytes, V3_CORE_ORACLE_TIMESTAMP_OFFSET)?;
+    let price = i64::from_le_bytes(bytes[181..189].try_into().map_err(|_| bundle_error())?);
+    let confidence = core_u64(bytes, V3_CORE_ORACLE_CONFIDENCE_OFFSET)?;
+    if bytes[V3_CORE_ORACLE_VALID_OFFSET] != 1
+        || bytes[V3_CORE_MODE_OFFSET] != 1
+        || bytes[V3_CORE_ORACLE_SESSION_OFFSET] > 2
+        || price <= 0
+        || confidence > price.unsigned_abs() / 5
+        || timestamp > now.saturating_add(2)
+        || now > timestamp.saturating_add(V3_MAX_ORACLE_AGE_SECONDS)
+    {
+        return Err(StockStreamError::OracleUnavailable.into());
+    }
+    Ok(())
+}
+
+fn fresh_v3_execution_time(bytes: &[u8]) -> Result<u64, ProgramError> {
+    let now = u64::try_from(crate::handlers::current_unix_timestamp()?)
+        .map_err(|_| ProgramError::from(StockStreamError::OracleUnavailable))?;
+    validate_v3_oracle_freshness(bytes, now)?;
+    Ok(now)
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct V3RiskConfig {
@@ -258,7 +290,9 @@ pub struct MarketCoreV3 {
     pub delegation_status: u8,
     pub expected_commit_sequence: u64,
     pub last_committed_sequence: u64,
-    pub reserved: [u8; 3_882],
+    /// Dedicated integration overlay. No economic field may occupy these bytes.
+    pub delegation_validator: [u8; 32],
+    pub reserved: [u8; 3_850],
 }
 pub const V3_MARKET_CORE_SIZE: usize = size_of::<MarketCoreV3>();
 
@@ -1452,14 +1486,10 @@ pub fn update_funding_v3(
         let core = unsafe { bundle[0].borrow_unchecked() };
         read_v3_risk_config(&core)?.mark_deviation_bps
     };
-    let now = {
-        let core = unsafe { bundle[0].borrow_unchecked() };
-        u64::from_le_bytes(
-            core[V3_CORE_ORACLE_TIMESTAMP_OFFSET..V3_CORE_ORACLE_TIMESTAMP_OFFSET + 8]
-                .try_into()
-                .map_err(|_| bundle_error())?,
-        )
-    };
+    let now = fresh_v3_execution_time(unsafe { bundle[0].borrow_unchecked() })?;
+    if timestamp > now.saturating_add(2) {
+        return Err(StockStreamError::OracleUnavailable.into());
+    }
     let best_for = |book: &mut PagedBookV3<'_>, side: Side| -> Result<Option<i64>, ProgramError> {
         let mut best: Option<i64> = None;
         for tree in [TreeKind::Fixed, TreeKind::OraclePegged] {
@@ -1606,6 +1636,7 @@ pub fn validate_execution_bundle(
         || core_bytes[0..8] != V3_MARKET_CORE_DISCRIMINATOR
         || core_bytes[8..10] != V3_LAYOUT_VERSION.to_le_bytes()
         || core_bytes[10] != 1
+        || core_bytes[V3_CORE_RISK_CONFIG_VERSION_OFFSET] != V3_RISK_CONFIG_VERSION
         || core_bytes[V3_CORE_MODE_OFFSET] > 2
     {
         return Err(bundle_error());
@@ -2400,6 +2431,10 @@ pub fn read_v3_risk_config(bytes: &[u8]) -> Result<V3RiskConfig, ProgramError> {
     if bytes.len() != V3_MARKET_CORE_SIZE {
         return Err(bundle_error());
     }
+    // Revision 1 overlaps the validator. Never reinterpret its risk values.
+    if bytes[V3_CORE_RISK_CONFIG_VERSION_OFFSET] != V3_RISK_CONFIG_VERSION {
+        return Err(bundle_error());
+    }
     let configured = bytes[V3_CORE_RISK_CONFIG_VERSION_OFFSET] == V3_RISK_CONFIG_VERSION;
     let defaults = V3RiskConfig::defaults();
     let read_u16_or = |offset: usize, fallback: u16| {
@@ -3021,6 +3056,7 @@ pub fn liquidate_v3(
     }
     let (mark, funding, config) = {
         let core = unsafe { accounts[0].borrow_unchecked() };
+        fresh_v3_execution_time(&core)?;
         if core[V3_CORE_MARKET_AUTHORITY_OFFSET..V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
             != signer.address().to_bytes()
             || core[V3_CORE_ORACLE_VALID_OFFSET] != 1
@@ -3167,10 +3203,7 @@ fn place_order_v3_with_action(
     if accounts.len() < V3_SIGNER_ACCOUNT_INDEX + 1 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
-    let now = core_u64(
-        unsafe { accounts[0].borrow_unchecked() },
-        V3_CORE_ORACLE_TIMESTAMP_OFFSET,
-    )?;
+    let now = fresh_v3_execution_time(unsafe { accounts[0].borrow_unchecked() })?;
     let (seat_before, _, _) = v3_trade_seat(accounts, order.seat_index)?;
     let funding_accumulator = core_i128(
         unsafe { accounts[0].borrow_unchecked() },
@@ -3703,6 +3736,8 @@ pub fn deposit_collateral_v3(
     }
     let core_key = *core.address();
     let core_bytes = unsafe { core.borrow_unchecked() };
+    fresh_v3_execution_time(&core_bytes)?;
+    read_v3_risk_config(&core_bytes)?;
     if core_bytes[0..8] != V3_MARKET_CORE_DISCRIMINATOR
         || core_bytes[8..10] != V3_LAYOUT_VERSION.to_le_bytes()
         || core_bytes[V3_CORE_MODE_OFFSET] != 1
@@ -3831,6 +3866,7 @@ pub fn withdraw_collateral_v3(
     if core_bytes[V3_CORE_ORACLE_VALID_OFFSET] == 0 {
         return Err(StockStreamError::RiskViolation.into());
     }
+    fresh_v3_execution_time(core_bytes)?;
     let mark_price = i64::from_le_bytes(
         core_bytes[V3_CORE_ORACLE_PRICE_OFFSET..V3_CORE_ORACLE_PRICE_OFFSET + 8]
             .try_into()
@@ -4234,10 +4270,7 @@ fn preflight_replace_order_v3(
     if accounts.len() < V3_SIGNER_ACCOUNT_INDEX + 1 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
-    let now = core_u64(
-        unsafe { accounts[0].borrow_unchecked() },
-        V3_CORE_ORACLE_TIMESTAMP_OFFSET,
-    )?;
+    let now = fresh_v3_execution_time(unsafe { accounts[0].borrow_unchecked() })?;
     let (seat, _, _) = v3_trade_seat(accounts, new_order.seat_index)?;
     let core_snapshot = unsafe { accounts[0].borrow_unchecked() };
     let config = read_v3_risk_config(&core_snapshot)?;

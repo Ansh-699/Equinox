@@ -121,9 +121,9 @@ describe("V3 sharded ABI", () => {
 
   it("decodes V3 bytes without interpreting them as a V2 header", () => {
     const core = new Uint8Array(V3_MARKET_CORE_SIZE);
-    core.set(Buffer.from("STKMK003")); const view = new DataView(core.buffer); view.setUint16(8, 3, true); core[10] = 1; core[11] = 1; core[12] = 4;
+    core.set(Buffer.from("STKMK003")); const view = new DataView(core.buffer); view.setUint16(8, 3, true); core[10] = 1; core[11] = 1; core[12] = 4; core[371] = 2;
     view.setUint32(246, 922, true); core[250] = 1; view.setInt32(251, -6, true);
-    expect(decodeV3MarketCore(core)).toMatchObject({ mode: 1, oracleValid: false, oracleFeedId: 922, oracleChannel: 1, oracleExponent: -6, riskConfigVersion: 0, protocolFeeBalance: 0n });
+    expect(decodeV3MarketCore(core)).toMatchObject({ mode: 1, oracleValid: false, oracleFeedId: 922, oracleChannel: 1, oracleExponent: -6, riskConfigVersion: 2, protocolFeeBalance: 0n });
     const page = new Uint8Array(V3_BOOK_PAGE_SIZE);
     page.set(Buffer.from("STKBK003")); new DataView(page.buffer).setUint16(8, 3, true); page[10] = 1; page[11] = 3;
     expect(decodeV3BookPage(page)).toMatchObject({ side: 1, page: 3, nodeCount: 0 });

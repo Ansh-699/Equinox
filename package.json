@@ -20,7 +20,8 @@
     "check:secrets": "bash scripts/secret-scan.sh",
     "verify": "bash scripts/verify.sh",
     "generate:stockstream-abi": "GENERATE_MANIFEST=1 MANIFEST_OUTPUT=$(pwd)/clients/stockstream/src/abi/layout.json cargo test -p stockstream --test abi_manifest -- generate_manifest",
-    "check:stockstream-abi": "GENERATE_MANIFEST=1 MANIFEST_OUTPUT=/tmp/abi-check.json cargo test -p stockstream --test abi_manifest -- generate_manifest > /dev/null && diff /tmp/abi-check.json clients/stockstream/src/abi/layout.json && echo ABI-OK"
+    "check:stockstream-abi": "GENERATE_MANIFEST=1 MANIFEST_OUTPUT=/tmp/abi-check.json cargo test -p stockstream --test abi_manifest -- generate_manifest > /dev/null && diff /tmp/abi-check.json clients/stockstream/src/abi/layout.json && echo ABI-OK",
+    "check:v3-layout-fixture": "V3_LAYOUT_FIXTURE_OUTPUT=/tmp/v3-core-revision2.hex cargo test -p stockstream --test v3_layout_overlay validator_overlay_preserves_all_economic_and_oracle_bytes > /dev/null && diff /tmp/v3-core-revision2.hex clients/stockstream/src/abi/v3-core-revision2.hex && echo V3-LAYOUT-FIXTURE-OK"
   },
   "dependencies": {
     "@magicblock-labs/ephemeral-rollups-kit": "0.17.0",

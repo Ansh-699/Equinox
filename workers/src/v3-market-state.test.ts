@@ -8,7 +8,7 @@ const write = (bytes: Uint8Array, text: string, at = 0) => bytes.set(new TextEnc
 const u16 = (bytes: Uint8Array, at: number, value: number) => new DataView(bytes.buffer).setUint16(at, value, true);
 
 function core(): Uint8Array {
-  const bytes = new Uint8Array(V3_CORE_SIZE); write(bytes, "STKMK003"); u16(bytes, 8, 3); bytes[10] = 1; bytes[11] = 1;
+  const bytes = new Uint8Array(V3_CORE_SIZE); write(bytes, "STKMK003"); u16(bytes, 8, 3); bytes[10] = 1; bytes[11] = 1; bytes[371] = 2;
   bytes[12] = 1; bytes[44] = 2; bytes[180] = 1; bytes[197] = 3; new DataView(bytes.buffer).setUint32(246, 922, true); bytes[250] = 1; new DataView(bytes.buffer).setInt32(251, -6, true); return bytes;
 }
 function page(side: number, index: number): Uint8Array {

@@ -49,7 +49,11 @@ enum Trader {
 }
 
 fn program_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/deploy/stockstream.so")
+    std::env::var_os("STOCKSTREAM_TEST_SBF")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/deploy/stockstream.so")
+        })
 }
 
 fn writable(address: Address) -> AccountMeta {

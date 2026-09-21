@@ -44,7 +44,11 @@ const DELEGATION_PROGRAM_ID: Address = Address::new_from_array([
 ]);
 
 fn program_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/deploy/stockstream.so")
+    std::env::var_os("STOCKSTREAM_TEST_SBF")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/deploy/stockstream.so")
+        })
 }
 
 fn install(svm: &mut LiteSVM, address: Address, data: Vec<u8>, owner: Address) {

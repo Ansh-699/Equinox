@@ -51,7 +51,7 @@ export interface V3CoreState {
 /** Exact offsets mirror `MarketCoreV3` in Rust. `null` means a malformed,
  * V2, or foreign account; callers must not fill defaults for these values. */
 export function decodeV3Core(bytes: Uint8Array): V3CoreState | null {
-  if (!validVersion(bytes, "STKMK003", V3_CORE_SIZE) || bytes[10] !== 1) return null;
+  if (!validVersion(bytes, "STKMK003", V3_CORE_SIZE) || bytes[10] !== 1 || bytes[371] !== 2) return null;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   return {
     kind: "v3",

@@ -18,8 +18,11 @@ use stockstream::{
 #[test]
 fn serialized_initialize_market_executes_in_litesvm() {
     let mut svm = LiteSVM::new();
-    let program_path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/deploy/stockstream.so");
+    let program_path = std::env::var_os("STOCKSTREAM_TEST_SBF")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/deploy/stockstream.so")
+        });
     svm.add_program_from_file(ID, program_path).unwrap();
 
     let authority = Keypair::new();
