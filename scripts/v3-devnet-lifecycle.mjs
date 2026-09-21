@@ -19,6 +19,8 @@ const STATE_PATH = process.env.V3_LIFECYCLE_STATE_PATH ?? "/tmp/opencode/v3-life
 const DELEGATION_STATE_PATH = process.env.V3_DELEGATION_STATE_PATH ?? "/tmp/opencode/v3-delegation-state.json";
 const SHARDED_COMMIT_STATE_PATH = process.env.V3_SHARDED_COMMIT_STATE_PATH ?? "/tmp/opencode/v3-sharded-commit-state.json";
 const EXCHANGE_KEY_PATH = process.env.V3_EXCHANGE_KEY_PATH ?? "/tmp/opencode/v3-lifecycle-exchange.json";
+const EXCHANGE_SEED = process.env.V3_EXCHANGE_SEED;
+const INSTRUMENT_ID_HEX = process.env.V3_INSTRUMENT_ID_HEX;
 const OLD_PROGRAM = "H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET";
 const PRESERVED_AAPL_CORE = "47Mx7SZvt7EY6NydsA5krgrqvcDDR1H5BG5xTPDSnhso";
 const FRESH_AAPL_CORE = "7gP2YAqf6TNMqfkDkSdjb2Y1peLzoXadBnzL2LDzhFei";
@@ -73,7 +75,13 @@ function assertFresh(state) {
 }
 async function send(name, ixs, signers) {
   const tx = new Transaction().add(...ixs);
-  const simulation = await connection.simulateTransaction(tx, signers);
+  let simulation;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    simulation = await connection.simulateTransaction(tx, signers);
+    if (simulation.value.err !== "BlockhashNotFound") break;
+    if (attempt === 3) break;
+    await new Promise((resolve) => setTimeout(resolve, 250 * (2 ** attempt)));
+  }
   if (simulation.value.err) {
     const logs = (simulation.value.logs ?? []).slice(-12).join(" | ");
     throw new Error(`${name}: simulation rejected ${JSON.stringify(simulation.value.err)}${logs ? `; logs: ${logs}` : ""}`);
@@ -105,33 +113,50 @@ async function ensureV3Account(label, parent, target, kind, index, size, payer) 
 async function setup() {
   if (!execute) throw new Error("add --execute to submit Devnet transactions");
   const state = load(); assertFresh(state);
-  const payer = authority(); const exchange = exchangeKeypair();
+  const payer = authority();
+  let exchangePublicKey; let exchangeCreateInstruction; let exchangeCreateSigners;
+  if (EXCHANGE_SEED) {
+    if (Buffer.byteLength(EXCHANGE_SEED, "utf8") > 32) throw new Error("V3_EXCHANGE_SEED must be at most 32 bytes");
+    exchangePublicKey = await PublicKey.createWithSeed(payer.publicKey, EXCHANGE_SEED, PROGRAM);
+    const lamports = await connection.getMinimumBalanceForRentExemption(256);
+    exchangeCreateInstruction = SystemProgram.createAccountWithSeed({ fromPubkey: payer.publicKey, newAccountPubkey: exchangePublicKey, basePubkey: payer.publicKey, seed: EXCHANGE_SEED, lamports, space: 256, programId: PROGRAM });
+    exchangeCreateSigners = [payer];
+  } else {
+    const exchange = exchangeKeypair(); exchangePublicKey = exchange.publicKey;
+    const lamports = await connection.getMinimumBalanceForRentExemption(256);
+    exchangeCreateInstruction = SystemProgram.createAccount({ fromPubkey: payer.publicKey, newAccountPubkey: exchange.publicKey, lamports, space: 256, programId: PROGRAM });
+    exchangeCreateSigners = [payer, exchange];
+  }
   let instrumentId = state.instrumentId ? Buffer.from(state.instrumentId) : null;
-  if (!instrumentId) { instrumentId = Buffer.alloc(32); Buffer.from(`V3-${Date.now()}`).copy(instrumentId); save({ version: 3, instrumentId: [...instrumentId] }); }
+  if (!instrumentId) {
+    if (INSTRUMENT_ID_HEX && !/^[0-9a-fA-F]{64}$/.test(INSTRUMENT_ID_HEX)) throw new Error("V3_INSTRUMENT_ID_HEX must contain exactly 32 bytes");
+    instrumentId = INSTRUMENT_ID_HEX ? Buffer.from(INSTRUMENT_ID_HEX, "hex") : Buffer.alloc(32);
+    if (!INSTRUMENT_ID_HEX) Buffer.from(`V3-${Date.now()}`).copy(instrumentId);
+    save({ version: 3, instrumentId: [...instrumentId] });
+  }
   const instrument = PublicKey.findProgramAddressSync([Buffer.from("instrument"), instrumentId], PROGRAM)[0];
   const core = PublicKey.findProgramAddressSync([Buffer.from("market-v3"), instrument.toBuffer()], PROGRAM)[0];
   if (core.toBase58() === PRESERVED_V2_MARKET) throw new Error("refusing preserved V2 market");
   if (!state.exchangeCreated) {
-    const lamports = await connection.getMinimumBalanceForRentExemption(256);
-    await send("create V3 exchange", [SystemProgram.createAccount({ fromPubkey: payer.publicKey, newAccountPubkey: exchange.publicKey, lamports, space: 256, programId: PROGRAM })], [payer, exchange]);
-    save({ exchangeCreated: true, exchange: exchange.publicKey.toBase58() });
+    await send("create V3 exchange", [exchangeCreateInstruction], exchangeCreateSigners);
+    save({ exchangeCreated: true, exchange: exchangePublicKey.toBase58() });
   }
   if (!(await connection.getAccountInfo(instrument, "confirmed"))) await send("create V3 instrument", [ix(43, [wr(instrument), wsg(payer.publicKey), ro(SystemProgram.programId)], [...instrumentId])], [payer]);
-  const exchangeInfo = await connection.getAccountInfo(exchange.publicKey, "confirmed");
-  if (!exchangeInfo?.data[10]) await send("initialize V3 exchange", [ix(19, [wr(exchange.publicKey), sg(payer.publicKey)])], [payer]);
+  const exchangeInfo = await connection.getAccountInfo(exchangePublicKey, "confirmed");
+  if (!exchangeInfo?.data[10]) await send("initialize V3 exchange", [ix(19, [wr(exchangePublicKey), sg(payer.publicKey)])], [payer]);
   const instrumentInfo = await connection.getAccountInfo(instrument, "confirmed");
-  if (!instrumentInfo?.data[10]) await send("register V3 instrument", [ix(20, [ro(exchange.publicKey), wr(instrument), sg(payer.publicKey)], [...instrumentId])], [payer]);
+  if (!instrumentInfo?.data[10]) await send("register V3 instrument", [ix(20, [ro(exchangePublicKey), wr(instrument), sg(payer.publicKey)], [...instrumentId])], [payer]);
   const configuredInstrument = await connection.getAccountInfo(instrument, "confirmed");
   const metadata = instrumentMetadata(configuredInstrument);
   const isUnset = metadata.feedId === 0 && metadata.channel === 0 && metadata.exponent === 0;
   const matchesSelectedOracle = metadata.feedId === SELECTED_ORACLE.feedId && metadata.channel === SELECTED_ORACLE.channel && metadata.exponent === SELECTED_ORACLE.exponent;
-  if (isUnset) await send("configure V3 instrument oracle", [updateInstrumentIx(exchange.publicKey, instrument, payer, instrumentId)], [payer]);
+  if (isUnset) await send("configure V3 instrument oracle", [updateInstrumentIx(exchangePublicKey, instrument, payer, instrumentId)], [payer]);
   else if (!matchesSelectedOracle) throw new Error(`instrument oracle metadata conflict: ${JSON.stringify(metadata)}`);
   await ensureV3Account("V3 core", instrument, core, 0, 0, SIZES.core, payer);
   const coreInfo = await connection.getAccountInfo(core, "confirmed");
   if (!coreInfo?.data[11]) {
     try {
-      await send("activate V3 core", [ix(47, [ro(exchange.publicKey), ro(instrument), wr(core), sg(payer.publicKey)])], [payer]);
+      await send("activate V3 core", [ix(47, [ro(exchangePublicKey), ro(instrument), wr(core), sg(payer.publicKey)])], [payer]);
       save({ activationBlocked: null, activationComplete: true });
     } catch (error) {
       if (!String(error?.transactionMessage ?? error).includes("0x6004")) throw error;
