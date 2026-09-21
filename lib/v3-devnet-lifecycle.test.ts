@@ -41,6 +41,8 @@ describe("V3 lifecycle runner", () => {
 
   it("configures instrument metadata before activation and refuses conflicting metadata", () => {
     const source = fs.readFileSync("scripts/v3-devnet-lifecycle.mjs", "utf8");
+    expect(source).toContain("createAccountWithSeed");
+    expect(source).toContain("V3_INSTRUMENT_ID_HEX");
     expect(source.indexOf("simulateTransaction")).toBeGreaterThan(-1);
     expect(source.indexOf("simulateTransaction")).toBeLessThan(source.indexOf("sendAndConfirmTransaction(connection"));
     expect(source).toContain("simulation rejected");
