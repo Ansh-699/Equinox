@@ -7,9 +7,11 @@ import { requirePythServerConfig } from '../oracle';
 const ED25519_PROGRAM = new PublicKey('Ed25519SigVerify111111111111111111111111111');
 const SYSTEM_PROGRAM = '11111111111111111111111111111111';
 const PROPERTIES = ['price','exponent','confidence','marketSession','feedUpdateTimestamp'] as const;
+const PYTH_CHANNELS = ['real_time','fixed_rate@50ms','fixed_rate@200ms','fixed_rate@1000ms'] as const;
+type PythChannel = typeof PYTH_CHANNELS[number];
 export interface SignedPythUpdate { message:Uint8Array;feedId:number;timestamp:number;payloadHash:string;parsed:ParsedFeedPayload }
-export interface PythKeeperConfig { apiKey:string;feedId:number;endpoints:readonly string[];channel:'fixed_rate@200ms';accounts:{market:string;payer:string;pythProgram:string;storage:string;treasury:string;systemProgram:string;instructionsSysvar:string} }
-export interface PythClient { getLatestPrice(input:{priceFeedIds:number[];properties:typeof PROPERTIES;formats:['solana'];jsonBinaryEncoding:'base64';parsed:true;channel:'fixed_rate@200ms'}):Promise<{solana?:{encoding:'base64'|'hex';data:string};parsed?:{timestampUs:string;priceFeeds:ParsedFeedPayload[]}}> }
+export interface PythKeeperConfig { apiKey:string;feedId:number;endpoints:readonly string[];channel:PythChannel;accounts:{market:string;payer:string;pythProgram:string;storage:string;treasury:string;systemProgram:string;instructionsSysvar:string} }
+export interface PythClient { getLatestPrice(input:{priceFeedIds:number[];properties:typeof PROPERTIES;formats:['solana'];jsonBinaryEncoding:'base64';parsed:true;channel:PythChannel}):Promise<{solana?:{encoding:'base64'|'hex';data:string};parsed?:{timestampUs:string;priceFeeds:ParsedFeedPayload[]}}> }
 type ClientFactory=(config:PythKeeperConfig)=>Promise<PythClient>;
 
 export function loadPythKeeperConfig(env:Record<string,string|undefined>):PythKeeperConfig {
@@ -18,9 +20,11 @@ export function loadPythKeeperConfig(env:Record<string,string|undefined>):PythKe
   const endpoints=(env.PYTH_PRO_ENDPOINTS??'').split(',').map(x=>x.trim()).filter(Boolean);
   if(!endpoints.length) throw new Error('PYTH_PRO_ENDPOINTS is required');
   for(const endpoint of endpoints) if(new URL(endpoint).protocol!=='wss:') throw new Error('Pyth endpoints must use wss');
+  const channel=env.PYTH_PRO_MIN_CHANNEL??'fixed_rate@200ms';
+  if(!PYTH_CHANNELS.includes(channel as PythChannel)) throw new Error('PYTH_PRO_MIN_CHANNEL must be a documented Pyth Pro channel');
   const names=['STOCKSTREAM_MARKET_ADDRESS','KEEPER_PUBLIC_KEY','PYTH_PROGRAM_ADDRESS','PYTH_STORAGE_ADDRESS','PYTH_TREASURY_ADDRESS'] as const;
   for(const name of names) if(!env[name]) throw new Error(`${name} is required`);
-  return {apiKey:base.apiKey,feedId,endpoints,channel:'fixed_rate@200ms',accounts:{market:env.STOCKSTREAM_MARKET_ADDRESS!,payer:env.KEEPER_PUBLIC_KEY!,pythProgram:env.PYTH_PROGRAM_ADDRESS!,storage:env.PYTH_STORAGE_ADDRESS!,treasury:env.PYTH_TREASURY_ADDRESS!,systemProgram:SYSTEM_PROGRAM,instructionsSysvar:'Sysvar1nstructions1111111111111111111111111'}};
+  return {apiKey:base.apiKey,feedId,endpoints,channel:channel as PythChannel,accounts:{market:env.STOCKSTREAM_MARKET_ADDRESS!,payer:env.KEEPER_PUBLIC_KEY!,pythProgram:env.PYTH_PROGRAM_ADDRESS!,storage:env.PYTH_STORAGE_ADDRESS!,treasury:env.PYTH_TREASURY_ADDRESS!,systemProgram:SYSTEM_PROGRAM,instructionsSysvar:'Sysvar1nstructions1111111111111111111111111'}};
 }
 const defaultFactory:ClientFactory=async config=>{
   const client=await PythLazerClient.create({token:config.apiKey,webSocketPoolConfig:{urls:[...config.endpoints]}});
