@@ -18,7 +18,7 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 ## Release alignment (2026-09-21)
 
 V3 source implementation and local verification are substantially complete.
-The current checkout is `0742dbd4efec1f6d33d82715474984a7a3aae734`; the fresh
+The current checkout is `811353b4e155243e1e7d7c367770103d2c54d819`; the fresh
 full gate is recorded in `docs/status/verify-latest.json` (256 Rust, 214
 frontend, 355 Worker, and 54 fixture-browser tests). The deployed Devnet ELF
 (`034b3088eeaf682c5c4618a2b704706eae177cd128d07a74f8365682bf15c0aa`) does not

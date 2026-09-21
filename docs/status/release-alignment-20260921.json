@@ -3,7 +3,7 @@
   "repository": "Ansh-699/StockStream",
   "branch": "stockstream/takeover-ee3c5f6",
   "upstream": "origin/stockstream/takeover-ee3c5f6",
-  "head": "0742dbd4efec1f6d33d82715474984a7a3aae734",
+  "head": "811353b4e155243e1e7d7c367770103d2c54d819",
   "ee3c5f6Ancestor": true,
   "workingTreeTrackedClean": true,
   "untrackedPreserved": [".deepseek/"],
@@ -17,7 +17,7 @@
   },
   "verification": {
     "summary": "docs/status/verify-latest.json",
-    "summaryCommit": "0742dbd4efec1f6d33d82715474984a7a3aae734",
+    "summaryCommit": "811353b4e155243e1e7d7c367770103d2c54d819",
     "rustTests": 256,
     "frontendTests": 214,
     "workerTests": 355,
