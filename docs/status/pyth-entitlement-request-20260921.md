@@ -6,6 +6,8 @@ feed and channel:
 - Feed: `Equity.US.AAPL/USD`
 - Numeric feed ID: `922`
 - Channel: `fixed_rate@50ms`
+- Solana payload channel ID: `2`
+- Catalog exponent: `-5`
 - Required redundancy: at least two authenticated streams
 - Network/application: StockStream Devnet test environment
 

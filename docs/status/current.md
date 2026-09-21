@@ -12,10 +12,28 @@ tree was clean before verification; only the pre-existing untracked
 `.deepseek/` directory remains. Re-run evidence is recorded in
 `docs/status/takeover-baseline-20260920.json`.
 
-Program ID (Devnet): `H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET`.
+Program ID (Devnet): `Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ`.
+Fresh V3 core: `7gP2YAqf6TNMqfkDkSdjb2Y1peLzoXadBnzL2LDzhFei`.
 Worker: `https://stockstream-market-api.ansht.workers.dev`.
 
-## Release alignment (2026-09-21)
+## Current release alignment (2026-09-21)
+
+- Fresh program: `Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ`
+- Fresh V3 core: `7gP2YAqf6TNMqfkDkSdjb2Y1peLzoXadBnzL2LDzhFei`
+- Local and deployed artifact: `c878d70b13864c6a8d51170a67129867e64484bec8395ae455fa3c6132014b97`
+- Artifact match: `true`
+- Fresh account set: 29 (`1 exchange + 1 instrument + 27 V3 execution accounts`)
+- Activation metadata: fixed; feed `922`, channel `2` (`fixed_rate@50ms`), exponent `-5`
+- Fresh core activation: verified at slot `501862266`; live Pyth updates remain entitlement-blocked
+- Live trading: blocked; ER lifecycle not started
+- Privy relay: blocked; Worker relay secrets incomplete
+- MagicBlock restoration: not attempted
+
+The authoritative machine-readable evidence is
+`docs/status/fresh-deployment-20260921.json`. This section is metadata-only;
+no protocol or live state was changed.
+
+## Historical/legacy release alignment (superseded)
 
 V3 source implementation and local verification are substantially complete.
 The current checkout is `811353b4e155243e1e7d7c367770103d2c54d819`; the fresh
