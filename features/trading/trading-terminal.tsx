@@ -37,6 +37,7 @@ import { recordSignature } from "@/lib/last-signature";
 import { publicMarketApiUrl, publicV3Core } from "@/lib/demo-config";
 
 const marketApiUrl = publicMarketApiUrl;
+const publicDemoReadOnly = process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_STOCKSTREAM_DEMO_READ_ONLY !== "false";
 
 interface MarketEvent { kind: string; sequence?: number; payload: { bids?: BookLevel[]; asks?: BookLevel[]; kind?: string } }
 
@@ -150,6 +151,7 @@ export function TradingTerminal() {
   }, [marketSymbol]);
 
   async function runLifecycle() {
+    if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: lifecycle writes are disabled."); return; }
     if (!auth.walletAddress || !marketAddress || !protocol) { setNotice("Configure the market, sign in, and connect a wallet before creating a seat."); return; }
     try {
       const v3Core = publicV3Core;
@@ -213,6 +215,7 @@ export function TradingTerminal() {
   }
 
   function submitOrder() {
+    if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: live order submission is unavailable."); return; }
     const settlementScratch = process.env.NEXT_PUBLIC_STOCKSTREAM_SETTLEMENT_SCRATCH_ADDRESS ?? marketConfig.scratchPda(0);
     if (canTrade) {
       const minutes = Number(expiresInMinutes) || 0;
@@ -280,34 +283,36 @@ export function TradingTerminal() {
             onSeatAndScratch={runLifecycle}
             seatActionLabel="Create V3 seat"
             onDeposit={() => {
+              if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: deposits are unavailable."); return; }
               const accounts = resolveCustodyAccounts(auth.walletAddress, marketAddress, marketConfig);
               if (!accounts) { setNotice("Configure the market, collateral mint/vault addresses and sign in before depositing."); return; }
               void deposit.submitDeposit(accounts, BigInt(quantityNumber || 1));
             }}
             onWithdraw={() => {
+              if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: withdrawals are unavailable while MagicBlock restoration is blocked."); return; }
               const accounts = resolveCustodyAccounts(auth.walletAddress, marketAddress, marketConfig);
               if (!accounts) { setNotice("Configure the market, collateral mint/vault addresses and sign in before withdrawing."); return; }
               void withdraw.submitWithdraw(accounts, BigInt(quantityNumber || 1), withdrawGate, position.seat);
             }}
             withdrawDisabled={!withdrawGate.allowed || withdraw.pending}
             onInitializeVault={constructVault}
-            onCancelAll={() => void sessionOrder.cancelAllSessionOrders(4)}
-            onCancelOrder={(orderKey) => void sessionOrder.cancelSessionOrder(orderKey)}
-            onReplaceOrder={replaceWithCurrentTicket}
+            onCancelAll={() => { if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: order cancellation is unavailable."); return; } void sessionOrder.cancelAllSessionOrders(4); }}
+            onCancelOrder={(orderKey) => { if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: order cancellation is unavailable."); return; } void sessionOrder.cancelSessionOrder(orderKey); }}
+            onReplaceOrder={(orderKey) => { if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: order replacement is unavailable."); return; } replaceWithCurrentTicket(orderKey); }}
           />
           <OpenOrdersPanel
             state={openOrders}
             pending={sessionOrder.pending}
-            onCancel={(orderKey) => void sessionOrder.cancelSessionOrder(orderKey)}
-            onReplace={replaceWithCurrentTicket}
-            onCancelAll={() => void sessionOrder.cancelAllSessionOrders(4)}
+            onCancel={(orderKey) => { if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: order cancellation is unavailable."); return; } void sessionOrder.cancelSessionOrder(orderKey); }}
+            onReplace={(orderKey) => { if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: order replacement is unavailable."); return; } replaceWithCurrentTicket(orderKey); }}
+            onCancelAll={() => { if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: order cancellation is unavailable."); return; } void sessionOrder.cancelAllSessionOrders(4); }}
           />
           <SessionPolicyPanel
             status={session.status}
             pending={session.pending}
             error={session.error}
-            onAuthorize={(config) => void session.authorize(config)}
-            onRevoke={() => void session.revoke()}
+            onAuthorize={(config) => { if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: Privy session relay is unavailable."); return; } void session.authorize(config); }}
+            onRevoke={() => { if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: session writes are unavailable."); return; } void session.revoke(); }}
           />
           <PositionsPanel seat={position.seat} error={position.error} />
           <div className="notice">

@@ -1,0 +1,239 @@
+# StockStream execution-domain and order-book audit
+
+Audit date: 2026-09-21
+Repository HEAD: `945d936cb09b35a8c2fd1f4fa61f5038b84492f4`
+Branch: `stockstream/takeover-ee3c5f6`
+Program: `H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET`
+Preserved V3 core: `47Mx7SZvt7EY6NydsA5krgrqvcDDR1H5BG5xTPDSnhso`
+
+## Executive summary
+
+StockStream implements an onchain Pinocchio/PATRICIA perpetuals matcher
+designed to execute inside a MagicBlock Ephemeral Rollup using a 27-account V3
+execution bundle. The matching, risk, liquidation, session, relayer, and
+frontend paths are substantially implemented and locally tested. The complete
+V3 matcher is not currently claimed as live because the latest source artifact
+differs from the immutable deployed ELF, only the V3 core remains delegated
+while child shards are restored, Pyth entitlement is unavailable, Privy relay
+credentials are unavailable, and MagicBlock restoration is blocked by a
+validator-side DLP mismatch.
+
+This is an ER design, not a PER integration. The source has explicit `l1` and
+`er` routing values and a Magic Router transport; repository search found no
+separate PER transport, endpoint, or execution-domain implementation.
+
+## Execution domains
+
+| Domain | Responsibility | Current evidence |
+|---|---|---|
+| Solana L1 | Program deployment, account creation/initialization, custody/vault operations, L1-owned orders, commit finality, restored-core reconciliation, and withdrawals | Devnet account/deployment evidence exists; current program authority is immutable and the writable V3 bundle is not L1-owned as a complete set |
+| MagicBlock ER | Delegated V3 core + 18 book pages + 4 seat shards + 4 event shards; intended place/cross/cancel/session execution | ER source path and read-only ER RPC exist; only the core is currently delegated, so no complete live matching domain exists |
+| Worker/indexer | D1 market/event projection, L1/ER status reconciliation, V3 aggregate reads, relayer authentication/validation, and domain-specific transport selection | Public Worker `/health` is live; `/v1/markets` is empty; relayer credentials are unavailable |
+| Browser/frontend | Reads public state, derives canonical PDAs/instructions, creates browser-local session signatures, and renders deterministic fixtures | Production and opt-in Devnet read-only browser checks pass; browser never receives server secrets |
+| Relayer | Verifies fresh Privy identity and linked wallet, validates exact signed bytes/account bundle/nonce/policy, co-signs fee payer, then submits to L1 or Magic Router ER | Source and local tests are complete; no real Privy round trip is available |
+
+### ER versus PER
+
+The authoritative values are `"l1"` and `"er"` in
+`lib/execution-status.ts`, `features/sessions/use-session-order.ts`,
+`lib/session-trading.ts`, and `workers/src/index.ts`. The ER transport is
+`MagicBlockErTransport` in `workers/src/session-relayer.ts`, using the Magic
+Router/ER RPC configuration. No separate PER value, PER transport, or PER
+endpoint is implemented or evidenced. Therefore the JSON audit records
+`executionDomain: "er"`, not `"per"`.
+
+The distinction is important:
+
+- **Source-designed ER:** V3 handlers and routing are designed for delegated
+  MagicBlock ER execution.
+- **Current live ER state:** 27 accounts exist, but only the core is delegated;
+  26 children are restored and owned by StockStream.
+- **Local/mock ER tests:** transport, routing, relayer, and browser fixture
+  tests exercise ER-shaped paths without proving a live trade.
+- **Actual live ER trade evidence:** none. There is no verified session-signed
+  order, crossing fill, or readback from a real ER trade.
+
+## End-to-end order flow
+
+```text
+Browser order ticket
+  -> features/trading/trading-terminal.tsx::submitOrder
+  -> features/sessions/use-session-order.ts::placeSessionOrder
+  -> clients/stockstream/src/abi/v3-instructions.ts::placeOrderV3
+     (canonical 27-account bundle + authority + optional session PDA)
+  -> lib/session-trading.ts::buildSessionSignedTransaction
+     (browser-local session signature; relayer fee-payer slot empty)
+  -> app/api/relay/session/route.ts::POST
+     (CSRF/app-session + fresh Privy token checks)
+  -> workers/src/index.ts::POST /v1/relay/session
+  -> workers/src/session-relayer.ts::validateSessionTransaction
+     (exact program/opcode/accounts/signatures/blockhash/nonce/policy)
+  -> workers/src/session-relayer.ts::relaySessionTransaction
+     -> SolanaL1Transport OR MagicBlockErTransport, selected by `l1`/`er`
+  -> programs/stockstream/src/handlers.rs dispatch
+  -> programs/stockstream/src/v3.rs::place_order_v3
+  -> v3.rs::plan_crossing_cross_tree
+  -> v3.rs::apply_match_plan
+  -> v3.rs::settle_v3_fill
+     (checked position, funding, fee, reserve, PnL, open-interest accounting)
+  -> v3.rs event payload construction + event-shard writes
+  -> Worker ingestion/projection in workers/src/index.ts and repository modules
+  -> frontend V3 aggregate/open-orders/position readback
+```
+
+The source path also handles no-fill resting orders, cancellation, IOC,
+post-only rejection, reduce-only checks, expiry pruning, and self-trade policy
+before persistent mutation. A live transaction is not claimed because the
+current account ownership and credentials do not satisfy the path's runtime
+preconditions.
+
+## Canonical V3 account bundle
+
+`programs/stockstream/src/v3.rs` defines
+`V3_EXECUTION_BUNDLE_LEN = 1 + 18 + 4 + 4 = 27`:
+
+1. one `MarketCoreV3` account;
+2. eighteen PATRICIA book pages (nine bid-side and nine ask-side);
+3. four seat shards;
+4. four event shards.
+
+The transaction then carries the signer outside the bundle. Session-authorized
+instructions additionally carry one writable session PDA and the session
+signer; the canonical relayer validator derives and checks both. Vaults and
+collateral accounts remain outside the hot bundle on L1 by design.
+
+For a real matching transaction, all 27 core/page/shard accounts must be
+delegated to the same ER validator and observed as one coherent ownership
+epoch. A signer is not an account delegation, and the session PDA is an
+authorization/state account appended to the transaction; it cannot compensate
+for missing delegated book, seat, or event shards.
+
+## Feature completion matrix
+
+| Feature | Classification | Evidence boundary |
+|---|---|---|
+| Fixed orders | source-complete; locally-tested | V3 place path and bundle tests; no live order |
+| OraclePegged orders | source-complete; locally-tested; externally-blocked live | peg validation and oracle-safety tests; Pyth feed 922 is not entitled |
+| Cross-tree matching | source-complete; locally-tested | `plan_crossing_cross_tree` adversarial bid/ask and peg tests; no live fill |
+| Price/time priority | source-complete; locally-tested | PATRICIA traversal/order tests; no Devnet trade |
+| Partial fills | source-complete; locally-tested | V3 fill planning and maker remainder tests; no live fill |
+| Post-only | source-complete; locally-tested | crossing rejection and replacement preflight tests |
+| IOC | source-complete; locally-tested | V3 order flag and no-resting remainder tests |
+| Reduce-only | source-complete; locally-tested | direction-flip rejection before mutation |
+| Cancel | source-complete; locally-tested | checked reserve/counter release tests; no live cancel |
+| Cancel-all | source-complete; locally-tested | all-tree reserve/exposure/open-order release tests |
+| Replace | source-complete; locally-tested | cancel/re-place preflight and one-nonce session tests |
+| Self-trade behavior | source-complete; locally-tested | abort, cancel-provide, decrement-take tests |
+| Expiry pruning | source-complete; locally-tested | expiry-aware book traversal tests |
+| Funding settlement | source-complete; locally-tested | funding-before-risk/fill/liquidation tests |
+| Maker/taker fees | source-complete; locally-tested | checked `risk::apply_fill` accounting tests |
+| Realized PnL | source-complete; locally-tested | checked fill/PnL accounting tests |
+| Liquidation | source-complete; locally-tested | runtime liquidation gate and funding-aware V3 tests; no live liquidation |
+| Open interest | source-complete; locally-tested | checked fill/cancel/liquidation accounting tests |
+| Event emission | source-complete; locally-tested | V3 event payload/event-shard tests and Worker fixtures; no live fill event |
+
+No row above is MagicBlock-verified. Devnet verification covers account
+existence, ownership/delegation observations, and lifecycle transactions—not a
+live trade or fill.
+
+## Current live-account state
+
+Fresh read-only command:
+
+```text
+NO_DNA=1 node scripts/v3-live-account-audit.mjs
+```
+
+At L1 slot `501826534` and ER slot `600894159`:
+
+- all 27 derived V3 accounts exist with expected sizes: core 4,096 bytes,
+  book pages 10,184 bytes, seat shards 8,236 bytes, event shards 3,244 bytes;
+- delegated count is 1: only core
+  `47Mx7SZvt7EY6NydsA5krgrqvcDDR1H5BG5xTPDSnhso`;
+- all 26 child pages/shards are restored and owned by the StockStream program;
+- the complete writable 27-account ER bundle is **not** ER-ready;
+- no real live place/crossing/cancel transaction is evidenced;
+- no real live fill or position/PnL/fee/funding readback is evidenced;
+- no real Pyth update is evidenced;
+- no real Privy relay or nonce/replay round trip is evidenced;
+- no real restoration callback is evidenced;
+- no real withdrawal is evidenced.
+
+The historical child/core commit signatures in
+`docs/status/v3-sharded-commit-evidence-20260920.json` prove bounded lifecycle
+attempts, not a complete currently writable ER matcher. The core restoration
+remains pending after the validator-side DLP mismatch.
+
+## Artifact parity and deployment
+
+- Current source HEAD: `945d936cb09b35a8c2fd1f4fa61f5038b84492f4`.
+- Local artifact: `69b7fb51b8562d6e41f946c4e5f106294cba4de58b62620020010c5dcd4ba4d0`.
+- Deployed ELF: `034b3088eeaf682c5c4618a2b704706eae177cd128d07a74f8365682bf15c0aa`.
+- Artifact match: **false**.
+- Deployed authority: `none`; existing program cannot be upgraded.
+- The local artifact was last captured by the source verification checkpoint at
+  `5fcb8ef`; protocol inputs are unchanged through the current demo/docs
+  commits, but the deployed ELF's exact source commit is not recorded.
+
+Therefore the latest source cannot be live on the existing program ID.
+
+## Blockers
+
+### Code-fixable
+
+No protocol rewrite is required for this PATH A audit. The source/local feature
+work is already covered by the verification gate.
+
+### Missing credentials
+
+No fresh Privy access token and expected linked wallet are present. No real
+relay or replay claim can be made.
+
+### Pyth entitlement
+
+`Equity.US.AAPL/USD` numeric feed `922` is catalog-visible but all authenticated
+streams return `Not entitled`. No update payload was submitted.
+
+### Cloudflare authorization
+
+`CLOUDFLARE_API_TOKEN` is unavailable. Production Worker secret deployment is
+externally blocked; only public read-only Worker behavior is verified.
+
+### MagicBlock validator/DLP
+
+The deployed DLP wire version rejects the required restoration callback path.
+The V3 reproducer returns `0x600e`. No guessed discriminator or recovery
+transaction was sent.
+
+### Immutable deployed program
+
+The deployed StockStream program reports upgrade authority `none`, and its ELF
+does not match the current local artifact. No upgrade is possible on this ID.
+
+### Missing live evidence
+
+There is no complete 27-account ER bundle, session-signed order, crossing fill,
+readback, restoration, or withdrawal evidence. Local tests and browser fixtures
+must not be presented as live transactions.
+
+## Demo limitations and safety
+
+The public demo defaults to the known V3 core and Worker read-only endpoint.
+The frontend labels read-only Devnet state, deterministic local fixtures, Pyth
+blocked, Privy/relayer unavailable, and MagicBlock restoration blocked. It does
+not expose server secrets, does not claim live trading, and does not use local
+fixtures as transaction signatures. Existing write paths remain guarded by
+real authentication, execution status, account ownership, session policy, and
+relayer checks; no demo action was routed into the preserved delegated core.
+
+## Final claim
+
+StockStream implements an onchain Pinocchio/PATRICIA perpetuals matcher designed
+to execute inside a MagicBlock Ephemeral Rollup using a 27-account V3 execution
+bundle. The matching, risk, liquidation, session, relayer, and frontend paths
+are substantially implemented and locally tested. The complete V3 matcher is
+not currently claimed as live because the latest source artifact differs from
+the immutable deployed ELF, only the V3 core remains delegated while child
+shards are restored, Pyth entitlement is unavailable, Privy relay credentials
+are unavailable, and MagicBlock restoration is blocked by a validator-side DLP
+mismatch.
