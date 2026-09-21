@@ -1,0 +1,72 @@
+{
+  "capturedAt": "2026-09-21T12:12:35.530Z",
+  "cluster": "devnet",
+  "submitted": false,
+  "scope": "isolated TSLA V3 core delegation only",
+  "programId": "Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ",
+  "core": "AN7JHGoaiQ4cbB4pxeigVjSEwLsTdtRBCJsFmcmG5XBs",
+  "bundleAudit": {
+    "accountCount": 27,
+    "allExist": true,
+    "allFreshProgramOwned": true,
+    "expectedSizes": [4096, 10184, 8236, 3244],
+    "noDuplicates": true,
+    "delegatedCount": 0,
+    "l1Slot": 501895479
+  },
+  "executionDomain": {
+    "kind": "MagicBlock ER",
+    "validator": "MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57",
+    "endpoint": "https://devnet-as.magicblock.app/",
+    "perIntegrationPresent": false
+  },
+  "transaction": {
+    "instruction": "DelegateV3Account",
+    "opcode": 48,
+    "kind": "core",
+    "index": 0,
+    "feePayer": "A5sV4PkkVM4gm3rejACvKFgxEMmj8ouGsffSKT5qYVc8",
+    "signers": ["A5sV4PkkVM4gm3rejACvKFgxEMmj8ouGsffSKT5qYVc8"],
+    "accounts": [
+      { "index": 0, "role": "instrument/parent", "address": "9dJTKhEHupjB7bpyzCQm52ePKDq1o14XCP6MtLx6js77", "signer": false, "writable": false },
+      { "index": 1, "role": "core/target", "address": "AN7JHGoaiQ4cbB4pxeigVjSEwLsTdtRBCJsFmcmG5XBs", "signer": false, "writable": true },
+      { "index": 2, "role": "authority", "address": "A5sV4PkkVM4gm3rejACvKFgxEMmj8ouGsffSKT5qYVc8", "signer": true, "writable": false },
+      { "index": 3, "role": "payer", "address": "A5sV4PkkVM4gm3rejACvKFgxEMmj8ouGsffSKT5qYVc8", "signer": true, "writable": true },
+      { "index": 4, "role": "buffer", "address": "6xB88bNbL7aqwdf2XRvok7NUfYdbPCBxUnanEzTUc4ZX", "signer": false, "writable": true },
+      { "index": 5, "role": "delegationRecord", "address": "D8Zyqai5W3yc69o38ZuPbiyXJCXQBMSNWMfjdUmdFiZZ", "signer": false, "writable": true },
+      { "index": 6, "role": "delegationMetadata", "address": "3H9Hz7zdFy5NXXpVKpKU4BMHnsMCF4bRcLT7qhZDVVr4", "signer": false, "writable": true },
+      { "index": 7, "role": "delegationProgram", "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh", "signer": false, "writable": false },
+      { "index": 8, "role": "systemProgram", "address": "11111111111111111111111111111111", "signer": false, "writable": false },
+      { "index": 9, "role": "ownerProgram", "address": "Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ", "signer": false, "writable": false }
+    ],
+    "expectedLamportDeltas": {
+      "payer": -2311320,
+      "core": 0,
+      "buffer": 0,
+      "delegationRecord": 1137920,
+      "delegationMetadata": 1168400
+    },
+    "expectedSolDebit": "0.002311320",
+    "expectedUsdcDelta": 0
+  },
+  "simulation": {
+    "error": null,
+    "unitsConsumed": 45060,
+    "signatureVerified": true,
+    "stockStreamSucceeded": true,
+    "delegationProgramSucceeded": true
+  },
+  "excluded": [
+    "AAPL",
+    "preserved old core",
+    "old program",
+    "child-shard delegation",
+    "seat creation",
+    "custody or deposit",
+    "orders",
+    "fills",
+    "commits",
+    "restoration",
+    "withdrawals"
+  ]
+}
