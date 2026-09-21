@@ -6,7 +6,7 @@
 import http from "node:http";
 import { PublicKey, VersionedTransaction } from "@solana/web3.js";
 
-const PROGRAM_ID = "Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ";
+const PROGRAM_ID = "BY81jGEfzwuqGkJbyYaGBty5Pn6oZLfntYUFkV85XZfo";
 const PORT = Number(process.env.MOCK_RPC_PORT ?? 4181);
 const V3_CORE = process.env.MOCK_V3_CORE_ADDRESS ?? "";
 const AUTHORIZE_TRADING_SESSION = 17;

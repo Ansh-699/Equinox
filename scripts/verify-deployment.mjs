@@ -12,14 +12,18 @@ import fs from "node:fs";
 import { Connection, PublicKey } from "@solana/web3.js";
 
 const RPC = "https://api.devnet.solana.com";
-const PROGRAM_ID = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? "Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ");
+const PROGRAM_ID = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? "BY81jGEfzwuqGkJbyYaGBty5Pn6oZLfntYUFkV85XZfo");
 const OWNER = new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111");
 const conn = new Connection("https://api.devnet.solana.com", "confirmed");
 const statePath = process.argv[2] ?? "/tmp/opencode/lifecycle-state.json";
 
 const program = await conn.getAccountInfo(PROGRAM_ID);
 if (!program) { console.error("program account missing"); process.exit(1); }
-const programData = await conn.getAccountInfo(new PublicKey("GCLwk9aFz8cz4etHv4cibqSwaKBa2ubQUgPRhRiHqTP2"));
+// Upgradeable-loader program account: 4-byte variant + 32-byte ProgramData
+// address. Derive it instead of hardcoding a stale deployment.
+if (!program.owner.equals(OWNER)) { console.error("program is not owned by the upgradeable loader"); process.exit(1); }
+const programDataAddress = new PublicKey(program.data.subarray(4, 36));
+const programData = await conn.getAccountInfo(programDataAddress);
 if (!programData) { console.error("programdata account missing"); process.exit(1); }
 
 const data = programData.data;
@@ -46,7 +50,7 @@ const report = {
   programId: PROGRAM_ID.toBase58(),
   executable: program.executable,
   ownerOk: program.owner.equals(OWNER),
-  programDataAddress: "GCLwk9aFz8cz4etHv4cibqSwaKBa2ubQUgPRhRiHqTP2",
+  programDataAddress: programDataAddress.toBase58(),
   programDataOwnerOk: programData.owner.equals(OWNER),
   // ProgramData header: 4-byte variant + 8-byte deploy slot + 1-byte
   // Option<authority> tag, followed by the key only when the tag is Some.

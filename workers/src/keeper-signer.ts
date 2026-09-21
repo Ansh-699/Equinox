@@ -39,7 +39,7 @@ import { LocalKeypairSigner, type Signer } from "./signer";
 /** Program addresses that may appear in a keeper-signed transaction. */
 export const KEEPER_ALLOWED_PROGRAMS: readonly string[] = [
   // StockStream itself (every keeper instruction family lives here).
-  "Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ",
+  "BY81jGEfzwuqGkJbyYaGBty5Pn6oZLfntYUFkV85XZfo",
   // Compute budget (the submission path prepends it).
   "ComputeBudget111111111111111111111111111111",
   // The Ed25519 native pre-instruction and the Pyth Pro Lazer oracle
@@ -53,7 +53,7 @@ export const KEEPER_ALLOWED_PROGRAMS: readonly string[] = [
 
 const KEEPER_ALLOWED_PROGRAM_SET = new Set(KEEPER_ALLOWED_PROGRAMS);
 
-const STOCKSTREAM_PROGRAM = "Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ";
+const STOCKSTREAM_PROGRAM = "BY81jGEfzwuqGkJbyYaGBty5Pn6oZLfntYUFkV85XZfo";
 const MAGIC_PROGRAM = "Magic11111111111111111111111111111111111111";
 const SYSTEM_PROGRAM = "11111111111111111111111111111111";
 

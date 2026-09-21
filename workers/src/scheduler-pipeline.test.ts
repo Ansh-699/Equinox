@@ -55,7 +55,7 @@ function mockRpc(recorder: { urls: string[]; bodies: unknown[] }, options: { blo
     if (body.method === "getMultipleAccounts") {
       return Response.json({
         jsonrpc: "2.0", id: body.id,
-        result: { context: { slot: 1 }, value: [{ data: [Buffer.from(HEADER_BYTES).toString("base64"), "base64"], owner: "Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ", lamports: 1_000_000_000, executable: false }] },
+        result: { context: { slot: 1 }, value: [{ data: [Buffer.from(HEADER_BYTES).toString("base64"), "base64"], owner: "BY81jGEfzwuqGkJbyYaGBty5Pn6oZLfntYUFkV85XZfo", lamports: 1_000_000_000, executable: false }] },
       });
     }
     if (body.method === "simulateTransaction" || body.method === "simulateTransaction") {
@@ -111,7 +111,7 @@ describe("full scheduler pipeline (real Miniflare D1 + DO, mock RPC)", () => {
         new TextEncoder().encodeInto("WRONGXXX", corrupt.subarray(0, 8));
         return Response.json({
           jsonrpc: "2.0", id: body.id,
-          result: { context: { slot: 1 }, value: [{ data: [Buffer.from(corrupt).toString("base64"), "base64"], owner: "Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ", lamports: 1, executable: false }] },
+          result: { context: { slot: 1 }, value: [{ data: [Buffer.from(corrupt).toString("base64"), "base64"], owner: "BY81jGEfzwuqGkJbyYaGBty5Pn6oZLfntYUFkV85XZfo", lamports: 1, executable: false }] },
         });
       }
       return Response.json({ jsonrpc: "2.0", id: body.id, result: null });
