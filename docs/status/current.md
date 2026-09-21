@@ -15,6 +15,29 @@ tree was clean before verification; only the pre-existing untracked
 Program ID (Devnet): `H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET`.
 Worker: `https://stockstream-market-api.ansht.workers.dev`.
 
+## Release alignment (2026-09-21)
+
+V3 source implementation and local verification are substantially complete.
+The current checkout is `0742dbd4efec1f6d33d82715474984a7a3aae734`; the fresh
+full gate is recorded in `docs/status/verify-latest.json` (256 Rust, 214
+frontend, 355 Worker, and 54 fixture-browser tests). The deployed Devnet ELF
+(`034b3088eeaf682c5c4618a2b704706eae177cd128d07a74f8365682bf15c0aa`) does not
+match the current local ELF (`69b7fb51b8562d6e41f946c4e5f106294cba4de58b62620020010c5dcd4ba4d0`),
+and its exact source commit is not recorded, so the latest V3 risk,
+liquidation, matching, and commit-epoch work is not claimed live. The
+deployed program is immutable (`authority: none`). Live Pyth entitlement,
+Privy relay credentials, Cloudflare production secret deployment, and
+MagicBlock core restoration remain externally blocked. This release follows
+PATH A: freeze the verified source, present read-only Devnet and deterministic
+local fixtures, and limit live claims to the deployed artifact.
+
+Classification: source-complete means implemented in the current source;
+locally-tested means covered by the fresh gate; Devnet-verified means directly
+observed on Devnet; MagicBlock-verified is not currently satisfied;
+externally-blocked covers unavailable credentials or validator services;
+incomplete covers work requiring those blockers to clear. Full machine-readable
+evidence is `docs/status/release-alignment-20260921.json`.
+
 ## Completion matrix
 
 | Area | Status | Evidence |
@@ -37,8 +60,8 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 | Pyth AAPL/USD live integration | Blocked only by entitlement; catalog/runtime configured and locally tested | `node --env-file=.env.local scripts/pyth-catalog-discovery.mjs AAPL` authenticated to the official catalog and returned stable `Equity.US.AAPL/USD` ID `922` (`fixed_rate@50ms`), stable `Equity.Index.AAPL/USD` ID `3191`, and inactive `Equity.US.AAPL/USD.EXT` ID `1671`; ignored server-only `.env.local` carries the AAPL settings and is loaded only with `--env-file`. The fresh authenticated probe of feed `922` rejects all three stream endpoints with `Not entitled`, so no payload is submitted. Worker health requires a positive numeric catalog ID rather than reporting ready for a key alone. `cargo test -p stockstream --test pyth_oracle` passes 19 tests, including stale input and closed/halted/corporate-action close-only behavior. Evidence: `docs/status/external-blocker-probe-20260921.json`. |
 | Privy live verification | Blocked only at interactive token/relayer submission; locally tested | `scripts/privy-relay-live.mjs` verifies a fresh Privy token's audience and linked Solana wallet before any relay call, defaults to preflight-only, and now has an explicit `--submit --replay` path that resubmits the identical signed transaction with a fresh request ID and requires nonce-based rejection on the second call. The server-only app credentials load from ignored `.env.local`, but the fresh preflight still lacks `PRIVY_ACCESS_TOKEN` and `PRIVY_EXPECTED_WALLET`; no relay request, nonce consumption, or replay attempt occurred. Cloudflare secret inspection/deployment is separately auth-gated by missing `CLOUDFLARE_API_TOKEN`. Evidence: `docs/status/external-blocker-probe-20260921.json`. |
 | Frontend fixture E2E (Playwright) | Complete | 50/50 pass; 2 real bugs found and fixed (stale mock-relayer auth contract, a WS-connection race in oracle-safety.spec.ts) |
-| Frontend production build | Complete | `npm run build` exit 0; `next start` serves real HTTP 200; fresh `NO_DNA=1 npm run test:browser:production` passed 6/6 on HEAD `474b318` |
-| Opt-in Devnet browser E2E | Complete (read-only, live) | Fresh `NO_DNA=1 npm run test:browser:devnet` passed 2/2 on HEAD `474b318` against the real Devnet RPC and deployed Worker. It verifies app boot, Devnet/AAPL configuration, server-secret non-disclosure and the live Worker V3 aggregate contract. Signing/relay is intentionally not claimed because Pyth/Privy remain externally blocked. |
+| Frontend production build | locally-tested | `npm run build` exit 0; `next start` serves real HTTP 200; fresh `NO_DNA=1 npm run test:browser:production` passed 6/6 on the current source lineage |
+| Opt-in Devnet browser E2E | Devnet-verified (read-only) | Fresh `NO_DNA=1 npm run test:browser:devnet` passed 2/2 against the real Devnet RPC and deployed Worker. It verifies app boot, Devnet/AAPL configuration, server-secret non-disclosure and the live Worker V3 aggregate contract. Signing/relay is intentionally not claimed because Pyth/Privy remain externally blocked. |
 | Repository cleanup / doc classification | Complete | `docs/status/document-classification.md` classifies every `docs/*.md` file as canonical specification, operational runbook/release gate, historical research, or navigation map; this file remains the authoritative implementation snapshot. The redacted post-reauthorization Wrangler handoff is `docs/status/cloudflare-secret-deploy-runbook-20260920.md`. |
 | `clients/stockstream/src/index.ts` facade reduction | Complete (compatibility facade retained) | commits `7fba664`, `309a475`, `bc917d9`, `8f981f8`, `ddf3776`, `ac88ed9`, `04dbf8f`, `9576c85`, `cc799d7`, `06965ee`, `bd9eef5`, `6612697`, `80ce102`, `7004dc5`, `7009301`, `92fc7ec`, `cd9aaa2`, and `799017f` remove duplicated opcode/state authorities, correct V3 session-replace encoding, and extract V3 order/cancel/funding/oracle/commit/recovery/custody/account-creation/initialization/delegation/session/registry/V2-custody/order/oracle/MagicBlock/exchange-config/event/legacy-book decoder logic into dedicated ABI modules; `abi/encoding.ts` and `abi/transaction.ts` own shared integer, public-key, account-meta, and transaction primitives. The remaining facade is intentionally retained for parity-tested compatibility APIs. |
 
@@ -51,7 +74,7 @@ typechecks, Playwright fixture E2E, and the secret scan. It emits a
 machine-readable gate record (use
 `VERIFY_SUMMARY_PATH=docs/status/verify-latest.json npm run verify` to refresh
 the tracked copy); the latest continuation run finished with `VERIFY-OK` on
-source commit `5fcb8ef` (fresh full-gate checkpoint). The funding clamp correction is committed as
+source commit `0742dbd` (fresh full-gate checkpoint). The funding clamp correction is committed as
 `a89c313`; `d563f28` additionally enforces persisted V3 maximum open interest
 before mutation and session `max_open_orders` during canonical bundle
 authorization.
@@ -69,7 +92,7 @@ Fresh current-HEAD regression evidence: `cargo test -p stockstream --test v3_bun
 - `tsc --noEmit` clean on both the frontend and workers packages.
 - `eslint .` clean.
 - ABI manifest parity: `ABI-OK`.
-- Fresh full gate on current HEAD (`5fcb8ef`): `VERIFY_SUMMARY_PATH=docs/status/verify-latest.json NO_DNA=1 bash scripts/verify.sh` finished `VERIFY-OK`; Rust 256, frontend 214, Worker 355, Playwright fixture 54/54, SBF artifact verification, ABI parity, typechecks, lint, and secret scan all passed. Current local artifact SHA-256 is `69b7fb51b8562d6e41f946c4e5f106294cba4de58b62620020010c5dcd4ba4d0`; it is not deployed. The frontend withdrawal hook now blocks every known non-reconciled status, matching the on-chain guard (`4715dc3`).
+- Fresh full gate on current HEAD (`0742dbd`): `VERIFY_SUMMARY_PATH=docs/status/verify-latest.json NO_DNA=1 bash scripts/verify.sh` finished `VERIFY-OK`; Rust 256, frontend 214, Worker 355, Playwright fixture 54/54, SBF artifact verification, ABI parity, typechecks, lint, and secret scan all passed. Current local artifact SHA-256 is `69b7fb51b8562d6e41f946c4e5f106294cba4de58b62620020010c5dcd4ba4d0`; it is not deployed. The frontend withdrawal hook now blocks every known non-reconciled status, matching the on-chain guard (`4715dc3`).
 - Fresh V3 economic/custody checkpoint (`717add9`, `c6ffca5`, `5f77b42`, `5ab5e47`, `aa65c7f`, `73af90b`, `d747194`, `a8cb5e3`, `4715dc3`): `MarketCoreV3` persists nonnegative `vault_surplus` at offset 1640 and `withdrawal_buffer` at offset 1656 after the 26 child commit records; the 81-byte versioned risk-update ABI, authorized update path, V3 L1 liability accounting, restored-core vault reconciliation opcode 55, canonical 30-account client/Worker builders, reconciliation safety guards, validation of existing economic ledgers before governance updates, pinned OraclePegged reservation prices, and checked session/cancel counter arithmetic are covered by the 256-test Rust gate, 214 frontend tests, and 38 targeted ABI/facade tests. Withdrawals now also reject every non-reconciled status, including the frontend write gate. This is source/local evidence only; the preserved Devnet core was not mutated or redeployed.
 - Fresh Worker V3 opcode-parity regression: V3 custody builders now use named opcode constants (`depositCollateralV3=53`, `withdrawCollateralV3=54`) instead of duplicated literals; the Worker transaction suite remains 355/355.
 - Fresh Worker V3 nonce-mode regression: the typed V3 place/cancel/cancel-all/replace builders reject nonzero action nonces when no session PDA is present; `workers/src/transactions.test.ts` passes 10/10 and the full Worker suite passes 355/355.
