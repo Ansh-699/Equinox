@@ -34,17 +34,19 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
   `AN7JHGoaiQ4cbB4pxeigVjSEwLsTdtRBCJsFmcmG5XBs` plus the complete 27-account
   execution bundle exist on Devnet under the fresh program. All 33 setup
   transactions simulated successfully before submission. The core is active
-  with TSLA metadata, while `oracle_valid` remains false because signed Pyth
-  submission was explicitly outside the authorized setup batch. Evidence:
+  with TSLA metadata. Evidence:
   `docs/status/tsla-setup-evidence-20260921.json`.
-- TSLA signed Pyth update is prepared but not submitted. A fresh real payload
-  for feed `1435` (channel `2`, exponent `-5`) passed the native Ed25519 check,
-  deployed Pyth `VerifyMessage` CPI, and `ConsumeOracleUpdateV3` simulation
-  with `35,440` compute units and no error. The deployed storage account points
+- TSLA signed Pyth update is Devnet-verified. The approved transaction
+  `2hjfJxoDhZUpyjDX9YD4xMUUkjTntRBFtgNkjCfCKTzVC4gHXcW9Q4WVqyFAwmPCXFbmzmXHiQaTqZRYq3aW9H87`
+  finalized in slot `501893854`. Its fresh real feed `1435` payload (channel
+  `2`, exponent `-5`) passed the native Ed25519 check, deployed Pyth
+  `VerifyMessage` CPI, and `ConsumeOracleUpdateV3` with `35,440` simulated
+  compute units and no error. Readback confirmed `oracle_valid=true`, price
+  `36982565`, and timestamp `1789992266`. The deployed storage account points
   to treasury `opsLibxVY7Vz5eYMmSfX8cLFCFVYTtH6fr6MiifMpA7`; using the stale
   documented treasury failed closed with `OracleUnavailable`. Payload bytes
-  remain redacted. Submission awaits explicit approval, so `oracle_valid`
-  remains false. Evidence: `docs/status/tsla-pyth-simulation-20260921.json`.
+  remain redacted. No delegation or trading transaction was included. Evidence:
+  `docs/status/tsla-pyth-simulation-20260921.json`.
 - Live trading: blocked; ER lifecycle not started
 - Privy relay: blocked; Worker relay secrets incomplete
 - MagicBlock restoration: not attempted
