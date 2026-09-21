@@ -27,8 +27,16 @@ Worker: `https://stockstream-market-api.ansht.workers.dev`.
 - Fresh core activation: verified at slot `501862266`; live Pyth updates remain entitlement-blocked
 - Entitled alternative verified read-only: `Equity.US.TSLA/USD`, feed `1435`,
   channel `fixed_rate@50ms`, exponent `-5`; the live smoke received redacted
-  updates from all three endpoints. TSLA is not configured on the activated
-  AAPL core and no TSLA market/account bundle has been created.
+  updates from all three endpoints.
+- Isolated TSLA setup verified: exchange
+  `AW5ByA33xvoewXNfRRSQ4Am9z5fYs3i9mpjdUdtbEREK`, instrument
+  `9dJTKhEHupjB7bpyzCQm52ePKDq1o14XCP6MtLx6js77`, and core
+  `AN7JHGoaiQ4cbB4pxeigVjSEwLsTdtRBCJsFmcmG5XBs` plus the complete 27-account
+  execution bundle exist on Devnet under the fresh program. All 33 setup
+  transactions simulated successfully before submission. The core is active
+  with TSLA metadata, while `oracle_valid` remains false because signed Pyth
+  submission was explicitly outside the authorized setup batch. Evidence:
+  `docs/status/tsla-setup-evidence-20260921.json`.
 - Live trading: blocked; ER lifecycle not started
 - Privy relay: blocked; Worker relay secrets incomplete
 - MagicBlock restoration: not attempted
