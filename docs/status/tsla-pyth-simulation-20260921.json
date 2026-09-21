@@ -1,6 +1,6 @@
 {
   "cluster": "devnet",
-  "submitted": false,
+  "submitted": true,
   "programId": "Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ",
   "core": "AN7JHGoaiQ4cbB4pxeigVjSEwLsTdtRBCJsFmcmG5XBs",
   "feePayer": "A5sV4PkkVM4gm3rejACvKFgxEMmj8ouGsffSKT5qYVc8",
@@ -15,12 +15,12 @@
     "channel": "fixed_rate@50ms",
     "channelId": 2,
     "exponent": -5,
-    "price": "36980004",
-    "confidence": 12004,
+    "price": "36982565",
+    "confidence": 12072,
     "marketSession": "preMarket",
-    "feedUpdateTimestampUs": "1789991974850000",
-    "ageMsAtSimulation": 140,
-    "payloadHash": "9ce9d2bab2e4d384324b1bd1b8c556afbfe45697c481aadf835be6144aa28d81",
+    "feedUpdateTimestampUs": "1789992266450000",
+    "ageMsAtSimulation": 97,
+    "payloadHash": "3a2f44f24e32a62b8ea539875fe41592efd1f99d3d8b534adf3d9fbd8bf8b08f",
     "payloadBytes": 155,
     "payload": "redacted"
   },
@@ -56,6 +56,24 @@
   "simulation": {
     "error": null,
     "unitsConsumed": 35440,
+    "signatureVerified": true,
+    "lamportDeltas": [
+      {
+        "address": "A5sV4PkkVM4gm3rejACvKFgxEMmj8ouGsffSKT5qYVc8",
+        "role": "payer",
+        "before": 8594034929,
+        "after": 8594024928,
+        "delta": -10001
+      },
+      {
+        "address": "opsLibxVY7Vz5eYMmSfX8cLFCFVYTtH6fr6MiifMpA7",
+        "role": "pythTreasury",
+        "before": 27054492726,
+        "after": 27054492727,
+        "delta": 1
+      }
+    ],
+    "usdcDelta": 0,
     "pythVerifyMessageSucceeded": true,
     "stockStreamConsumeOracleUpdateV3Succeeded": true
   },
@@ -70,5 +88,20 @@
     "feedId": 1435,
     "channelId": 2,
     "exponent": -5
+  },
+  "transaction": {
+    "signature": "2hjfJxoDhZUpyjDX9YD4xMUUkjTntRBFtgNkjCfCKTzVC4gHXcW9Q4WVqyFAwmPCXFbmzmXHiQaTqZRYq3aW9H87",
+    "slot": 501893854,
+    "confirmationStatus": "finalized",
+    "error": null,
+    "feeLamports": 10000,
+    "pythTreasuryLamports": 1
+  },
+  "coreAfterSubmission": {
+    "owner": "Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ",
+    "dataLength": 4096,
+    "oracleValid": true,
+    "lastVerifiedOraclePrice": "36982565",
+    "lastVerifiedOracleTimestamp": "1789992266"
   }
 }

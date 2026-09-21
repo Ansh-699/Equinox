@@ -7,7 +7,6 @@ import {
   SYSVAR_INSTRUCTIONS_PUBKEY,
   SystemProgram,
   Transaction,
-  sendAndConfirmTransaction,
 } from "@solana/web3.js";
 import { loadPythKeeperConfig, PythKeeper } from "../lib/server/pyth-keeper";
 
@@ -67,7 +66,37 @@ const instructions = keeper.buildV3Transaction(update, {
   instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
 });
 const transaction = new Transaction().add(...instructions);
-const simulation = await connection.simulateTransaction(transaction, [payer]);
+const latestBlockhash = await connection.getLatestBlockhash("confirmed");
+transaction.feePayer = payer.publicKey;
+transaction.recentBlockhash = latestBlockhash.blockhash;
+transaction.sign(payer);
+const balanceAddresses = [payer.publicKey, pythTreasury];
+const balancesBefore = await connection.getMultipleAccountsInfo(balanceAddresses, "confirmed");
+const simulationResponse = await fetch(RPC, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "simulateTransaction",
+    params: [transaction.serialize().toString("base64"), {
+      encoding: "base64",
+      commitment: "confirmed",
+      sigVerify: true,
+      accounts: { encoding: "base64", addresses: balanceAddresses.map((address) => address.toBase58()) },
+    }],
+  }),
+});
+const simulationJson = await simulationResponse.json() as { result?: { value?: { err: unknown; unitsConsumed?: number; logs?: string[]; accounts?: Array<{ lamports: number } | null> } }; error?: unknown };
+if (!simulationResponse.ok || simulationJson.error || !simulationJson.result?.value) throw new Error(`simulation RPC failed: ${JSON.stringify(simulationJson.error ?? simulationResponse.status)}`);
+const simulation = simulationJson.result.value;
+const simulatedAccounts = simulation.accounts ?? [];
+const lamportDeltas = balanceAddresses.map((address, index) => ({
+  address: address.toBase58(),
+  before: balancesBefore[index]?.lamports ?? 0,
+  after: simulatedAccounts[index]?.lamports ?? 0,
+  delta: (simulatedAccounts[index]?.lamports ?? 0) - (balancesBefore[index]?.lamports ?? 0),
+}));
 const plan = {
   cluster: "devnet",
   execute,
@@ -90,11 +119,12 @@ const plan = {
     dataBytes: instruction.data.length,
     accounts: instruction.keys.map((meta) => ({ address: meta.pubkey.toBase58(), signer: meta.isSigner, writable: meta.isWritable })),
   })),
-  simulation: { err: simulation.value.err, unitsConsumed: simulation.value.unitsConsumed, logs: simulation.value.logs },
+  simulation: { err: simulation.err, unitsConsumed: simulation.unitsConsumed, lamportDeltas, logs: simulation.logs },
 };
 console.log(JSON.stringify(plan, null, 2));
-if (simulation.value.err) process.exit(2);
+if (simulation.err) process.exit(2);
 if (!execute) process.exit(0);
-const signature = await sendAndConfirmTransaction(connection, transaction, [payer], { commitment: "confirmed" });
+const signature = await connection.sendRawTransaction(transaction.serialize(), { skipPreflight: false, preflightCommitment: "confirmed" });
+await connection.confirmTransaction({ signature, ...latestBlockhash }, "confirmed");
 const finalizedSlot = await connection.getSlot("finalized");
 console.log(JSON.stringify({ signature, finalizedSlot, status: "confirmed", payload: "redacted" }, null, 2));
