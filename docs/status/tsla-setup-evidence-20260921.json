@@ -1,0 +1,295 @@
+{
+  "capturedAt": "2026-09-21T11:45:06.742Z",
+  "cluster": "devnet",
+  "repositoryHead": "21cf64b89983ab7a731a01e7a72c2d96df7a7368",
+  "executionCodeCommit": "21cf64b89983ab7a731a01e7a72c2d96df7a7368",
+  "programId": "Gc4shx8j29nSuP4xATiKszBMZpzVEzc72Tr5iYwLALzZ",
+  "artifactHash": "c878d70b13864c6a8d51170a67129867e64484bec8395ae455fa3c6132014b97",
+  "feePayer": "A5sV4PkkVM4gm3rejACvKFgxEMmj8ouGsffSKT5qYVc8",
+  "scope": "isolated TSLA setup only",
+  "exchange": "AW5ByA33xvoewXNfRRSQ4Am9z5fYs3i9mpjdUdtbEREK",
+  "instrument": "9dJTKhEHupjB7bpyzCQm52ePKDq1o14XCP6MtLx6js77",
+  "core": "AN7JHGoaiQ4cbB4pxeigVjSEwLsTdtRBCJsFmcmG5XBs",
+  "instrumentIdHex": "9e65eb89a39cd57e08a3cda2c8f25166af85d0170761c223f076d60bb094fbdd",
+  "oracle": {
+    "symbol": "Equity.US.TSLA/USD",
+    "feedId": 1435,
+    "channel": "fixed_rate@50ms",
+    "channelId": 2,
+    "exponent": -5,
+    "oracleValid": false
+  },
+  "accounts": {
+    "total": 29,
+    "executionBundle": 27,
+    "bookPages": [
+      "FAuUqjdXx6BX5GPx3FSFWmEkdo4p7B1iu4cUpUrNt24z",
+      "2hkQ81EGiXcAnKk1ApQ5ApqiaHe124i1AXRe9h2J2k5h",
+      "3vsK2rcj3BYxqePJ2ByWjkGuMmmV77tVwZPCxYA8RcHW",
+      "GU68vPQ57FAphqVDWjLoDsCwdtnz97qYLy7aLFVKq8tT",
+      "7BxG2ts59yFVrnaGKiDzRovzLCPeD6kin4Zt6JR4uxvx",
+      "HEctkAUuyxp5QGydEbN7nKMqdtwXhAjq8iVDbmv97eq7",
+      "4f9G1z7yRBtHKB3hpwzuvSqDbYyDCc3J3btXUYcfDS9t",
+      "5e6vv2dMeXEpgAqAaNYfSvFhpVPGTckwP8MxrWk6kaTq",
+      "6Rasucei7y8pwvawYtyL8ocrcp69M8vbBMsgNoQH6BP3",
+      "FQgEmyaEki1GY2H9G42VUPmjTZv3m5UYdR5j29TGgA2d",
+      "5XfQJ9RLB9RtDfCSn7rdKnyw1JVkgAAs4vy589xYMtTR",
+      "By1JVpKrgPA1iqt2zFEW8v5XBQfDkrofU7EB2UZih7Ss",
+      "EfMCDMxvxgDK4Lb9mFpSu7rKnccfKESBTTG5bpinWQSt",
+      "EiuQz5Q5C386w6xyHRDjpyEuuuNaoVRMPJcwMdfP6Lmz",
+      "ERk24zy2FmYCtLdgz3ZUZfUkiVJZBaXyCWcog7CBJAUi",
+      "EKfwLdRKsEX2DKVM97s3NhzCGpVoRkS4KuMGtngHLGeD",
+      "A5C8CTWVSLCFfzx5bf7KqB3ecKunasMcA3G4Lu1X5r98",
+      "pCyZkSBKUW788NdZtdAEPoxyfQmZBbLkUsrsnC8qLNi"
+    ],
+    "seatShards": [
+      "JonKBVo63TR7AsSymbAufEv54FZjXcuT2U9e7kTS5p1",
+      "FP2gQnVeoZbpS86PvHsXuWPTpL5Vezx7k2GKSpnSos1U",
+      "6uRPEarEeitvYLG9kbZzFXKJ9EwkQxhNuW67x8vbUAhS",
+      "77nbpXVoA2USZqeWM3pTR3JN3aA84sr8fwzczSTrkMGd"
+    ],
+    "eventShards": [
+      "6HsYsaAHZp9P9QQgLZMABhcfxQzf314qc59fQCxZMfZb",
+      "EweGu79e5rXAkE1kTdjAec96sjuKVd97moSfVs1yaCQj",
+      "6JTVv79gcSCS77o5UbkvJ5WjgwMf1hkFX518Zf3HLthK",
+      "G96EwQLZ14k4AJhwD3CqMopE5RSYZD4DzQbxHK7CjKc6"
+    ]
+  },
+  "readback": {
+    "allExist": true,
+    "allOwnedByFreshProgram": true,
+    "sizes": {
+      "exchange": 256,
+      "instrument": 128,
+      "core": 4096,
+      "bookPage": 10184,
+      "seatShard": 8236,
+      "eventShard": 3244
+    },
+    "instrumentDiscriminator": "STKINS01",
+    "instrumentInitialized": true,
+    "instrumentSuspended": false,
+    "coreDiscriminator": "STKMK003",
+    "coreInitialized": true,
+    "coreMode": 1,
+    "activationComplete": true,
+    "setupComplete": true
+  },
+  "transactions": [
+    {
+      "name": "create V3 exchange",
+      "signature": "5hgM646ZYMVj11NNieJzELLzSdqTFNAAScumHcSK4hXAaMbka1PfheSgdpFXCKTcMx4gwEmsKtbzPegzMpCHFqGH",
+      "slot": 501885528,
+      "bytes": 323
+    },
+    {
+      "name": "create V3 instrument",
+      "signature": "2kZsvLsTYPkt8KhhQvXPgCourZ6AJbuag6H66JRHHjts5zSQLShkoWk4aiDViWaGHT9ZQBygh3UaKqhPKk5xeHi5",
+      "slot": 501885533,
+      "bytes": 269
+    },
+    {
+      "name": "initialize V3 exchange",
+      "signature": "2khaE6cVspt92PySRow4h3BzgFFqiMkw4QN1zWfbexFV5NZDZ8SbfaU9jNr11xBCdNhp2FanLtgMGgPUtKumThYF",
+      "slot": 501885536,
+      "bytes": 204
+    },
+    {
+      "name": "register V3 instrument",
+      "signature": "2aZ6x449cR2AjQyXYLCG96RKAYhsgAec33sEm7DbJT9KJq8UfeznUZHMMqicKUZJDPn9ySz9kdRvbb5SaSA9oHb1",
+      "slot": 501885542,
+      "bytes": 269
+    },
+    {
+      "name": "configure V3 instrument oracle",
+      "signature": "5rKmGax8uhgRffKZEUn2HqL9k2Bw7YsexvAcAzoTX4L6impiiiYswDvotGCBLfEzfAWpzSNttDUyCASNqjMiYw1C",
+      "slot": 501885546,
+      "bytes": 278
+    },
+    {
+      "name": "V3 core create/resume",
+      "signature": "5rwLt17tDGNFbD1xuBWyktZwvSjXFxdmtPsreKgWJgcF9ea83NgWcLFwJdBfaL5jvrttiRtQhp2zXNsRrr2kUtjF",
+      "slot": 501885552,
+      "bytes": 272
+    },
+    {
+      "name": "activate V3 core",
+      "signature": "4MmQkN1D1rq5h4JbcjaHnazmG6LRq84Gp3eDWJpZksF72YwC6g8gGa8BBVz17PhKwwE59KppU5SpxTRjAB8FZd8g",
+      "slot": 501885608,
+      "bytes": 270
+    },
+    {
+      "name": "V3 book 0/0 create/resume",
+      "signature": "5fcbFZjVH6agS63jy1UqMj2uiu2dg6hWPM8SdLHBcS3wuEjf1pvSJ9ZxnVmLrPDMQrqmGBzKCK44fr2NU4idYvW7",
+      "slot": 501885614,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 0/1 create/resume",
+      "signature": "4fqrMfshJUaVBThanmUs8qU9CyfpzzJxWpexVMgsFwftyW54GH8kjpRag8LoozugjiHBesKFoQw4X3jbn5v24UvL",
+      "slot": 501885620,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 0/2 create/resume",
+      "signature": "2fYLJerBBKB8gFH2sdeRKAs9NmSFxD9Cnht6FBvtLtTn4t9zWJDujxV5ES1BeUbZzN2sZ1DhuYbDmjfPGfuuTzAj",
+      "slot": 501885625,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 0/3 create/resume",
+      "signature": "2Tj7WZuv9HDtcjUshV8HDeiRtnYXhWE6bjg9iTiiaEJK7S3FXQRTshYQVJriVJnsVmfAi4kPazmXLpbiWpWPxD5X",
+      "slot": 501885636,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 0/4 create/resume",
+      "signature": "5qdXNS4e1PjV5pU8isfnjmqqXCWnqie4Zj2Xv4cvwLmaYKpGzUGY66rDkM1VCYv5FtSRTV5qBD55qoF1WaoUy1vH",
+      "slot": 501885808,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 0/5 create/resume",
+      "signature": "5zaRyag8psEpnxWGNqXSUpoKyxHuUB3UeTfzSMw5x3RpWBYLvSt3ugNDesxAr8CSSqZk9G9ETGv49j1wiZsL8Uhf",
+      "slot": 501885813,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 0/6 create/resume",
+      "signature": "6584cevVS4dL6XHHW2WMqdz5DxCabLGr1Urm8dWkdJeVq5ukw64qmCHerG7VfmHVPffGrmQS32xxDHvWYpNbhGdC",
+      "slot": 501885824,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 0/7 create/resume",
+      "signature": "4o3Jm587nGwEyqGKQs5G4joPsXuhTKCqeNR2wtBj8JE42tem4365REXjy1LQUGpc8caH4y7JdTAKSXZZVrtkoxZ7",
+      "slot": 501885884,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 0/8 create/resume",
+      "signature": "Spfit36SVQ5qCMfBM7PAD3sW9qgmbxTUERmomzvMa1eueZXa5xL44ipK5v5DkPxB3Dnvv2USUTQQ3hgmQj1GJi3",
+      "slot": 501885889,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 1/0 create/resume",
+      "signature": "2nRjHs93JoTQ5mCB5DCBsqxYrhLiqodC58qSmyxCPeXyHwXvBifoQanhHqWi2tXDTnsMBEiAQHzkPCrPSYURVWqT",
+      "slot": 501885894,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 1/1 create/resume",
+      "signature": "5Z9pWgchR3nXgPDSQddg27TZLFbpSSmcqFZqURrsJztWBxFWtHUJAiHBU9q8sEhDJKZBaHutMJn8SFT6YaZ8xVFW",
+      "slot": 501885900,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 1/2 create/resume",
+      "signature": "3KCpWVq1NN84TuQrKNAQDmzn7VKhTzKYQHj7j7nDfLWgwbAbmhre94ZrgnbcTNUMxvJ5r9bEAB9GGCcHb6KpPkEn",
+      "slot": 501885906,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 1/3 create/resume",
+      "signature": "44QLSTxAWwHYJwPJouu3XaZooKbehoUJcwRUZ9t9VEAJMuqMAj3ExLqxmLFGBq5uqiuNxBgT9EgkvUXaSXK4cjrX",
+      "slot": 501885916,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 1/4 create/resume",
+      "signature": "SwVxD6XH9vwZa2egDJGDTHmThmqdVH8xSdSYKoXJ56WGUx82zzCHZWajMUBx3oThPzG4mAZBmBpSCHCbZTsbKg2",
+      "slot": 501885945,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 1/5 create/resume",
+      "signature": "3gYzDFdnZjkbkeGSVov8TWcsD5GQkTg3eKQEkAUT115AkEx9GMAHxRAVJ4oDS2Fe88McVSk1PGpnPYBqZbSbFHV7",
+      "slot": 501885962,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 1/6 create/resume",
+      "signature": "3xpcrhF9VwiUwJZ3J3ySn7Ueb4LkLLgeHfi1x1Ue6v5BYG5Bd2nfZLYdNkbcsYzWSmP9Y3Qg753v5rsnshVMoDsH",
+      "slot": 501885978,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 1/7 create/resume",
+      "signature": "53CMJJgdGy4TPF5nbDGk41WH18md8txUdNmy3YuW5rUis8ygZT2rAk5rQ82ZqvYzL36kC1w8vPu5Fa3nNrctahx2",
+      "slot": 501885996,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 1/8 create/resume",
+      "signature": "2jU1K8CrZMT6wSgV4pt2pEiDTmFdwztGEGb7Cf37vdLbcRcBkSiv8M3bubyEqoDHwWvaz1PLdTtxq9c1PVF6U2WD",
+      "slot": 501886010,
+      "bytes": 272
+    },
+    {
+      "name": "V3 seat shard 0 create/resume",
+      "signature": "Hc2DptDRzBHt8sKY9GnWHuqhaV75yD4RmqvrFvdhnNhLWp4ACDShjvTiDPLaYobkS2Qn99TxLNzpoqyBUbD9LUw",
+      "slot": 501886028,
+      "bytes": 272
+    },
+    {
+      "name": "V3 event shard 0 create/resume",
+      "signature": "2AAkQFfudjgAHVLkgnWZd6WgZD2wg3obTEiXtyHxqJQwq3Fzkoow5y79xrwGTeayZdtonadt899QBwngCbQjXD3w",
+      "slot": 501886042,
+      "bytes": 272
+    },
+    {
+      "name": "V3 seat shard 1 create/resume",
+      "signature": "r4SVEQEiLCBZbhPYbW3eTnzM8NsRZfp5SZLZJaRPVBHM7Djuzkg1Vvfrb9R2Hv9cVpywjxnyhdZM92AMaWfJcpB",
+      "slot": 501886060,
+      "bytes": 272
+    },
+    {
+      "name": "V3 event shard 1 create/resume",
+      "signature": "5EDqDJ7n6kM6xEQekrm3VCVqohXkZX1er99datSmMPfwf968H15zRiuQtoFTih58uUdFtbFG177EY5wwtrwMYbCn",
+      "slot": 501886077,
+      "bytes": 272
+    },
+    {
+      "name": "V3 seat shard 2 create/resume",
+      "signature": "9UD7wxT8psjiPnZjGx5smHsAfV5eKYiYxSYaeRajfwGXe9kpFWYLe8PAhafocgUa8qzcuyLZpL5kV9rRhqdh6DY",
+      "slot": 501886088,
+      "bytes": 272
+    },
+    {
+      "name": "V3 event shard 2 create/resume",
+      "signature": "3xt4vMKvqYgRqpEKADK9RUR5idHANYZ3PhfLvs2XAVYpu763JhTTZNMbj7og8jWKcURCXcd845iFLPhVXgmLVgWd",
+      "slot": 501886104,
+      "bytes": 272
+    },
+    {
+      "name": "V3 seat shard 3 create/resume",
+      "signature": "5Vt2nSiPBzC6PccrzR8ocofcS629pbuGSzJ32givj4SCbXojWsxyFTADJ9VsrfBbB35KVdD5BUw1GnVt1UFaCghm",
+      "slot": 501886119,
+      "bytes": 272
+    },
+    {
+      "name": "V3 event shard 3 create/resume",
+      "signature": "3tEyt9agk5LsarVYSP2C9wbFYvWegMJftMvNbqBAdNY9NwtJPsXHQSzbaapH7JDCM9Q8VwXWvF9Wzf2WHRMSYsmS",
+      "slot": 501886138,
+      "bytes": 272
+    }
+  ],
+  "excluded": {
+    "pythSubmission": true,
+    "delegation": true,
+    "traderSeats": true,
+    "custody": true,
+    "orders": true,
+    "fills": true,
+    "commits": true,
+    "restoration": true,
+    "withdrawals": true
+  },
+  "protectedAccountsUntouched": [
+    "47Mx7SZvt7EY6NydsA5krgrqvcDDR1H5BG5xTPDSnhso",
+    "7gP2YAqf6TNMqfkDkSdjb2Y1peLzoXadBnzL2LDzhFei",
+    "9d75hK8GyfqajxcijLa35bEh8SYUtobqi6eSdtF42RuS"
+  ],
+  "oldProgramNotUsed": "H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET"
+}
