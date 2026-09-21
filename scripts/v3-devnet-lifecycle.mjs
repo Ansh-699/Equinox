@@ -73,6 +73,12 @@ function assertFresh(state) {
 }
 async function send(name, ixs, signers) {
   const tx = new Transaction().add(...ixs);
+  const simulation = await connection.simulateTransaction(tx, signers);
+  if (simulation.value.err) {
+    const logs = (simulation.value.logs ?? []).slice(-12).join(" | ");
+    throw new Error(`${name}: simulation rejected ${JSON.stringify(simulation.value.err)}${logs ? `; logs: ${logs}` : ""}`);
+  }
+  console.log(`${name}: simulation ok units=${simulation.value.unitsConsumed ?? "unknown"}`);
   const signature = await sendAndConfirmTransaction(connection, tx, signers, { commitment: "confirmed" });
   const slot = await connection.getSlot("finalized");
   const state = load(); (state.events ??= []).push({ name, signature, slot, bytes: tx.serialize().length }); save(state);
