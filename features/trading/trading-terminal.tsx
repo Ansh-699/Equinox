@@ -34,8 +34,9 @@ import { OpenOrdersPanel } from "@/features/orders/open-orders-panel";
 import { createV3OpenOrdersAdapter, unimplementedOpenOrdersAdapter } from "@/lib/open-orders";
 import type { TransactionPreview } from "@/lib/execution-boundary";
 import { recordSignature } from "@/lib/last-signature";
+import { publicMarketApiUrl, publicV3Core } from "@/lib/demo-config";
 
-const marketApiUrl = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_API_URL;
+const marketApiUrl = publicMarketApiUrl;
 
 interface MarketEvent { kind: string; sequence?: number; payload: { bids?: BookLevel[]; asks?: BookLevel[]; kind?: string } }
 
@@ -72,13 +73,13 @@ export function TradingTerminal() {
   const session = useTradingSession(protocol, auth.walletAddress, marketAddress, 0);
   const handleSessionResult = (result: SessionActionResult) => { setNotice(result.detail ? `${result.message}: ${result.detail}` : result.message); setSessionActionReason(result.reason); };
   const executionStatus = useExecutionStatus(marketApiUrl, marketSymbol);
-  const v3MarketState = useV3MarketState(marketApiUrl, process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS);
+  const v3MarketState = useV3MarketState(marketApiUrl, publicV3Core);
   const sessionOrder = useSessionOrder(protocol?.rpc ?? null, session.status, auth, handleSessionResult, session.advanceNonce, executionStatus);
   const canTrade = session.status !== null && isSessionUsable(session.status);
-  const position = usePosition(protocol?.rpc ?? null, marketAddress, 0, { marketApiUrl, core: process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS });
+  const position = usePosition(protocol?.rpc ?? null, marketAddress, 0, { marketApiUrl, core: publicV3Core });
   const openOrdersAdapter = useMemo(
-    () => marketApiUrl && process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS
-      ? createV3OpenOrdersAdapter({ marketApiUrl, core: process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS })
+    () => marketApiUrl && publicV3Core
+      ? createV3OpenOrdersAdapter({ marketApiUrl, core: publicV3Core })
       : unimplementedOpenOrdersAdapter,
     [],
   );
@@ -151,7 +152,7 @@ export function TradingTerminal() {
   async function runLifecycle() {
     if (!auth.walletAddress || !marketAddress || !protocol) { setNotice("Configure the market, sign in, and connect a wallet before creating a seat."); return; }
     try {
-      const v3Core = process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS;
+      const v3Core = publicV3Core;
       if (v3Core) {
         // A seat mutates the V3 core and seat/event shards, so it is an L1
         // lifecycle write. Never send it while the bundle is delegated or in
@@ -244,6 +245,10 @@ export function TradingTerminal() {
   return (
     <main className="shell">
       <TopBar active={tab} onTabChange={setTab} auth={auth} />
+      <section className="demo-banner" aria-label="Demo limitations">
+        <strong>Read-only Devnet demo</strong>
+        <span>Known V3 core configured · local deterministic trading fixtures available · live trading unavailable (Pyth feed 922 not entitled) · session relay unavailable (Privy/relayer credentials) · withdrawals unavailable (MagicBlock restoration).</span>
+      </section>
       <ExecutionStatusBanner display={executionStatus} canTrade={canTrade} oracleSafety={oracleSafety} />
       <ProtocolStatusStrip marketSymbol={marketSymbol} onMarketSymbolChange={setMarketSymbol} authenticated={auth.authenticated} v3={v3MarketState} />
 
@@ -273,7 +278,7 @@ export function TradingTerminal() {
           />
           <LifecyclePanel
             onSeatAndScratch={runLifecycle}
-            seatActionLabel={process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS ? "Create V3 seat" : undefined}
+            seatActionLabel="Create V3 seat"
             onDeposit={() => {
               const accounts = resolveCustodyAccounts(auth.walletAddress, marketAddress, marketConfig);
               if (!accounts) { setNotice("Configure the market, collateral mint/vault addresses and sign in before depositing."); return; }

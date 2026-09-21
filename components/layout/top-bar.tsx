@@ -58,9 +58,7 @@ export function TopBar({
         <Link href="/portfolio" className={active === "portfolio" ? "nav-active" : ""}>Portfolio</Link>
         <Link href="/activity" className={active === "activity" ? "nav-active" : ""}>Activity</Link>
         <Link href="/settings" className={active === "settings" ? "nav-active" : ""}>Settings</Link>
-        {process.env.NODE_ENV !== "production" ? (
-          <Link href="/diagnostics" className={active === "diagnostics" ? "nav-active" : ""}>Diagnostics</Link>
-        ) : null}
+        <Link href="/diagnostics" className={active === "diagnostics" ? "nav-active" : ""}>Diagnostics</Link>
       </nav>
       <div className="topbar-meta">
         <span className="network"><i /> Devnet</span>

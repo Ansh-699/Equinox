@@ -8,9 +8,10 @@ import { useExecutionStatus } from "@/features/magicblock/use-execution-status";
 import { useLastSignature } from "@/lib/use-last-signature";
 import { marketForSymbol } from "@/lib/markets";
 import { STOCKSTREAM_PROGRAM_ID } from "@/clients/stockstream/src/constants";
+import { DEMO_DEPLOYED_ARTIFACT_SHA256, DEMO_LOCAL_ARTIFACT_SHA256, DEMO_PROGRAM_ID, publicMarketApiUrl, publicV3Core } from "@/lib/demo-config";
 import { useEffect, useState } from "react";
 
-const marketApiUrl = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_API_URL;
+const marketApiUrl = publicMarketApiUrl;
 const RELAYER_ADDRESS = process.env.NEXT_PUBLIC_STOCKSTREAM_RELAYER_ADDRESS;
 
 export function DiagnosticsView() {
@@ -24,6 +25,7 @@ export function DiagnosticsView() {
   const lastSignature = useLastSignature();
   const [marketVersion, setMarketVersion] = useState<number | null>(null);
   const [l1Slot, setL1Slot] = useState<number | null>(null);
+  const [workerHealth, setWorkerHealth] = useState<"checking" | "healthy" | "unavailable">("checking");
 
   useEffect(() => {
     if (!protocol) return;
@@ -33,22 +35,29 @@ export function DiagnosticsView() {
     return () => { stopped = true; };
   }, [protocol, marketAddress]);
 
-  if (process.env.NODE_ENV === "production") {
-    return (
-      <main className="shell">
-        <TopBar active="diagnostics" auth={auth} />
-        <p className="form-note">Diagnostics is development-only.</p>
-      </main>
-    );
-  }
+  useEffect(() => {
+    let stopped = false;
+    fetch(`${marketApiUrl}/health`).then((response) => {
+      if (!stopped) setWorkerHealth(response.ok ? "healthy" : "unavailable");
+    }).catch(() => { if (!stopped) setWorkerHealth("unavailable"); });
+    return () => { stopped = true; };
+  }, []);
 
   return (
     <main className="shell">
       <TopBar active="diagnostics" auth={auth} />
       <section className="session-panel" style={{ marginTop: 20 }}>
-        <div className="panel-title"><h2>Diagnostics</h2><span>development-only</span></div>
+        <div className="panel-title"><h2>Demo diagnostics</h2><span>read-only Devnet</span></div>
+        <p className="form-note">This panel reports public deployment facts only. Trading, relay, restoration, and withdrawal are intentionally unavailable in the demo.</p>
         <dl className="session-detail">
-          <dt>Program ID</dt><dd>{STOCKSTREAM_PROGRAM_ID}</dd>
+          <dt>Program ID</dt><dd>{DEMO_PROGRAM_ID || STOCKSTREAM_PROGRAM_ID}</dd>
+          <dt>Configured V3 core</dt><dd>{publicV3Core}</dd>
+          <dt>Artifact alignment</dt><dd className="negative">mismatch · local {DEMO_LOCAL_ARTIFACT_SHA256.slice(0, 12)}… / deployed {DEMO_DEPLOYED_ARTIFACT_SHA256.slice(0, 12)}…</dd>
+          <dt>Pyth AAPL/USD</dt><dd className="negative">blocked · feed 922 not entitled</dd>
+          <dt>Privy session relay</dt><dd className="negative">unavailable · credentials not configured</dd>
+          <dt>Worker health</dt><dd>{workerHealth === "healthy" ? "healthy · public read-only" : workerHealth}</dd>
+          <dt>MagicBlock lifecycle</dt><dd className="negative">restoration blocked · deployed DLP wire mismatch</dd>
+          <dt>Demo mode</dt><dd>deterministic local fixtures; no live trading</dd>
           <dt>Market account version</dt><dd>{marketVersion ?? "unavailable"}</dd>
           <dt>Market address</dt><dd>{marketAddress ?? "unconfigured"}</dd>
           <dt>Seat index</dt><dd>0 (seats are embedded in the market account, not separate PDAs)</dd>
@@ -62,7 +71,7 @@ export function DiagnosticsView() {
           <dt>Relayer fee payer</dt><dd>{RELAYER_ADDRESS ?? "unconfigured (relayer_signer_unconfigured)"}</dd>
           <dt>Last transaction signature</dt><dd>{lastSignature ? `${lastSignature.instruction} · ${lastSignature.signature} (${lastSignature.domain}, ${new Date(lastSignature.at).toLocaleTimeString()})` : "none this session"}</dd>
         </dl>
-        <p className="form-note">Never displays private keys or server secrets. Oracle age/staleness is omitted here pending the canonical oracle event ABI (see Trade page status banner).</p>
+        <p className="form-note">Never displays private keys or server secrets. Withdrawal remains unavailable while the preserved core awaits compatible MagicBlock restoration.</p>
       </section>
     </main>
   );

@@ -22,12 +22,14 @@ for (const route of ROUTES) {
   });
 }
 
-test("diagnostics is dev-only: no nav link, and the route itself refuses to render in production", async ({ page }) => {
+test("diagnostics remains available as a public read-only demo panel in production", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("link", { name: "Diagnostics" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Diagnostics" })).toBeVisible();
 
   await page.goto("/diagnostics");
-  await expect(page.getByText("Diagnostics is development-only.")).toBeVisible();
+  await expect(page.getByText("Demo diagnostics")).toBeVisible();
+  await expect(page.getByText("read-only Devnet")).toBeVisible();
+  await expect(page.getByText(/feed 922 not entitled/)).toBeVisible();
 });
 
 test("no server secret names appear in the production HTML or shipped scripts", async ({ page }) => {
