@@ -584,13 +584,19 @@ pub fn create_v3_account(
 
 /// Allocates the L1-owned OracleSnapshotV3 PDA. It is intentionally separate
 /// from `V3AccountKind`: delegation must never accept this account as a hot
-/// execution child. Accounts are `[core(ro), snapshot(w), payer(signer,w)]`.
+/// execution child. Accounts are `[core(ro), snapshot(w), payer(signer,w), system(ro)]`.
 pub fn create_oracle_snapshot_v3(program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
-    if accounts.len() != 3 || !accounts[1].is_writable() || !accounts[2].is_signer() || !accounts[2].is_writable() {
+    if accounts.len() != 4 || !accounts[1].is_writable() || !accounts[2].is_signer() || !accounts[2].is_writable() {
         return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    if *accounts[3].address() != pinocchio_system::ID {
+        return Err(ProgramError::InvalidAccountOwner);
     }
     validate_v3_core_parent(program_id, &accounts[0])?;
     if *accounts[1].address() != v3::derive_oracle_snapshot_v3(program_id, accounts[0].address()) {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    if accounts[1].data_len() != 0 {
         return Err(custom(StockStreamError::InvalidInstruction));
     }
     let (feed, channel, exponent) = {

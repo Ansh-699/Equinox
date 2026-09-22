@@ -52,6 +52,11 @@ the plan must stop on any identity, owner, size, or writable-flag mismatch.
 11. Only after that read-through succeeds may session authorization and ER
     order testing be considered for separate approval.
 
+The opcode-59 snapshot-allocation instruction has the canonical four-account
+ABI `[core(ro), snapshot(w), payer(signer,w), system_program(ro)]`. The
+System Program is required by the PDA allocation CPI; Pyth storage, treasury,
+fee, and verification accounts are not part of this instruction.
+
 ## Abort conditions
 
 Abort without sending if the snapshot is absent, writable, foreign-owned,
