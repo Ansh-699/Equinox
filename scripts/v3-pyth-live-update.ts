@@ -11,7 +11,7 @@ import {
 import { loadPythKeeperConfig, PythKeeper } from "../lib/server/pyth-keeper";
 
 const RPC = process.env.SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
-const PROGRAM = "BY81jGEfzwuqGkJbyYaGBty5Pn6oZLfntYUFkV85XZfo";
+const PROGRAM = "8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ";
 const CORE = process.env.V3_CORE;
 const STATE_PATH = process.env.V3_LIFECYCLE_STATE_PATH ?? "/tmp/opencode/v3-lifecycle-state.json";
 const PYTH_PROGRAM = "pytd2yyk641x7ak7mkaasSJVXh6YYZnC7wTmtgAyxPt";
