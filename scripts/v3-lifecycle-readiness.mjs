@@ -1,8 +1,8 @@
 /** Pure readiness checks. Callers supply freshly read, identity-validated L1 bytes. */
 export const V3_LIFECYCLE_ORDER = Object.freeze([
   "exchange-and-instrument", "oracle-metadata", "core-activation",
-  "fresh-pyth-update", "trader-seat", "l1-test-collateral", "collateral-readback",
-  "er-delegation", "limited-session", "er-orders-and-fills",
+  "fresh-pyth-update", "trader-seat", "l1-session-allocation", "l1-test-collateral", "collateral-readback",
+  "er-delegation", "session-member-delegation", "limited-session", "er-orders-and-fills",
 ]);
 
 export function assertV3L1Readiness({ core, seatShards, accountCount, nowSeconds, requireCollateral = true }) {

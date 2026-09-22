@@ -437,7 +437,9 @@ fn session_member_delegation_happy_path_reaches_the_cpi() {
         &ID,
     );
     let mut session_struct = TradingSession::empty();
-    session_struct.initialized = 1;
+    // L1 allocation deliberately leaves policy fields uninitialized; ER
+    // authorization fills them after this member is delegated.
+    session_struct.initialized = 0;
     session_struct.target_program = ID.to_bytes();
     session_struct.owner = owner.pubkey().to_bytes();
     session_struct.market = env.market.to_bytes();

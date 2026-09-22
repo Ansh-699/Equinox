@@ -2105,6 +2105,103 @@ pub fn create_trader_seat(
     )
 }
 
+/// Allocates the TradingSession PDA on L1 while the owner is still a normal
+/// Solana account. The account is deliberately left uninitialized but carries
+/// its canonical identity fields so MagicBlock can validate and delegate it as
+/// a cluster member. ER authorization later fills the policy fields in place;
+/// it must never perform a System Program create-account CPI.
+pub fn create_v3_trading_session(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    seat_index: u16,
+) -> ProgramResult {
+    if accounts.len() != 5 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    let (head, tail) = accounts.split_at_mut(2);
+    let core = &head[0];
+    let owner = &head[1];
+    let (session_slice, tail) = tail.split_at_mut(1);
+    let session_account = &mut session_slice[0];
+    let session_signer = &tail[0];
+    if !owner.is_signer()
+        || !owner.is_writable()
+        || !session_account.is_writable()
+        || *tail[1].address() != pinocchio_system::ID
+    {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    if !core.owned_by(program_id) || core.data_len() != V3_MARKET_CORE_SIZE {
+        return Err(bundle_error());
+    }
+    let core_bytes = unsafe { core.borrow_unchecked() };
+    if core_bytes[0..8] != V3_MARKET_CORE_DISCRIMINATOR
+        || core_bytes[8..10] != V3_LAYOUT_VERSION.to_le_bytes()
+        || core_bytes[V3_CORE_MARKET_AUTHORITY_OFFSET..V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
+            != owner.address().to_bytes()
+        || core_bytes[V3_CORE_DELEGATION_STATUS_OFFSET] != DelegationStatus::NotDelegated as u8
+    {
+        return Err(StockStreamError::InvalidTradingSession.into());
+    }
+    if owner.address() == session_signer.address() || owner.address() == core.address() {
+        return Err(StockStreamError::InvalidTradingSession.into());
+    }
+    let market = *core.address();
+    let signer_key = *session_signer.address();
+    let expected = session::derive_trading_session(
+        owner.address(),
+        &market,
+        seat_index,
+        &signer_key,
+        program_id,
+    );
+    if expected != *session_account.address()
+        || session_account.lamports() != 0
+        || session_account.data_len() != 0
+        || session_account.owned_by(program_id)
+    {
+        return Err(StockStreamError::InvalidTradingSession.into());
+    }
+    let bump = Address::find_program_address(
+        &[
+            session::TRADING_SESSION_SEED,
+            owner.address().as_ref(),
+            market.as_ref(),
+            &seat_index.to_le_bytes(),
+            signer_key.as_ref(),
+        ],
+        program_id,
+    )
+    .1;
+    let seat_bytes = seat_index.to_le_bytes();
+    let bump_bytes = [bump];
+    let seeds = [
+        Seed::from(session::TRADING_SESSION_SEED),
+        Seed::from(owner.address().as_ref()),
+        Seed::from(market.as_ref()),
+        Seed::from(&seat_bytes),
+        Seed::from(signer_key.as_ref()),
+        Seed::from(&bump_bytes),
+    ];
+    let signer = Signer::from(&seeds);
+    let rent = Rent::get()?;
+    pinocchio_system::instructions::CreateAccount {
+        from: owner,
+        to: session_account,
+        lamports: rent.try_minimum_balance(session::TRADING_SESSION_SIZE)?,
+        space: session::TRADING_SESSION_SIZE as u64,
+        owner: program_id,
+    }
+    .invoke_signed(core::slice::from_ref(&signer))?;
+    let mut state = TradingSession::empty();
+    state.owner = owner.address().to_bytes();
+    state.session_signer = signer_key.to_bytes();
+    state.target_program = program_id.to_bytes();
+    state.market = market.to_bytes();
+    state.trader_seat_index = seat_index;
+    session::write_session(unsafe { session_account.borrow_unchecked_mut() }, &state)
+}
+
 /// V3 session authorization uses the same TradingSession account format as
 /// the legacy market, but binds it to the complete sharded execution bundle.
 /// Accounts are `[core, 18 book pages, 4 seat shards, 4 event shards,
@@ -2144,13 +2241,28 @@ pub fn authorize_trading_session_v3(
         || !session_account.is_writable()
         || *accounts[V3_EXECUTION_BUNDLE_LEN + 3].address() != pinocchio_system::ID
     {
+        pinocchio_log::log!(
+            256,
+            "auth_session:FAIL owner_signer={} owner_writable={} session_writable={} system_ok={}",
+            owner.is_signer(),
+            owner.is_writable(),
+            session_account.is_writable(),
+            accounts[V3_EXECUTION_BUNDLE_LEN + 3].address() == &pinocchio_system::ID
+        );
         return Err(ProgramError::MissingRequiredSignature);
     }
     if owner.address() == session_signer.address() || owner.address() == accounts[0].address() {
+        pinocchio_log::log!(
+            256,
+            "auth_session:FAIL owner_eq_signer={} owner_eq_core={}",
+            owner.address() == session_signer.address(),
+            owner.address() == accounts[0].address()
+        );
         return Err(StockStreamError::InvalidTradingSession.into());
     }
     let seat = v3_trade_seat(&accounts[..V3_EXECUTION_BUNDLE_LEN], seat_index)?.0;
     if seat.trader != owner.address().to_bytes() {
+        pinocchio_log::log!(256, "auth_session:FAIL seat_trader_mismatch");
         return Err(StockStreamError::InvalidSeat.into());
     }
     let core_snapshot = unsafe { accounts[0].borrow_unchecked() };
@@ -2167,11 +2279,12 @@ pub fn authorize_trading_session_v3(
         || maximum_exposure <= 0
         || maximum_open_orders == 0
     {
+        pinocchio_log::log!(256, "auth_session:FAIL oracle_valid={} expires_at={} now={} actions={} max_order_notional={} max_cum={} max_exposure={} max_open_orders={}", core_snapshot[V3_CORE_ORACLE_VALID_OFFSET], expires_at, now, actions, max_order_notional, max_cumulative_notional, maximum_exposure, maximum_open_orders);
         return Err(StockStreamError::InvalidTradingSession.into());
     }
     let core_key = *accounts[0].address();
     let signer_key = *session_signer.address();
-    let (expected_pda, bump) = Address::find_program_address(
+    let (expected_pda, _) = Address::find_program_address(
         &[
             session::TRADING_SESSION_SEED,
             owner.address().as_ref(),
@@ -2181,34 +2294,35 @@ pub fn authorize_trading_session_v3(
         ],
         program_id,
     );
+    pinocchio_log::log!(256, "auth_session:DEBUG pre_create expected_pda_ok={} session_lamports={} session_owned_by_prog={} session_addr_eq_owner={}", expected_pda == *session_account.address(), session_account.lamports(), session_account.owned_by(program_id), session_account.address() == owner.address());
     if expected_pda != *session_account.address()
-        || session_account.lamports() != 0
-        || session_account.owned_by(program_id)
+        || session_account.lamports() == 0
+        || !session_account.owned_by(program_id)
+        || session_account.data_len() != session::TRADING_SESSION_SIZE
         || session_account.address() == owner.address()
     {
+        pinocchio_log::log!(
+            256,
+            "auth_session:FAIL pda_mismatch={} lamports={} owned_by_prog={} session_eq_owner={}",
+            expected_pda != *session_account.address(),
+            session_account.lamports(),
+            session_account.owned_by(program_id),
+            session_account.address() == owner.address()
+        );
         return Err(StockStreamError::InvalidTradingSession.into());
     }
-    let bump_bytes = [bump];
-    let seat_bytes = seat_index.to_le_bytes();
-    let seeds = [
-        Seed::from(session::TRADING_SESSION_SEED),
-        Seed::from(owner.address().as_ref()),
-        Seed::from(core_key.as_ref()),
-        Seed::from(&seat_bytes),
-        Seed::from(signer_key.as_ref()),
-        Seed::from(&bump_bytes),
-    ];
-    let signer = Signer::from(&seeds);
-    let rent = Rent::get()?;
-    pinocchio_system::instructions::CreateAccount {
-        from: owner,
-        to: session_account,
-        lamports: rent.try_minimum_balance(session::TRADING_SESSION_SIZE)?,
-        space: session::TRADING_SESSION_SIZE as u64,
-        owner: program_id,
+    let mut state = session::validated_session_account(
+        program_id,
+        session_account,
+        owner.address(),
+        &core_key,
+        seat_index,
+        &signer_key,
+        true,
+    )?;
+    if state.initialized != 0 || state.revoked != 0 {
+        return Err(StockStreamError::InvalidTradingSession.into());
     }
-    .invoke_signed(core::slice::from_ref(&signer))?;
-    let mut state = TradingSession::empty();
     state.initialized = 1;
     state.owner = owner.address().to_bytes();
     state.session_signer = signer_key.to_bytes();
@@ -3786,6 +3900,114 @@ pub fn reconcile_vault_v3(program_id: &Address, accounts: &mut [AccountView]) ->
 /// authority, source_token, vault, mint, token_program]`. Token vaults never
 /// enter the delegated execution bundle; only the seat ledger and durable
 /// event queue are updated here.
+/// Creates the V3 market vault token account at `derive_vault(core)`.
+///
+/// Accounts: `[core (ro), vault (w), authority (signer, w), mint (ro),
+/// token_program (ro), system_program (ro)]`. The vault PDA is signed by the
+/// program, so no external caller can create it. `deposit_collateral_v3`
+/// requires this exact token account, but the V2 vault paths (opcodes 9 and
+/// 44) validate a 222,752-byte `STKMRK01` header and can never accept a
+/// 4,096-byte `STKMK003` core.
+pub fn create_v3_vault_account(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+) -> ProgramResult {
+    use pinocchio::sysvars::{rent::Rent, Sysvar};
+
+    if accounts.len() != 6 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    if !accounts[1].is_writable() || !accounts[2].is_signer() || !accounts[2].is_writable() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    if !accounts[0].owned_by(program_id) || accounts[0].data_len() != V3_MARKET_CORE_SIZE {
+        return Err(StockStreamError::InvalidMarketLayout.into());
+    }
+    if *accounts[4].address() != crate::handlers::TOKEN_PROGRAM_ID
+        || *accounts[5].address() != pinocchio_system::ID
+    {
+        return Err(ProgramError::InvalidAccountOwner);
+    }
+    if accounts[1].data_len() != 0 {
+        return Err(StockStreamError::InvalidInstruction.into());
+    }
+    let core_key = *accounts[0].address();
+    let vault_key = *accounts[1].address();
+    let (expected_vault, vault_bump) =
+        Address::find_program_address(&[b"vault", core_key.as_ref()], program_id);
+    if expected_vault != vault_key {
+        return Err(StockStreamError::InvalidInstruction.into());
+    }
+    let mint_bytes: [u8; 32] = {
+        let core = unsafe { accounts[0].borrow_unchecked() };
+        if core[0..8] != V3_MARKET_CORE_DISCRIMINATOR
+            || core[8..10] != V3_LAYOUT_VERSION.to_le_bytes()
+            || core[10] != 1
+            || core[V3_CORE_RISK_CONFIG_VERSION_OFFSET] != V3_RISK_CONFIG_VERSION
+            || core[V3_CORE_MODE_OFFSET] == 0
+        {
+            return Err(StockStreamError::InvalidMarketLayout.into());
+        }
+        if core[V3_CORE_MARKET_AUTHORITY_OFFSET..V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
+            != accounts[2].address().to_bytes()
+        {
+            return Err(ProgramError::MissingRequiredSignature);
+        }
+        // `initialize_v3_market` copies the exchange's collateral mint here.
+        let mint: [u8; 32] = core[76..108].try_into().map_err(|_| bundle_error())?;
+        if mint == [0u8; 32] {
+            return Err(StockStreamError::InvalidMarketLayout.into());
+        }
+        mint
+    };
+    if accounts[3].address().to_bytes() != mint_bytes {
+        return Err(StockStreamError::CustodyViolation.into());
+    }
+
+    let bump_slice = [vault_bump];
+    let vault_seeds = [
+        pinocchio::cpi::Seed::from(b"vault"),
+        pinocchio::cpi::Seed::from(core_key.as_ref()),
+        pinocchio::cpi::Seed::from(&bump_slice),
+    ];
+    let vault_signer = pinocchio::cpi::Signer::from(&vault_seeds);
+    pinocchio_system::instructions::CreateAccount {
+        from: &accounts[2],
+        to: &accounts[1],
+        lamports: Rent::get()?.try_minimum_balance(crate::handlers::TOKEN_ACCOUNT_LEN)?,
+        space: crate::handlers::TOKEN_ACCOUNT_LEN as u64,
+        owner: &crate::handlers::TOKEN_PROGRAM_ID,
+    }
+    .invoke_signed(core::slice::from_ref(&vault_signer))?;
+
+    // SPL Token initializeAccount3 embeds the owner in the data, so the vault
+    // PDA does not need to sign again.
+    let vault_authority_address = crate::handlers::derive_vault_authority(&core_key, program_id);
+    let mint_address = *accounts[3].address();
+    let mut init_data = [0u8; 33];
+    init_data[0] = 18; // SPL Token initializeAccount3
+    init_data[1..33].copy_from_slice(vault_authority_address.as_ref());
+    let init_accounts = [
+        pinocchio::instruction::InstructionAccount::writable(&vault_key),
+        pinocchio::instruction::InstructionAccount::readonly(&mint_address),
+    ];
+    let init_ix = pinocchio::instruction::InstructionView {
+        program_id: &crate::handlers::TOKEN_PROGRAM_ID,
+        accounts: &init_accounts,
+        data: &init_data,
+    };
+    {
+        let vault_view = accounts[1].clone();
+        let mint_view = accounts[3].clone();
+        pinocchio::cpi::invoke_signed(
+            &init_ix,
+            &[&vault_view, &mint_view],
+            core::slice::from_ref(&vault_signer),
+        )?;
+    }
+    Ok(())
+}
+
 pub fn deposit_collateral_v3(
     program_id: &Address,
     accounts: &mut [AccountView],

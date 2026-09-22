@@ -12,9 +12,10 @@
  */
 import fs from "node:fs";
 import { V3_LIFECYCLE_ORDER } from "./v3-lifecycle-readiness.mjs";
-import { Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction, sendAndConfirmTransaction } from "@solana/web3.js";
+import { Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction } from "@solana/web3.js";
+import { createMint } from "@solana/spl-token";
 
-const RPC = "https://api.devnet.solana.com";
+const RPC = process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com";
 const PROGRAM = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? "8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ");
 const STATE_PATH = process.env.V3_LIFECYCLE_STATE_PATH ?? "/tmp/opencode/v3-lifecycle-state.json";
 const DELEGATION_STATE_PATH = process.env.V3_DELEGATION_STATE_PATH ?? "/tmp/opencode/v3-delegation-state.json";
@@ -28,6 +29,8 @@ const FRESH_AAPL_CORE = "7gP2YAqf6TNMqfkDkSdjb2Y1peLzoXadBnzL2LDzhFei";
 const PRESERVED_V2_MARKET = "9d75hK8GyfqajxcijLa35bEh8SYUtobqi6eSdtF42RuS";
 const SIZES = { core: 4_096, book: 10_184, seat: 8_236, event: 3_244 };
 const BOOK_PAGES_PER_SIDE = 9;
+const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const PYTH_PROGRAM = new PublicKey("pytd2yyk641x7ak7mkaasSJVXh6YYZnC7wTmtgAyxPt");
 const ORACLE_CHANNELS = new Map([
   ["real_time", 1],
   ["fixed_rate@50ms", 2],
@@ -81,29 +84,78 @@ function assertFresh(state) {
   }
   if (state.version !== undefined && state.version !== 3) throw new Error("checkpoint is not V3");
 }
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function send(name, ixs, signers) {
   const tx = new Transaction().add(...ixs);
-  let simulation;
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    simulation = await connection.simulateTransaction(tx, signers);
-    if (simulation.value.err !== "BlockhashNotFound") break;
-    if (attempt === 3) break;
-    await new Promise((resolve) => setTimeout(resolve, 250 * (2 ** attempt)));
+  tx.feePayer = signers[0].publicKey;
+  let lastError;
+  // Public Devnet RPC rate-limits aggressively (429) and a stale blockhash
+  // after retries shows up as BlockhashNotFound. Refresh the blockhash and
+  // retry the whole simulate+send+confirm cycle instead of reusing one.
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    try {
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+      tx.recentBlockhash = blockhash;
+      const simulation = await connection.simulateTransaction(tx, signers);
+      if (simulation.value.err) {
+        const logs = (simulation.value.logs ?? []).slice(-12).join(" | ");
+        throw new Error(`${name}: simulation rejected ${JSON.stringify(simulation.value.err)}${logs ? `; logs: ${logs}` : ""}`);
+      }
+      console.log(`${name}: simulation ok units=${simulation.value.unitsConsumed ?? "unknown"}`);
+      const signature = await connection.sendTransaction(tx, signers, { skipPreflight: false, preflightCommitment: "confirmed", maxRetries: 5 });
+      await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed");
+      const slot = await connection.getSlot("finalized");
+      const state = load(); (state.events ??= []).push({ name, signature, slot, bytes: tx.serialize().length }); save(state);
+      console.log(`${name}: ${signature} slot=${slot}`);
+      await sleep(400);
+      return { signature, slot };
+    } catch (error) {
+      lastError = error;
+      const message = String(error?.transactionMessage ?? error?.message ?? error);
+      console.log(`${name}: attempt ${attempt + 1}/6 failed (${message.slice(0, 140)}); retrying`);
+      await sleep(600 * (attempt + 1));
+    }
   }
-  if (simulation.value.err) {
-    const logs = (simulation.value.logs ?? []).slice(-12).join(" | ");
-    throw new Error(`${name}: simulation rejected ${JSON.stringify(simulation.value.err)}${logs ? `; logs: ${logs}` : ""}`);
-  }
-  console.log(`${name}: simulation ok units=${simulation.value.unitsConsumed ?? "unknown"}`);
-  const signature = await sendAndConfirmTransaction(connection, tx, signers, { commitment: "confirmed" });
-  const slot = await connection.getSlot("finalized");
-  const state = load(); (state.events ??= []).push({ name, signature, slot, bytes: tx.serialize().length }); save(state);
-  console.log(`${name}: ${signature} slot=${slot}`); return { signature, slot };
+  throw new Error(`${name}: ${String(lastError?.transactionMessage ?? lastError?.message ?? lastError)}`);
 }
 function ix(opcode, keys, data = []) { return new TransactionInstruction({ programId: PROGRAM, keys, data: Buffer.from([opcode, ...data]) }); }
 function updateInstrumentIx(exchange, instrument, payer, instrumentId) {
   const data = Buffer.alloc(41); instrumentId.copy(data, 0); data.writeUInt32LE(SELECTED_ORACLE.feedId, 32); data[36] = SELECTED_ORACLE.channel; data.writeInt32LE(SELECTED_ORACLE.exponent, 37);
   return new TransactionInstruction({ programId: PROGRAM, keys: [ro(exchange), wr(instrument), sg(payer.publicKey)], data: Buffer.concat([Buffer.from([22]), data]) });
+}
+// Canonical exchange-config encoding, mirroring
+// `clients/stockstream/src/abi/exchange-config-instructions.ts`. This runner is
+// plain ESM, so the bytes are written directly; every transaction is simulated
+// before it is sent, so a malformed mask fails closed rather than landing.
+const EXCHANGE_FIELD = {
+  keeperAuthority: 1 << 2, makerFeeBps: 1 << 3, takerFeeBps: 1 << 4,
+  liquidationFeeBps: 1 << 5, defaultInitialMarginBps: 1 << 6,
+  defaultMaintenanceMarginBps: 1 << 7, defaultMaximumLeverage: 1 << 8,
+  collateralMint: 1 << 9, oracleProgram: 1 << 10, protocolStatus: 1 << 12,
+};
+function updateExchangeConfigIx(exchange, authority, fields, expectedConfigSequence) {
+  const data = Buffer.alloc(196); data[0] = 40;
+  let mask = 0;
+  const pubkey = (offset, bit, value) => { if (value === undefined) return; mask |= bit; value.toBuffer().copy(data, offset); };
+  const u16 = (offset, bit, value) => { if (value === undefined) return; mask |= bit; data.writeUInt16LE(value, offset); };
+  pubkey(69, EXCHANGE_FIELD.keeperAuthority, fields.keeperAuthority);
+  u16(101, EXCHANGE_FIELD.makerFeeBps, fields.makerFeeBps);
+  u16(103, EXCHANGE_FIELD.takerFeeBps, fields.takerFeeBps);
+  u16(105, EXCHANGE_FIELD.liquidationFeeBps, fields.liquidationFeeBps);
+  u16(107, EXCHANGE_FIELD.defaultInitialMarginBps, fields.defaultInitialMarginBps);
+  u16(109, EXCHANGE_FIELD.defaultMaintenanceMarginBps, fields.defaultMaintenanceMarginBps);
+  if (fields.defaultMaximumLeverage !== undefined) { mask |= EXCHANGE_FIELD.defaultMaximumLeverage; data.writeUInt32LE(fields.defaultMaximumLeverage, 111); }
+  pubkey(115, EXCHANGE_FIELD.collateralMint, fields.collateralMint);
+  pubkey(147, EXCHANGE_FIELD.oracleProgram, fields.oracleProgram);
+  if (fields.protocolStatus !== undefined) { mask |= EXCHANGE_FIELD.protocolStatus; data[187] = fields.protocolStatus; }
+  data.writeUInt32LE(mask, 1); data.writeBigUInt64LE(BigInt(expectedConfigSequence), 188);
+  return new TransactionInstruction({ programId: PROGRAM, keys: [wr(exchange), sg(authority.publicKey)], data });
+}
+// Opcode 56: creates the V3 vault token account at ["vault", core]. The V2
+// vault paths (opcodes 9/44) validate a 222,752-byte STKMRK01 header, so a
+// 4,096-byte STKMK003 core can only get a vault through this instruction.
+function createV3VaultAccountIx(core, vault, authority, mint) {
+  return ix(56, [ro(core), wr(vault), wsg(authority.publicKey), ro(mint), ro(TOKEN_PROGRAM), ro(SystemProgram.programId)]);
 }
 function instrumentMetadata(info) {
   if (!info || info.data.length !== 128) throw new Error("fresh instrument account has an unexpected layout");
@@ -175,6 +227,28 @@ async function setup() {
   if (!(await connection.getAccountInfo(instrument, "confirmed"))) await send("create V3 instrument", [ix(43, [wr(instrument), wsg(payer.publicKey), ro(SystemProgram.programId)], [...instrumentId])], [payer]);
   const exchangeInfo = await connection.getAccountInfo(exchangePublicKey, "confirmed");
   if (!exchangeInfo?.data[10]) await send("initialize V3 exchange", [ix(19, [wr(exchangePublicKey), sg(payer.publicKey)])], [payer]);
+  // Collateral mint + exchange configuration MUST precede core activation:
+  // `initialize_v3_market` copies the exchange's collateral mint into the core,
+  // and a zero mint makes every V3 custody path impossible.
+  let mint = state.mint
+    ? new PublicKey(state.mint)
+    : process.env.V3_COLLATERAL_MINT
+      ? new PublicKey(process.env.V3_COLLATERAL_MINT)
+      : null;
+  if (!mint) {
+    mint = await createMint(connection, payer, payer.publicKey, null, 6);
+    console.log(`created test collateral mint: ${mint.toBase58()}`);
+  }
+  save({ mint: mint.toBase58() });
+  const exchangeAccount = await connection.getAccountInfo(exchangePublicKey, "confirmed");
+  if (!new PublicKey(exchangeAccount.data.subarray(157, 189)).equals(mint)) {
+    await send("configure V3 exchange", [updateExchangeConfigIx(exchangePublicKey, payer, {
+      collateralMint: mint, keeperAuthority: payer.publicKey, oracleProgram: PYTH_PROGRAM,
+      makerFeeBps: 0, takerFeeBps: 5, liquidationFeeBps: 50,
+      defaultInitialMarginBps: 2_000, defaultMaintenanceMarginBps: 1_000, defaultMaximumLeverage: 5,
+      protocolStatus: 0,
+    }, exchangeAccount.data.readBigUInt64LE(230))], [payer]);
+  }
   const instrumentInfo = await connection.getAccountInfo(instrument, "confirmed");
   if (!instrumentInfo?.data[10]) await send("register V3 instrument", [ix(20, [ro(exchangePublicKey), wr(instrument), sg(payer.publicKey)], [...instrumentId])], [payer]);
   const configuredInstrument = await connection.getAccountInfo(instrument, "confirmed");
@@ -195,6 +269,17 @@ async function setup() {
       console.log("activate V3 core: blocked by OracleUnavailable (0x6004); continuing account bootstrap without activation");
     }
   }
+  // V3 vault: required by opcode 53 deposit. Created after activation because
+  // the handler validates an activated revision-2 core.
+  const vault = PublicKey.findProgramAddressSync([Buffer.from("vault"), core.toBuffer()], PROGRAM)[0];
+  if (!(await connection.getAccountInfo(vault, "confirmed"))) {
+    const activated = await connection.getAccountInfo(core, "confirmed");
+    if (!activated?.data[11]) throw new Error("V3 vault requires an activated core; activation was blocked");
+    await send("create V3 vault", [createV3VaultAccountIx(core, vault, payer, mint)], [payer]);
+  }
+  const vaultInfo = await connection.getAccountInfo(vault, "confirmed");
+  if (!vaultInfo || !vaultInfo.owner.equals(TOKEN_PROGRAM) || vaultInfo.data.length !== 165) throw new Error("vault: missing, foreign-owned, or malformed");
+  save({ vault: vault.toBase58() });
   const accounts = { bookPages: [], seatShards: [], eventShards: [] };
   for (let side = 0; side < 2; side += 1) for (let page = 0; page < BOOK_PAGES_PER_SIDE; page += 1) {
     const index = side * BOOK_PAGES_PER_SIDE + page; const target = PublicKey.findProgramAddressSync([Buffer.from("book-page-v3"), core.toBuffer(), Buffer.from([side]), Buffer.from([page])], PROGRAM)[0];
@@ -209,8 +294,10 @@ async function setup() {
   }
   save({ version: 3, core: core.toBase58(), instrument: instrument.toBase58(), v3Accounts: accounts });
   const bundle = await verifyBundle(core, accounts);
+  const activatedCore = await connection.getAccountInfo(core, "confirmed");
+  if (!new PublicKey(activatedCore.data.subarray(76, 108)).equals(mint)) throw new Error("core collateral mint does not match the configured exchange mint");
   save({ setupComplete: true, bundleVerified: bundle });
-  console.log(JSON.stringify({ statePath: STATE_PATH, core: core.toBase58(), accounts, bundle }, null, 2));
+  console.log(JSON.stringify({ statePath: STATE_PATH, core: core.toBase58(), vault: vault.toBase58(), mint: mint.toBase58(), accounts, bundle }, null, 2));
 }
 function plan() {
   const state = load(); assertFresh(state);

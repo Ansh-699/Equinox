@@ -9,7 +9,10 @@ function fixture() {
   return { core, seatShards, accountCount:27, nowSeconds:1700000000 };
 }
 test("custody precedes delegation and valid L1 state passes", () => {
+  assert.ok(V3_LIFECYCLE_ORDER.indexOf("l1-session-allocation") < V3_LIFECYCLE_ORDER.indexOf("l1-test-collateral"));
   assert.ok(V3_LIFECYCLE_ORDER.indexOf("l1-test-collateral") < V3_LIFECYCLE_ORDER.indexOf("er-delegation"));
+  assert.ok(V3_LIFECYCLE_ORDER.indexOf("session-member-delegation") < V3_LIFECYCLE_ORDER.indexOf("limited-session"));
+  assert.ok(V3_LIFECYCLE_ORDER.indexOf("limited-session") < V3_LIFECYCLE_ORDER.indexOf("er-orders-and-fills"));
   assert.equal(assertV3L1Readiness(fixture()).funded,1);
 });
 for (const [label, mutate] of [

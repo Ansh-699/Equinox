@@ -21,6 +21,7 @@ use stockstream::{
         derive_instrument, EXCHANGE_CONFIG_VERSION, EXCHANGE_DISCRIMINATOR, EXCHANGE_SIZE,
         INSTRUMENT_DISCRIMINATOR, INSTRUMENT_SIZE,
     },
+    session::{derive_trading_session, TRADING_SESSION_SIZE},
     v3::{
         derive_book_page_v3, derive_market_core_v3, V3_BOOK_PAGE_SIZE, V3_LAYOUT_VERSION,
         V3_MARKET_CORE_SIZE,
@@ -108,6 +109,33 @@ fn activate(
         .map_err(|error| format!("{error:?}"))
 }
 
+fn create_session(
+    svm: &mut LiteSVM,
+    authority: &Keypair,
+    core: Address,
+    session: Address,
+    session_signer: Address,
+    seat_index: u16,
+) -> Result<(), String> {
+    svm.expire_blockhash();
+    let instruction = Instruction {
+        program_id: solana_address(ID),
+        accounts: vec![
+            readonly(core),
+            writable_signer(authority.pubkey()),
+            writable(session),
+            readonly(session_signer),
+            readonly(Address::default()),
+        ],
+        data: vec![57, (seat_index & 0xff) as u8, (seat_index >> 8) as u8],
+    };
+    let message = Message::new(&[instruction], Some(&authority.pubkey()));
+    let transaction = Transaction::new(&[authority], message, svm.latest_blockhash());
+    svm.send_transaction(transaction)
+        .map(|_| ())
+        .map_err(|error| format!("{error:?}"))
+}
+
 #[test]
 fn creates_core_and_resumable_book_page_with_real_system_cpis() {
     let mut svm = LiteSVM::new();
@@ -179,6 +207,37 @@ fn creates_core_and_resumable_book_page_with_real_system_cpis() {
     assert!(
         activate(&mut svm, &authority, exchange, instrument, core).is_err(),
         "activation is one-time"
+    );
+
+    let session_signer = Keypair::new().pubkey();
+    let session = solana_address(derive_trading_session(
+        &pinocchio::Address::new_from_array(authority.pubkey().to_bytes()),
+        &pinocchio::Address::new_from_array(core.to_bytes()),
+        0,
+        &pinocchio::Address::new_from_array(session_signer.to_bytes()),
+        &ID,
+    ));
+    create_session(&mut svm, &authority, core, session, session_signer, 0)
+        .expect("L1 V3 session allocation must succeed");
+    let session_account = svm.get_account(&session).expect("session exists");
+    assert_eq!(session_account.owner, solana_address(ID));
+    assert_eq!(session_account.data.len(), TRADING_SESSION_SIZE);
+    assert_eq!(&session_account.data[0..8], b"STKSES02");
+    assert_eq!(
+        session_account.data[10], 0,
+        "allocation remains uninitialized"
+    );
+    assert!(
+        create_session(
+            &mut svm,
+            &impostor,
+            core,
+            Address::new_unique(),
+            session_signer,
+            0,
+        )
+        .is_err(),
+        "a wrong owner/PDA pair must fail closed"
     );
 
     let pinocchio_core = pinocchio::Address::new_from_array(core.to_bytes());

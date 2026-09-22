@@ -44,7 +44,7 @@ describe("V3 lifecycle runner", () => {
     expect(source).toContain("createAccountWithSeed");
     expect(source).toContain("V3_INSTRUMENT_ID_HEX");
     expect(source.indexOf("simulateTransaction")).toBeGreaterThan(-1);
-    expect(source.indexOf("simulateTransaction")).toBeLessThan(source.indexOf("sendAndConfirmTransaction(connection"));
+    expect(source.indexOf("simulateTransaction")).toBeLessThan(source.indexOf("connection.sendTransaction("));
     expect(source).toContain("simulation rejected");
     expect(source.indexOf("configure V3 instrument oracle")).toBeGreaterThan(-1);
     expect(source.indexOf("configure V3 instrument oracle")).toBeLessThan(source.indexOf("activate V3 core"));
