@@ -35,6 +35,13 @@ requires exponent `-5`, current bytes decode to `5`, and the historical
 must stop on this mismatch and require MagicBlock to clarify or reinitialize
 the feed with a documented wire version.
 
+The upstream MagicBlock oracle source was inspected at commit
+`c6d08ac317706c0943e9b6304b915cd1064bbea3`. Its `InitializePriceFeed`
+handler writes the caller-supplied exponent directly into `PriceFeedMessage`,
+and `UpdatePriceFeed` preserves that field. Therefore the observed values are
+not a client decoding convention; they identify an initialization/provenance
+problem that must be corrected or explicitly versioned by the validator owner.
+
 ## Smallest safe implementation
 
 1. **Done locally (diagnostics-only):** `src/magicblock_oracle.rs` provides a

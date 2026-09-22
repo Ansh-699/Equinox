@@ -16,6 +16,11 @@
     "instruction": "InitializePriceFeed",
     "encodedTrailingExponent": 8
   },
+  "upstreamReference": {
+    "repository": "https://github.com/magicblock-labs/real-time-pricing-oracle",
+    "commit": "c6d08ac317706c0943e9b6304b915cd1064bbea3",
+    "verifiedBehavior": "InitializePriceFeed writes the supplied exponent directly into PriceFeedMessage; UpdatePriceFeed preserves that exponent and only replaces price, publish time and posted slot."
+  },
   "l1": {
     "endpoint": "https://api.devnet.solana.com",
     "slot": 502523547,
