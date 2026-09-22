@@ -3,12 +3,14 @@ import { PublicKey } from "@solana/web3.js";
 import {
   V3_BOOK_PAGE_SIZE, V3_BOOK_SLOTS_PER_SIDE, V3_COMMIT_ACCOUNT_HARD_MAX,
   V3_COMMIT_ACCOUNT_SAFE_MAX, V3_EVENT_SHARD_SIZE, V3_MARKET_CORE_SIZE,
-  V3_SEAT_SHARD_SIZE, V3_EXECUTION_BUNDLE_LEN, deriveBookPageV3, deriveEventShardV3,
-  deriveMarketCoreV3, deriveSeatShardV3, v3AccountIsCommittable,
+  V3_SEAT_SHARD_SIZE, V3_EXECUTION_BUNDLE_LEN, ORACLE_SNAPSHOT_SIZE, deriveBookPageV3, deriveEventShardV3,
+  deriveMarketCoreV3, deriveSeatShardV3, deriveOracleSnapshotV3, v3AccountIsCommittable,
   decodeV3BookPage, decodeV3MarketCore,
-  decodeV3EventShard, decodeV3SeatShard,
+  decodeV3EventShard, decodeV3SeatShard, decodeOracleSnapshotV3,
 } from "./v3";
-import { authorizeTradingSessionV3, closeTradingSessionV3, commitMarketV3, commitV3Shard, deriveV3ExecutionAccounts, placeOrderV3, reconcileVaultV3, revokeTradingSessionV3, updateTradingSessionV3 } from "./v3-instructions";
+import { authorizeTradingSessionV3, closeTradingSessionV3, commitMarketV3, commitV3Shard, createOracleSnapshotV3, deriveV3ExecutionAccounts, placeOrderV3, reconcileVaultV3, revokeTradingSessionV3, updateFundingV3, updateTradingSessionV3 } from "./v3-instructions";
+
+import { createV3TradingSession } from "./v3-instructions";
 
 function key(seed: number): PublicKey {
   return new PublicKey(Uint8Array.from({ length: 32 }, (_, index) => (seed + index) & 0xff));
@@ -119,6 +121,48 @@ describe("V3 sharded ABI", () => {
     expect(closeTradingSessionV3({ ...accounts, session: key(83), sessionSigner: key(84) }, 0).keys.at(-3)).toMatchObject({ isSigner: true, isWritable: true });
   });
 
+  it("appends the oracle snapshot read-only after session accounts", () => {
+    const market = deriveMarketCoreV3(instrument);
+    const accounts = deriveV3ExecutionAccounts(market, key(92));
+    const ix = placeOrderV3({ ...accounts, session: key(93), oracleSnapshot: key(94), seatIndex: 0, side: "bid", quantity: 1, priceOrOffset: 10, expiresAt: 100, clientOrderId: 1, actionNonce: 1 });
+    expect(ix.keys).toHaveLength(30);
+    expect(ix.keys[28]).toMatchObject({ isWritable: true, isSigner: false });
+    expect(ix.keys[29]).toMatchObject({ isWritable: false, isSigner: false });
+  });
+
+  it("builds the non-delegated snapshot allocation with the canonical PDA", () => {
+    const market = deriveMarketCoreV3(instrument); const snapshot = deriveOracleSnapshotV3(market);
+    const ix = createOracleSnapshotV3({ core: market, snapshot, payer: key(95) });
+    expect([...ix.data]).toEqual([59]);
+    expect(ix.keys.map(({ isSigner, isWritable }) => [isSigner, isWritable])).toEqual([[false, false], [false, true], [true, true]]);
+  });
+
+  it("keeps the snapshot read-only when funding replaces the signer meta", () => {
+    const market = deriveMarketCoreV3(instrument);
+    const ix = updateFundingV3({ ...deriveV3ExecutionAccounts(market, key(96)), oracleSnapshot: key(97) }, 1n, 10);
+    expect(ix.keys).toHaveLength(29);
+    expect(ix.keys[27]).toMatchObject({ isSigner: true, isWritable: false });
+    expect(ix.keys[28]).toMatchObject({ isSigner: false, isWritable: false });
+  });
+
+  it("keeps ER order metas Pyth-free", () => {
+    const market = deriveMarketCoreV3(instrument);
+    const pythStorage = key(201); const pythTreasury = key(202);
+    const ix = placeOrderV3({ ...deriveV3ExecutionAccounts(market, key(98)), oracleSnapshot: key(99), seatIndex: 0, side: "bid", quantity: 1, priceOrOffset: 10, expiresAt: 100, clientOrderId: 1 });
+    expect(ix.keys.some((meta) => meta.pubkey.equals(pythStorage) || meta.pubkey.equals(pythTreasury))).toBe(false);
+    expect(ix.keys.at(-1)).toMatchObject({ isWritable: false, isSigner: false });
+  });
+
+  it("builds the L1-only pre-delegation session allocation", () => {
+    const market = deriveMarketCoreV3(instrument);
+    const ix = createV3TradingSession({ core: market, authority: key(86), session: key(87), sessionSigner: key(88) }, 3);
+    expect([...ix.data]).toEqual([57, 3, 0]);
+    expect(ix.keys).toHaveLength(5);
+    expect(ix.keys.map(({ isSigner, isWritable }) => [isSigner, isWritable])).toEqual([
+      [false, false], [true, true], [false, true], [false, false], [false, false],
+    ]);
+  });
+
   it("decodes V3 bytes without interpreting them as a V2 header", () => {
     const core = new Uint8Array(V3_MARKET_CORE_SIZE);
     core.set(Buffer.from("STKMK003")); const view = new DataView(core.buffer); view.setUint16(8, 3, true); core[10] = 1; core[11] = 1; core[12] = 4; core[371] = 2;
@@ -151,5 +195,14 @@ describe("V3 sharded ABI", () => {
     const base = 44; shard[base] = 1; shard.fill(8, base + 1, base + 33);
     const view = new DataView(shard.buffer); view.setBigUint64(base + 72, 5n, true); view.setUint32(base + 168, 2, true);
     expect(decodeV3SeatShard(shard).positions[0]).toMatchObject({ shard: 2, slot: 0, basePosition: 5n, openOrderCount: 2 });
+  });
+
+  it("decodes the fixed L1 oracle snapshot layout", () => {
+    const snapshot = new Uint8Array(ORACLE_SNAPSHOT_SIZE);
+    snapshot.set(Buffer.from("STKORS03"));
+    const view = new DataView(snapshot.buffer); view.setUint16(8, 3, true); snapshot[10] = 1;
+    snapshot.set(key(91).toBytes(), 12); view.setUint32(44, 1435, true); snapshot[48] = 2; view.setInt32(49, -5, true);
+    view.setBigInt64(53, 36982565n, true); view.setBigUint64(61, 10n, true); view.setBigUint64(69, 1700000000n, true); snapshot[85] = 1; snapshot[86] = 0; snapshot[87] = 1;
+    expect(decodeOracleSnapshotV3(snapshot)).toMatchObject({ feedId: 1435, channel: 2, exponent: -5, price: 36982565n, authenticated: true });
   });
 });

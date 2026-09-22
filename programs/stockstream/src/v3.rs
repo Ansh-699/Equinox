@@ -53,6 +53,7 @@ pub const V3_MARKET_CORE_SEED: &[u8] = b"market-v3";
 pub const V3_BOOK_PAGE_SEED: &[u8] = b"book-page-v3";
 pub const V3_SEAT_SHARD_SEED: &[u8] = b"seat-shard-v3";
 pub const V3_EVENT_SHARD_SEED: &[u8] = b"event-shard-v3";
+pub const V3_ORACLE_SNAPSHOT_SEED: &[u8] = b"oracle-snapshot-v3";
 
 pub const V3_MARKET_CORE_DISCRIMINATOR: [u8; 8] = *b"STKMK003";
 pub const V3_BOOK_PAGE_DISCRIMINATOR: [u8; 8] = *b"STKBK003";
@@ -151,6 +152,75 @@ fn fresh_v3_execution_time(bytes: &[u8]) -> Result<u64, ProgramError> {
         .map_err(|_| ProgramError::from(StockStreamError::OracleUnavailable))?;
     validate_v3_oracle_freshness(bytes, now)?;
     Ok(now)
+}
+
+/// Validates the optional L1-owned snapshot appended after the normal V3
+/// account tuple. The snapshot is read-only and is never included in the
+/// delegated 27-account bundle. When absent, legacy/core freshness remains the
+/// fail-closed source for pre-snapshot instructions.
+fn fresh_v3_execution_time_with_snapshot(
+    program_id: &Address,
+    accounts: &[AccountView],
+    snapshot_index: Option<usize>,
+) -> Result<u64, ProgramError> {
+    let now = u64::try_from(crate::handlers::current_unix_timestamp()?)
+        .map_err(|_| ProgramError::from(StockStreamError::OracleUnavailable))?;
+    if let Some(index) = snapshot_index {
+        let snapshot = accounts.get(index).ok_or(ProgramError::NotEnoughAccountKeys)?;
+        if snapshot.is_writable() || !snapshot.owned_by(program_id) {
+            return Err(StockStreamError::OracleUnavailable.into());
+        }
+        let core = unsafe { accounts[0].borrow_unchecked() };
+        let feed = u32::from_le_bytes(core[V3_CORE_ORACLE_FEED_ID_OFFSET..V3_CORE_ORACLE_FEED_ID_OFFSET + 4].try_into().map_err(|_| bundle_error())?);
+        let channel = core[V3_CORE_ORACLE_CHANNEL_OFFSET];
+        let exponent = i32::from_le_bytes(core[V3_CORE_ORACLE_EXPONENT_OFFSET..V3_CORE_ORACLE_EXPONENT_OFFSET + 4].try_into().map_err(|_| bundle_error())?);
+        crate::oracle_snapshot::validate_for_core(unsafe { snapshot.borrow_unchecked() }, accounts[0].address(), feed, channel, exponent, now)?;
+        return Ok(now);
+    }
+    fresh_v3_execution_time(unsafe { accounts[0].borrow_unchecked() })
+}
+
+fn optional_snapshot_index(accounts: &[AccountView]) -> Option<usize> {
+    accounts.iter().enumerate().skip(V3_SESSION_ACCOUNT_INDEX).find_map(|(index, account)| {
+        if account.data_len() == crate::oracle_snapshot::ORACLE_SNAPSHOT_SIZE
+            && unsafe { account.borrow_unchecked() }[0..8] == crate::oracle_snapshot::ORACLE_SNAPSHOT_DISCRIMINATOR
+        { Some(index) } else { None }
+    })
+}
+
+/// Read-only ER boundary check used by runtime/integration callers before a
+/// risk-sensitive operation. It deliberately accepts only the core and the
+/// L1-owned snapshot; no Pyth account or writable oracle account is involved.
+pub fn validate_v3_oracle_snapshot_for_er(
+    program_id: &Address,
+    core: &AccountView,
+    snapshot: &AccountView,
+) -> ProgramResult {
+    if snapshot.is_writable() || !snapshot.owned_by(program_id) {
+        return Err(StockStreamError::OracleUnavailable.into());
+    }
+    let now = u64::try_from(crate::handlers::current_unix_timestamp()?)
+        .map_err(|_| ProgramError::from(StockStreamError::OracleUnavailable))?;
+    let core_bytes = unsafe { core.borrow_unchecked() };
+    let feed = u32::from_le_bytes(
+        core_bytes[V3_CORE_ORACLE_FEED_ID_OFFSET..V3_CORE_ORACLE_FEED_ID_OFFSET + 4]
+            .try_into()
+            .map_err(|_| bundle_error())?,
+    );
+    let channel = core_bytes[V3_CORE_ORACLE_CHANNEL_OFFSET];
+    let exponent = i32::from_le_bytes(
+        core_bytes[V3_CORE_ORACLE_EXPONENT_OFFSET..V3_CORE_ORACLE_EXPONENT_OFFSET + 4]
+            .try_into()
+            .map_err(|_| bundle_error())?,
+    );
+    crate::oracle_snapshot::validate_for_core(
+        unsafe { snapshot.borrow_unchecked() },
+        core.address(),
+        feed,
+        channel,
+        exponent,
+        now,
+    )
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -412,6 +482,9 @@ pub fn derive_event_shard_v3(program_id: &Address, market: &Address, shard: u8) 
         program_id,
     )
     .0
+}
+pub fn derive_oracle_snapshot_v3(program_id: &Address, core: &Address) -> Address {
+    Address::find_program_address(&[V3_ORACLE_SNAPSHOT_SEED, core.as_ref()], program_id).0
 }
 
 /// Derives exactly one V3 account. `parent` is the instrument only for the
@@ -1445,7 +1518,7 @@ pub fn update_funding_v3(
     accounts: &mut [AccountView],
     instruction: StockStreamInstruction,
 ) -> ProgramResult {
-    if accounts.len() != V3_SIGNER_ACCOUNT_INDEX + 1 {
+    if accounts.len() < V3_SIGNER_ACCOUNT_INDEX + 1 || accounts.len() > V3_SIGNER_ACCOUNT_INDEX + 2 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
     validate_execution_bundle(program_id, &accounts[..V3_EXECUTION_BUNDLE_LEN], true)?;
@@ -1470,6 +1543,7 @@ pub fn update_funding_v3(
             return Err(StockStreamError::OracleUnavailable.into());
         }
     }
+    let now = fresh_v3_execution_time_with_snapshot(program_id, accounts, optional_snapshot_index(accounts))?;
     let (bundle, _) = accounts.split_at_mut(V3_EXECUTION_BUNDLE_LEN);
     let oracle = {
         let core = unsafe { bundle[0].borrow_unchecked() };
@@ -1486,7 +1560,6 @@ pub fn update_funding_v3(
         let core = unsafe { bundle[0].borrow_unchecked() };
         read_v3_risk_config(&core)?.mark_deviation_bps
     };
-    let now = fresh_v3_execution_time(unsafe { bundle[0].borrow_unchecked() })?;
     if timestamp > now.saturating_add(2) {
         return Err(StockStreamError::OracleUnavailable.into());
     }
@@ -2050,10 +2123,19 @@ pub fn authorize_trading_session_v3(
     maximum_exposure: i128,
     maximum_open_orders: u16,
 ) -> ProgramResult {
-    if accounts.len() != V3_EXECUTION_BUNDLE_LEN + 4 {
+    if accounts.len() != V3_EXECUTION_BUNDLE_LEN + 4 && accounts.len() != V3_EXECUTION_BUNDLE_LEN + 5 {
+        pinocchio_log::log!(
+            256,
+            "auth_session:FAIL accounts_len={} expected={}",
+            accounts.len(),
+            V3_EXECUTION_BUNDLE_LEN + 4
+        );
         return Err(ProgramError::NotEnoughAccountKeys);
     }
     validate_execution_bundle(program_id, &accounts[..V3_EXECUTION_BUNDLE_LEN], true)?;
+    if accounts.len() == V3_EXECUTION_BUNDLE_LEN + 5 {
+        fresh_v3_execution_time_with_snapshot(program_id, accounts, Some(V3_EXECUTION_BUNDLE_LEN + 4))?;
+    }
     let owner = &accounts[V3_EXECUTION_BUNDLE_LEN];
     let session_account = &accounts[V3_EXECUTION_BUNDLE_LEN + 1];
     let session_signer = &accounts[V3_EXECUTION_BUNDLE_LEN + 2];
@@ -2691,10 +2773,13 @@ fn validate_v3_trade_accounts(
     now: u64,
 ) -> Result<(TraderSeat, Option<V3SessionAuthorization>), ProgramError> {
     if accounts.len() < V3_SIGNER_ACCOUNT_INDEX + 1
-        || accounts.len() > V3_SESSION_ACCOUNT_INDEX + 1
+        || accounts.len() > V3_SESSION_ACCOUNT_INDEX + 2
         || !accounts[V3_SIGNER_ACCOUNT_INDEX].is_signer()
     {
         return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    if accounts.len() > V3_SESSION_ACCOUNT_INDEX + 2 {
+        fresh_v3_execution_time_with_snapshot(program_id, accounts, optional_snapshot_index(accounts))?;
     }
     validate_execution_bundle(program_id, &accounts[..V3_EXECUTION_BUNDLE_LEN], true)?;
     let core = &accounts[0];
@@ -2718,7 +2803,7 @@ fn validate_v3_trade_accounts(
         }
         return Ok((seat, None));
     }
-    if accounts.len() != V3_SESSION_ACCOUNT_INDEX + 1
+    if accounts.len() != V3_SESSION_ACCOUNT_INDEX + 1 && accounts.len() != V3_SESSION_ACCOUNT_INDEX + 2
         || !accounts[V3_SESSION_ACCOUNT_INDEX].is_writable()
     {
         return Err(StockStreamError::InvalidTradingSession.into());
@@ -3046,7 +3131,7 @@ pub fn liquidate_v3(
     seat_index: u16,
     max_quantity: u64,
 ) -> ProgramResult {
-    if accounts.len() != V3_EXECUTION_BUNDLE_LEN + 1 || max_quantity == 0 {
+    if (accounts.len() != V3_EXECUTION_BUNDLE_LEN + 1 && accounts.len() != V3_EXECUTION_BUNDLE_LEN + 2) || max_quantity == 0 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
     validate_execution_bundle(program_id, &accounts[..V3_EXECUTION_BUNDLE_LEN], true)?;
@@ -3054,9 +3139,9 @@ pub fn liquidate_v3(
     if !signer.is_signer() {
         return Err(ProgramError::MissingRequiredSignature);
     }
+    fresh_v3_execution_time_with_snapshot(program_id, accounts, optional_snapshot_index(accounts))?;
     let (mark, funding, config) = {
         let core = unsafe { accounts[0].borrow_unchecked() };
-        fresh_v3_execution_time(&core)?;
         if core[V3_CORE_MARKET_AUTHORITY_OFFSET..V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
             != signer.address().to_bytes()
             || core[V3_CORE_ORACLE_VALID_OFFSET] != 1
@@ -3203,7 +3288,7 @@ fn place_order_v3_with_action(
     if accounts.len() < V3_SIGNER_ACCOUNT_INDEX + 1 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
-    let now = fresh_v3_execution_time(unsafe { accounts[0].borrow_unchecked() })?;
+    let now = fresh_v3_execution_time_with_snapshot(program_id, accounts, optional_snapshot_index(accounts))?;
     let (seat_before, _, _) = v3_trade_seat(accounts, order.seat_index)?;
     let funding_accumulator = core_i128(
         unsafe { accounts[0].borrow_unchecked() },
@@ -4270,7 +4355,7 @@ fn preflight_replace_order_v3(
     if accounts.len() < V3_SIGNER_ACCOUNT_INDEX + 1 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
-    let now = fresh_v3_execution_time(unsafe { accounts[0].borrow_unchecked() })?;
+    let now = fresh_v3_execution_time_with_snapshot(program_id, accounts, optional_snapshot_index(accounts))?;
     let (seat, _, _) = v3_trade_seat(accounts, new_order.seat_index)?;
     let core_snapshot = unsafe { accounts[0].borrow_unchecked() };
     let config = read_v3_risk_config(&core_snapshot)?;
@@ -4520,7 +4605,7 @@ pub fn replace_order_v3(
         cancel_order_v3(program_id, accounts, new_order.seat_index, old_order_key, 0)?;
         return place_order_v3(program_id, accounts, new_order);
     }
-    if accounts.len() != V3_SESSION_ACCOUNT_INDEX + 1 {
+    if accounts.len() != V3_SESSION_ACCOUNT_INDEX + 1 && accounts.len() != V3_SESSION_ACCOUNT_INDEX + 2 {
         return Err(StockStreamError::InvalidTradingSession.into());
     }
     cancel_order_v3_with_action(

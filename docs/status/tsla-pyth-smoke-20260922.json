@@ -1,0 +1,14 @@
+{
+  "date": "2026-09-22",
+  "readOnly": true,
+  "feed": "Equity.US.TSLA/USD",
+  "feedId": 1435,
+  "channel": "fixed_rate@50ms",
+  "endpoints": 3,
+  "subscribedEndpoints": 3,
+  "latestAcceptedUpdateTimestampUs": 1790080735250000,
+  "payloadsRedacted": true,
+  "credentialsExposed": false,
+  "transactionsSubmitted": 0,
+  "classification": "Pyth entitlement and live signed-update stream verified; no on-chain snapshot update was submitted."
+}

@@ -52,6 +52,21 @@ pub const WITHDRAW_COLLATERAL_V3: u8 = 54;
 /// liability/fee ledgers. Data is `[55]`; accounts are the 27-account bundle
 /// followed by `[vault, mint, token_program]`.
 pub const RECONCILE_VAULT_V3: u8 = 55;
+/// Creates the V3 market vault token account at `derive_vault(core)`. Data is
+/// `[56]`; accounts are `[core (ro), vault (w), authority (signer, w),
+/// mint (ro), token_program (ro), system_program (ro)]`. The V2
+/// `CREATE_VAULT_ACCOUNT` (44) path validates a 222,752-byte `STKMRK01`
+/// header, so a 4,096-byte `STKMK003` core otherwise has no vault and
+/// `DEPOSIT_COLLATERAL_V3` can never succeed. The vault PDA is signed by the
+/// program, so this instruction is the only way to create it.
+pub const CREATE_V3_VAULT_ACCOUNT: u8 = 56;
+/// Allocates a V3 TradingSession PDA on L1 before its market enters ER.
+/// Data: `[57, seat_index:u16]`; the later V3 authorization only updates the
+/// pre-created account and never debits the owner from ER.
+pub const CREATE_V3_TRADING_SESSION: u8 = 57;
+/// Authenticated L1 Pyth verification into an ER-readable snapshot account.
+pub const UPDATE_ORACLE_SNAPSHOT_V3: u8 = 58;
+pub const CREATE_ORACLE_SNAPSHOT_V3: u8 = 59;
 pub const COMMIT_MARKET: u8 = 14;
 pub const COMMIT_AND_UNDELEGATE: u8 = 15;
 /// Reserved: the real external-undelegate callback uses the delegation
@@ -225,6 +240,11 @@ pub enum StockStreamInstruction {
     CreateV3TraderSeat {
         seat_index: u16,
     },
+    CreateV3TradingSession {
+        seat_index: u16,
+    },
+    UpdateOracleSnapshotV3,
+    CreateOracleSnapshotV3,
     CloseV3TraderSeat {
         seat_index: u16,
     },
@@ -311,6 +331,7 @@ pub enum StockStreamInstruction {
         withdrawal_buffer: i128,
     },
     ReconcileVaultV3,
+    CreateV3VaultAccount,
     TransitionMarket {
         mode: u8,
         /// The specific opcode that produced this transition. Several of
@@ -512,6 +533,15 @@ impl StockStreamInstruction {
             Some(CREATE_V3_TRADER_SEAT) if data.len() == 3 => Ok(Self::CreateV3TraderSeat {
                 seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
             }),
+            Some(CREATE_V3_TRADING_SESSION) if data.len() == 3 => {
+                Ok(Self::CreateV3TradingSession {
+                    seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+                })
+            }
+            Some(UPDATE_ORACLE_SNAPSHOT_V3) if (107..=516).contains(&data.len()) => {
+                Ok(Self::UpdateOracleSnapshotV3)
+            }
+            Some(CREATE_ORACLE_SNAPSHOT_V3) if data.len() == 1 => Ok(Self::CreateOracleSnapshotV3),
             Some(DEPOSIT_COLLATERAL_V3) if data.len() == 11 => Ok(Self::DepositCollateralV3 {
                 seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
                 amount: read_u64(data, 3).ok_or(ProgramError::InvalidInstructionData)?,
@@ -647,6 +677,7 @@ impl StockStreamInstruction {
                 })
             }
             Some(RECONCILE_VAULT_V3) if data.len() == 1 => Ok(Self::ReconcileVaultV3),
+            Some(CREATE_V3_VAULT_ACCOUNT) if data.len() == 1 => Ok(Self::CreateV3VaultAccount),
             Some(PAUSE_MARKET) if data.len() == 1 => Ok(Self::TransitionMarket {
                 mode: 0,
                 action: MarketTransitionAction::Pause,

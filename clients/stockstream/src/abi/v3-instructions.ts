@@ -2,7 +2,7 @@ import { PublicKey, SystemProgram, TransactionInstruction, type AccountMeta } fr
 import { OPCODE } from "./instructions";
 import { checkedSigned, checkedUnsigned, writeSigned, writeUnsigned } from "./encoding";
 import { accountMeta, instruction, publicKey, STOCKSTREAM_PROGRAM_KEY, type AddressInput } from "./transaction";
-import { deriveBookPageV3, deriveEventShardV3, deriveMarketCoreV3, deriveSeatShardV3, V3_BOOK_PAGES_PER_SIDE } from "./v3";
+import { deriveBookPageV3, deriveEventShardV3, deriveMarketCoreV3, deriveSeatShardV3, deriveOracleSnapshotV3, V3_BOOK_PAGES_PER_SIDE } from "./v3";
 
 export type V3OrderSide = "bid" | "ask";
 export type V3OrderTree = "fixed" | "oracle-pegged";
@@ -15,6 +15,8 @@ export interface V3ExecutionAccounts {
   eventShards: readonly AddressInput[];
   authority: AddressInput;
   session?: AddressInput;
+  /** L1-owned authenticated snapshot, read-only in ER. */
+  oracleSnapshot?: AddressInput;
 }
 
 export interface V3SessionAuthorizationAccounts extends V3ExecutionAccounts {
@@ -64,6 +66,16 @@ export interface V3OracleAccounts {
   systemProgram: AddressInput;
   instructionsSysvar: AddressInput;
 }
+export interface V3OracleSnapshotAccounts {
+  snapshot: AddressInput;
+  core: AddressInput;
+  payer: AddressInput;
+  pythProgram: AddressInput;
+  storage: AddressInput;
+  treasury: AddressInput;
+  systemProgram: AddressInput;
+  instructionsSysvar: AddressInput;
+}
 export interface V3CommitAccounts extends V3ExecutionAccounts {
   payer: AddressInput;
   magicContext: AddressInput;
@@ -93,6 +105,7 @@ export interface V3WithdrawAccounts extends V3ExecutionAccounts { destination: A
 export interface V3ReconcileAccounts extends V3ExecutionAccounts { vault: AddressInput; mint: AddressInput; tokenProgram: AddressInput; }
 export type V3AccountKind = "core" | "book-page" | "seat-shard" | "event-shard";
 export interface V3CreationAccounts { parent: AddressInput; target: AddressInput; payer: AddressInput; }
+export interface V3OracleSnapshotCreationAccounts { core: AddressInput; snapshot: AddressInput; payer: AddressInput; }
 export interface V3InitializationAccounts { exchange: AddressInput; instrument: AddressInput; core: AddressInput; authority: AddressInput; }
 export interface V3DelegationAccounts extends V3CreationAccounts { authority: AddressInput; }
 
@@ -113,6 +126,7 @@ function v3ExecutionMetas(accounts: V3ExecutionAccounts): AccountMeta[] {
     ...accounts.eventShards.map((address) => accountMeta(address, false, true)),
     accountMeta(accounts.authority, true, false)];
   if (accounts.session) metas.push(accountMeta(accounts.session, false, true));
+  if (accounts.oracleSnapshot) metas.push(accountMeta(accounts.oracleSnapshot, false, false));
   return metas;
 }
 
@@ -134,18 +148,39 @@ export function authorizeTradingSessionV3(
   writeUnsigned(data, 20, checkedUnsigned(policy.maxCumulativeNotional, 64, "maxCumulativeNotional"), 8);
   writeSigned(data, 28, checkedSigned(policy.maximumExposure, 128, "maximumExposure"), 16);
   view.setUint16(44, Number(checkedUnsigned(policy.maximumOpenOrders, 16, "maximumOpenOrders")), true);
-  const { session: _session, sessionSigner: _sessionSigner, ...executionAccounts } = accounts;
+  const { session: _session, sessionSigner: _sessionSigner, oracleSnapshot: _oracleSnapshot, ...executionAccounts } = accounts;
   const metas = v3ExecutionMetas(executionAccounts);
   metas[metas.length - 1] = accountMeta(accounts.authority, true, true);
   metas.push(accountMeta(accounts.session, false, true), accountMeta(accounts.sessionSigner, false, false), accountMeta(SystemProgram.programId, false, false));
+  if (accounts.oracleSnapshot) metas.push(accountMeta(accounts.oracleSnapshot, false, false));
   return instruction(data, metas);
 }
 
+/** Allocates the session PDA on L1 before the execution bundle is delegated.
+ * The ER authorization instruction reuses this account and never includes a
+ * System Program create-account CPI. */
+export function createV3TradingSession(
+  accounts: V3TradingSessionCreationAccounts,
+  seatIndex: number,
+): TransactionInstruction {
+  const data = new Uint8Array(3);
+  data[0] = OPCODE.createV3TradingSession;
+  new DataView(data.buffer).setUint16(1, Number(checkedUnsigned(seatIndex, 16, "seatIndex")), true);
+  return instruction(data, [
+    accountMeta(accounts.core, false, false),
+    accountMeta(accounts.authority, true, true),
+    accountMeta(accounts.session, false, true),
+    accountMeta(accounts.sessionSigner, false, false),
+    accountMeta(SystemProgram.programId, false, false),
+  ]);
+}
+
 function v3SessionControlMetas(accounts: V3SessionAuthorizationAccounts, ownerWritable: boolean): AccountMeta[] {
-  const { session: _session, sessionSigner: _sessionSigner, ...executionAccounts } = accounts;
+  const { session: _session, sessionSigner: _sessionSigner, oracleSnapshot: _oracleSnapshot, ...executionAccounts } = accounts;
   const metas = v3ExecutionMetas(executionAccounts);
   metas[metas.length - 1] = accountMeta(accounts.authority, true, ownerWritable);
   metas.push(accountMeta(accounts.session, false, true), accountMeta(accounts.sessionSigner, false, false));
+  if (accounts.oracleSnapshot) metas.push(accountMeta(accounts.oracleSnapshot, false, false));
   return metas;
 }
 
@@ -245,6 +280,16 @@ export function consumeOracleUpdateV3(accounts: V3OracleAccounts, message: Uint8
     accountMeta(accounts.payer, true, true), accountMeta(accounts.pythProgram, false, false),
     accountMeta(accounts.storage, false, false), accountMeta(accounts.treasury, false, true),
     accountMeta(accounts.systemProgram, false, false), accountMeta(accounts.instructionsSysvar, false, false)]);
+}
+
+/** L1-only authenticated Pyth update into an ER-readable snapshot.  The
+ * snapshot is intentionally outside the delegated 27-account bundle; Pyth
+ * storage/treasury are never accepted by execution-account builders. */
+export function updateOracleSnapshotV3(accounts: V3OracleSnapshotAccounts, message: Uint8Array, ed25519InstructionIndex: number, signatureIndex: number): TransactionInstruction {
+  if (message.length < 102 || message.length > 512) throw new RangeError("Invalid signed Pyth message length");
+  const data = new Uint8Array(4 + message.length); data[0] = OPCODE.updateOracleSnapshotV3;
+  new DataView(data.buffer).setUint16(1, ed25519InstructionIndex, true); data[3] = signatureIndex; data.set(message, 4);
+  return instruction(data, [accountMeta(accounts.snapshot, false, true), accountMeta(accounts.core, false, false), accountMeta(accounts.payer, true, true), accountMeta(accounts.pythProgram, false, false), accountMeta(accounts.storage, false, false), accountMeta(accounts.treasury, false, true), accountMeta(accounts.systemProgram, false, false), accountMeta(accounts.instructionsSysvar, false, false)]);
 }
 
 function v3CommitMetas(accounts: V3CommitAccounts): AccountMeta[] {
@@ -370,6 +415,14 @@ export function createV3Account(accounts: V3CreationAccounts, kind: V3AccountKin
   if (!target.equals(expectedV3Account(parent, kindByte, flattenedIndex))) throw new RangeError("target is not the derived V3 account PDA");
   return instruction(Uint8Array.of(OPCODE.createV3Account, kindByte, flattenedIndex), [
     accountMeta(parent, false, false), accountMeta(target, false, true), accountMeta(accounts.payer, true, true), accountMeta(SystemProgram.programId, false, false)]);
+}
+
+export function createOracleSnapshotV3(accounts: V3OracleSnapshotCreationAccounts): TransactionInstruction {
+  const core = publicKey(accounts.core); const snapshot = publicKey(accounts.snapshot);
+  if (!snapshot.equals(deriveOracleSnapshotV3(core))) throw new RangeError("snapshot is not the derived OracleSnapshotV3 PDA");
+  return instruction(Uint8Array.of(OPCODE.createOracleSnapshotV3), [
+    accountMeta(accounts.core, false, false), accountMeta(accounts.snapshot, false, true), accountMeta(accounts.payer, true, true),
+  ]);
 }
 
 export function initializeV3Market(accounts: V3InitializationAccounts): TransactionInstruction {

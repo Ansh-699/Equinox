@@ -1,6 +1,6 @@
 import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { STOCKSTREAM_PROGRAM_ID } from "./constants";
-import { authorizeTradingSessionV3, cancelAllV3, cancelOrderV3, closeV3TraderSeat, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, createV3Account, createV3TraderSeat, delegateV3Account, depositCollateralV3, initializeV3Market, placeOrderV3, reconcileVaultV3, replaceOrderV3, requestV3Undelegation, rollbackV3Undelegation, updateFundingV3, withdrawCollateralV3 } from "./abi/v3-instructions";
+import { authorizeTradingSessionV3, cancelAllV3, cancelOrderV3, closeV3TraderSeat, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, createOracleSnapshotV3, createV3Account, createV3TradingSession, createV3TraderSeat, createV3VaultAccount, delegateV3Account, depositCollateralV3, initializeV3Market, placeOrderV3, reconcileVaultV3, replaceOrderV3, requestV3Undelegation, rollbackV3Undelegation, updateFundingV3, updateOracleSnapshotV3, withdrawCollateralV3 } from "./abi/v3-instructions";
 import { authorizeTradingSession, closeTradingSession, deriveTradingSession, revokeTradingSession, updateTradingSessionLimits } from "./abi/session-instructions";
 import { createPerpMarket, initializeExchange, registerStockInstrument, suspendStockInstrument, transitionMarket, updateMarketRisk, updateStockInstrument } from "./abi/registry-instructions";
 import { depositCollateral, initializeVault, reconcileVault, recordBadDebt, resolveBadDebt, transferToInsuranceFund, withdrawCollateral, withdrawInsuranceFunds, withdrawProtocolFees } from "./abi/custody-instructions";
@@ -12,8 +12,8 @@ import { updateExchangeConfig } from "./abi/exchange-config-instructions";
 import { EVENT_ABI_VERSION, EVENT_HEADER_SIZE, EVENT_KIND_NAMES, EVENT_PAYLOAD_SIZE, EVENT_SIZE, NO_SEAT } from "./abi/events";
 import { decodeTradingSession as decodeTradingSessionAbi, type TradingSessionView as TradingSessionAbiView } from "./abi/sessions";
 
-export { authorizeTradingSessionV3, cancelAllV3, cancelOrderV3, closeTradingSessionV3, closeV3TraderSeat, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, createV3Account, createV3TraderSeat, delegateV3Account, depositCollateralV3, deriveV3ExecutionAccounts, initializeV3Market, placeOrderV3, reconcileVaultV3, replaceOrderV3, requestV3Undelegation, revokeTradingSessionV3, rollbackV3Undelegation, updateFundingV3, updateTradingSessionV3, withdrawCollateralV3 } from "./abi/v3-instructions";
-export type { V3AccountKind, V3CommitAccounts, V3CreationAccounts, V3DelegationAccounts, V3DepositAccounts, V3ExecutionAccounts, V3FundingAccounts, V3InitializationAccounts, V3OracleAccounts, V3ReconcileAccounts, V3SeatAccounts, V3SessionAuthorizationAccounts, V3ShardCommitAccounts, V3UndelegationRecoveryAccounts, V3WithdrawAccounts } from "./abi/v3-instructions";
+export { authorizeTradingSessionV3, cancelAllV3, cancelOrderV3, closeTradingSessionV3, closeV3TraderSeat, commitMarketV3, commitV3Shard, consumeOracleUpdateV3, createOracleSnapshotV3, createV3Account, createV3TradingSession, createV3TraderSeat, createV3VaultAccount, delegateV3Account, depositCollateralV3, deriveV3ExecutionAccounts, initializeV3Market, placeOrderV3, reconcileVaultV3, replaceOrderV3, requestV3Undelegation, revokeTradingSessionV3, rollbackV3Undelegation, updateFundingV3, updateOracleSnapshotV3, updateTradingSessionV3, withdrawCollateralV3 } from "./abi/v3-instructions";
+export type { V3AccountKind, V3CommitAccounts, V3CreationAccounts, V3DelegationAccounts, V3DepositAccounts, V3ExecutionAccounts, V3FundingAccounts, V3InitializationAccounts, V3OracleAccounts, V3OracleSnapshotCreationAccounts, V3OracleSnapshotAccounts, V3ReconcileAccounts, V3SeatAccounts, V3SessionAuthorizationAccounts, V3ShardCommitAccounts, V3TradingSessionCreationAccounts, V3UndelegationRecoveryAccounts, V3VaultCreationAccounts, V3WithdrawAccounts } from "./abi/v3-instructions";
 export { SESSION_ACTION, authorizeTradingSession, closeTradingSession, deriveTradingSession, revokeTradingSession, updateTradingSessionLimits } from "./abi/session-instructions";
 export type { SessionControlAccounts, TradingSessionAccounts, TradingSessionPolicy } from "./abi/session-instructions";
 export { createPerpMarket, initializeExchange, registerStockInstrument, suspendStockInstrument, transitionMarket, updateMarketRisk, updateStockInstrument, updateV3Risk } from "./abi/registry-instructions";
@@ -47,6 +47,8 @@ export { decodeInstruction } from "./abi/instructions";
 export type { InstructionFixture } from "./abi/instructions";
 export { decodeMarketState } from "./abi/accounts";
 export type { MarketStateView } from "./abi/accounts";
+export { decodeOracleSnapshotV3 } from "./abi/v3";
+export type { OracleSnapshotV3View } from "./abi/v3";
 
 /** Account tuple for opcode 46. `parent` is an instrument for `core`, and a V3 core otherwise. */
 

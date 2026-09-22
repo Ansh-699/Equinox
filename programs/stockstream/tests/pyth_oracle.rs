@@ -280,6 +280,67 @@ impl Fixture {
     }
 }
 
+struct SnapshotFixture {
+    base: Fixture,
+    core: TestAccount,
+    snapshot: TestAccount,
+}
+
+impl SnapshotFixture {
+    fn accounts(&self) -> [AccountView; 8] {
+        [
+            self.snapshot.view.clone(),
+            self.core.view.clone(),
+            self.base.payer.view.clone(),
+            self.base.pyth_program.view.clone(),
+            self.base.storage.view.clone(),
+            self.base.treasury.view.clone(),
+            self.base.system_program.view.clone(),
+            self.base.instructions_sysvar.view.clone(),
+        ]
+    }
+}
+
+fn snapshot_fixture(delegated_core: bool) -> SnapshotFixture {
+    let base = fixture();
+    let core_address = Address::new_from_array([40; 32]);
+    let core_owner = if delegated_core {
+        stockstream::magicblock::DELEGATION_PROGRAM_ID
+    } else {
+        ID
+    };
+    let mut core = account(
+        core_address,
+        core_owner,
+        stockstream::v3::V3_MARKET_CORE_SIZE,
+        false,
+        false,
+        false,
+    );
+    unsafe {
+        let bytes = core.view.borrow_unchecked_mut();
+        bytes[0..8].copy_from_slice(&stockstream::v3::V3_MARKET_CORE_DISCRIMINATOR);
+        bytes[10] = 1;
+        bytes[44..76].copy_from_slice(base.payer.view.address().as_ref());
+        bytes[stockstream::v3::V3_CORE_ORACLE_FEED_ID_OFFSET
+            ..stockstream::v3::V3_CORE_ORACLE_FEED_ID_OFFSET + 4]
+            .copy_from_slice(&VALID_FEED.to_le_bytes());
+        bytes[stockstream::v3::V3_CORE_ORACLE_CHANNEL_OFFSET] = VALID_CHANNEL;
+        bytes[stockstream::v3::V3_CORE_ORACLE_EXPONENT_OFFSET
+            ..stockstream::v3::V3_CORE_ORACLE_EXPONENT_OFFSET + 4]
+            .copy_from_slice(&(i32::from(VALID_EXPONENT)).to_le_bytes());
+    }
+    let snapshot = account(
+        Address::new_from_array([60; 32]),
+        ID,
+        stockstream::oracle_snapshot::ORACLE_SNAPSHOT_SIZE,
+        false,
+        true,
+        false,
+    );
+    SnapshotFixture { base, core, snapshot }
+}
+
 const VALID_FEED: u32 = 7;
 const VALID_CHANNEL: u8 = 3;
 const VALID_EXPONENT: i16 = -8;
@@ -301,6 +362,39 @@ fn valid_message(session: i16, timestamp_us: u64) -> Vec<u8> {
         timestamp_us,
         timestamp_us,
     )
+}
+
+#[test]
+fn valid_pyth_update_creates_authenticated_snapshot() {
+    let f = snapshot_fixture(false);
+    let message = valid_message(0, fresh_timestamp_us());
+    let mut data = instruction_data(0, 0, &message);
+    data[0] = stockstream::instruction::UPDATE_ORACLE_SNAPSHOT_V3;
+    let mut accounts = f.accounts();
+    process_instruction(&ID, &mut accounts, &data).unwrap();
+    let bytes = unsafe { f.snapshot.view.borrow_unchecked() };
+    stockstream::oracle_snapshot::validate_for_core(
+        bytes,
+        f.core.view.address(),
+        VALID_FEED,
+        VALID_CHANNEL,
+        i32::from(VALID_EXPONENT),
+        OFF_CHAIN_TEST_NOW as u64,
+    ).unwrap();
+    assert_eq!(bytes[stockstream::oracle_snapshot::OFFSET_AUTHENTICATED], 1);
+    assert_eq!(bytes[stockstream::oracle_snapshot::OFFSET_SEQUENCE], 1);
+}
+
+#[test]
+fn snapshot_update_accepts_readonly_delegated_core() {
+    let f = snapshot_fixture(true);
+    let message = valid_message(0, fresh_timestamp_us());
+    let mut data = instruction_data(0, 0, &message);
+    data[0] = stockstream::instruction::UPDATE_ORACLE_SNAPSHOT_V3;
+    let mut accounts = f.accounts();
+    process_instruction(&ID, &mut accounts, &data).unwrap();
+    assert_eq!(f.core.view.owner(), &stockstream::magicblock::DELEGATION_PROGRAM_ID);
+    assert!(!f.core.view.is_writable());
 }
 
 // ---------------------------------------------------------------------

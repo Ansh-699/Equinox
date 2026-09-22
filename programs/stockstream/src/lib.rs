@@ -25,6 +25,7 @@ pub mod scratch;
 pub mod session;
 pub mod state;
 pub mod v3;
+pub mod oracle_snapshot;
 
 use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
 

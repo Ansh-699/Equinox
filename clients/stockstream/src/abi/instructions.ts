@@ -30,6 +30,10 @@ export const OPCODE = {
   depositCollateralV3: 53,
   withdrawCollateralV3: 54,
   reconcileVaultV3: 55,
+  createV3VaultAccount: 56,
+  createV3TradingSession: 57,
+  updateOracleSnapshotV3: 58,
+  createOracleSnapshotV3: 59,
 } as const;
 
 /** Session action allowlist bits — must match `session::SESSION_ACTION_*`. */
@@ -62,6 +66,8 @@ export function decodeInstruction(data: Uint8Array): InstructionFixture {
     [OPCODE.authorizeTradingSession]: "AuthorizeTradingSession", [OPCODE.revokeTradingSession]: "RevokeTradingSession", [OPCODE.initializeExchange]: "InitializeExchange", [OPCODE.registerStockInstrument]: "RegisterStockInstrument", [OPCODE.createPerpMarket]: "CreatePerpMarket", [OPCODE.updateStockInstrument]: "UpdateStockInstrument", [OPCODE.suspendStockInstrument]: "SuspendStockInstrument", [OPCODE.updateMarketRisk]: "UpdateMarketRisk", [OPCODE.pauseMarket]: "PauseMarket", [OPCODE.resumeMarket]: "ResumeMarket", [OPCODE.setCloseOnly]: "SetCloseOnly", [OPCODE.enterCorporateAction]: "EnterCorporateAction", [OPCODE.resolveCorporateAction]: "ResolveCorporateAction", [OPCODE.closeMarket]: "CloseMarket", [OPCODE.updateTradingSessionLimits]: "UpdateTradingSessionLimits", [OPCODE.closeTradingSession]: "CloseTradingSession", [OPCODE.replaceOrder]: "ReplaceOrder",
     [OPCODE.transferToInsuranceFund]: "TransferToInsuranceFund", [OPCODE.withdrawProtocolFees]: "WithdrawProtocolFees", [OPCODE.withdrawInsuranceFunds]: "WithdrawInsuranceFunds", [OPCODE.recordBadDebt]: "RecordBadDebt", [OPCODE.resolveBadDebt]: "ResolveBadDebt", [OPCODE.reconcileVault]: "ReconcileVault", [OPCODE.updateExchangeConfig]: "UpdateExchangeConfig", [OPCODE.delegateClusterMember]: "DelegateClusterMember", [OPCODE.createMarketAccount]: "CreateMarketAccount", [OPCODE.createInstrumentAccount]: "CreateInstrumentAccount", [OPCODE.createVaultAccount]: "CreateVaultAccount", [OPCODE.createScratchAccount]: "CreateScratchAccount",
     [OPCODE.createV3Account]: "CreateV3Account", [OPCODE.initializeV3Market]: "InitializeV3Market", [OPCODE.delegateV3Account]: "DelegateV3Account", [OPCODE.createV3TraderSeat]: "CreateV3TraderSeat", [OPCODE.closeV3TraderSeat]: "CloseV3TraderSeat", [OPCODE.requestV3Undelegation]: "RequestV3Undelegation", [OPCODE.rollbackV3Undelegation]: "RollbackV3Undelegation", [OPCODE.depositCollateralV3]: "DepositCollateralV3", [OPCODE.withdrawCollateralV3]: "WithdrawCollateralV3",
+    [OPCODE.updateOracleSnapshotV3]: "UpdateOracleSnapshotV3",
+    [OPCODE.createOracleSnapshotV3]: "CreateOracleSnapshotV3",
   };
   const name = names[data[0]];
   if (!name) throw new RangeError("Unknown instruction");
