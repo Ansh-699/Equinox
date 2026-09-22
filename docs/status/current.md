@@ -17,7 +17,10 @@ addresses are exposed until a corrected fresh market is created.
   regressions.
 - **Locally-tested:** Rust native/runtime suites, 227 frontend tests, 357 Worker
   tests, ABI parity, TypeScript checks, production build, lint, secret scan,
-  and SBF artifact validation.
+  SBF artifact validation, and the 54-test Playwright fixture suite. The fresh
+  gate is recorded in `docs/status/verify-latest.json` for commit
+  `01453238f9a87a6a4e2452bce59969152e52e417` (275 Rust tests; artifact
+  `1c1bb230d94520ead90e31cb1eb40d8c42d0c2b6391a8355a3457c5de51e05de`).
 - **Devnet-verified:** existing program identity, historical TSLA entitlement,
   and prior setup evidence only. The currently deployed ELF is older than the
   local source artifact.
