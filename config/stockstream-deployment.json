@@ -1,0 +1,26 @@
+{
+  "cluster": "devnet",
+  "programId": "8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ",
+  "localArtifactSha256": "1c1bb230d94520ead90e31cb1eb40d8c42d0c2b6391a8355a3457c5de51e05de",
+  "deployedArtifactSha256": "d90bd38a28e32c01c99243b9e69edd75c336e02077621ef2b14c6cf3f5ce943f",
+  "exchange": null,
+  "instrument": null,
+  "core": null,
+  "oracleSnapshot": null,
+  "collateralMint": null,
+  "magicBlock": {
+    "executionDomain": "er",
+    "validator": "MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57",
+    "router": "https://devnet-router.magicblock.app",
+    "rpc": "https://devnet-as.magicblock.app"
+  },
+  "oracle": {
+    "symbol": "Equity.US.TSLA/USD",
+    "feedId": 1435,
+    "channel": "fixed_rate@50ms",
+    "channelId": 2,
+    "exponent": -5
+  },
+  "status": "source-local-only",
+  "writeEnabled": false
+}

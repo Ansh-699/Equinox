@@ -48,6 +48,28 @@ pub const MAX_FEE_BPS: u16 = 1_000; // 10%
 pub const MAX_MARGIN_BPS: u16 = 10_000; // 100%
 pub const MAX_DEFAULT_LEVERAGE: u32 = 125;
 
+/// A V3 market must never be activated with the system/default address or an
+/// uninitialized/non-SPL account as its collateral mint. The same checks are
+/// repeated by `create_v3_vault_account` before custody is created; the early
+/// check keeps activation fail-closed and prevents an unusable core from going
+/// live.
+pub fn validate_configured_collateral_mint(
+    mint_address: &Address,
+    expected: &[u8; 32],
+    owner: &Address,
+    data: &[u8],
+) -> ProgramResult {
+    if *expected == [0u8; 32]
+        || mint_address.to_bytes() != *expected
+        || owner != &handlers::TOKEN_PROGRAM_ID
+        || data.len() != 82
+        || data[45] != 1
+    {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    Ok(())
+}
+
 #[repr(C, packed(1))]
 #[derive(Clone, Copy)]
 pub struct ExchangeConfig {
@@ -585,8 +607,15 @@ pub fn create_v3_account(
 /// Allocates the L1-owned OracleSnapshotV3 PDA. It is intentionally separate
 /// from `V3AccountKind`: delegation must never accept this account as a hot
 /// execution child. Accounts are `[core(ro), snapshot(w), payer(signer,w), system(ro)]`.
-pub fn create_oracle_snapshot_v3(program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
-    if accounts.len() != 4 || !accounts[1].is_writable() || !accounts[2].is_signer() || !accounts[2].is_writable() {
+pub fn create_oracle_snapshot_v3(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+) -> ProgramResult {
+    if accounts.len() != 4
+        || !accounts[1].is_writable()
+        || !accounts[2].is_signer()
+        || !accounts[2].is_writable()
+    {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
     if *accounts[3].address() != pinocchio_system::ID {
@@ -601,16 +630,41 @@ pub fn create_oracle_snapshot_v3(program_id: &Address, accounts: &mut [AccountVi
     }
     let (feed, channel, exponent) = {
         let core = unsafe { accounts[0].borrow_unchecked() };
-        (u32::from_le_bytes(core[v3::V3_CORE_ORACLE_FEED_ID_OFFSET..v3::V3_CORE_ORACLE_FEED_ID_OFFSET + 4].try_into().unwrap()), core[v3::V3_CORE_ORACLE_CHANNEL_OFFSET], i32::from_le_bytes(core[v3::V3_CORE_ORACLE_EXPONENT_OFFSET..v3::V3_CORE_ORACLE_EXPONENT_OFFSET + 4].try_into().unwrap()))
+        (
+            u32::from_le_bytes(
+                core[v3::V3_CORE_ORACLE_FEED_ID_OFFSET..v3::V3_CORE_ORACLE_FEED_ID_OFFSET + 4]
+                    .try_into()
+                    .unwrap(),
+            ),
+            core[v3::V3_CORE_ORACLE_CHANNEL_OFFSET],
+            i32::from_le_bytes(
+                core[v3::V3_CORE_ORACLE_EXPONENT_OFFSET..v3::V3_CORE_ORACLE_EXPONENT_OFFSET + 4]
+                    .try_into()
+                    .unwrap(),
+            ),
+        )
     };
-    if feed == 0 { return Err(custom(StockStreamError::OracleUnavailable)); }
+    if feed == 0 {
+        return Err(custom(StockStreamError::OracleUnavailable));
+    }
     let core_address = *accounts[0].address();
     let core_bytes = core_address.to_bytes();
-    let (_, bump) = Address::find_program_address(&[v3::V3_ORACLE_SNAPSHOT_SEED, &core_bytes], program_id);
+    let (_, bump) =
+        Address::find_program_address(&[v3::V3_ORACLE_SNAPSHOT_SEED, &core_bytes], program_id);
     let bump_slice = [bump];
-    let seeds = [pinocchio::cpi::Seed::from(v3::V3_ORACLE_SNAPSHOT_SEED), pinocchio::cpi::Seed::from(&core_bytes), pinocchio::cpi::Seed::from(&bump_slice)];
+    let seeds = [
+        pinocchio::cpi::Seed::from(v3::V3_ORACLE_SNAPSHOT_SEED),
+        pinocchio::cpi::Seed::from(&core_bytes),
+        pinocchio::cpi::Seed::from(&bump_slice),
+    ];
     let (prefix, suffix) = accounts.split_at_mut(2);
-    if !grow_v3_account(program_id, &mut prefix[1], &mut suffix[0], crate::oracle_snapshot::ORACLE_SNAPSHOT_SIZE, &pinocchio::cpi::Signer::from(&seeds))? {
+    if !grow_v3_account(
+        program_id,
+        &mut prefix[1],
+        &mut suffix[0],
+        crate::oracle_snapshot::ORACLE_SNAPSHOT_SIZE,
+        &pinocchio::cpi::Signer::from(&seeds),
+    )? {
         return Ok(());
     }
     let data = unsafe { prefix[1].borrow_unchecked_mut() };
@@ -620,7 +674,8 @@ pub fn create_oracle_snapshot_v3(program_id: &Address, accounts: &mut [AccountVi
 /// Opcode 47: activates a fully created V3 core under the immutable exchange
 /// listing authority.
 ///
-/// Accounts: `[exchange, instrument, core (writable), authority (signer)]`.
+/// Accounts: `[exchange, instrument, core (writable), authority (signer),
+/// collateral_mint (readonly)]`.
 /// Creation of a PDA is intentionally permissionless because it only spends
 /// the caller's rent. This instruction is the distinct authority boundary:
 /// it verifies the registered instrument belongs to the supplied exchange and
@@ -629,7 +684,7 @@ pub fn create_oracle_snapshot_v3(program_id: &Address, accounts: &mut [AccountVi
 pub fn initialize_v3_market(program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
     use crate::v3;
 
-    if accounts.len() != 4 {
+    if accounts.len() != 5 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
     if !accounts[2].is_writable() || !accounts[3].is_signer() {
@@ -638,6 +693,7 @@ pub fn initialize_v3_market(program_id: &Address, accounts: &mut [AccountView]) 
     if !accounts[0].owned_by(program_id) || !accounts[1].owned_by(program_id) {
         return Err(ProgramError::IllegalOwner);
     }
+    let mint_data = unsafe { accounts[4].borrow_unchecked() };
     let authority = accounts[3].address().to_bytes();
     let (exchange_authority, collateral_mint) = {
         let exchange = unsafe { accounts[0].borrow_unchecked() };
@@ -656,6 +712,12 @@ pub fn initialize_v3_market(program_id: &Address, accounts: &mut [AccountView]) 
             [exchange_offset::COLLATERAL_MINT..exchange_offset::COLLATERAL_MINT + 32]
             .try_into()
             .map_err(|_| custom(StockStreamError::InvalidInstruction))?;
+        validate_configured_collateral_mint(
+            accounts[4].address(),
+            &mint,
+            &handlers::TOKEN_PROGRAM_ID,
+            &mint_data,
+        )?;
         (authority, mint)
     };
     let (id, oracle_feed_id, oracle_channel, oracle_exponent) = {
@@ -1455,4 +1517,63 @@ pub fn create_scratch_account(
     let mut view = crate::scratch::SettlementScratchView::new(scratch_data)?;
     view.initialize(market_key.to_bytes(), trader_key, seat_index);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_configured_collateral_mint;
+    use pinocchio::Address;
+
+    #[test]
+    fn activation_rejects_zero_collateral_mint() {
+        let mint = Address::new_from_array([7; 32]);
+        let owner = crate::handlers::TOKEN_PROGRAM_ID;
+        let mut data = [0u8; 82];
+        data[45] = 1;
+        assert!(validate_configured_collateral_mint(&mint, &[0; 32], &owner, &data).is_err());
+    }
+
+    #[test]
+    fn activation_rejects_wrong_mint_owner_and_malformed_layout() {
+        let mint = Address::new_from_array([7; 32]);
+        let expected = mint.to_bytes();
+        let mut data = [0u8; 82];
+        data[45] = 1;
+        assert!(validate_configured_collateral_mint(
+            &mint,
+            &expected,
+            &Address::new_from_array([8; 32]),
+            &data
+        )
+        .is_err());
+        assert!(validate_configured_collateral_mint(
+            &mint,
+            &expected,
+            &crate::handlers::TOKEN_PROGRAM_ID,
+            &[0; 81]
+        )
+        .is_err());
+        data[45] = 0;
+        assert!(validate_configured_collateral_mint(
+            &mint,
+            &expected,
+            &crate::handlers::TOKEN_PROGRAM_ID,
+            &data
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn activation_accepts_initialized_spl_mint() {
+        let mint = Address::new_from_array([7; 32]);
+        let mut data = [0u8; 82];
+        data[45] = 1;
+        assert!(validate_configured_collateral_mint(
+            &mint,
+            &mint.to_bytes(),
+            &crate::handlers::TOKEN_PROGRAM_ID,
+            &data
+        )
+        .is_ok());
+    }
 }

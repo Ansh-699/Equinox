@@ -11,12 +11,13 @@
  * `node scripts/v3-devnet-lifecycle.mjs --execute setup` sends Devnet txs.
  */
 import fs from "node:fs";
+import { DEFAULT_PROGRAM_ID } from "./deployment-manifest.mjs";
 import { V3_LIFECYCLE_ORDER } from "./v3-lifecycle-readiness.mjs";
 import { Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction } from "@solana/web3.js";
 import { createMint } from "@solana/spl-token";
 
 const RPC = process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com";
-const PROGRAM = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? "8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ");
+const PROGRAM = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? DEFAULT_PROGRAM_ID);
 const STATE_PATH = process.env.V3_LIFECYCLE_STATE_PATH ?? "/tmp/opencode/v3-lifecycle-state.json";
 const DELEGATION_STATE_PATH = process.env.V3_DELEGATION_STATE_PATH ?? "/tmp/opencode/v3-delegation-state.json";
 const SHARDED_COMMIT_STATE_PATH = process.env.V3_SHARDED_COMMIT_STATE_PATH ?? "/tmp/opencode/v3-sharded-commit-state.json";
@@ -274,9 +275,14 @@ async function setup() {
   else if (!matchesSelectedOracle) throw new Error(`instrument oracle metadata conflict: ${JSON.stringify(metadata)}`);
   await ensureV3Account("V3 core", instrument, core, 0, 0, SIZES.core, payer);
   const coreInfo = await connection.getAccountInfo(core, "confirmed");
+  if (coreInfo?.data?.length >= 108
+      && coreInfo.data[10] === 1
+      && coreInfo.data.subarray(76, 108).every((byte) => byte === 0)) {
+    throw new Error(`refusing activated zero-mint core ${core.toBase58()}; create a fresh market`);
+  }
   if (!coreInfo?.data[11]) {
     try {
-      await send("activate V3 core", [ix(47, [ro(exchangePublicKey), ro(instrument), wr(core), sg(payer.publicKey)])], [payer]);
+      await send("activate V3 core", [ix(47, [ro(exchangePublicKey), ro(instrument), wr(core), sg(payer.publicKey), ro(mint)])], [payer]);
       save({ activationBlocked: null, activationComplete: true });
     } catch (error) {
       if (!String(error?.transactionMessage ?? error).includes("0x6004")) throw error;

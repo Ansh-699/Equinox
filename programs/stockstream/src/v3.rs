@@ -166,26 +166,94 @@ fn fresh_v3_execution_time_with_snapshot(
     let now = u64::try_from(crate::handlers::current_unix_timestamp()?)
         .map_err(|_| ProgramError::from(StockStreamError::OracleUnavailable))?;
     if let Some(index) = snapshot_index {
-        let snapshot = accounts.get(index).ok_or(ProgramError::NotEnoughAccountKeys)?;
+        let snapshot = accounts
+            .get(index)
+            .ok_or(ProgramError::NotEnoughAccountKeys)?;
         if snapshot.is_writable() || !snapshot.owned_by(program_id) {
             return Err(StockStreamError::OracleUnavailable.into());
         }
         let core = unsafe { accounts[0].borrow_unchecked() };
-        let feed = u32::from_le_bytes(core[V3_CORE_ORACLE_FEED_ID_OFFSET..V3_CORE_ORACLE_FEED_ID_OFFSET + 4].try_into().map_err(|_| bundle_error())?);
+        let feed = u32::from_le_bytes(
+            core[V3_CORE_ORACLE_FEED_ID_OFFSET..V3_CORE_ORACLE_FEED_ID_OFFSET + 4]
+                .try_into()
+                .map_err(|_| bundle_error())?,
+        );
         let channel = core[V3_CORE_ORACLE_CHANNEL_OFFSET];
-        let exponent = i32::from_le_bytes(core[V3_CORE_ORACLE_EXPONENT_OFFSET..V3_CORE_ORACLE_EXPONENT_OFFSET + 4].try_into().map_err(|_| bundle_error())?);
-        crate::oracle_snapshot::validate_for_core(unsafe { snapshot.borrow_unchecked() }, accounts[0].address(), feed, channel, exponent, now)?;
+        let exponent = i32::from_le_bytes(
+            core[V3_CORE_ORACLE_EXPONENT_OFFSET..V3_CORE_ORACLE_EXPONENT_OFFSET + 4]
+                .try_into()
+                .map_err(|_| bundle_error())?,
+        );
+        crate::oracle_snapshot::validate_for_core(
+            unsafe { snapshot.borrow_unchecked() },
+            accounts[0].address(),
+            feed,
+            channel,
+            exponent,
+            now,
+        )?;
         return Ok(now);
     }
     fresh_v3_execution_time(unsafe { accounts[0].borrow_unchecked() })
 }
 
 fn optional_snapshot_index(accounts: &[AccountView]) -> Option<usize> {
-    accounts.iter().enumerate().skip(V3_SESSION_ACCOUNT_INDEX).find_map(|(index, account)| {
-        if account.data_len() == crate::oracle_snapshot::ORACLE_SNAPSHOT_SIZE
-            && unsafe { account.borrow_unchecked() }[0..8] == crate::oracle_snapshot::ORACLE_SNAPSHOT_DISCRIMINATOR
-        { Some(index) } else { None }
-    })
+    accounts
+        .iter()
+        .enumerate()
+        .skip(V3_SESSION_ACCOUNT_INDEX)
+        .find_map(|(index, account)| {
+            if account.data_len() == crate::oracle_snapshot::ORACLE_SNAPSHOT_SIZE
+                && unsafe { account.borrow_unchecked() }[0..8]
+                    == crate::oracle_snapshot::ORACLE_SNAPSHOT_DISCRIMINATOR
+            {
+                Some(index)
+            } else {
+                None
+            }
+        })
+}
+
+/// Returns the authenticated mark after `fresh_v3_execution_time_with_snapshot`
+/// has succeeded. When a snapshot is supplied it is the sole price source;
+/// the delegated core's cached oracle bytes are only the legacy fallback when
+/// no snapshot account is present.
+fn oracle_price_after_freshness(
+    accounts: &[AccountView],
+    snapshot_index: Option<usize>,
+) -> Result<i64, ProgramError> {
+    let core = unsafe { accounts[0].borrow_unchecked() };
+    let snapshot = snapshot_index
+        .map(|index| {
+            accounts
+                .get(index)
+                .ok_or(ProgramError::NotEnoughAccountKeys)
+        })
+        .transpose()?
+        .map(|account| unsafe { account.borrow_unchecked() });
+    let price = oracle_price_from_bytes(&core, snapshot.as_deref())?;
+    if price <= 0 {
+        return Err(StockStreamError::OracleUnavailable.into());
+    }
+    Ok(price)
+}
+
+fn oracle_price_from_bytes(core: &[u8], snapshot: Option<&[u8]>) -> Result<i64, ProgramError> {
+    let bytes = snapshot.unwrap_or(core);
+    let offset = if snapshot.is_some() {
+        crate::oracle_snapshot::OFFSET_PRICE
+    } else {
+        V3_CORE_ORACLE_PRICE_OFFSET
+    };
+    let end = offset
+        .checked_add(8)
+        .ok_or(ProgramError::InvalidAccountData)?;
+    if bytes.len() < end {
+        return Err(bundle_error());
+    }
+    Ok(i64::from_le_bytes(
+        bytes[offset..end].try_into().map_err(|_| bundle_error())?,
+    ))
 }
 
 /// Read-only ER boundary check used by runtime/integration callers before a
@@ -1518,7 +1586,8 @@ pub fn update_funding_v3(
     accounts: &mut [AccountView],
     instruction: StockStreamInstruction,
 ) -> ProgramResult {
-    if accounts.len() < V3_SIGNER_ACCOUNT_INDEX + 1 || accounts.len() > V3_SIGNER_ACCOUNT_INDEX + 2 {
+    if accounts.len() < V3_SIGNER_ACCOUNT_INDEX + 1 || accounts.len() > V3_SIGNER_ACCOUNT_INDEX + 2
+    {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
     validate_execution_bundle(program_id, &accounts[..V3_EXECUTION_BUNDLE_LEN], true)?;
@@ -1533,29 +1602,21 @@ pub fn update_funding_v3(
     if !signer.is_signer() {
         return Err(ProgramError::MissingRequiredSignature);
     }
+    let snapshot_index = optional_snapshot_index(accounts);
     {
         let core = unsafe { accounts[0].borrow_unchecked() };
         if core[V3_CORE_MARKET_AUTHORITY_OFFSET..V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
             != signer.address().to_bytes()
-            || core[V3_CORE_ORACLE_VALID_OFFSET] != 1
-            || !matches!(core[V3_CORE_MODE_OFFSET], 1..=3)
+            || (snapshot_index.is_none()
+                && (core[V3_CORE_ORACLE_VALID_OFFSET] != 1
+                    || !matches!(core[V3_CORE_MODE_OFFSET], 1..=3)))
         {
             return Err(StockStreamError::OracleUnavailable.into());
         }
     }
-    let now = fresh_v3_execution_time_with_snapshot(program_id, accounts, optional_snapshot_index(accounts))?;
+    let now = fresh_v3_execution_time_with_snapshot(program_id, accounts, snapshot_index)?;
+    let oracle = oracle_price_after_freshness(accounts, snapshot_index)?;
     let (bundle, _) = accounts.split_at_mut(V3_EXECUTION_BUNDLE_LEN);
-    let oracle = {
-        let core = unsafe { bundle[0].borrow_unchecked() };
-        i64::from_le_bytes(
-            core[V3_CORE_ORACLE_PRICE_OFFSET..V3_CORE_ORACLE_PRICE_OFFSET + 8]
-                .try_into()
-                .map_err(|_| bundle_error())?,
-        )
-    };
-    if oracle <= 0 {
-        return Err(StockStreamError::OracleUnavailable.into());
-    }
     let mark_deviation_bps = {
         let core = unsafe { bundle[0].borrow_unchecked() };
         read_v3_risk_config(&core)?.mark_deviation_bps
@@ -2220,7 +2281,9 @@ pub fn authorize_trading_session_v3(
     maximum_exposure: i128,
     maximum_open_orders: u16,
 ) -> ProgramResult {
-    if accounts.len() != V3_EXECUTION_BUNDLE_LEN + 4 && accounts.len() != V3_EXECUTION_BUNDLE_LEN + 5 {
+    if accounts.len() != V3_EXECUTION_BUNDLE_LEN + 4
+        && accounts.len() != V3_EXECUTION_BUNDLE_LEN + 5
+    {
         pinocchio_log::log!(
             256,
             "auth_session:FAIL accounts_len={} expected={}",
@@ -2230,9 +2293,11 @@ pub fn authorize_trading_session_v3(
         return Err(ProgramError::NotEnoughAccountKeys);
     }
     validate_execution_bundle(program_id, &accounts[..V3_EXECUTION_BUNDLE_LEN], true)?;
-    if accounts.len() == V3_EXECUTION_BUNDLE_LEN + 5 {
-        fresh_v3_execution_time_with_snapshot(program_id, accounts, Some(V3_EXECUTION_BUNDLE_LEN + 4))?;
-    }
+    let snapshot_index = if accounts.len() == V3_EXECUTION_BUNDLE_LEN + 5 {
+        Some(V3_EXECUTION_BUNDLE_LEN + 4)
+    } else {
+        None
+    };
     let owner = &accounts[V3_EXECUTION_BUNDLE_LEN];
     let session_account = &accounts[V3_EXECUTION_BUNDLE_LEN + 1];
     let session_signer = &accounts[V3_EXECUTION_BUNDLE_LEN + 2];
@@ -2265,13 +2330,9 @@ pub fn authorize_trading_session_v3(
         pinocchio_log::log!(256, "auth_session:FAIL seat_trader_mismatch");
         return Err(StockStreamError::InvalidSeat.into());
     }
+    let now = fresh_v3_execution_time_with_snapshot(program_id, accounts, snapshot_index)?;
     let core_snapshot = unsafe { accounts[0].borrow_unchecked() };
-    let now = u64::from_le_bytes(
-        core_snapshot[V3_CORE_ORACLE_TIMESTAMP_OFFSET..V3_CORE_ORACLE_TIMESTAMP_OFFSET + 8]
-            .try_into()
-            .map_err(|_| bundle_error())?,
-    );
-    if core_snapshot[V3_CORE_ORACLE_VALID_OFFSET] != 1
+    if snapshot_index.is_none() && core_snapshot[V3_CORE_ORACLE_VALID_OFFSET] != 1
         || expires_at <= now
         || actions == 0
         || max_order_notional == 0
@@ -2279,7 +2340,7 @@ pub fn authorize_trading_session_v3(
         || maximum_exposure <= 0
         || maximum_open_orders == 0
     {
-        pinocchio_log::log!(256, "auth_session:FAIL oracle_valid={} expires_at={} now={} actions={} max_order_notional={} max_cum={} max_exposure={} max_open_orders={}", core_snapshot[V3_CORE_ORACLE_VALID_OFFSET], expires_at, now, actions, max_order_notional, max_cumulative_notional, maximum_exposure, maximum_open_orders);
+        pinocchio_log::log!(256, "auth_session:FAIL oracle_valid={} snapshot={} expires_at={} now={} actions={} max_order_notional={} max_cum={} max_exposure={} max_open_orders={}", core_snapshot[V3_CORE_ORACLE_VALID_OFFSET], snapshot_index.is_some(), expires_at, now, actions, max_order_notional, max_cumulative_notional, maximum_exposure, maximum_open_orders);
         return Err(StockStreamError::InvalidTradingSession.into());
     }
     let core_key = *accounts[0].address();
@@ -2893,7 +2954,11 @@ fn validate_v3_trade_accounts(
         return Err(ProgramError::NotEnoughAccountKeys);
     }
     if accounts.len() > V3_SESSION_ACCOUNT_INDEX + 2 {
-        fresh_v3_execution_time_with_snapshot(program_id, accounts, optional_snapshot_index(accounts))?;
+        fresh_v3_execution_time_with_snapshot(
+            program_id,
+            accounts,
+            optional_snapshot_index(accounts),
+        )?;
     }
     validate_execution_bundle(program_id, &accounts[..V3_EXECUTION_BUNDLE_LEN], true)?;
     let core = &accounts[0];
@@ -2917,7 +2982,8 @@ fn validate_v3_trade_accounts(
         }
         return Ok((seat, None));
     }
-    if accounts.len() != V3_SESSION_ACCOUNT_INDEX + 1 && accounts.len() != V3_SESSION_ACCOUNT_INDEX + 2
+    if accounts.len() != V3_SESSION_ACCOUNT_INDEX + 1
+        && accounts.len() != V3_SESSION_ACCOUNT_INDEX + 2
         || !accounts[V3_SESSION_ACCOUNT_INDEX].is_writable()
     {
         return Err(StockStreamError::InvalidTradingSession.into());
@@ -3245,7 +3311,10 @@ pub fn liquidate_v3(
     seat_index: u16,
     max_quantity: u64,
 ) -> ProgramResult {
-    if (accounts.len() != V3_EXECUTION_BUNDLE_LEN + 1 && accounts.len() != V3_EXECUTION_BUNDLE_LEN + 2) || max_quantity == 0 {
+    if (accounts.len() != V3_EXECUTION_BUNDLE_LEN + 1
+        && accounts.len() != V3_EXECUTION_BUNDLE_LEN + 2)
+        || max_quantity == 0
+    {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
     validate_execution_bundle(program_id, &accounts[..V3_EXECUTION_BUNDLE_LEN], true)?;
@@ -3253,20 +3322,17 @@ pub fn liquidate_v3(
     if !signer.is_signer() {
         return Err(ProgramError::MissingRequiredSignature);
     }
-    fresh_v3_execution_time_with_snapshot(program_id, accounts, optional_snapshot_index(accounts))?;
+    let snapshot_index = optional_snapshot_index(accounts);
+    fresh_v3_execution_time_with_snapshot(program_id, accounts, snapshot_index)?;
     let (mark, funding, config) = {
         let core = unsafe { accounts[0].borrow_unchecked() };
         if core[V3_CORE_MARKET_AUTHORITY_OFFSET..V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
             != signer.address().to_bytes()
-            || core[V3_CORE_ORACLE_VALID_OFFSET] != 1
+            || (snapshot_index.is_none() && core[V3_CORE_ORACLE_VALID_OFFSET] != 1)
         {
             return Err(StockStreamError::InvalidInstruction.into());
         }
-        let mark = i64::from_le_bytes(
-            core[V3_CORE_ORACLE_PRICE_OFFSET..V3_CORE_ORACLE_PRICE_OFFSET + 8]
-                .try_into()
-                .map_err(|_| bundle_error())?,
-        );
+        let mark = oracle_price_after_freshness(accounts, snapshot_index)?;
         if mark <= 0 {
             return Err(StockStreamError::OracleUnavailable.into());
         }
@@ -3402,7 +3468,8 @@ fn place_order_v3_with_action(
     if accounts.len() < V3_SIGNER_ACCOUNT_INDEX + 1 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
-    let now = fresh_v3_execution_time_with_snapshot(program_id, accounts, optional_snapshot_index(accounts))?;
+    let snapshot_index = optional_snapshot_index(accounts);
+    let now = fresh_v3_execution_time_with_snapshot(program_id, accounts, snapshot_index)?;
     let (seat_before, _, _) = v3_trade_seat(accounts, order.seat_index)?;
     let funding_accumulator = core_i128(
         unsafe { accounts[0].borrow_unchecked() },
@@ -3429,15 +3496,7 @@ fn place_order_v3_with_action(
     }
     let core_snapshot = unsafe { accounts[0].borrow_unchecked() };
     let risk_config = read_v3_risk_config(&core_snapshot)?;
-    let oracle = if core_snapshot[V3_CORE_ORACLE_VALID_OFFSET] != 0 {
-        Some(i64::from_le_bytes(
-            core_snapshot[V3_CORE_ORACLE_PRICE_OFFSET..V3_CORE_ORACLE_PRICE_OFFSET + 8]
-                .try_into()
-                .map_err(|_| bundle_error())?,
-        ))
-    } else {
-        None
-    };
+    let oracle = Some(oracle_price_after_freshness(accounts, snapshot_index)?);
     let effective_price = match tree {
         TreeKind::Fixed => order.price_or_offset,
         TreeKind::OraclePegged => oracle
@@ -4014,7 +4073,7 @@ pub fn deposit_collateral_v3(
     seat_index: u16,
     amount: u64,
 ) -> ProgramResult {
-    if accounts.len() != 11 || amount == 0 {
+    if (accounts.len() != 11 && accounts.len() != 12) || amount == 0 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
     for index in 0..accounts.len() {
@@ -4043,7 +4102,8 @@ pub fn deposit_collateral_v3(
     }
     let core_key = *core.address();
     let core_bytes = unsafe { core.borrow_unchecked() };
-    fresh_v3_execution_time(&core_bytes)?;
+    let snapshot_index = (accounts.len() == 12).then_some(11);
+    fresh_v3_execution_time_with_snapshot(program_id, accounts, snapshot_index)?;
     read_v3_risk_config(&core_bytes)?;
     if core_bytes[0..8] != V3_MARKET_CORE_DISCRIMINATOR
         || core_bytes[8..10] != V3_LAYOUT_VERSION.to_le_bytes()
@@ -4133,7 +4193,10 @@ pub fn withdraw_collateral_v3(
     seat_index: u16,
     amount: u64,
 ) -> ProgramResult {
-    if accounts.len() != V3_EXECUTION_BUNDLE_LEN + 6 || amount == 0 {
+    if (accounts.len() != V3_EXECUTION_BUNDLE_LEN + 6
+        && accounts.len() != V3_EXECUTION_BUNDLE_LEN + 7)
+        || amount == 0
+    {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
     for index in 0..accounts.len() {
@@ -4170,15 +4233,13 @@ pub fn withdraw_collateral_v3(
     {
         return Err(StockStreamError::RiskViolation.into());
     }
-    if core_bytes[V3_CORE_ORACLE_VALID_OFFSET] == 0 {
+    let snapshot_index =
+        (accounts.len() == V3_EXECUTION_BUNDLE_LEN + 7).then_some(V3_EXECUTION_BUNDLE_LEN + 6);
+    if snapshot_index.is_none() && core_bytes[V3_CORE_ORACLE_VALID_OFFSET] == 0 {
         return Err(StockStreamError::RiskViolation.into());
     }
-    fresh_v3_execution_time(core_bytes)?;
-    let mark_price = i64::from_le_bytes(
-        core_bytes[V3_CORE_ORACLE_PRICE_OFFSET..V3_CORE_ORACLE_PRICE_OFFSET + 8]
-            .try_into()
-            .map_err(|_| bundle_error())?,
-    );
+    fresh_v3_execution_time_with_snapshot(program_id, accounts, snapshot_index)?;
+    let mark_price = oracle_price_after_freshness(accounts, snapshot_index)?;
     let funding_accumulator = core_i128(core_bytes, V3_CORE_FUNDING_ACCUMULATOR_OFFSET)?;
     let vault_liability = core_i128(core_bytes, V3_CORE_VAULT_LIABILITY_OFFSET)?;
     let updated_vault_liability = vault_liability
@@ -4577,19 +4638,12 @@ fn preflight_replace_order_v3(
     if accounts.len() < V3_SIGNER_ACCOUNT_INDEX + 1 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
-    let now = fresh_v3_execution_time_with_snapshot(program_id, accounts, optional_snapshot_index(accounts))?;
+    let snapshot_index = optional_snapshot_index(accounts);
+    let now = fresh_v3_execution_time_with_snapshot(program_id, accounts, snapshot_index)?;
     let (seat, _, _) = v3_trade_seat(accounts, new_order.seat_index)?;
     let core_snapshot = unsafe { accounts[0].borrow_unchecked() };
     let config = read_v3_risk_config(&core_snapshot)?;
-    let oracle = if core_snapshot[V3_CORE_ORACLE_VALID_OFFSET] != 0 {
-        Some(i64::from_le_bytes(
-            core_snapshot[V3_CORE_ORACLE_PRICE_OFFSET..V3_CORE_ORACLE_PRICE_OFFSET + 8]
-                .try_into()
-                .map_err(|_| bundle_error())?,
-        ))
-    } else {
-        None
-    };
+    let oracle = Some(oracle_price_after_freshness(accounts, snapshot_index)?);
     let funding = core_i128(&core_snapshot, V3_CORE_FUNDING_ACCUMULATOR_OFFSET)?;
 
     let mut old_leaf = None;
@@ -4827,7 +4881,9 @@ pub fn replace_order_v3(
         cancel_order_v3(program_id, accounts, new_order.seat_index, old_order_key, 0)?;
         return place_order_v3(program_id, accounts, new_order);
     }
-    if accounts.len() != V3_SESSION_ACCOUNT_INDEX + 1 && accounts.len() != V3_SESSION_ACCOUNT_INDEX + 2 {
+    if accounts.len() != V3_SESSION_ACCOUNT_INDEX + 1
+        && accounts.len() != V3_SESSION_ACCOUNT_INDEX + 2
+    {
         return Err(StockStreamError::InvalidTradingSession.into());
     }
     cancel_order_v3_with_action(

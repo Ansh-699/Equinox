@@ -13,10 +13,11 @@
  */
 import fs from "node:fs";
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram } from "@solana/web3.js";
+import { DEFAULT_PROGRAM_ID } from "./deployment-manifest.mjs";
 
 const RPC = "https://api.devnet.solana.com";
 const conn = new Connection(RPC, "confirmed");
-const PROGRAM_ID = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? "8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ");
+const PROGRAM_ID = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? DEFAULT_PROGRAM_ID);
 const DELEGATION_PROGRAM = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
 const statePath = process.argv[2] ?? "/tmp/opencode/lifecycle-state.json";
 const state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, "utf8")) : {};

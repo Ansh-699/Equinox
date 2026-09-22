@@ -34,12 +34,13 @@
  */
 
 import { getCompiledTransactionMessageDecoder, getTransactionDecoder, type Instruction } from "@solana/kit";
+import { STOCKSTREAM_PROGRAM_ID } from "../../clients/stockstream/src/constants";
 import { LocalKeypairSigner, type Signer } from "./signer";
 
 /** Program addresses that may appear in a keeper-signed transaction. */
 export const KEEPER_ALLOWED_PROGRAMS: readonly string[] = [
   // StockStream itself (every keeper instruction family lives here).
-  "8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ",
+  STOCKSTREAM_PROGRAM_ID,
   // Compute budget (the submission path prepends it).
   "ComputeBudget111111111111111111111111111111",
   // The Ed25519 native pre-instruction and the Pyth Pro Lazer oracle
@@ -53,7 +54,7 @@ export const KEEPER_ALLOWED_PROGRAMS: readonly string[] = [
 
 const KEEPER_ALLOWED_PROGRAM_SET = new Set(KEEPER_ALLOWED_PROGRAMS);
 
-const STOCKSTREAM_PROGRAM = "8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ";
+const STOCKSTREAM_PROGRAM = STOCKSTREAM_PROGRAM_ID;
 const MAGIC_PROGRAM = "Magic11111111111111111111111111111111111111";
 const SYSTEM_PROGRAM = "11111111111111111111111111111111";
 

@@ -18,22 +18,23 @@ pub mod handlers;
 pub mod initialize_market;
 pub mod instruction;
 pub mod magicblock;
+pub mod magicblock_oracle;
 pub mod mark;
+pub mod oracle_snapshot;
 pub mod registry;
 pub mod risk;
 pub mod scratch;
 pub mod session;
 pub mod state;
 pub mod v3;
-pub mod oracle_snapshot;
 
 use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
 
 use crate::instruction::StockStreamInstruction;
 
 pub const ID: Address = Address::new_from_array([
-    1, 234, 74, 20, 133, 113, 141, 20, 242, 15, 253, 116, 227, 98, 23, 21, 74, 231, 252, 113,
-    229, 226, 164, 31, 131, 3, 31, 153, 255, 39, 114, 192,
+    1, 234, 74, 20, 133, 113, 141, 20, 242, 15, 253, 116, 227, 98, 23, 21, 74, 231, 252, 113, 229,
+    226, 164, 31, 131, 3, 31, 153, 255, 39, 114, 192,
 ]);
 
 // The Phase 2 `#[used] static STOCKSTREAM_ARENA_VALIDATOR` that used to live

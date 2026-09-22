@@ -10,9 +10,10 @@
  */
 import fs from "node:fs";
 import { Connection, PublicKey } from "@solana/web3.js";
+import { DEFAULT_PROGRAM_ID } from "./deployment-manifest.mjs";
 
 const RPC = "https://api.devnet.solana.com";
-const PROGRAM_ID = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? "8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ");
+const PROGRAM_ID = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? DEFAULT_PROGRAM_ID);
 const OWNER = new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111");
 const conn = new Connection("https://api.devnet.solana.com", "confirmed");
 const statePath = process.argv[2] ?? "/tmp/opencode/lifecycle-state.json";

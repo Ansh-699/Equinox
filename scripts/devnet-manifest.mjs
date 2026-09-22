@@ -8,16 +8,17 @@
  */
 import fs from "node:fs";
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
+import { DEFAULT_PROGRAM_ID } from "./deployment-manifest.mjs";
 
 const RPC = "https://api.devnet.solana.com";
 const conn = new Connection(RPC, "confirmed");
-const PROGRAM_ID = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? "8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ");
-const PROGRAMDATA = new PublicKey("GCLwk9aFz8cz4etHv4cibqSwaKBa2ubQUgPRhRiHqTP2");
+const PROGRAM_ID = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? DEFAULT_PROGRAM_ID);
 const DELEGATION_PROGRAM = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh";
 const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const BPF_LOADER = "BPFLoaderUpgradeab1e11111111111111111111111";
 const statePath = process.argv[2] ?? "/tmp/opencode/lifecycle-state.json";
 const state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, "utf8")) : {};
+const [PROGRAMDATA] = PublicKey.findProgramAddressSync([PROGRAM_ID.toBuffer()], new PublicKey(BPF_LOADER));
 
 const authority = Keypair.fromSecretKey(
   new Uint8Array(JSON.parse(fs.readFileSync(process.env.HOME + "/.config/solana/id.json", "utf8"))),
@@ -75,7 +76,7 @@ const push = async (label, address, expected) => manifest.push(await inspect(lab
     label: "programdata", address: PROGRAMDATA.toBase58(), exists: pd !== null,
     owner: pd?.owner.toBase58() ?? null, lamports: (pd?.lamports ?? 0) / LAMPORTS_PER_SOL,
     dataLen: pd?.data.length ?? 0, reusable: pd !== null, recreate: false,
-    nextAction: "upgrade when funded (deployed ELF sha 23b6922b… != local eb7e4a91…)",
+    nextAction: "upgrade only with explicit authority and an artifact-equivalence review",
   });
 }
 

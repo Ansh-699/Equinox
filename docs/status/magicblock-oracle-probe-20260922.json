@@ -1,0 +1,50 @@
+{
+  "date": "2026-09-22",
+  "readOnly": true,
+  "feedId": 1435,
+  "derivedPda": "8L7ccCxTBZaLsMMdhAod5fFnpdEWGSDPW4y1td7y3y8N",
+  "oracleProgram": "PriCems5tHihc6UDXDjzjeawomAwBduWMGAi8ZUjppd",
+  "catalog": {
+    "symbol": "Equity.US.TSLA/USD",
+    "exponent": -5,
+    "channel": "fixed_rate@50ms",
+    "channelId": 2
+  },
+  "initialization": {
+    "signature": "2RemknQvzQ45Qs5SexhC63ZCfxU5S1jKFwRnpJZGVoMNFGxUZqLUhioweQwSo7PvBHFC4U5GRhUmtckeZSkANADF",
+    "slot": 426478311,
+    "instruction": "InitializePriceFeed",
+    "encodedTrailingExponent": 8
+  },
+  "l1": {
+    "endpoint": "https://api.devnet.solana.com",
+    "slot": 502521252,
+    "exists": true,
+    "owner": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh",
+    "dataLength": 144
+  },
+  "er": {
+    "endpoint": "https://devnet-as.magicblock.app",
+    "slot": 612399657,
+    "exists": true,
+    "owner": "PriCems5tHihc6UDXDjzjeawomAwBduWMGAi8ZUjppd",
+    "dataLength": 144,
+    "websocket": {
+      "endpoint": "wss://devnet-as.magicblock.app",
+      "updatesObserved": 3,
+      "samples": [
+        { "slot": 612399707, "priceRaw": "37838995", "publishTime": 1790096183, "postedSlot": 612399707, "verificationLevel": 1, "exponent": 5, "confidence": "0" },
+        { "slot": 612399727, "priceRaw": "37839126", "publishTime": 1790096184, "postedSlot": 612399727, "verificationLevel": 1, "exponent": 5, "confidence": "0" },
+        { "slot": 612399748, "priceRaw": "37839126", "publishTime": 1790096184, "postedSlot": 612399748, "verificationLevel": 1, "exponent": 5, "confidence": "0" }
+      ]
+    }
+  },
+  "interpretation": {
+    "erOracleAccountPresent": true,
+    "supportsPriceAndExponentRead": true,
+    "stockstreamObservationCompatible": false,
+    "reason": "The current account stores exponent 5 while the Pyth catalog requires -5; its public initialization instruction encoded trailing exponent 8. The account also lacks StockStream's channel, market-session, trading-status, sequence and authenticated-snapshot fields. No adapter or ER write-through into OracleSnapshotV3 is deployed.",
+    "nextSafeStep": "Implement and locally test an authenticated read-only adapter or obtain a validator-supported bridge; do not use this account as a drop-in replacement without preserving all validation fields."
+  },
+  "stateMutation": false
+}
