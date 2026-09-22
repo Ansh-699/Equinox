@@ -363,7 +363,9 @@ pub fn dispatch(
             action_nonce,
         ),
         funding @ StockStreamInstruction::UpdateFunding { .. } => {
-            if accounts.len() == crate::v3::V3_SIGNER_ACCOUNT_INDEX + 1 {
+            if accounts.len() == crate::v3::V3_SIGNER_ACCOUNT_INDEX + 1
+                || accounts.len() == crate::v3::V3_SIGNER_ACCOUNT_INDEX + 2
+            {
                 crate::v3::update_funding_v3(program_id, accounts, funding)
             } else {
                 update_funding(program_id, accounts, funding)
@@ -433,6 +435,15 @@ pub fn dispatch(
         ),
         StockStreamInstruction::CreateV3TraderSeat { seat_index } => {
             crate::v3::create_trader_seat(program_id, accounts, seat_index)
+        }
+        StockStreamInstruction::CreateV3TradingSession { seat_index } => {
+            crate::v3::create_v3_trading_session(program_id, accounts, seat_index)
+        }
+        StockStreamInstruction::UpdateOracleSnapshotV3 => {
+            oracle::update_oracle_snapshot_v3(program_id, accounts, instruction_data)
+        }
+        StockStreamInstruction::CreateOracleSnapshotV3 => {
+            crate::registry::create_oracle_snapshot_v3(program_id, accounts)
         }
         StockStreamInstruction::CloseV3TraderSeat { seat_index } => {
             crate::v3::close_trader_seat(program_id, accounts, seat_index)
@@ -1586,20 +1597,20 @@ const SOLANA_FORMAT_MAGIC: u32 = 2_182_742_457;
 const PAYLOAD_FORMAT_MAGIC: u32 = 2_479_346_549;
 const MAX_PYTH_MESSAGE: usize = 512;
 
-struct VerifiedOracle {
-    feed_id: u32,
-    channel: u8,
-    price: i64,
-    exponent: i16,
-    confidence: i64,
+pub(crate) struct VerifiedOracle {
+    pub(crate) feed_id: u32,
+    pub(crate) channel: u8,
+    pub(crate) price: i64,
+    pub(crate) exponent: i16,
+    pub(crate) confidence: i64,
     /// The signed envelope's own generation timestamp (`PayloadData::timestamp_us`).
-    envelope_timestamp_us: u64,
+    pub(crate) envelope_timestamp_us: u64,
     /// The per-feed `FeedUpdateTimestamp` property: when this specific feed's
     /// price last actually changed, which can lag the envelope timestamp for
     /// a feed that hasn't updated this tick. This -- not the envelope
     /// timestamp -- is the correct value for staleness/monotonic checks.
-    feed_update_timestamp_us: u64,
-    session: i16,
+    pub(crate) feed_update_timestamp_us: u64,
+    pub(crate) session: i16,
 }
 
 /// Parses the fixed 5-property payload shape the keeper always requests
@@ -1608,7 +1619,7 @@ struct VerifiedOracle {
 /// tags are checked explicitly (`[0, 4, 5, 9, 12]`, the real
 /// `PriceFeedProperty` enum discriminants for those five properties) so a
 /// differently-shaped payload is rejected rather than misparsed.
-fn parse_verified_oracle(message: &[u8]) -> Result<VerifiedOracle, ProgramError> {
+pub(crate) fn parse_verified_oracle(message: &[u8]) -> Result<VerifiedOracle, ProgramError> {
     if message.len() < 102
         || u32::from_le_bytes(message[0..4].try_into().unwrap()) != SOLANA_FORMAT_MAGIC
     {
@@ -2038,7 +2049,8 @@ fn authorize_trading_session(
     maximum_exposure: i128,
     maximum_open_orders: u16,
 ) -> ProgramResult {
-    if accounts.len() == crate::v3::V3_EXECUTION_BUNDLE_LEN + 4
+    if (accounts.len() == crate::v3::V3_EXECUTION_BUNDLE_LEN + 4
+        || accounts.len() == crate::v3::V3_EXECUTION_BUNDLE_LEN + 5)
         && accounts[0].data_len() == crate::v3::V3_MARKET_CORE_SIZE
         && unsafe { accounts[0].borrow_unchecked() }[0..8]
             == crate::v3::V3_MARKET_CORE_DISCRIMINATOR

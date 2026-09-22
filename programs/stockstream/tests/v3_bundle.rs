@@ -15,15 +15,16 @@ use stockstream::{
         SESSION_ACTION_REPLACE, TRADING_SESSION_SIZE,
     },
     v3::{
-        append_event_record, cancel_all_v3, close_trader_seat, create_trader_seat,
-        deposit_collateral_v3, derive_book_page_v3, derive_event_shard_v3, derive_market_core_v3,
-        derive_seat_shard_v3, initialize_book_page_metadata, liquidate_v3, place_order_v3,
-        read_v3_risk_config, update_funding_v3, update_v3_risk_config, validate_execution_bundle,
-        validate_v3_session_actor, validate_v3_withdrawal_readiness, withdraw_collateral_v3,
-        PagedBookV3, V3RiskConfig, V3_BOOK_PAGES_PER_SIDE, V3_BOOK_PAGE_SIZE,
-        V3_CORE_INSURANCE_BALANCE_OFFSET, V3_CORE_PROTOCOL_FEE_BALANCE_OFFSET,
-        V3_CORE_VAULT_SURPLUS_OFFSET, V3_CORE_WITHDRAWAL_BUFFER_OFFSET, V3_EVENT_SHARD_SIZE,
-        V3_EXECUTION_BUNDLE_LEN, V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
+        append_event_record, authorize_trading_session_v3, cancel_all_v3, close_trader_seat,
+        create_trader_seat, deposit_collateral_v3, derive_book_page_v3, derive_event_shard_v3,
+        derive_market_core_v3, derive_seat_shard_v3, initialize_book_page_metadata, liquidate_v3,
+        place_order_v3, read_v3_risk_config, update_funding_v3, update_v3_risk_config,
+        validate_execution_bundle, validate_v3_session_actor, validate_v3_withdrawal_readiness,
+        withdraw_collateral_v3, PagedBookV3, V3RiskConfig, V3_BOOK_PAGES_PER_SIDE,
+        V3_BOOK_PAGE_SIZE, V3_CORE_DELEGATION_STATUS_OFFSET, V3_CORE_INSURANCE_BALANCE_OFFSET,
+        V3_CORE_PROTOCOL_FEE_BALANCE_OFFSET, V3_CORE_VAULT_SURPLUS_OFFSET,
+        V3_CORE_WITHDRAWAL_BUFFER_OFFSET, V3_EVENT_SHARD_SIZE, V3_EXECUTION_BUNDLE_LEN,
+        V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE, validate_v3_oracle_snapshot_for_er,
     },
     ID,
 };
@@ -35,6 +36,13 @@ const V3_EVENT_START: usize = V3_SEAT_START + 4;
 struct TestAccount {
     _storage: Vec<u64>,
     view: AccountView,
+}
+impl TestAccount {
+    fn set_readonly(&mut self) {
+        unsafe {
+            (*(self._storage.as_mut_ptr() as *mut RuntimeAccount)).is_writable = 0;
+        }
+    }
 }
 fn account(address: Address, size: usize, signer: bool) -> TestAccount {
     let words = (size_of::<RuntimeAccount>() + size).div_ceil(size_of::<u64>());
@@ -149,6 +157,167 @@ fn expiring_leaf(key: u128, owner: u32, expires_at: u64) -> LeafNode {
 }
 fn views(accounts: &[TestAccount]) -> Vec<AccountView> {
     accounts.iter().map(|value| value.view.clone()).collect()
+}
+
+#[test]
+fn er_readonly_snapshot_boundary_accepts_fresh_snapshot_without_pyth_accounts() {
+    let mut accounts = bundle();
+    let core_key = *accounts[0].view.address();
+    let now = stockstream::handlers::OFF_CHAIN_TEST_NOW as u64;
+    unsafe {
+        let core = accounts[0].view.borrow_unchecked_mut();
+        core[stockstream::v3::V3_CORE_ORACLE_FEED_ID_OFFSET
+            ..stockstream::v3::V3_CORE_ORACLE_FEED_ID_OFFSET + 4]
+            .copy_from_slice(&1435u32.to_le_bytes());
+        core[stockstream::v3::V3_CORE_ORACLE_CHANNEL_OFFSET] = 2;
+        core[stockstream::v3::V3_CORE_ORACLE_EXPONENT_OFFSET
+            ..stockstream::v3::V3_CORE_ORACLE_EXPONENT_OFFSET + 4]
+            .copy_from_slice(&(-5i32).to_le_bytes());
+    }
+    let mut snapshot = account(
+        Address::new_unique(),
+        stockstream::oracle_snapshot::ORACLE_SNAPSHOT_SIZE,
+        false,
+    );
+    stockstream::oracle_snapshot::write_verified(
+        unsafe { snapshot.view.borrow_unchecked_mut() },
+        &core_key,
+        1435,
+        2,
+        -5,
+        100,
+        1,
+        now,
+        1,
+        now,
+    )
+    .unwrap();
+    assert!(validate_v3_oracle_snapshot_for_er(&ID, &accounts[0].view, &snapshot.view).is_err());
+    snapshot.set_readonly();
+    assert!(validate_v3_oracle_snapshot_for_er(&ID, &accounts[0].view, &snapshot.view).is_ok());
+    assert!(!snapshot.view.is_writable());
+}
+
+#[test]
+fn v3_session_authorization_uses_precreated_account_without_owner_debit_or_cpi() {
+    let mut accounts = bundle();
+    // ER presents the delegated execution bundle to the program. The
+    // authorization path must still accept the delegated core because the
+    // session account was allocated on L1 and is already part of the ER
+    // cluster; it must not fall back to a System CreateAccount CPI.
+    let owner = account(Address::new_from_array([91; 32]), 0, true);
+    let session_signer = account(Address::new_from_array([92; 32]), 0, false);
+    let system_program = account(Address::default(), 0, false);
+    unsafe {
+        accounts[0].view.borrow_unchecked_mut()[44..76]
+            .copy_from_slice(owner.view.address().as_ref());
+    }
+    let mut seat_call = vec![
+        accounts[0].view.clone(),
+        accounts[V3_SEAT_START].view.clone(),
+        accounts[V3_SEAT_START + 1].view.clone(),
+        accounts[V3_SEAT_START + 2].view.clone(),
+        accounts[V3_SEAT_START + 3].view.clone(),
+        accounts[V3_EVENT_START].view.clone(),
+        accounts[V3_EVENT_START + 1].view.clone(),
+        accounts[V3_EVENT_START + 2].view.clone(),
+        accounts[V3_EVENT_START + 3].view.clone(),
+        owner.view.clone(),
+    ];
+    create_trader_seat(&ID, &mut seat_call, 0).unwrap();
+    unsafe {
+        accounts[0].view.borrow_unchecked_mut()[V3_CORE_DELEGATION_STATUS_OFFSET] = 1;
+    }
+    let core_key = *accounts[0].view.address();
+    let session_key = session::derive_trading_session(
+        owner.view.address(),
+        &core_key,
+        0,
+        session_signer.view.address(),
+        &ID,
+    );
+    let mut session_account = account(session_key, TRADING_SESSION_SIZE, false);
+    let mut session_state = TradingSession::empty();
+    session_state.owner = owner.view.address().to_bytes();
+    session_state.session_signer = session_signer.view.address().to_bytes();
+    session_state.target_program = ID.to_bytes();
+    session_state.market = core_key.to_bytes();
+    session::write_session(
+        unsafe { session_account.view.borrow_unchecked_mut() },
+        &session_state,
+    )
+    .unwrap();
+    let owner_lamports_before = owner.view.lamports();
+    let mut auth = views(&accounts);
+    auth.extend([
+        owner.view.clone(),
+        session_account.view.clone(),
+        session_signer.view.clone(),
+        system_program.view.clone(),
+    ]);
+    authorize_trading_session_v3(
+        &ID,
+        &mut auth,
+        0,
+        stockstream::handlers::OFF_CHAIN_TEST_NOW as u64 + 600,
+        SESSION_ACTION_PLACE,
+        100,
+        200,
+        100,
+        4,
+    )
+    .unwrap();
+    assert_eq!(owner.view.lamports(), owner_lamports_before);
+    let decoded =
+        session::read_session(unsafe { session_account.view.borrow_unchecked() }).unwrap();
+    assert_eq!(decoded.initialized, 1);
+    let next_nonce = decoded.next_expected_nonce;
+    assert_eq!(next_nonce, 1);
+}
+
+#[test]
+fn v3_session_authorization_rejects_missing_or_wrong_shape_session() {
+    let mut accounts = bundle();
+    let owner = account(Address::new_from_array([93; 32]), 0, true);
+    let session_signer = account(Address::new_from_array([94; 32]), 0, false);
+    let system_program = account(Address::default(), 0, false);
+    unsafe {
+        accounts[0].view.borrow_unchecked_mut()[44..76]
+            .copy_from_slice(owner.view.address().as_ref());
+    }
+    let mut seat_call = vec![
+        accounts[0].view.clone(),
+        accounts[V3_SEAT_START].view.clone(),
+        accounts[V3_SEAT_START + 1].view.clone(),
+        accounts[V3_SEAT_START + 2].view.clone(),
+        accounts[V3_SEAT_START + 3].view.clone(),
+        accounts[V3_EVENT_START].view.clone(),
+        accounts[V3_EVENT_START + 1].view.clone(),
+        accounts[V3_EVENT_START + 2].view.clone(),
+        accounts[V3_EVENT_START + 3].view.clone(),
+        owner.view.clone(),
+    ];
+    create_trader_seat(&ID, &mut seat_call, 0).unwrap();
+    let wrong_session = account(Address::new_from_array([95; 32]), 0, false);
+    let mut auth = views(&accounts);
+    auth.extend([
+        owner.view.clone(),
+        wrong_session.view.clone(),
+        session_signer.view.clone(),
+        system_program.view.clone(),
+    ]);
+    assert!(authorize_trading_session_v3(
+        &ID,
+        &mut auth,
+        0,
+        stockstream::handlers::OFF_CHAIN_TEST_NOW as u64 + 600,
+        SESSION_ACTION_PLACE,
+        100,
+        200,
+        100,
+        4
+    )
+    .is_err());
 }
 
 #[test]

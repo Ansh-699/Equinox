@@ -142,6 +142,19 @@ fn build_manifest() -> String {
   "V3_SEAT_SHARDS": {v3_seat_shards},
   "V3_EVENTS_PER_SHARD": {v3_events_per_shard},
   "V3_EVENT_SHARDS": {v3_event_shards}
+  ,"ORACLE_SNAPSHOT_SIZE": {oracle_snapshot_size}
+  ,"ORACLE_SNAPSHOT_VERSION": {oracle_snapshot_version}
+  ,"ORACLE_SNAPSHOT_CORE_OFFSET": {oracle_snapshot_core_offset}
+  ,"ORACLE_SNAPSHOT_FEED_ID_OFFSET": {oracle_snapshot_feed_id_offset}
+  ,"ORACLE_SNAPSHOT_CHANNEL_OFFSET": {oracle_snapshot_channel_offset}
+  ,"ORACLE_SNAPSHOT_EXPONENT_OFFSET": {oracle_snapshot_exponent_offset}
+  ,"ORACLE_SNAPSHOT_PRICE_OFFSET": {oracle_snapshot_price_offset}
+  ,"ORACLE_SNAPSHOT_CONFIDENCE_OFFSET": {oracle_snapshot_confidence_offset}
+  ,"ORACLE_SNAPSHOT_TIMESTAMP_OFFSET": {oracle_snapshot_timestamp_offset}
+  ,"ORACLE_SNAPSHOT_SEQUENCE_OFFSET": {oracle_snapshot_sequence_offset}
+  ,"ORACLE_SNAPSHOT_STATUS_OFFSET": {oracle_snapshot_status_offset}
+  ,"ORACLE_SNAPSHOT_AUTHENTICATED_OFFSET": {oracle_snapshot_authenticated_offset}
+  ,"ORACLE_SNAPSHOT_REVISION_OFFSET": {oracle_snapshot_revision_offset}
   ,"V3_CORE_ORACLE_FEED_ID_OFFSET": {v3_core_oracle_feed_id_offset}
   ,"V3_CORE_ORACLE_CHANNEL_OFFSET": {v3_core_oracle_channel_offset}
   ,"V3_CORE_ORACLE_EXPONENT_OFFSET": {v3_core_oracle_exponent_offset}
@@ -201,6 +214,19 @@ fn build_manifest() -> String {
         v3_seat_shards = stockstream::v3::V3_SEAT_SHARDS,
         v3_events_per_shard = stockstream::v3::V3_EVENTS_PER_SHARD,
         v3_event_shards = stockstream::v3::V3_EVENT_SHARDS,
+        oracle_snapshot_size = stockstream::oracle_snapshot::ORACLE_SNAPSHOT_SIZE,
+        oracle_snapshot_version = stockstream::oracle_snapshot::ORACLE_SNAPSHOT_VERSION,
+        oracle_snapshot_core_offset = stockstream::oracle_snapshot::OFFSET_CORE,
+        oracle_snapshot_feed_id_offset = stockstream::oracle_snapshot::OFFSET_FEED_ID,
+        oracle_snapshot_channel_offset = stockstream::oracle_snapshot::OFFSET_CHANNEL,
+        oracle_snapshot_exponent_offset = stockstream::oracle_snapshot::OFFSET_EXPONENT,
+        oracle_snapshot_price_offset = stockstream::oracle_snapshot::OFFSET_PRICE,
+        oracle_snapshot_confidence_offset = stockstream::oracle_snapshot::OFFSET_CONFIDENCE,
+        oracle_snapshot_timestamp_offset = stockstream::oracle_snapshot::OFFSET_PUBLISH_TIMESTAMP,
+        oracle_snapshot_sequence_offset = stockstream::oracle_snapshot::OFFSET_SEQUENCE,
+        oracle_snapshot_status_offset = stockstream::oracle_snapshot::OFFSET_TRADING_STATUS,
+        oracle_snapshot_authenticated_offset = stockstream::oracle_snapshot::OFFSET_AUTHENTICATED,
+        oracle_snapshot_revision_offset = stockstream::oracle_snapshot::OFFSET_REVISION,
         v3_core_oracle_feed_id_offset = stockstream::v3::V3_CORE_ORACLE_FEED_ID_OFFSET,
         v3_core_oracle_channel_offset = stockstream::v3::V3_CORE_ORACLE_CHANNEL_OFFSET,
         v3_core_oracle_exponent_offset = stockstream::v3::V3_CORE_ORACLE_EXPONENT_OFFSET,

@@ -9,6 +9,7 @@ use crate::{
     },
     handlers,
     instruction::exchange_config_field as field,
+    v3,
 };
 
 /// Registry-level events (Exchange/StockInstrument/PerpMarketCreated) have
@@ -579,6 +580,35 @@ pub fn create_v3_account(
         initialize_v3_account(program_id, target, parent, kind, index)?;
     }
     Ok(())
+}
+
+/// Allocates the L1-owned OracleSnapshotV3 PDA. It is intentionally separate
+/// from `V3AccountKind`: delegation must never accept this account as a hot
+/// execution child. Accounts are `[core(ro), snapshot(w), payer(signer,w)]`.
+pub fn create_oracle_snapshot_v3(program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
+    if accounts.len() != 3 || !accounts[1].is_writable() || !accounts[2].is_signer() || !accounts[2].is_writable() {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    validate_v3_core_parent(program_id, &accounts[0])?;
+    if *accounts[1].address() != v3::derive_oracle_snapshot_v3(program_id, accounts[0].address()) {
+        return Err(custom(StockStreamError::InvalidInstruction));
+    }
+    let (feed, channel, exponent) = {
+        let core = unsafe { accounts[0].borrow_unchecked() };
+        (u32::from_le_bytes(core[v3::V3_CORE_ORACLE_FEED_ID_OFFSET..v3::V3_CORE_ORACLE_FEED_ID_OFFSET + 4].try_into().unwrap()), core[v3::V3_CORE_ORACLE_CHANNEL_OFFSET], i32::from_le_bytes(core[v3::V3_CORE_ORACLE_EXPONENT_OFFSET..v3::V3_CORE_ORACLE_EXPONENT_OFFSET + 4].try_into().unwrap()))
+    };
+    if feed == 0 { return Err(custom(StockStreamError::OracleUnavailable)); }
+    let core_address = *accounts[0].address();
+    let core_bytes = core_address.to_bytes();
+    let (_, bump) = Address::find_program_address(&[v3::V3_ORACLE_SNAPSHOT_SEED, &core_bytes], program_id);
+    let bump_slice = [bump];
+    let seeds = [pinocchio::cpi::Seed::from(v3::V3_ORACLE_SNAPSHOT_SEED), pinocchio::cpi::Seed::from(&core_bytes), pinocchio::cpi::Seed::from(&bump_slice)];
+    let (prefix, suffix) = accounts.split_at_mut(2);
+    if !grow_v3_account(program_id, &mut prefix[1], &mut suffix[0], crate::oracle_snapshot::ORACLE_SNAPSHOT_SIZE, &pinocchio::cpi::Signer::from(&seeds))? {
+        return Ok(());
+    }
+    let data = unsafe { prefix[1].borrow_unchecked_mut() };
+    crate::oracle_snapshot::initialize(data, &core_address, feed, channel, exponent)
 }
 
 /// Opcode 47: activates a fully created V3 core under the immutable exchange

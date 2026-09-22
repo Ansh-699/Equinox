@@ -1,5 +1,45 @@
 # StockStream status (2026-09-21, continuation)
 
+## ER-compatible oracle snapshot milestone (2026-09-22)
+
+Source/local only: an authenticated `OracleSnapshotV3` layout (`STKORS03`,
+128 bytes) and opcode 58 `UpdateOracleSnapshotV3` were added. The instruction
+reuses the canonical Ed25519 + Pyth `verify_message` checks, binds feed 1435,
+channel 2 and exponent -5 to the TSLA core, preserves timestamp/confidence/
+session/status, rejects replay/future/stale/invalid-confidence data, and writes
+only the L1-owned snapshot. The snapshot is designed to be read-only by ER;
+Pyth storage/treasury/fee accounts are not in the delegated 27-account bundle.
+
+This is not deployed and has not been run against the delegated market. No
+session authorization, order, fill, commit, restoration, undelegation or
+withdrawal was submitted. ER read-through and live session authorization remain
+unverified; the deployed program still has the original L1-only Pyth path.
+Evidence and option assessment: `docs/status/tsla-er-oracle-adapter-20260922.md`.
+The preparation-only fresh-deployment gate is
+`docs/status/tsla-er-oracle-deployment-runbook-20260922.md`.
+The latest redacted TSLA entitlement smoke is recorded in
+`docs/status/tsla-pyth-smoke-20260922.json` (3/3 endpoints, no transaction).
+
+## TSLA ER execution status (2026-09-22)
+
+The isolated fresh TSLA market is deployed and its complete 27-account V3
+execution bundle is delegated to MagicBlock ER. Real TSLA Pyth entitlement is
+working (feed 1435, fixed_rate@50ms, channel 2, exponent -5), but the stored
+oracle update is stale and cannot be refreshed through the delegated ER path.
+The canonical `ConsumeOracleUpdateV3` transaction was simulated twice and not
+submitted: with the L1 authority it returned `InvalidAccountForFee` because
+the writable fee payer is not delegated; with the pre-created session signer
+it reached Pyth but failed because that zero-lamport system account could not
+pay the one-lamport verification transfer. The source architecture documents
+this as an L1-only instruction because Pyth fee/treasury accounts cannot be
+delegated (`docs/magicblock.md`), so funding alone does not establish a
+supported delegated-oracle lifecycle.
+
+Evidence: `docs/status/tsla-er-oracle-blocker-20260922.json`. No Pyth update,
+session authorization, order, fill, commit, restoration, or withdrawal was
+submitted in this probe. Live ER trading remains externally blocked pending a
+MagicBlock-compatible oracle-feed path or validator-supported sponsor flow.
+
 TSLA delegation hold: the previously successful opcode-48 simulation does
 not establish risk preservation. Source inspection found validator bytes
 214–245 overlap risk configuration at bytes 218–231. The selected validator

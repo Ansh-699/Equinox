@@ -2,7 +2,7 @@ import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { expect, test } from "vitest";
 import { STOCKSTREAM_PROGRAM_ID } from "./constants";
 import { MAGICBLOCK_DELEGATION_PROGRAM_ID, MAGICBLOCK_MAGIC_CONTEXT_ID, MAGICBLOCK_MAGIC_PROGRAM_ID, STOCKSTREAM_PROGRAM_KEY, cancelAllV3, cancelOrderV3, placeOrderV3, replaceOrderV3, commitV3Shard, consumeOracleUpdateV3, updateFundingV3 } from "./index";
-import { authorizeTradingSession, cancelOrder, closeV3TraderSeat, commitMarket, delegateClusterMember, delegateV3Account, deriveClusterMemberPdas, createPerpMarket, createV3Account, createV3TraderSeat, decodeFillPayload, decodeInstruction, decodeMarketState, decodeSeatAmountPayload, decodeStockStreamEvent, decodeTradingSession, delegateMarket, deriveTradingSession, depositCollateral, depositCollateralV3, EVENT_SIZE, initializeExchange, initializeMarket, initializeV3Market, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateExchangeConfig, updateStockInstrument, updateV3Risk, withdrawCollateral, withdrawCollateralV3, withdrawInsuranceFunds, withdrawProtocolFees, EXCHANGE_CONFIG_FIELD, requestV3Undelegation, rollbackV3Undelegation } from "./index";
+import { authorizeTradingSession, authorizeTradingSessionV3, cancelOrder, closeV3TraderSeat, commitMarket, delegateClusterMember, delegateV3Account, deriveClusterMemberPdas, createPerpMarket, createV3Account, createV3TraderSeat, decodeFillPayload, decodeInstruction, decodeMarketState, decodeSeatAmountPayload, decodeStockStreamEvent, decodeTradingSession, delegateMarket, deriveTradingSession, depositCollateral, depositCollateralV3, EVENT_SIZE, initializeExchange, initializeMarket, initializeV3Market, initializeVault, placeOrder, previewPlaceOrder, recordBadDebt, reconcileVault, registerStockInstrument, resolveBadDebt, transferToInsuranceFund, updateExchangeConfig, updateStockInstrument, updateV3Risk, withdrawCollateral, withdrawCollateralV3, withdrawInsuranceFunds, withdrawProtocolFees, EXCHANGE_CONFIG_FIELD, requestV3Undelegation, rollbackV3Undelegation } from "./index";
 import { STOCKSTREAM_ACCOUNT_SIZE } from "./constants";
 import { deriveBookPageV3, deriveEventShardV3, deriveMarketCoreV3, deriveSeatShardV3 } from "./abi/v3";
 
@@ -274,6 +274,28 @@ test("trading session PDA derivation matches the Rust program byte-for-byte", ()
     223, 250, 33, 165, 116, 106, 233, 192, 73, 39, 227, 10, 125, 226, 215, 142, 169, 41, 200, 156,
     208, 129, 66, 196, 213, 207, 19, 4, 31, 239, 172, 152,
   ]);
+});
+
+test("V3 session authorization bytes match the Rust decoder golden vector", () => {
+  const core = PublicKey.unique();
+  const execution = {
+    core,
+    bookPages: Array.from({ length: 18 }, () => PublicKey.unique()),
+    seatShards: Array.from({ length: 4 }, () => PublicKey.unique()),
+    eventShards: Array.from({ length: 4 }, () => PublicKey.unique()),
+    authority,
+    session: PublicKey.unique(),
+    sessionSigner: PublicKey.unique(),
+  };
+  const ix = authorizeTradingSessionV3(execution, 0x0102030405060708n, {
+    seatIndex: 7,
+    actions: 0x1f,
+    maxOrderNotional: 0x1122334455667788n,
+    maxCumulativeNotional: 0x99aabbccddeeff00n,
+    maximumExposure: 0x0102030405060708090a0b0c0d0e0f10n,
+    maximumOpenOrders: 0x1234,
+  });
+  expect(Buffer.from(ix.data).toString("hex")).toBe("11070008070605040302011f887766554433221100ffeeddccbbaa99100f0e0d0c0b0a0908070605040302013412");
 });
 
 test("registry constructors preserve market-scoped account order", () => {

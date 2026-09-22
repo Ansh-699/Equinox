@@ -1,6 +1,14 @@
 /** V3 shard ABI. Mirrors programs/stockstream/src/v3.rs. */
 import { PublicKey } from "@solana/web3.js";
-import { PROGRAM_ID } from "./constants";
+import {
+  ORACLE_SNAPSHOT_AUTHENTICATED_OFFSET, ORACLE_SNAPSHOT_CHANNEL_OFFSET,
+  ORACLE_SNAPSHOT_CONFIDENCE_OFFSET, ORACLE_SNAPSHOT_CORE_OFFSET,
+  ORACLE_SNAPSHOT_EXPONENT_OFFSET, ORACLE_SNAPSHOT_FEED_ID_OFFSET,
+  ORACLE_SNAPSHOT_PRICE_OFFSET, ORACLE_SNAPSHOT_REVISION_OFFSET,
+  ORACLE_SNAPSHOT_SEQUENCE_OFFSET, ORACLE_SNAPSHOT_SIZE,
+  ORACLE_SNAPSHOT_STATUS_OFFSET, ORACLE_SNAPSHOT_TIMESTAMP_OFFSET,
+  ORACLE_SNAPSHOT_VERSION, PROGRAM_ID,
+} from "./constants";
 
 const PROGRAM_KEY = new PublicKey(PROGRAM_ID);
 export const V3_LAYOUT_VERSION = 3;
@@ -20,6 +28,9 @@ export const V3_SEAT_SHARDS = 4;
 export const V3_EVENTS_PER_SHARD = 32;
 export const V3_EVENT_SHARDS = 4;
 export const V3_EXECUTION_BUNDLE_LEN = 27;
+export { ORACLE_SNAPSHOT_SIZE };
+export const ORACLE_SNAPSHOT_DISCRIMINATOR = "STKORS03";
+export { ORACLE_SNAPSHOT_VERSION };
 export const V3_CORE_COMMIT_PHASE_OFFSET = 372;
 export const V3_CORE_SNAPSHOT_EPOCH_OFFSET = 376;
 export const V3_CORE_SNAPSHOT_CHILD_COUNT_OFFSET = 384;
@@ -40,6 +51,9 @@ export function deriveSeatShardV3(market: PublicKey, shard: number): PublicKey {
 export function deriveEventShardV3(market: PublicKey, shard: number): PublicKey {
   if (!Number.isInteger(shard) || shard < 0 || shard >= V3_EVENT_SHARDS) throw new RangeError("invalid V3 event shard");
   return PublicKey.findProgramAddressSync([Buffer.from("event-shard-v3"), market.toBuffer(), Buffer.from([shard])], PROGRAM_KEY)[0];
+}
+export function deriveOracleSnapshotV3(core: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync([Buffer.from("oracle-snapshot-v3"), core.toBuffer()], PROGRAM_KEY)[0];
 }
 export function v3AccountIsCommittable(size: number): boolean {
   return Number.isInteger(size) && size >= 0 && size <= V3_COMMIT_ACCOUNT_SAFE_MAX && size <= V3_COMMIT_ACCOUNT_HARD_MAX;
@@ -88,6 +102,19 @@ export function decodeV3MarketCore(bytes: Uint8Array): V3MarketCoreView {
     commitPhase: bytes[V3_CORE_COMMIT_PHASE_OFFSET], snapshotEpoch: view.getBigUint64(V3_CORE_SNAPSHOT_EPOCH_OFFSET, true),
     snapshotChildCount: view.getUint32(V3_CORE_SNAPSHOT_CHILD_COUNT_OFFSET, true),
   };
+}
+
+export interface OracleSnapshotV3View {
+  core: PublicKey; feedId: number; channel: number; exponent: number;
+  price: bigint; confidence: bigint; publishTimestamp: bigint; sequence: bigint;
+  session: number; tradingStatus: number; authenticated: boolean;
+  revision: number;
+}
+export function decodeOracleSnapshotV3(bytes: Uint8Array): OracleSnapshotV3View {
+  if (bytes.length !== ORACLE_SNAPSHOT_SIZE || Buffer.from(bytes.subarray(0, 8)).toString("utf8") !== ORACLE_SNAPSHOT_DISCRIMINATOR) throw new RangeError("Invalid oracle snapshot");
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (view.getUint16(8, true) !== ORACLE_SNAPSHOT_VERSION || bytes[10] !== 1 || bytes[ORACLE_SNAPSHOT_AUTHENTICATED_OFFSET] !== 1) throw new RangeError("Invalid oracle snapshot version/authentication");
+  return { core: key(bytes, ORACLE_SNAPSHOT_CORE_OFFSET), feedId: view.getUint32(ORACLE_SNAPSHOT_FEED_ID_OFFSET, true), channel: bytes[ORACLE_SNAPSHOT_CHANNEL_OFFSET], exponent: view.getInt32(ORACLE_SNAPSHOT_EXPONENT_OFFSET, true), price: view.getBigInt64(ORACLE_SNAPSHOT_PRICE_OFFSET, true), confidence: view.getBigUint64(ORACLE_SNAPSHOT_CONFIDENCE_OFFSET, true), publishTimestamp: view.getBigUint64(ORACLE_SNAPSHOT_TIMESTAMP_OFFSET, true), sequence: view.getBigUint64(ORACLE_SNAPSHOT_SEQUENCE_OFFSET, true), session: bytes[85], tradingStatus: bytes[ORACLE_SNAPSHOT_STATUS_OFFSET], authenticated: true, revision: bytes[ORACLE_SNAPSHOT_REVISION_OFFSET] };
 }
 
 export interface V3BookPageView {
