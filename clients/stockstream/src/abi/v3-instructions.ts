@@ -24,6 +24,13 @@ export interface V3SessionAuthorizationAccounts extends V3ExecutionAccounts {
   sessionSigner: AddressInput;
 }
 
+export interface V3TradingSessionCreationAccounts {
+  core: AddressInput;
+  authority: AddressInput;
+  session: AddressInput;
+  sessionSigner: AddressInput;
+}
+
 /** Builds the canonical V3 execution account tuple from a core address. The
  * helper is intentionally pure so browser callers can construct the exact
  * 27-account bundle without copying PDA seed logic into UI code. */
@@ -257,12 +264,15 @@ export function cancelAllV3(accounts: V3ExecutionAccounts, seatIndex: number, ma
 }
 
 export function updateFundingV3(accounts: V3FundingAccounts, accumulator: bigint, timestamp: bigint | number): TransactionInstruction {
-  const metas = v3ExecutionMetas(accounts);
+  const { oracleSnapshot: snapshot, ...withoutSnapshot } = accounts;
+  const metas = v3ExecutionMetas(withoutSnapshot);
   metas.pop();
   const data = new Uint8Array(25); data[0] = OPCODE.updateFunding;
   writeSigned(data, 1, checkedSigned(accumulator, 128, "accumulator"), 16);
   writeUnsigned(data, 17, checkedUnsigned(timestamp, 64, "timestamp"), 8);
-  return instruction(data, [...metas, accountMeta(accounts.authority, true, false)]);
+  const result = [...metas, accountMeta(accounts.authority, true, false)];
+  if (snapshot) result.push(accountMeta(snapshot, false, false));
+  return instruction(data, result);
 }
 
 export function consumeOracleUpdateV3(accounts: V3OracleAccounts, message: Uint8Array, ed25519InstructionIndex: number, signatureIndex: number): TransactionInstruction {
@@ -407,6 +417,18 @@ function expectedV3Account(parent: PublicKey, kindByte: number, index: number): 
   return kindByte === 0 ? deriveMarketCoreV3(parent)
     : kindByte === 1 ? deriveBookPageV3(parent, Math.floor(index / V3_BOOK_PAGES_PER_SIDE), index % V3_BOOK_PAGES_PER_SIDE)
       : kindByte === 2 ? deriveSeatShardV3(parent, index) : deriveEventShardV3(parent, index);
+}
+
+export interface V3VaultCreationAccounts { core: AddressInput; vault: AddressInput; authority: AddressInput; mint: AddressInput; tokenProgram: AddressInput; }
+
+/** Creates the V3 market vault token account at `["vault", core]`. The vault
+ * PDA is signed by the program, so this is the only way to create it; the V2
+ * vault paths reject a 4,096-byte `STKMK003` core. */
+export function createV3VaultAccount(accounts: V3VaultCreationAccounts): TransactionInstruction {
+  return instruction(Uint8Array.of(OPCODE.createV3VaultAccount), [
+    accountMeta(accounts.core, false, false), accountMeta(accounts.vault, false, true),
+    accountMeta(accounts.authority, true, true), accountMeta(accounts.mint, false, false),
+    accountMeta(accounts.tokenProgram, false, false), accountMeta(SystemProgram.programId, false, false)]);
 }
 
 export function createV3Account(accounts: V3CreationAccounts, kind: V3AccountKind, index = 0): TransactionInstruction {
