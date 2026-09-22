@@ -23,7 +23,7 @@ use stockstream::{
     },
     session::{derive_trading_session, TRADING_SESSION_SIZE},
     v3::{
-        derive_book_page_v3, derive_market_core_v3, V3_BOOK_PAGE_SIZE, V3_LAYOUT_VERSION,
+        derive_book_page_v3, derive_market_core_v3, derive_oracle_snapshot_v3, V3_BOOK_PAGE_SIZE, V3_LAYOUT_VERSION,
         V3_MARKET_CORE_SIZE,
     },
     ID,
@@ -31,6 +31,7 @@ use stockstream::{
 
 const CREATE_V3_ACCOUNT: u8 = 46;
 const INITIALIZE_V3_MARKET: u8 = 47;
+const CREATE_ORACLE_SNAPSHOT_V3: u8 = 59;
 const SYSTEM_PROGRAM: Address = Address::new_from_array([0; 32]);
 
 fn program_path() -> PathBuf {
@@ -50,6 +51,31 @@ fn writable(address: Address) -> AccountMeta {
 }
 fn writable_signer(address: Address) -> AccountMeta {
     AccountMeta::new(address, true)
+}
+
+fn create_snapshot(
+    svm: &mut LiteSVM,
+    payer: &Keypair,
+    core: Address,
+    snapshot: Address,
+    system: Address,
+) -> Result<(), String> {
+    svm.expire_blockhash();
+    let instruction = Instruction {
+        program_id: solana_address(ID),
+        accounts: vec![
+            readonly(core),
+            writable(snapshot),
+            writable_signer(payer.pubkey()),
+            readonly(system),
+        ],
+        data: vec![CREATE_ORACLE_SNAPSHOT_V3],
+    };
+    let message = Message::new(&[instruction], Some(&payer.pubkey()));
+    let transaction = Transaction::new(&[payer], message, svm.latest_blockhash());
+    svm.send_transaction(transaction)
+        .map(|_| ())
+        .map_err(|error| format!("{error:?}"))
 }
 fn readonly(address: Address) -> AccountMeta {
     AccountMeta::new_readonly(address, false)
@@ -257,4 +283,56 @@ fn creates_core_and_resumable_book_page_with_real_system_cpis() {
     assert_eq!(page_account.data[8..10], V3_LAYOUT_VERSION.to_le_bytes());
     assert_eq!(&page_account.data[10..12], &[0, 7]);
     assert_eq!(&page_account.data[12..44], core.as_ref());
+}
+
+#[test]
+fn creates_oracle_snapshot_with_canonical_system_meta_and_rejects_invalid_forms() {
+    let mut svm = LiteSVM::new();
+    svm.add_program_from_file(solana_address(ID), program_path())
+        .expect("SBF artifact must load");
+    let payer = Keypair::new();
+    svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+    let core = Address::new_unique();
+    let mut core_data = vec![0; V3_MARKET_CORE_SIZE];
+    core_data[0..8].copy_from_slice(b"STKMK003");
+    core_data[8..10].copy_from_slice(&V3_LAYOUT_VERSION.to_le_bytes());
+    core_data[10] = 1;
+    core_data[11] = 1;
+    core_data[246..250].copy_from_slice(&1435u32.to_le_bytes());
+    core_data[250] = 2;
+    core_data[251..255].copy_from_slice(&(-5i32).to_le_bytes());
+    svm.set_account(
+        core,
+        Account { lamports: 1_000_000, data: core_data, owner: solana_address(ID), executable: false, rent_epoch: 0 },
+    ).unwrap();
+    let snapshot = solana_address(derive_oracle_snapshot_v3(
+        &ID,
+        &pinocchio::Address::new_from_array(core.to_bytes()),
+    ));
+
+    svm.expire_blockhash();
+    let missing_system = Instruction {
+        program_id: solana_address(ID),
+        accounts: vec![readonly(core), writable(snapshot), writable_signer(payer.pubkey())],
+        data: vec![CREATE_ORACLE_SNAPSHOT_V3],
+    };
+    let message = Message::new(&[missing_system], Some(&payer.pubkey()));
+    let transaction = Transaction::new(&[&payer], message, svm.latest_blockhash());
+    assert!(svm.send_transaction(transaction).is_err(), "three-account form must fail");
+
+    create_snapshot(&mut svm, &payer, core, snapshot, SYSTEM_PROGRAM)
+        .expect("canonical four-account snapshot creation must succeed");
+    let account = svm.get_account(&snapshot).expect("snapshot exists");
+    assert_eq!(account.owner, solana_address(ID));
+    assert_eq!(account.data.len(), 128);
+    assert_eq!(&account.data[0..8], b"STKORS03");
+    assert_eq!(u16::from_le_bytes(account.data[8..10].try_into().unwrap()), 3);
+    assert_eq!(&account.data[12..44], core.as_ref());
+    assert_eq!(&account.data[44..48], &1435u32.to_le_bytes());
+    assert_eq!(account.data[48], 2);
+    assert_eq!(&account.data[49..53], &(-5i32).to_le_bytes());
+
+    assert!(create_snapshot(&mut svm, &payer, core, Address::new_unique(), SYSTEM_PROGRAM).is_err());
+    assert!(create_snapshot(&mut svm, &payer, core, snapshot, Address::new_unique()).is_err());
+    assert!(create_snapshot(&mut svm, &payer, core, snapshot, SYSTEM_PROGRAM).is_err());
 }

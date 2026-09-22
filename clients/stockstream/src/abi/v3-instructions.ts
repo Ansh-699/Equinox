@@ -444,6 +444,7 @@ export function createOracleSnapshotV3(accounts: V3OracleSnapshotCreationAccount
   if (!snapshot.equals(deriveOracleSnapshotV3(core))) throw new RangeError("snapshot is not the derived OracleSnapshotV3 PDA");
   return instruction(Uint8Array.of(OPCODE.createOracleSnapshotV3), [
     accountMeta(accounts.core, false, false), accountMeta(accounts.snapshot, false, true), accountMeta(accounts.payer, true, true),
+    accountMeta(SystemProgram.programId, false, false),
   ]);
 }
 

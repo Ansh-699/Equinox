@@ -27,7 +27,7 @@ const OLD_PROGRAM = "H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET";
 const PRESERVED_AAPL_CORE = "47Mx7SZvt7EY6NydsA5krgrqvcDDR1H5BG5xTPDSnhso";
 const FRESH_AAPL_CORE = "7gP2YAqf6TNMqfkDkSdjb2Y1peLzoXadBnzL2LDzhFei";
 const PRESERVED_V2_MARKET = "9d75hK8GyfqajxcijLa35bEh8SYUtobqi6eSdtF42RuS";
-const SIZES = { core: 4_096, book: 10_184, seat: 8_236, event: 3_244 };
+const SIZES = { core: 4_096, book: 10_184, seat: 8_236, event: 3_244, snapshot: 128 };
 const BOOK_PAGES_PER_SIDE = 9;
 const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const PYTH_PROGRAM = new PublicKey("pytd2yyk641x7ak7mkaasSJVXh6YYZnC7wTmtgAyxPt");
@@ -170,6 +170,21 @@ async function ensureV3Account(label, parent, target, kind, index, size, payer) 
     await send(`${label} create/resume`, [ix(46, [ro(parent), wr(target), wsg(payer.publicKey), ro(SystemProgram.programId)], [kind, index])], [payer]);
   }
 }
+function createOracleSnapshotIx(core, snapshot, payer) {
+  return ix(59, [ro(core), wr(snapshot), wsg(payer.publicKey), ro(SystemProgram.programId)]);
+}
+async function ensureOracleSnapshot(core, payer) {
+  const snapshot = PublicKey.findProgramAddressSync([Buffer.from("oracle-snapshot-v3"), core.toBuffer()], PROGRAM)[0];
+  const existing = await connection.getAccountInfo(snapshot, "confirmed");
+  if (existing) {
+    if (!existing.owner.equals(PROGRAM) || existing.data.length !== SIZES.snapshot || existing.data.subarray(0, 8).toString() !== "STKORS03") throw new Error("oracle snapshot: existing account has wrong owner, size, or discriminator");
+    return snapshot;
+  }
+  await send("create V3 oracle snapshot", [createOracleSnapshotIx(core, snapshot, payer)], [payer]);
+  const created = await connection.getAccountInfo(snapshot, "confirmed");
+  if (!created || !created.owner.equals(PROGRAM) || created.data.length !== SIZES.snapshot || created.data.subarray(0, 8).toString() !== "STKORS03") throw new Error("oracle snapshot: creation readback failed");
+  return snapshot;
+}
 const V3_DISCRIMINATORS = { core: "STKMK003", book: "STKBK003", seat: "STKST003", event: "STKEV003" };
 async function verifyBundle(core, accounts) {
   const coreInfo = await connection.getAccountInfo(core, "confirmed");
@@ -292,7 +307,8 @@ async function setup() {
     await ensureV3Account(`V3 event shard ${index}`, core, event, 3, index, SIZES.event, payer);
     accounts.seatShards.push(seat.toBase58()); accounts.eventShards.push(event.toBase58());
   }
-  save({ version: 3, core: core.toBase58(), instrument: instrument.toBase58(), v3Accounts: accounts });
+  const snapshot = await ensureOracleSnapshot(core, payer);
+  save({ version: 3, core: core.toBase58(), instrument: instrument.toBase58(), oracleSnapshot: snapshot.toBase58(), v3Accounts: accounts });
   const bundle = await verifyBundle(core, accounts);
   const activatedCore = await connection.getAccountInfo(core, "confirmed");
   if (!new PublicKey(activatedCore.data.subarray(76, 108)).equals(mint)) throw new Error("core collateral mint does not match the configured exchange mint");

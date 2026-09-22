@@ -235,6 +235,10 @@ fn typescript_golden_instruction_vectors_decode_in_rust() {
         StockStreamInstruction::decode(&[stockstream::instruction::CREATE_V3_ACCOUNT, 1, 7]),
         Ok(StockStreamInstruction::CreateV3Account { kind: 1, index: 7 })
     ));
+    assert!(matches!(
+        StockStreamInstruction::decode(&[stockstream::instruction::CREATE_ORACLE_SNAPSHOT_V3]),
+        Ok(StockStreamInstruction::CreateOracleSnapshotV3)
+    ));
     // The parser rejects bad kinds and bounds before a handler can derive a
     // PDA, preventing malformed flattened page indices from aliasing pages.
     assert!(

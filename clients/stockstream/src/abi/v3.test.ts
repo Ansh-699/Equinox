@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey, SystemProgram } from "@solana/web3.js";
 import {
   V3_BOOK_PAGE_SIZE, V3_BOOK_SLOTS_PER_SIDE, V3_COMMIT_ACCOUNT_HARD_MAX,
   V3_COMMIT_ACCOUNT_SAFE_MAX, V3_EVENT_SHARD_SIZE, V3_MARKET_CORE_SIZE,
@@ -134,7 +134,8 @@ describe("V3 sharded ABI", () => {
     const market = deriveMarketCoreV3(instrument); const snapshot = deriveOracleSnapshotV3(market);
     const ix = createOracleSnapshotV3({ core: market, snapshot, payer: key(95) });
     expect([...ix.data]).toEqual([59]);
-    expect(ix.keys.map(({ isSigner, isWritable }) => [isSigner, isWritable])).toEqual([[false, false], [false, true], [true, true]]);
+    expect(ix.keys.map(({ isSigner, isWritable }) => [isSigner, isWritable])).toEqual([[false, false], [false, true], [true, true], [false, false]]);
+    expect(ix.keys[3].pubkey.equals(SystemProgram.programId)).toBe(true);
   });
 
   it("keeps the snapshot read-only when funding replaces the signer meta", () => {
