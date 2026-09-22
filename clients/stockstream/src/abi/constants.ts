@@ -7,7 +7,9 @@
  *
  * The Rust program is authoritative for every offset and size here.
  */
-export const PROGRAM_ID = "8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ";
+import deployment from "../../../../config/stockstream-deployment.json";
+
+export const PROGRAM_ID = deployment.programId;
 export const MARKET_VERSION = 2;
 export const MARKET_HEADER_SIZE = 512;
 export const MARKET_ACCOUNT_SIZE = 222_752;

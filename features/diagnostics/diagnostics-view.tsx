@@ -18,7 +18,7 @@ export function DiagnosticsView() {
   const auth = useAppAuth();
   const marketSymbol = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_SYMBOL ?? "AAPL-PERP";
   const marketConfig = marketForSymbol(marketSymbol);
-  const marketAddress = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_ADDRESS ?? marketConfig.marketPda;
+  const marketAddress = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_ADDRESS ?? (publicV3Core ? marketConfig.marketPda : null);
   const protocol = useStockStreamProtocol(auth.authenticated ? marketAddress : null);
   const session = useTradingSession(protocol, auth.walletAddress, marketAddress, 0);
   const executionStatus = useExecutionStatus(marketApiUrl, marketSymbol);
@@ -28,7 +28,7 @@ export function DiagnosticsView() {
   const [workerHealth, setWorkerHealth] = useState<"checking" | "healthy" | "unavailable">("checking");
 
   useEffect(() => {
-    if (!protocol) return;
+    if (!protocol || !marketAddress) return;
     let stopped = false;
     protocol.rpc.market(marketAddress).then((market) => { if (!stopped) setMarketVersion(market.state.version); }).catch(() => {});
     protocol.rpc.currentSlot().then((slot) => { if (!stopped) setL1Slot(slot); }).catch(() => {});
@@ -52,8 +52,8 @@ export function DiagnosticsView() {
         <dl className="session-detail">
           <dt>Program ID</dt><dd>{DEMO_PROGRAM_ID || STOCKSTREAM_PROGRAM_ID}</dd>
           <dt>Configured V3 core</dt><dd>{publicV3Core}</dd>
-          <dt>Artifact alignment</dt><dd>matched · {DEMO_LOCAL_ARTIFACT_SHA256.slice(0, 12)}…</dd>
-          <dt>Pyth AAPL/USD</dt><dd className="negative">blocked · feed 922 not entitled</dd>
+          <dt>Artifact alignment</dt><dd className={DEMO_LOCAL_ARTIFACT_SHA256 === DEMO_DEPLOYED_ARTIFACT_SHA256 ? undefined : "negative"}>{DEMO_LOCAL_ARTIFACT_SHA256 === DEMO_DEPLOYED_ARTIFACT_SHA256 ? "matched" : "mismatch"} · local {DEMO_LOCAL_ARTIFACT_SHA256.slice(0, 12)}… · deployed {DEMO_DEPLOYED_ARTIFACT_SHA256.slice(0, 12)}…</dd>
+          <dt>Pyth TSLA/USD</dt><dd className="negative">update pending · feed 1435, snapshot unauthenticated</dd>
           <dt>Privy session relay</dt><dd className="negative">unavailable · fresh token/wallet unavailable</dd>
           <dt>Worker health</dt><dd>{workerHealth === "healthy" ? "healthy · public read-only" : workerHealth}</dd>
           <dt>MagicBlock lifecycle</dt><dd className="negative">not attempted · restoration remains externally blocked</dd>

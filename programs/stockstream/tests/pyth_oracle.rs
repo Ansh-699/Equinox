@@ -338,7 +338,11 @@ fn snapshot_fixture(delegated_core: bool) -> SnapshotFixture {
         true,
         false,
     );
-    SnapshotFixture { base, core, snapshot }
+    SnapshotFixture {
+        base,
+        core,
+        snapshot,
+    }
 }
 
 const VALID_FEED: u32 = 7;
@@ -380,7 +384,8 @@ fn valid_pyth_update_creates_authenticated_snapshot() {
         VALID_CHANNEL,
         i32::from(VALID_EXPONENT),
         OFF_CHAIN_TEST_NOW as u64,
-    ).unwrap();
+    )
+    .unwrap();
     assert_eq!(bytes[stockstream::oracle_snapshot::OFFSET_AUTHENTICATED], 1);
     assert_eq!(bytes[stockstream::oracle_snapshot::OFFSET_SEQUENCE], 1);
 }
@@ -393,7 +398,10 @@ fn snapshot_update_accepts_readonly_delegated_core() {
     data[0] = stockstream::instruction::UPDATE_ORACLE_SNAPSHOT_V3;
     let mut accounts = f.accounts();
     process_instruction(&ID, &mut accounts, &data).unwrap();
-    assert_eq!(f.core.view.owner(), &stockstream::magicblock::DELEGATION_PROGRAM_ID);
+    assert_eq!(
+        f.core.view.owner(),
+        &stockstream::magicblock::DELEGATION_PROGRAM_ID
+    );
     assert!(!f.core.view.is_writable());
 }
 

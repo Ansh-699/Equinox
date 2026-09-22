@@ -180,8 +180,7 @@ pub fn write_verified(
     }
     initialize(bytes, core, feed_id, channel, exponent)?;
     bytes[OFFSET_PRICE..OFFSET_PRICE + 8].copy_from_slice(&price.to_le_bytes());
-    bytes[OFFSET_CONFIDENCE..OFFSET_CONFIDENCE + 8]
-        .copy_from_slice(&confidence.to_le_bytes());
+    bytes[OFFSET_CONFIDENCE..OFFSET_CONFIDENCE + 8].copy_from_slice(&confidence.to_le_bytes());
     bytes[OFFSET_PUBLISH_TIMESTAMP..OFFSET_PUBLISH_TIMESTAMP + 8]
         .copy_from_slice(&publish_timestamp.to_le_bytes());
     bytes[OFFSET_SEQUENCE..OFFSET_SEQUENCE + 8].copy_from_slice(&sequence.to_le_bytes());
@@ -242,12 +241,25 @@ mod tests {
     fn verified_write_round_trips_and_rejects_replay() {
         let core = Address::new_from_array([7; 32]);
         let mut bytes = [0u8; ORACLE_SNAPSHOT_SIZE];
-        write_verified(&mut bytes, &core, 1435, 2, -5, 36982565, 10, 1_000, 1, 1_005)
-            .unwrap();
+        write_verified(
+            &mut bytes, &core, 1435, 2, -5, 36982565, 10, 1_000, 1, 1_005,
+        )
+        .unwrap();
         assert!(validate_for_core(&bytes, &core, 1435, 2, -5, 1_005).is_ok());
-        assert!(write_verified(&mut bytes, &core, 1435, 2, -5, 36982566, 10, 1_000, 1, 1_005).is_err());
-        write_verified(&mut bytes, &core, 1435, 2, -5, 36982566, 10, 1_001, 1, 1_005)
-            .unwrap();
-        assert_eq!(u64::from_le_bytes(bytes[OFFSET_SEQUENCE..OFFSET_SEQUENCE + 8].try_into().unwrap()), 2);
+        assert!(
+            write_verified(&mut bytes, &core, 1435, 2, -5, 36982566, 10, 1_000, 1, 1_005).is_err()
+        );
+        write_verified(
+            &mut bytes, &core, 1435, 2, -5, 36982566, 10, 1_001, 1, 1_005,
+        )
+        .unwrap();
+        assert_eq!(
+            u64::from_le_bytes(
+                bytes[OFFSET_SEQUENCE..OFFSET_SEQUENCE + 8]
+                    .try_into()
+                    .unwrap()
+            ),
+            2
+        );
     }
 }

@@ -92,10 +92,12 @@ test("createV3Account validates the isolated PDA and preserves the program accou
   expect(Array.from(createV3Account({ parent: core, target: page, payer }, "book-page", 7).data)).toEqual([46, 1, 7]);
   expect(() => createV3Account({ parent: core, target: market, payer }, "book-page", 0)).toThrow(/derived/);
   expect(() => createV3Account({ parent: core, target: page, payer }, "book-page", 18)).toThrow(/index/);
-  const activation = initializeV3Market({ exchange: PublicKey.unique(), instrument, core, authority });
+  const collateralMint = PublicKey.unique();
+  const activation = initializeV3Market({ exchange: PublicKey.unique(), instrument, core, authority, collateralMint });
   expect(Array.from(activation.data)).toEqual([47]);
-  expect(activation.keys.map(({ isSigner, isWritable }) => [isSigner, isWritable])).toEqual([[false, false], [false, false], [false, true], [true, false]]);
-  expect(() => initializeV3Market({ exchange: PublicKey.unique(), instrument, core: market, authority })).toThrow(/derived/);
+  expect(activation.keys.map(({ isSigner, isWritable }) => [isSigner, isWritable])).toEqual([[false, false], [false, false], [false, true], [true, false], [false, false]]);
+  expect(activation.keys[4].pubkey).toEqual(collateralMint);
+  expect(() => initializeV3Market({ exchange: PublicKey.unique(), instrument, core: market, authority, collateralMint })).toThrow(/derived/);
   const validator = PublicKey.unique();
   const delegation = delegateV3Account({ parent: core, target: page, authority, payer }, "book-page", validator, 7);
   expect(Array.from(delegation.data)).toEqual([48, 1, 7, ...validator.toBytes()]);

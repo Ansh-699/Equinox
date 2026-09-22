@@ -107,13 +107,13 @@ export interface V3UndelegationRecoveryAccounts {
   reimbursement?: AddressInput;
 }
 export interface V3SeatAccounts { core: AddressInput; seatShards: readonly AddressInput[]; eventShards: readonly AddressInput[]; trader: AddressInput; }
-export interface V3DepositAccounts { core: AddressInput; seatShard: AddressInput; eventShards: readonly AddressInput[]; authority: AddressInput; source: AddressInput; vault: AddressInput; mint: AddressInput; tokenProgram: AddressInput; }
+export interface V3DepositAccounts { core: AddressInput; seatShard: AddressInput; eventShards: readonly AddressInput[]; authority: AddressInput; source: AddressInput; vault: AddressInput; mint: AddressInput; tokenProgram: AddressInput; oracleSnapshot?: AddressInput; }
 export interface V3WithdrawAccounts extends V3ExecutionAccounts { destination: AddressInput; mint: AddressInput; vault: AddressInput; vaultAuthority: AddressInput; tokenProgram: AddressInput; }
 export interface V3ReconcileAccounts extends V3ExecutionAccounts { vault: AddressInput; mint: AddressInput; tokenProgram: AddressInput; }
 export type V3AccountKind = "core" | "book-page" | "seat-shard" | "event-shard";
 export interface V3CreationAccounts { parent: AddressInput; target: AddressInput; payer: AddressInput; }
 export interface V3OracleSnapshotCreationAccounts { core: AddressInput; snapshot: AddressInput; payer: AddressInput; }
-export interface V3InitializationAccounts { exchange: AddressInput; instrument: AddressInput; core: AddressInput; authority: AddressInput; }
+export interface V3InitializationAccounts { exchange: AddressInput; instrument: AddressInput; core: AddressInput; authority: AddressInput; collateralMint: AddressInput; }
 export interface V3DelegationAccounts extends V3CreationAccounts { authority: AddressInput; }
 
 const MAGICBLOCK_DELEGATION_PROGRAM_ID = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
@@ -377,15 +377,25 @@ export function depositCollateralV3(accounts: V3DepositAccounts, seatIndex: numb
   return instruction(v3AmountData(OPCODE.depositCollateralV3, seatIndex, amount), [
     accountMeta(accounts.core, false, true), accountMeta(accounts.seatShard, false, true),
     ...accounts.eventShards.map((event) => accountMeta(event, false, true)), accountMeta(accounts.authority, true, false),
-    accountMeta(accounts.source, false, true), accountMeta(accounts.vault, false, true), accountMeta(accounts.mint, false, false), accountMeta(accounts.tokenProgram, false, false)]);
+    accountMeta(accounts.source, false, true), accountMeta(accounts.vault, false, true), accountMeta(accounts.mint, false, false), accountMeta(accounts.tokenProgram, false, false),
+    ...(accounts.oracleSnapshot ? [accountMeta(accounts.oracleSnapshot, false, false)] : [])]);
 }
 
 export function withdrawCollateralV3(accounts: V3WithdrawAccounts, seatIndex: number, amount: bigint | number): TransactionInstruction {
   if (accounts.session) throw new RangeError("V3 custody withdrawal cannot include a delegated session account");
-  const metas = v3ExecutionMetas(accounts);
+  if (accounts.bookPages.length !== 2 * V3_BOOK_PAGES_PER_SIDE
+      || accounts.seatShards.length !== 4 || accounts.eventShards.length !== 4) {
+    throw new RangeError("V3 withdrawal requires 18 book pages, 4 seat shards and 4 event shards");
+  }
+  const metas = [accountMeta(accounts.core, false, true),
+    ...accounts.bookPages.map((address) => accountMeta(address, false, true)),
+    ...accounts.seatShards.map((address) => accountMeta(address, false, true)),
+    ...accounts.eventShards.map((address) => accountMeta(address, false, true)),
+    accountMeta(accounts.authority, true, false)];
   return instruction(v3AmountData(OPCODE.withdrawCollateralV3, seatIndex, amount), [
     ...metas, accountMeta(accounts.destination, false, true), accountMeta(accounts.mint, false, false),
-    accountMeta(accounts.vault, false, true), accountMeta(accounts.vaultAuthority, false, false), accountMeta(accounts.tokenProgram, false, false)]);
+    accountMeta(accounts.vault, false, true), accountMeta(accounts.vaultAuthority, false, false), accountMeta(accounts.tokenProgram, false, false),
+    ...(accounts.oracleSnapshot ? [accountMeta(accounts.oracleSnapshot, false, false)] : [])]);
 }
 
 export function reconcileVaultV3(accounts: V3ReconcileAccounts): TransactionInstruction {
@@ -452,7 +462,7 @@ export function initializeV3Market(accounts: V3InitializationAccounts): Transact
   const instrument = publicKey(accounts.instrument);
   if (!publicKey(accounts.core).equals(deriveMarketCoreV3(instrument))) throw new RangeError("core is not the derived V3 market PDA");
   return instruction(Uint8Array.of(OPCODE.initializeV3Market), [
-    accountMeta(accounts.exchange, false, false), accountMeta(instrument, false, false), accountMeta(accounts.core, false, true), accountMeta(accounts.authority, true, false)]);
+    accountMeta(accounts.exchange, false, false), accountMeta(instrument, false, false), accountMeta(accounts.core, false, true), accountMeta(accounts.authority, true, false), accountMeta(accounts.collateralMint, false, false)]);
 }
 
 export function delegateV3Account(accounts: V3DelegationAccounts, kind: V3AccountKind, validator: AddressInput, index = 0): TransactionInstruction {

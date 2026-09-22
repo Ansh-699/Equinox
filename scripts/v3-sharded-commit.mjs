@@ -7,15 +7,16 @@
  */
 import fs from "node:fs";
 import { Keypair, PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
+import { DEFAULT_MAGIC_ER_RPC, DEFAULT_PROGRAM_ID } from "./deployment-manifest.mjs";
 import { validateCheckpoint, validateV3CommitEpoch, validateV3CoreBytes } from "./v3-sharded-commit-guard.mjs";
 
 const LIFECYCLE_STATE_PATH = process.env.V3_LIFECYCLE_STATE_PATH ?? "/tmp/opencode/v3-lifecycle-state.json";
 const state = JSON.parse(fs.readFileSync(LIFECYCLE_STATE_PATH, "utf8"));
 const authority = Keypair.fromSecretKey(new Uint8Array(JSON.parse(fs.readFileSync(`${process.env.HOME}/.config/solana/id.json`, "utf8"))));
-const PROGRAM = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? "8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ");
+const PROGRAM = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? DEFAULT_PROGRAM_ID);
 const MAGIC_CONTEXT = new PublicKey("MagicContext1111111111111111111111111111111");
 const MAGIC_PROGRAM = new PublicKey("Magic11111111111111111111111111111111111111");
-const ENDPOINT = "https://devnet-as.magicblock.app/";
+const ENDPOINT = `${DEFAULT_MAGIC_ER_RPC}/`;
 const core = new PublicKey(state.core);
 const children = [...state.v3Accounts.bookPages, ...state.v3Accounts.seatShards, ...state.v3Accounts.eventShards].map((key) => new PublicKey(key));
 const mode = process.argv[2] ?? "commit";

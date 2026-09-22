@@ -42,3 +42,18 @@ fn v3_snapshot_records_cover_every_child_without_overlapping_risk_state() {
     assert!(child_record_offset(V3_CHILD_COUNT).is_none());
     assert_ne!(snapshot_digest(&[1, 2, 3]), snapshot_digest(&[1, 2, 4]));
 }
+
+#[test]
+fn authenticated_snapshot_price_wins_over_stale_core_cache() {
+    let mut core = [0u8; V3_MARKET_CORE_SIZE];
+    let mut snapshot = [0u8; crate::oracle_snapshot::ORACLE_SNAPSHOT_SIZE];
+    core[V3_CORE_ORACLE_PRICE_OFFSET..V3_CORE_ORACLE_PRICE_OFFSET + 8]
+        .copy_from_slice(&100_i64.to_le_bytes());
+    snapshot[crate::oracle_snapshot::OFFSET_PRICE..crate::oracle_snapshot::OFFSET_PRICE + 8]
+        .copy_from_slice(&200_i64.to_le_bytes());
+    assert_eq!(
+        oracle_price_from_bytes(&core, Some(&snapshot)).unwrap(),
+        200
+    );
+    assert_eq!(oracle_price_from_bytes(&core, None).unwrap(), 100);
+}

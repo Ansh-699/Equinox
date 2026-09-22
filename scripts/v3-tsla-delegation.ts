@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import { DEFAULT_PROGRAM_ID, DEFAULT_VALIDATOR } from "./deployment-manifest.mjs";
 import { assertV3L1Readiness } from "./v3-lifecycle-readiness.mjs";
 import {
   Connection,
@@ -18,7 +19,7 @@ import {
 
 const RPC = process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com";
 const ROUTER = "https://devnet-router.magicblock.app";
-const PROGRAM = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID || "8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ");
+const PROGRAM = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID || DEFAULT_PROGRAM_ID);
 const DELEGATION_PROGRAM = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -29,7 +30,7 @@ function requireEnv(name: string): string {
 // hardcoded address. decodeV3MarketCore + assertV3L1Readiness reject revision 1.
 const INSTRUMENT = new PublicKey(requireEnv("V3_INSTRUMENT"));
 const CORE = new PublicKey(requireEnv("V3_CORE"));
-const VALIDATOR = new PublicKey("MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57");
+const VALIDATOR = new PublicKey(DEFAULT_VALIDATOR);
 const EXPECTED_ER = "https://devnet-as.magicblock.app/";
 const CHECKPOINT = process.env.V3_LIFECYCLE_STATE_PATH ?? "/tmp/opencode/v3-lifecycle-state.json";
 const execute = process.argv.includes("--submit");

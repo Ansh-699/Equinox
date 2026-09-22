@@ -23,8 +23,8 @@ use stockstream::{
     },
     session::{derive_trading_session, TRADING_SESSION_SIZE},
     v3::{
-        derive_book_page_v3, derive_market_core_v3, derive_oracle_snapshot_v3, V3_BOOK_PAGE_SIZE, V3_LAYOUT_VERSION,
-        V3_MARKET_CORE_SIZE,
+        derive_book_page_v3, derive_market_core_v3, derive_oracle_snapshot_v3, V3_BOOK_PAGE_SIZE,
+        V3_LAYOUT_VERSION, V3_MARKET_CORE_SIZE,
     },
     ID,
 };
@@ -116,6 +116,7 @@ fn activate(
     exchange: Address,
     instrument: Address,
     core: Address,
+    collateral_mint: Address,
 ) -> Result<(), String> {
     svm.expire_blockhash();
     let instruction = Instruction {
@@ -125,6 +126,7 @@ fn activate(
             readonly(instrument),
             writable(core),
             AccountMeta::new_readonly(authority.pubkey(), true),
+            readonly(collateral_mint),
         ],
         data: vec![INITIALIZE_V3_MARKET],
     };
@@ -172,17 +174,34 @@ fn creates_core_and_resumable_book_page_with_real_system_cpis() {
     svm.airdrop(&authority.pubkey(), 10_000_000_000).unwrap();
     svm.airdrop(&impostor.pubkey(), 10_000_000_000).unwrap();
     let exchange = Address::new_unique();
+    let collateral_mint = Address::new_unique();
     let mut exchange_data = vec![0; EXCHANGE_SIZE];
     exchange_data[0..8].copy_from_slice(&EXCHANGE_DISCRIMINATOR);
     exchange_data[8..10].copy_from_slice(&EXCHANGE_CONFIG_VERSION.to_le_bytes());
     exchange_data[10] = 1;
     exchange_data[11..43].copy_from_slice(authority.pubkey().as_ref());
+    exchange_data[157..189].copy_from_slice(collateral_mint.as_ref());
     svm.set_account(
         exchange,
         Account {
             lamports: 1_000_000,
             data: exchange_data,
             owner: solana_address(ID),
+            executable: false,
+            rent_epoch: 0,
+        },
+    )
+    .unwrap();
+    svm.set_account(
+        collateral_mint,
+        Account {
+            lamports: 1_000_000,
+            data: {
+                let mut data = vec![0; 82];
+                data[45] = 1;
+                data
+            },
+            owner: solana_address(stockstream::handlers::TOKEN_PROGRAM_ID),
             executable: false,
             rent_epoch: 0,
         },
@@ -220,10 +239,26 @@ fn creates_core_and_resumable_book_page_with_real_system_cpis() {
     assert_eq!(&core_account.data[0..8], b"STKMK003");
     assert_eq!(core_account.data[10], 1);
     assert!(
-        activate(&mut svm, &impostor, exchange, instrument, core).is_err(),
+        activate(
+            &mut svm,
+            &impostor,
+            exchange,
+            instrument,
+            core,
+            collateral_mint
+        )
+        .is_err(),
         "non-listing authority cannot activate V3 core"
     );
-    activate(&mut svm, &authority, exchange, instrument, core).expect("activate V3 core");
+    activate(
+        &mut svm,
+        &authority,
+        exchange,
+        instrument,
+        core,
+        collateral_mint,
+    )
+    .expect("activate V3 core");
     let active_core = svm.get_account(&core).expect("activated core");
     assert_eq!(active_core.data[11], 1);
     assert_eq!(&active_core.data[44..76], authority.pubkey().as_ref());
@@ -231,7 +266,15 @@ fn creates_core_and_resumable_book_page_with_real_system_cpis() {
     assert_eq!(active_core.data[250], 1);
     assert_eq!(&active_core.data[251..255], &(-6i32).to_le_bytes());
     assert!(
-        activate(&mut svm, &authority, exchange, instrument, core).is_err(),
+        activate(
+            &mut svm,
+            &authority,
+            exchange,
+            instrument,
+            core,
+            collateral_mint
+        )
+        .is_err(),
         "activation is one-time"
     );
 
@@ -303,8 +346,15 @@ fn creates_oracle_snapshot_with_canonical_system_meta_and_rejects_invalid_forms(
     core_data[251..255].copy_from_slice(&(-5i32).to_le_bytes());
     svm.set_account(
         core,
-        Account { lamports: 1_000_000, data: core_data, owner: solana_address(ID), executable: false, rent_epoch: 0 },
-    ).unwrap();
+        Account {
+            lamports: 1_000_000,
+            data: core_data,
+            owner: solana_address(ID),
+            executable: false,
+            rent_epoch: 0,
+        },
+    )
+    .unwrap();
     let snapshot = solana_address(derive_oracle_snapshot_v3(
         &ID,
         &pinocchio::Address::new_from_array(core.to_bytes()),
@@ -313,12 +363,19 @@ fn creates_oracle_snapshot_with_canonical_system_meta_and_rejects_invalid_forms(
     svm.expire_blockhash();
     let missing_system = Instruction {
         program_id: solana_address(ID),
-        accounts: vec![readonly(core), writable(snapshot), writable_signer(payer.pubkey())],
+        accounts: vec![
+            readonly(core),
+            writable(snapshot),
+            writable_signer(payer.pubkey()),
+        ],
         data: vec![CREATE_ORACLE_SNAPSHOT_V3],
     };
     let message = Message::new(&[missing_system], Some(&payer.pubkey()));
     let transaction = Transaction::new(&[&payer], message, svm.latest_blockhash());
-    assert!(svm.send_transaction(transaction).is_err(), "three-account form must fail");
+    assert!(
+        svm.send_transaction(transaction).is_err(),
+        "three-account form must fail"
+    );
 
     create_snapshot(&mut svm, &payer, core, snapshot, SYSTEM_PROGRAM)
         .expect("canonical four-account snapshot creation must succeed");
@@ -326,13 +383,23 @@ fn creates_oracle_snapshot_with_canonical_system_meta_and_rejects_invalid_forms(
     assert_eq!(account.owner, solana_address(ID));
     assert_eq!(account.data.len(), 128);
     assert_eq!(&account.data[0..8], b"STKORS03");
-    assert_eq!(u16::from_le_bytes(account.data[8..10].try_into().unwrap()), 3);
+    assert_eq!(
+        u16::from_le_bytes(account.data[8..10].try_into().unwrap()),
+        3
+    );
     assert_eq!(&account.data[12..44], core.as_ref());
     assert_eq!(&account.data[44..48], &1435u32.to_le_bytes());
     assert_eq!(account.data[48], 2);
     assert_eq!(&account.data[49..53], &(-5i32).to_le_bytes());
 
-    assert!(create_snapshot(&mut svm, &payer, core, Address::new_unique(), SYSTEM_PROGRAM).is_err());
+    assert!(create_snapshot(
+        &mut svm,
+        &payer,
+        core,
+        Address::new_unique(),
+        SYSTEM_PROGRAM
+    )
+    .is_err());
     assert!(create_snapshot(&mut svm, &payer, core, snapshot, Address::new_unique()).is_err());
     assert!(create_snapshot(&mut svm, &payer, core, snapshot, SYSTEM_PROGRAM).is_err());
 }

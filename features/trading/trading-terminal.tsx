@@ -69,7 +69,7 @@ export function TradingTerminal() {
     return () => clearInterval(interval);
   }, []);
   const marketConfig = marketForSymbol(marketSymbol);
-  const marketAddress = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_ADDRESS ?? marketConfig.marketPda;
+  const marketAddress = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_ADDRESS ?? (publicV3Core ? marketConfig.marketPda : null);
   const protocol = useStockStreamProtocol(auth.authenticated ? marketAddress : null);
   const session = useTradingSession(protocol, auth.walletAddress, marketAddress, 0);
   const handleSessionResult = (result: SessionActionResult) => { setNotice(result.detail ? `${result.message}: ${result.detail}` : result.message); setSessionActionReason(result.reason); };

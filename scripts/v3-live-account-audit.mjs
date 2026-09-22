@@ -7,8 +7,9 @@
  * Usage: node scripts/v3-live-account-audit.mjs [core]
  */
 import { PublicKey } from "@solana/web3.js";
+import { DEFAULT_PROGRAM_ID } from "./deployment-manifest.mjs";
 
-const PROGRAM = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? "8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ");
+const PROGRAM = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? DEFAULT_PROGRAM_ID);
 const DEFAULT_CORE = "47Mx7SZvt7EY6NydsA5krgrqvcDDR1H5BG5xTPDSnhso";
 const L1 = "https://api.devnet.solana.com";
 const ER = "https://devnet-as.magicblock.app/";

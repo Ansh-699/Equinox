@@ -1,5 +1,46 @@
 # StockStream status (2026-09-21, continuation)
 
+## Current audited architecture status (2026-09-22)
+
+The canonical public deployment manifest is
+`config/stockstream-deployment.json`. It fixes the Devnet program identity,
+artifact provenance, TSLA oracle metadata, MagicBlock ER endpoints, and the
+write-disabled release state. Frontend, client, Worker, lifecycle, and
+diagnostics defaults now derive from that manifest; no market/core/collateral
+addresses are exposed until a corrected fresh market is created.
+
+### Classification
+
+- **Source-complete / locally-tested:** collateral-mint activation guards,
+  authenticated `OracleSnapshotV3` validation, snapshot-aware V3 risk
+  consumers, ABI builders, deployment manifest wiring, and local risk/matching
+  regressions.
+- **Locally-tested:** Rust native/runtime suites, 227 frontend tests, 357 Worker
+  tests, ABI parity, TypeScript checks, production build, lint, secret scan,
+  and SBF artifact validation.
+- **Devnet-verified:** existing program identity, historical TSLA entitlement,
+  and prior setup evidence only. The currently deployed ELF is older than the
+  local source artifact.
+- **MagicBlock-verified:** not satisfied. No authenticated L1 snapshot
+  read-through into ER or ER session-account write has been proven.
+- **Externally-blocked:** MagicBlock oracle bridge/read-through and session
+  lifecycle compatibility; fresh-market creation requiring a valid SPL mint.
+- **Incomplete:** live delegation, session authorization, orders, fills,
+  accounting readback, commit, restoration, and withdrawal for the corrected
+  architecture.
+
+The existing zero-mint core
+`82yWLiEcbcszxGgxouGRFMX7BaYWNAVboU7aVnDaxK34` remains an abandoned test
+artifact and must not be repaired, delegated, or used for demo writes. No live
+state was mutated during this audit.
+
+The read-only MagicBlock feed probe found a live 144-byte feed-1435 account,
+but its bytes encode exponent `5` while the Pyth catalog requires `-5`; the
+historical initialization transaction encoded trailing exponent `8`. This is
+an unresolved validator-side wire/provenance mismatch, not a value that the
+client or Worker may normalize. See
+`docs/status/magicblock-oracle-probe-20260922.json`.
+
 ## ER-compatible oracle snapshot milestone (2026-09-22)
 
 Source/local only: an authenticated `OracleSnapshotV3` layout (`STKORS03`,

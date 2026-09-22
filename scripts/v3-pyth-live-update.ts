@@ -9,9 +9,10 @@ import {
   Transaction,
 } from "@solana/web3.js";
 import { loadPythKeeperConfig, PythKeeper } from "../lib/server/pyth-keeper";
+import deployment from "../config/stockstream-deployment.json";
 
 const RPC = process.env.SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
-const PROGRAM = "8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ";
+const PROGRAM = deployment.programId;
 const CORE = process.env.V3_CORE;
 const STATE_PATH = process.env.V3_LIFECYCLE_STATE_PATH ?? "/tmp/opencode/v3-lifecycle-state.json";
 const PYTH_PROGRAM = "pytd2yyk641x7ak7mkaasSJVXh6YYZnC7wTmtgAyxPt";
