@@ -18,14 +18,14 @@
   },
   "l1": {
     "endpoint": "https://api.devnet.solana.com",
-    "slot": 502521252,
+    "slot": 502523547,
     "exists": true,
     "owner": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh",
     "dataLength": 144
   },
   "er": {
     "endpoint": "https://devnet-as.magicblock.app",
-    "slot": 612399657,
+    "slot": 612437634,
     "exists": true,
     "owner": "PriCems5tHihc6UDXDjzjeawomAwBduWMGAi8ZUjppd",
     "dataLength": 144,
@@ -33,9 +33,9 @@
       "endpoint": "wss://devnet-as.magicblock.app",
       "updatesObserved": 3,
       "samples": [
-        { "slot": 612399707, "priceRaw": "37838995", "publishTime": 1790096183, "postedSlot": 612399707, "verificationLevel": 1, "exponent": 5, "confidence": "0" },
-        { "slot": 612399727, "priceRaw": "37839126", "publishTime": 1790096184, "postedSlot": 612399727, "verificationLevel": 1, "exponent": 5, "confidence": "0" },
-        { "slot": 612399748, "priceRaw": "37839126", "publishTime": 1790096184, "postedSlot": 612399748, "verificationLevel": 1, "exponent": 5, "confidence": "0" }
+        { "slot": 612437687, "priceRaw": "37820500", "publishTime": 1790096563, "postedSlot": 612437687, "verificationLevel": 1, "exponent": 5, "confidence": "0" },
+        { "slot": 612437707, "priceRaw": "37817250", "publishTime": 1790096563, "postedSlot": 612437707, "verificationLevel": 1, "exponent": 5, "confidence": "0" },
+        { "slot": 612437727, "priceRaw": "37816004", "publishTime": 1790096564, "postedSlot": 612437727, "verificationLevel": 1, "exponent": 5, "confidence": "0" }
       ]
     }
   },
