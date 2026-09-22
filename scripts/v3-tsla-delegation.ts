@@ -18,7 +18,7 @@ import {
 
 const RPC = process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com";
 const ROUTER = "https://devnet-router.magicblock.app";
-const PROGRAM = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID || "BY81jGEfzwuqGkJbyYaGBty5Pn6oZLfntYUFkV85XZfo");
+const PROGRAM = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID || "8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ");
 const DELEGATION_PROGRAM = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
 function requireEnv(name: string): string {
   const value = process.env[name];

@@ -41,7 +41,7 @@ fn generate_manifest() {
 /// missing import (not a missing assertion) is what breaks if a constant
 /// this depends on is ever renamed or removed.
 fn build_manifest() -> String {
-    let program_id = "BY81jGEfzwuqGkJbyYaGBty5Pn6oZLfntYUFkV85XZfo";
+    let program_id = "8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ";
 
     // Reserved-region offsets are RELATIVE to `reserved_upgrade`'s own
     // start within the header -- the manifest's fields are ABSOLUTE

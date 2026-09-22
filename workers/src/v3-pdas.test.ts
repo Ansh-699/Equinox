@@ -8,9 +8,9 @@ const CORE = "11111111111111111111111111111111";
 
 describe("Worker V3 PDA facade", () => {
   it("matches the public client PDA vectors", async () => {
-    await expect(deriveBookPageV3(CORE, 1, 8)).resolves.toBe("A2jrG9fNP2GitPCmpdwkd4etxWcCAQ5KTdcnsW4opjYE");
-    await expect(deriveSeatShardV3(CORE, 3)).resolves.toBe("DB5NyVDVeswfNis1dHvdQWDWjTckmGes7sFsMEb5LPXC");
-    await expect(deriveEventShardV3(CORE, 3)).resolves.toBe("Hn47LRZLa63muNELbkB9EXzz59dZ8LiV7GtUrdsoSob4");
+    await expect(deriveBookPageV3(CORE, 1, 8)).resolves.toBe("6pfjPKhdS2AY7EeRc8GXqDRr5i5NiAaANRe1PpcLAQJv");
+    await expect(deriveSeatShardV3(CORE, 3)).resolves.toBe("HNdC1qGyahrrHHa3WhYpkocTvDvGzFcgDmMvh6jX2CCa");
+    await expect(deriveEventShardV3(CORE, 3)).resolves.toBe("9wmxB2sNE73s5bXtb7U3JwGLvRutKmvPeEY3cJivj326");
   });
 
   it("rejects caller-controlled invalid shard indexes", async () => {

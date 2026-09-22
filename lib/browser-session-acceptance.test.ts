@@ -122,7 +122,7 @@ test("ten session-key actions: exactly ONE main-wallet prompt, exact nonce progr
       sessionSignerAddress: created.sessionSignerAddress,
       relayerAddress: Keypair.generate().publicKey.toBase58(),
       instructions: [{
-        programAddress: "BY81jGEfzwuqGkJbyYaGBty5Pn6oZLfntYUFkV85XZfo" as never,
+        programAddress: "8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ" as never,
         accounts: [{ address: MARKET as never, role: 1 as never }],
         data: new Uint8Array([3, ...new Uint8Array(38)]),
       }],

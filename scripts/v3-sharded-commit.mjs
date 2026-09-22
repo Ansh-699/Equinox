@@ -12,7 +12,7 @@ import { validateCheckpoint, validateV3CommitEpoch, validateV3CoreBytes } from "
 const LIFECYCLE_STATE_PATH = process.env.V3_LIFECYCLE_STATE_PATH ?? "/tmp/opencode/v3-lifecycle-state.json";
 const state = JSON.parse(fs.readFileSync(LIFECYCLE_STATE_PATH, "utf8"));
 const authority = Keypair.fromSecretKey(new Uint8Array(JSON.parse(fs.readFileSync(`${process.env.HOME}/.config/solana/id.json`, "utf8"))));
-const PROGRAM = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? "BY81jGEfzwuqGkJbyYaGBty5Pn6oZLfntYUFkV85XZfo");
+const PROGRAM = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? "8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ");
 const MAGIC_CONTEXT = new PublicKey("MagicContext1111111111111111111111111111111");
 const MAGIC_PROGRAM = new PublicKey("Magic11111111111111111111111111111111111111");
 const ENDPOINT = "https://devnet-as.magicblock.app/";
