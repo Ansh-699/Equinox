@@ -67,6 +67,17 @@ pub const CREATE_V3_TRADING_SESSION: u8 = 57;
 /// Authenticated L1 Pyth verification into an ER-readable snapshot account.
 pub const UPDATE_ORACLE_SNAPSHOT_V3: u8 = 58;
 pub const CREATE_ORACLE_SNAPSHOT_V3: u8 = 59;
+/// L1 deposit into a per-(market, trader) receipt that works while the V3
+/// bundle is delegated. Data: `[60, amount:u64]`. See `inbox.rs`.
+pub const DEPOSIT_TO_INBOX_V3: u8 = 60;
+/// Credits a receipt's uncredited balance to its owner's seat, wherever the
+/// bundle lives (rollup or L1). Permissionless. Data: `[61, seat_index:u16]`.
+pub const CLAIM_INBOX_DEPOSIT_V3: u8 = 61;
+/// Rollup withdrawal request (risk-checked; schedules a seat-shard commit).
+/// Data: `[62, seat_index:u16, amount:u64]`.
+pub const REQUEST_WITHDRAWAL_V3: u8 = 62;
+/// L1 payout of committed withdrawal requests. Data: `[63, seat_index:u16]`.
+pub const CLAIM_WITHDRAWAL_V3: u8 = 63;
 pub const COMMIT_MARKET: u8 = 14;
 pub const COMMIT_AND_UNDELEGATE: u8 = 15;
 /// Reserved: the real external-undelegate callback uses the delegation
@@ -253,6 +264,19 @@ pub enum StockStreamInstruction {
     DepositCollateralV3 {
         seat_index: u16,
         amount: u64,
+    },
+    DepositToInboxV3 {
+        amount: u64,
+    },
+    ClaimInboxDepositV3 {
+        seat_index: u16,
+    },
+    RequestWithdrawalV3 {
+        seat_index: u16,
+        amount: u64,
+    },
+    ClaimWithdrawalV3 {
+        seat_index: u16,
     },
     WithdrawCollateralV3 {
         seat_index: u16,
@@ -542,6 +566,19 @@ impl StockStreamInstruction {
                 Ok(Self::UpdateOracleSnapshotV3)
             }
             Some(CREATE_ORACLE_SNAPSHOT_V3) if data.len() == 1 => Ok(Self::CreateOracleSnapshotV3),
+            Some(DEPOSIT_TO_INBOX_V3) if data.len() == 9 => Ok(Self::DepositToInboxV3 {
+                amount: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+            }),
+            Some(CLAIM_INBOX_DEPOSIT_V3) if data.len() == 3 => Ok(Self::ClaimInboxDepositV3 {
+                seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+            }),
+            Some(REQUEST_WITHDRAWAL_V3) if data.len() == 11 => Ok(Self::RequestWithdrawalV3 {
+                seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+                amount: read_u64(data, 3).ok_or(ProgramError::InvalidInstructionData)?,
+            }),
+            Some(CLAIM_WITHDRAWAL_V3) if data.len() == 3 => Ok(Self::ClaimWithdrawalV3 {
+                seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+            }),
             Some(DEPOSIT_COLLATERAL_V3) if data.len() == 11 => Ok(Self::DepositCollateralV3 {
                 seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
                 amount: read_u64(data, 3).ok_or(ProgramError::InvalidInstructionData)?,

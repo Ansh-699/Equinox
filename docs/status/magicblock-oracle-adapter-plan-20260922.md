@@ -29,26 +29,36 @@ status, StockStream sequence, or `OracleSnapshotV3` authenticated-update
 metadata. Its owner and account PDA must be checked; a price-only read is not
 acceptable.
 
-The current public account history is also inconsistent: the Pyth catalog
-requires exponent `-5`, current bytes decode to `5`, and the historical
-`InitializePriceFeed` instruction at slot `426478311` encoded `8`. The adapter
-must stop on this mismatch and require MagicBlock to clarify or reinitialize
-the feed with a documented wire version.
+Exponent resolution (see
+`docs/status/magicblock-oracle-exponent-resolution-20260922.json`): MagicBlock
+stores decimal places, so the stored value is the negated Pyth exponent. Upstream
+`sample` scales by `10^-exponent`, and all six live ER feeds follow
+`stored = -catalog`. The ER TSLA value `5` therefore means canonical `-5`. The
+stale L1 delegation-time copy holds `8`, the historical initialization value.
+That discrepancy is still an open provenance question for MagicBlock, but the ER
+value is consistent with the convention.
 
-The upstream MagicBlock oracle source was inspected at commit
-`c6d08ac317706c0943e9b6304b915cd1064bbea3`. Its `InitializePriceFeed`
-handler writes the caller-supplied exponent directly into `PriceFeedMessage`,
-and `UpdatePriceFeed` preserves that field. Therefore the observed values are
-not a client decoding convention; they identify an initialization/provenance
-problem that must be corrected or explicitly versioned by the validator owner.
+The upstream source at commit `c6d08ac317706c0943e9b6304b915cd1064bbea3` also
+shows the following:
+
+- `update_price_feed` writes only price, publish time, previous publish time,
+  posted slot, and the hard-coded `Full` level. Confidence and EMA stay `0`.
+- The Lazer signature fields are accepted but never verified. The only
+  authentication is `payer == MPUxHCpNUy3K1CSVhebAmTbcTCKVxfk9YMDcUP2ZnEA`.
+- `initialize_price_feed` is permissionless, so `write_authority` must be
+  checked against that key.
+- Bytes 41–72 hold the PDA address, not the Lazer feed ID.
 
 ## Smallest safe implementation
 
 1. **Done locally (diagnostics-only):** `src/magicblock_oracle.rs` provides a
    Rust `MagicBlockPriceObservation` decoder that rejects wrong owner,
-   wrong PDA, short data, non-`Full` verification, wrong feed bytes, invalid
-   confidence, future timestamps, stale timestamps, and exponent mismatch.
-   It is not called by any risk or matching path.
+   wrong PDA, wrong Anchor discriminator, non-MagicBlock write authority,
+   non-`Full` level, feed bytes that differ from the PDA, absent (zero) or
+   invalid confidence, future or stale timestamps, and any stored exponent
+   other than `-catalogExponent`. It returns the canonical exponent. Tests use
+   captured live ER and L1 bytes. It is not called by any risk or matching
+   path, and it rejects today's live account because confidence is absent.
 2. Bind channel `2` and exponent `-5` to the configured instrument. Do not
    infer channel or exponent from an unauthenticated client value.
 3. Bind market session and trading status to the active StockStream instrument

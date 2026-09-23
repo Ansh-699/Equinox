@@ -34,6 +34,10 @@ export const OPCODE = {
   createV3TradingSession: 57,
   updateOracleSnapshotV3: 58,
   createOracleSnapshotV3: 59,
+  depositToInboxV3: 60,
+  claimInboxDepositV3: 61,
+  requestWithdrawalV3: 62,
+  claimWithdrawalV3: 63,
 } as const;
 
 /** Session action allowlist bits — must match `session::SESSION_ACTION_*`. */

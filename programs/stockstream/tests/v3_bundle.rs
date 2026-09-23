@@ -1823,8 +1823,14 @@ fn v3_withdrawal_requires_restored_and_reconciled_full_bundle() {
         core[206..214].copy_from_slice(&7u64.to_le_bytes());
     }
     assert!(validate_v3_withdrawal_readiness(&ID, &views(&accounts)).is_ok());
+    // A surplus (vault holds more than owed, e.g. uncredited inbox deposits) is safe.
     unsafe {
         accounts[0].view.borrow_unchecked_mut()[370] = 1;
+    }
+    assert!(validate_v3_withdrawal_readiness(&ID, &views(&accounts)).is_ok());
+    // A deficit is not.
+    unsafe {
+        accounts[0].view.borrow_unchecked_mut()[370] = 2;
     }
     assert!(validate_v3_withdrawal_readiness(&ID, &views(&accounts)).is_err());
     unsafe {
@@ -1847,4 +1853,97 @@ fn v3_custody_requires_explicit_account_shapes() {
         withdraw_collateral_v3(&ID, &mut empty, 0, 1),
         Err(ProgramError::NotEnoughAccountKeys)
     );
+}
+
+/// Fees move value from trader claims to the protocol ledger, so the vault
+/// liability must fall by exactly what the protocol balance gains.
+#[test]
+fn v3_fill_fees_move_from_vault_liability_to_protocol_balance() {
+    use stockstream::v3::{
+        V3_CORE_MAKER_FEE_BPS_OFFSET, V3_CORE_TAKER_FEE_BPS_OFFSET, V3_CORE_VAULT_LIABILITY_OFFSET,
+    };
+    let i128_at = |bytes: &[u8], offset: usize| {
+        i128::from_le_bytes(bytes[offset..offset + 16].try_into().unwrap())
+    };
+    let mut accounts = bundle();
+    let owner_a = account(Address::new_from_array([45; 32]), 0, true);
+    let owner_b = account(Address::new_from_array([46; 32]), 0, true);
+    for (seat_index, owner) in [(0u16, &owner_a), (1u16, &owner_b)] {
+        let mut call = vec![accounts[0].view.clone()];
+        call.extend((0..4).map(|i| accounts[V3_SEAT_START + i].view.clone()));
+        call.extend((0..4).map(|i| accounts[V3_EVENT_START + i].view.clone()));
+        call.push(owner.view.clone());
+        create_trader_seat(&ID, &mut call, seat_index).unwrap();
+    }
+    unsafe {
+        let bytes = accounts[V3_SEAT_START].view.borrow_unchecked_mut();
+        bytes[84..100].copy_from_slice(&1_000_000i128.to_le_bytes());
+        let second = 44 + 256;
+        bytes[second + 40..second + 56].copy_from_slice(&1_000_000i128.to_le_bytes());
+        let core = accounts[0].view.borrow_unchecked_mut();
+        core[197] = 1;
+        core[V3_CORE_MAKER_FEE_BPS_OFFSET..V3_CORE_MAKER_FEE_BPS_OFFSET + 2]
+            .copy_from_slice(&2u16.to_le_bytes());
+        core[V3_CORE_TAKER_FEE_BPS_OFFSET..V3_CORE_TAKER_FEE_BPS_OFFSET + 2]
+            .copy_from_slice(&5u16.to_le_bytes());
+        core[V3_CORE_VAULT_LIABILITY_OFFSET..V3_CORE_VAULT_LIABILITY_OFFSET + 16]
+            .copy_from_slice(&2_000_000i128.to_le_bytes());
+    }
+    for (owner, side, flags, seat_index, client_order_id) in [
+        (&owner_a, Side::Ask, 0u8, 0u16, 1u64),
+        (&owner_b, Side::Bid, 2u8, 1u16, 2u64),
+    ] {
+        let mut call = views(&accounts);
+        call.push(owner.view.clone());
+        place_order_v3(
+            &ID,
+            &mut call,
+            PlaceOrderData {
+                side: side as u8,
+                tree: TreeKind::Fixed as u8,
+                flags,
+                seat_index,
+                quantity: 3_000,
+                price_or_offset: 100,
+                expires_at: u64::MAX,
+                peg_limit: 0,
+                client_order_id,
+                action_nonce: 0,
+            },
+        )
+        .unwrap();
+    }
+    let core = unsafe { accounts[0].view.borrow_unchecked() };
+    let protocol = i128_at(&core, V3_CORE_PROTOCOL_FEE_BALANCE_OFFSET);
+    // 300,000 notional: maker 2 bps = 60, taker 5 bps = 150.
+    assert_eq!(protocol, 210);
+    assert_eq!(
+        i128_at(&core, V3_CORE_VAULT_LIABILITY_OFFSET),
+        2_000_000 - 210
+    );
+}
+
+/// New traders can take a seat on L1 (never delegated or restored) and in the
+/// rollup (delegated: there the program owns the core; on L1 a delegated core
+/// is owned by the delegation program and fails the ownership check), but
+/// never while the bundle is mid-undelegation.
+#[test]
+fn v3_seat_creation_accepts_l1_and_rollup_cores_but_not_undelegating() {
+    for (status, allowed) in [(0u8, true), (3u8, true), (1u8, true), (2u8, false)] {
+        let accounts = bundle();
+        let trader = account(Address::new_from_array([47; 32]), 0, true);
+        unsafe {
+            accounts[0].view.clone().borrow_unchecked_mut()[V3_CORE_DELEGATION_STATUS_OFFSET] =
+                status
+        };
+        let mut call = vec![accounts[0].view.clone()];
+        call.extend((0..4).map(|i| accounts[V3_SEAT_START + i].view.clone()));
+        call.extend((0..4).map(|i| accounts[V3_EVENT_START + i].view.clone()));
+        call.push(trader.view.clone());
+        assert_eq!(
+            create_trader_seat(&ID, &mut call, 5).is_ok(),
+            allowed,
+            "delegation status {status}"
+        );
+    }
 }

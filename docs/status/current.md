@@ -1,5 +1,77 @@
 # StockStream status (2026-09-21, continuation)
 
+## Devnet end-to-end lifecycle verified (2026-09-23)
+
+Program `8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ` runs artifact
+`bc8da09d…0fc0` (dump hash verified). Market core
+`9Vea9MVZCzYFKNHaHMPET9fuXXjfof8mA2F75pbBDJyV` completed the full lifecycle
+with two independent traders and test collateral:
+
+setup → seats → each trader deposits their own collateral on L1 → Pyth Lazer
+TSLA update verified on L1 into `OracleSnapshotV3` → all 27 execution accounts
+delegated → ER maker/taker fill (snapshot visible in ER 73–284 ms after L1
+confirmation) → sharded commit visible on L1 → ER close → sharded
+commit+undelegate → 27/27 restored → reconcile finalizes `Restored` → both
+traders withdraw via a v0 transaction through the market lookup table. The
+vault reconciles exactly (1,028,659 = liability 649,120 + fees 379,539).
+Evidence and every signature: `docs/status/devnet-e2e-lifecycle-20260923.json`.
+Reproduce: `scripts/v3-e2e-run.sh <state-name>`.
+
+Protocol fixes found by the live run (each with a failing test first):
+
+- V3 deposit/withdraw bound custody to the market authority, so no other
+  trader could fund a seat; custody now binds to the seat's own trader.
+- Fills credited fees to the protocol balance without reducing vault
+  liability, so every traded market reconciled as a deficit and halted.
+- MagicBlock's undelegation callback left the V3 core `Undelegating`
+  forever; reconcile now finalizes it once all 27 accounts are program-owned.
+- V3 withdrawal debited the seat twice.
+- Tooling: sharded core commit sent a duplicate core account; commits needed
+  a compute budget; readiness required the obsolete core oracle cache.
+
+The MagicBlock oracle account was not used: StockStream's own authenticated
+L1 snapshot is the ER price source (exponent analysis:
+`docs/status/magicblock-oracle-exponent-resolution-20260922.json`).
+
+Cloudflare (2026-09-23): market API Worker `stockstream-market-api`
+(https://stockstream-market-api.ansht.workers.dev) serves the market on L1 and
+ER. It had been running without its secrets because `secrets.required` binds
+only listed names, and its RPC transport threw "Illegal invocation" in workerd;
+both fixed. The frontend is deployed with vinext as Worker `stockstream`
+(https://stockstream.ansht.workers.dev) using `.env.production` (public values)
+and `npm run deploy:vinext`; the relay service token was rotated on both
+Workers. Privy login and the relay proxy are wired and fail closed without a
+session.
+
+Website pass (2026-09-23): the market API had no CORS (every browser read was
+blocked) and an empty D1 market registry (TSLA-PERP 404s); the frontend
+decoded the Worker's per-domain stream shape as a flat list, read the oracle
+from the stale core cache instead of the L1 snapshot, showed seat 0's position
+to every visitor, hard-coded seat 0 for every new trader, and needed unset env
+vars for custody accounts. All fixed and deployed; stale banner/diagnostics
+text replaced with live facts. Privy login fails because the Privy app has
+Solana wallet login disabled (`solana_wallet_auth: false`) -- a dashboard
+setting.
+
+SlipStream-style UI + permissionless oracle (2026-09-23): program `866cd74b…`
+makes `UpdateOracleSnapshotV3` permissionless (Pyth signature authenticates;
+only the core's canonical snapshot PDA is writable) and lets restored markets
+accept new seats and sessions. The market API adds `POST /v1/oracle/refresh`
+(keeper-paid, reused under 3 s), `POST /v1/faucet` (Privy-verified, one claim
+per wallet per day; the keeper holds the test mint authority), and
+`GET /v1/markets/TSLA-PERP/candles` (Pyth Pro history). The frontend has a
+landing page at `/` and a dark three-column terminal at `/trade` with a Pyth
+candle chart; website orders are wallet-signed and routed to MagicBlock ER via
+the Magic Router. Trading requires the market to be delegated; seats and
+deposits require it on L1. Runner state now lives in
+`~/.local/state/stockstream` (the old `/tmp` state was lost on reboot).
+
+Open: realized PnL is not withdrawable; liquidation-fee ledger
+accounting with bad debt; browser session-key trading on the delegated V3
+path. Markets `B2B3tzNx…` and
+`D5DpWM9f…` were intermediate test runs on earlier artifacts and are
+abandoned.
+
 ## Current audited architecture status (2026-09-22)
 
 The canonical public deployment manifest is
@@ -379,3 +451,29 @@ Pyth update, Privy credentials, and a compatible DLP restore path.
 - `docs/status/magicblock-commit-simulation-20260919.json` -- sanitized,
   read-only ER simulation; the full regenerable output is
   `/tmp/opencode/magicblock-commit-simulation.json`.
+
+## UI port — 2026-09-23
+
+- `/` is the Onyx landing re-cut for perps (`features/landing/`): sky hero with glass credibility pill, liquid-glass CTA, sliding tab pill driving a floating app panel (Trade on real Pyth history + terminal sizing math; Markets/Portfolio/Activity with illustrative data tagged), scroll reveals, mega footer.
+- `/trade` is the SlipStream terminal (Tailwind v4, `--t-*` tokens, dark/light toggle): TerminalNav, market bar with market picker, canvas chart, V3 order book from the Worker aggregate (ER while delegated, L1 otherwise; Book/Trades, depth bars, click-to-price), Market/Limit ticket sized as amount × multiplier, Wallet/custody panel, session keys, system status, activity drawer (positions/open orders/fills), status strip.
+- While the on-chain snapshot is stale (it only refreshes on trade), headline/ticket prices use the latest Pyth close and the bar shows the snapshot age.
+- Known: the V3 aggregate route intermittently hits the Worker CPU limit (error 1102); the book tolerates single failures and polls every 15 s on L1 / 3 s in the ER.
+
+## Live market, sponsors, wallet — 2026-09-23 (later)
+
+- Program upgraded (sha 3e901121…): a `Restored` + idle + reconciled core can be delegated again, and its commit sequence continues from `last_committed + 1` (was: one delegation per market ever). Unit-tested in `magicblock::delegation_status_tests`.
+- Worker: one-minute cron refreshes the TSLA Pyth snapshot (keeper jobs stay opt-in via `KEEPER_ORCHESTRATION=on`); `POST /v1/operator/mint` (ingestion bearer) mints test collateral; `GET /v1/pre-ipo` proxies PreStocks + Tessera.
+- Market maker: superseded by the Worker's MarketMaker Durable Object (see the 2026-09-24 section). Delegation: `scripts/v3-delegate-market.sh` (market authority, local only).
+- Terminal book reads the rollup directly (websocket `accountSubscribe` on book/seat/event shards, 1 s fallback poll) — no Worker in the path.
+- New tabs: Launch (Meteora DBC createConfigAndPool, three equity-tuned presets, simulated OK on devnet) and Pre-IPO (PreStocks/Tessera marks vs token price).
+- Wallet: Disconnect everywhere; a connected-but-unauthenticated wallet gets "Finish sign-in" + "Disconnect"; Privy account shown in the wallet panel and System Status.
+- Market delegated to MagicBlock (done by the operator).
+
+## Popup-free trading, rollup withdrawals, live MM — 2026-09-24
+
+- Program (sha c53cb603…): deposit inbox (60 deposit on L1, 61 claim in the rollup) and withdrawal outbox (62 request in the rollup: risk-checked debit + seat-shard commit to L1; 63 claim on L1, paid once per request to the trader's own USDC account). Runtime-tested; deployed.
+- Trading key (`lib/trading-key.ts`): one wallet signature derives the in-app key (sha256 of a domain-bound signed message); it signs seat, deposits, orders, cancels and withdrawals silently, and withdrawals forward to the wallet. "Start trading" = faucet → rollup seat → 100 USDC deposit. The market-authority-only V3 session panel is hidden when live wallet trading is configured.
+- Market maker: `MarketMaker` DO created with `locationHint: "apac-se"` (runs in SIN, ~4 ms from devnet-as). Every ~0.5 s it replaces only drifted rungs (ReplaceOrder), re-sizes two rungs, and a taker crosses with 1–2 lots. Latency = send → `signatureSubscribe` processed push: p50 ≈ 11 ms from SIN. Status: `GET /v1/mm/status`.
+- Browser: rollup transactions go straight to devnet-as (validator MAS1…) with websocket confirmation; the terminal's live-transactions panel shows the bot's and your own times (from India ≈ 80 ms, nearly all network).
+- Live checks against production: `npx tsx scripts/e2e/onboarding.mts` and `npx tsx scripts/e2e/wallet-seat.mts` (fresh keypair injected as a Wallet Standard wallet).
+

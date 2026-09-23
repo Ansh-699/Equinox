@@ -48,6 +48,9 @@ pub(crate) fn update_oracle_snapshot_v3(
     if message.len() > 512
         || !accounts[0].is_writable()
         || !accounts[0].owned_by(program_id)
+        // Writes are permissionless (the Pyth signature authenticates the
+        // price), so only the core's canonical snapshot PDA may be written.
+        || *accounts[0].address() != crate::v3::derive_oracle_snapshot_v3(program_id, accounts[1].address())
         || accounts[1].is_writable()
         || !accounts[2].is_signer()
         || !accounts[2].is_writable()
@@ -144,7 +147,6 @@ pub(crate) fn update_oracle_snapshot_v3(
     {
         return Err(StockStreamError::OracleUnavailable.into());
     }
-    crate::oracle_snapshot::validate_writer(&core, accounts[2].address())?;
     drop(core);
     let core_address = *accounts[1].address();
     let snap = unsafe { accounts[0].borrow_unchecked_mut() };

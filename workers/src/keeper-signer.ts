@@ -161,7 +161,7 @@ function parsePublicKeyHex(value: string): Uint8Array {
 /** Minimal base58 decode (Bitcoin alphabet, Solana-compatible). */
 export function base58Decode(value: string): Uint8Array | null {
   const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-  const bytes: number[] = [0];
+  const bytes: number[] = [];
   for (const char of value) {
     const carry = ALPHABET.indexOf(char);
     if (carry < 0) return null;
@@ -176,7 +176,9 @@ export function base58Decode(value: string): Uint8Array | null {
       temp >>= 8;
     }
   }
-  return Uint8Array.from(bytes.reverse());
+  // Each leading '1' encodes one leading zero byte.
+  const zeros = value.length - value.replace(/^1+/, "").length;
+  return Uint8Array.from([...new Array<number>(zeros).fill(0), ...bytes.reverse()]);
 }
 
 function parsePublicKey(value: string): Uint8Array {

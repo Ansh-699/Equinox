@@ -1,0 +1,168 @@
+{
+  "date": "2026-09-22",
+  "readOnly": true,
+  "stateMutation": false,
+  "upstream": {
+    "repository": "https://github.com/magicblock-labs/real-time-pricing-oracle",
+    "commit": "c6d08ac317706c0943e9b6304b915cd1064bbea3",
+    "accountType": "Anchor PriceUpdateV3 { write_authority, verification_level, price_message: PriceFeedMessage, posted_slot }, 144 bytes (133 used + 11 zero padding)",
+    "exponentConsumerConvention": "program `sample`: `price * 10_f64.powi(-exponent)` and log `10^-{exponent}`; tests: `price / 10 ** exponent`",
+    "readmeContradiction": "README.md `sample` example uses `10_f64.powi(price.exponent)` (Pyth sign)",
+    "updateWritesExponent": false,
+    "updateWritesConfidence": false,
+    "updateVerifiesPythSignature": false,
+    "verificationLevel": "hard-coded Full by initialize_price_feed and update_price_feed",
+    "updateAuthority": "MPUxHCpNUy3K1CSVhebAmTbcTCKVxfk9YMDcUP2ZnEA (ensure_oracle)",
+    "initializeAuthority": "permissionless (any payer; PDA is init-once)",
+    "storedFeedIdBytes": "the price-feed PDA's own address; Lazer feed id is bound only through PDA seed text",
+    "pusherSubscribedProperties": [
+      "price"
+    ]
+  },
+  "liveUpdateInstruction": {
+    "endpoint": "https://devnet-as.magicblock.app",
+    "signature": "58CAMWxRDBebkV52rrNDkCxXU9ZLCVdSxgyic9U42MdKFtwBzob26HZDi2pJdsTyePdAtnpJZQ7kKgw3N3u2BZBY",
+    "slot": 612517927,
+    "signer": "MPUxHCpNUy3K1CSVhebAmTbcTCKVxfk9YMDcUP2ZnEA",
+    "dataLength": 215,
+    "anchorDiscriminatorMatchesUpstream": true,
+    "decoded": {
+      "provider": "pyth-lazer",
+      "symbol": "1435",
+      "id": "9b05000000000000000000000000000000000000000000000000000000000000",
+      "timestampNs": "1790097366000000000",
+      "quantizedValue": "37894052",
+      "publisherMerkleRoot": "9gKEEcFzSd1PDYBKWAKZi4Sq4ZCUaVX5oTr8kEjdwsfR",
+      "v": 0
+    },
+    "containsExponentField": false
+  },
+  "tslaAccount": {
+    "pda": "8L7ccCxTBZaLsMMdhAod5fFnpdEWGSDPW4y1td7y3y8N",
+    "er": {
+      "slot": 612511129,
+      "owner": "PriCems5tHihc6UDXDjzjeawomAwBduWMGAi8ZUjppd",
+      "hex": "eaa10e24acef0fe80539095ed4e00de5e681642b17bbb375bc7874e8a0dbbaf9128c04fc8c30985f016ce7527dde6dcbc54b7aedfc80a5025265f2cd2fae2ad2b44cf5bc9da2be0f9be7d041020000000000000000000000000500000092b7b26a0000000091b7b26a0000000000000000000000000000000000000000982d8224000000000000000000000000000000",
+      "decoded": {
+        "writeAuthority": "MPUxHCpNUy3K1CSVhebAmTbcTCKVxfk9YMDcUP2ZnEA",
+        "verificationLevel": 1,
+        "feedIdBytesEqualPda": true,
+        "price": "37867751",
+        "confidence": "0",
+        "storedExponent": 5,
+        "publishTime": 1790097298,
+        "prevPublishTime": 1790097297,
+        "emaPrice": "0",
+        "emaConf": "0",
+        "postedSlot": 612511128
+      }
+    },
+    "l1": {
+      "slot": 502527977,
+      "owner": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh",
+      "hex": "eaa10e24acef0fe80539095ed4e00de5e681642b17bbb375bc7874e8a0dbbaf9128c04fc8c30985f016ce7527dde6dcbc54b7aedfc80a5025265f2cd2fae2ad2b44cf5bc9da2be0f9b0000000000000000000000000000000008000000fbf1b26900000000fbf1b269000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "decoded": {
+        "price": "0",
+        "storedExponent": 8,
+        "publishTime": 1773335035
+      },
+      "note": "Delegation-time copy; never committed back (commit_frequency_ms = u32::MAX). Matches the historical InitializePriceFeed argument 8."
+    }
+  },
+  "crossFeedComparison": {
+    "note": "catalog = https://pyth.dourolabs.app/history/v1/symbols; ER = devnet-as; values sampled 2026-09-22",
+    "rows": [
+      {
+        "feedId": 1,
+        "symbol": "Crypto.BTC/USD",
+        "catalogExponent": -8,
+        "erStored": 8,
+        "l1Stored": 8,
+        "erPriceRaw": "8649514751930",
+        "impliedUsd": 86495.15
+      },
+      {
+        "feedId": 2,
+        "symbol": "Crypto.ETH/USD",
+        "catalogExponent": -8,
+        "erStored": 8,
+        "l1Stored": 8,
+        "erPriceRaw": "275138984950",
+        "impliedUsd": 2751.39
+      },
+      {
+        "feedId": 6,
+        "symbol": "Crypto.SOL/USD",
+        "catalogExponent": -8,
+        "erStored": 8,
+        "l1Stored": 8,
+        "erPriceRaw": "11786000000",
+        "impliedUsd": 117.86
+      },
+      {
+        "feedId": 922,
+        "symbol": "Equity.US.AAPL/USD",
+        "catalogExponent": -5,
+        "erStored": 5,
+        "l1Stored": 5,
+        "erPriceRaw": "34158500",
+        "impliedUsd": 341.59
+      },
+      {
+        "feedId": 1314,
+        "symbol": "Equity.US.NVDA/USD",
+        "catalogExponent": -5,
+        "erStored": 5,
+        "l1Stored": 8,
+        "erPriceRaw": "22974000",
+        "impliedUsd": 229.74
+      },
+      {
+        "feedId": 1398,
+        "symbol": "Equity.US.SPY/USD",
+        "catalogExponent": -5,
+        "erStored": null,
+        "l1Stored": null
+      },
+      {
+        "feedId": 1435,
+        "symbol": "Equity.US.TSLA/USD",
+        "catalogExponent": -5,
+        "erStored": 5,
+        "l1Stored": 8,
+        "erPriceRaw": "37890500",
+        "impliedUsd": 378.91
+      }
+    ],
+    "allErConfidenceZero": true,
+    "allErVerificationLevelFull": true
+  },
+  "conclusion": {
+    "rootCause": "MagicBlock stores the exponent field as positive decimal places (stored = -pythExponent), consistent with its own `sample` consumer and all six live ER feeds. The Lazer quantized price is written unscaled, so raw price * 10^-stored is the economic value.",
+    "canonicalConversion": "canonicalExponent = -storedExponent, accepted only when storedExponent == -catalogExponent exactly",
+    "l1Value8": "Stale L1 delegation-time copies for 1314 and 1435 were initialized with 8 (wrong for -5 equity feeds). The ER copies hold 5; the mechanism that changed the ER copy is not visible in upstream source (updates preserve the exponent) and is an open support question.",
+    "stockstreamV3Compatible": false,
+    "remainingBlockers": [
+      "confidence never written (always 0)",
+      "no market session or trading status",
+      "no Pyth signature verification onchain; Full verification level is hard-coded; provenance is trust in MPUx signer",
+      "no channel field; channel depends on off-chain pusher configuration",
+      "no monotonic sequence (posted_slot is an ER slot)"
+    ]
+  },
+  "l1ToErPropagationProxy": {
+    "method": "passive read-only: L1-owned, undelegated Pyth push-oracle accounts (owner rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ) observed on devnet L1 and devnet-as ER; 75 s RPC polling + 420 s WebSocket subscription",
+    "accounts": {
+      "SOL": "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE",
+      "BTC": "4cSM2e6rvbGQUFiJbqytoVMi5GgghSMr8LwVrT9VPSPo",
+      "ETH": "42amVS4KgzR9rA28tkVYqVXjq9Qa8dcZQMbH5EYFX6XC"
+    },
+    "results": [
+      "RPC poll, SOL publish 1790097471: ER showed it in the same 500 ms poll as L1",
+      "WebSocket, SOL publish 1790097785: ER notification 160 ms after L1",
+      "WebSocket, BTC/ETH publish 1790097785: L1 notified, ER sent no notification in 420 s; ER getAccountInfo afterwards returned the current value for both"
+    ],
+    "samples": 2,
+    "interpretation": "ER RPC reads of cloned L1 accounts were current, and the only measured sync lag was 160 ms. ER WebSocket delivery was not reliable for accounts ER had not previously read. This is a proxy only: it does not prove that an ER transaction reads a StockStream OracleSnapshotV3 within ten seconds of an L1 write, and no L1 write was made."
+  }
+}

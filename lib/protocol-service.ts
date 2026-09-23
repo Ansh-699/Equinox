@@ -2,6 +2,7 @@ import type { TransactionInstruction } from "@solana/web3.js";
 import { cancelAll, cancelOrder, createTraderSeat, depositCollateral, initializeSettlementScratch, placeOrder, withdrawCollateral, type CustodyAccounts, type InstructionAccounts, type PlaceOrderParams } from "../clients/stockstream/src";
 import type { L1Transport, RouterBoundary, TransactionPreview, WalletBoundary } from "./execution-boundary";
 import { executeL1, submitEr } from "./execution-boundary";
+import type { OracleFreshness } from "./oracle-freshness";
 
 export interface ProtocolBuildContext {
   market: InstructionAccounts["market"];
@@ -15,6 +16,8 @@ export interface ProtocolTransport {
   l1: L1Transport;
   er: RouterBoundary;
   wallet: WalletBoundary;
+  /** Present for V3 markets whose program requires a fresh oracle snapshot. */
+  freshOracle?: OracleFreshness;
 }
 
 export class StockStreamProtocolService {
@@ -33,15 +36,21 @@ export class StockStreamProtocolService {
   buildDeposit(accounts: CustodyAccounts, amount: bigint): TransactionInstruction { return depositCollateral(accounts, amount); }
   buildWithdraw(accounts: CustodyAccounts, amount: bigint): TransactionInstruction { return withdrawCollateral(accounts, amount); }
 
-  async executeL1(preview: TransactionPreview, instructions: readonly TransactionInstruction[]): Promise<{ preview: TransactionPreview; signature: string; confirmation: "confirmed" | "finalized" }> {
+  /** `freshOracle` for writes whose on-chain checks read the oracle (custody, sessions). */
+  async executeL1(preview: TransactionPreview, instructions: readonly TransactionInstruction[], options: { freshOracle?: boolean } = {}): Promise<{ preview: TransactionPreview; signature: string; confirmation: "confirmed" | "finalized" }> {
     const bytes = await this.transport.encode(instructions);
-    return executeL1(preview, this.transport.wallet, this.transport.l1, bytes);
+    const fresh = options.freshOracle && this.transport.freshOracle ? () => this.transport.freshOracle!.l1() : undefined;
+    return executeL1(preview, this.transport.wallet, this.transport.l1, bytes, fresh);
   }
 
   async executeEr(preview: TransactionPreview, instructions: readonly TransactionInstruction[], writableAccounts: readonly string[]): Promise<{ preview: TransactionPreview; sequence: bigint }> {
-    const blockhash = await this.transport.er.getAccountAwareBlockhash(writableAccounts);
+    // Blockhash and price freshness in parallel: both are rollup round trips.
+    const [blockhash] = await Promise.all([this.transport.er.getAccountAwareBlockhash(writableAccounts), this.transport.freshOracle?.er()]);
     const bytes = await this.transport.encode(instructions, blockhash);
+    const signingStarted = Date.now();
     const signed = await this.transport.wallet.signTransaction(bytes);
+    // A slow wallet prompt can outlast the price: the rollup must see one under 10 seconds old.
+    if (Date.now() - signingStarted > 2_000) await this.transport.freshOracle?.er();
     return submitEr(preview, this.transport.er, signed);
   }
 }

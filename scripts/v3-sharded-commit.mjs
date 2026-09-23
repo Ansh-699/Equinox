@@ -6,7 +6,7 @@
  * sequence is advanced by StockStream across these calls and is committed last.
  */
 import fs from "node:fs";
-import { Keypair, PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
+import { ComputeBudgetProgram, Keypair, PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
 import { DEFAULT_MAGIC_ER_RPC, DEFAULT_PROGRAM_ID } from "./deployment-manifest.mjs";
 import { validateCheckpoint, validateV3CommitEpoch, validateV3CoreBytes } from "./v3-sharded-commit-guard.mjs";
 
@@ -36,13 +36,16 @@ async function submit(account, sequence, undelegate) {
   const blockhashResult = await rpc("getBlockhashForAccounts", [[account.toBase58(), core.toBase58()]]);
   const tx = new Transaction({ recentBlockhash: (blockhashResult.value ?? blockhashResult).blockhash, feePayer: authority.publicKey });
   const data = Buffer.alloc(9); data[0] = undelegate ? 15 : 14; data.writeBigUInt64LE(BigInt(sequence), 1);
+  // A shard digest plus the Magic commit CPI exceeds the 200k default.
+  tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }));
   tx.add(new TransactionInstruction({ programId: PROGRAM, data, keys: [
     { pubkey: account, isSigner: false, isWritable: true },
     { pubkey: authority.publicKey, isSigner: true, isWritable: false },
     { pubkey: authority.publicKey, isSigner: true, isWritable: true },
     { pubkey: MAGIC_CONTEXT, isSigner: false, isWritable: true },
     { pubkey: MAGIC_PROGRAM, isSigner: false, isWritable: false },
-    { pubkey: core, isSigner: false, isWritable: true },
+    // Children carry the core as a sixth account; the core's own commit is the five-account form.
+    ...(account.equals(core) ? [] : [{ pubkey: core, isSigner: false, isWritable: true }]),
   ] }));
   tx.sign(authority);
   const raw = tx.serialize();

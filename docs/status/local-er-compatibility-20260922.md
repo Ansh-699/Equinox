@@ -27,15 +27,18 @@ ER-side oracle data is present. This is evidence of an available price-feed
 account, not evidence that StockStream can safely consume it: the account does
 not carry StockStream's channel, market-session, trading-status, sequence, and
 authenticated-snapshot fields. The latest samples report verification level
-`Full`, but encode exponent `5` (while StockStream requires `-5`) and confidence
-`0`; the adapter therefore rejects them rather than guessing a sign or
-confidence interpretation. Full redacted probe data is in
+`Full`, exponent `5`, and confidence `0`. The exponent was later resolved as
+MagicBlock's decimal-place convention (`stored = -catalog`, proven from
+upstream source and six live feeds; see
+`docs/status/magicblock-oracle-exponent-resolution-20260922.json`). Confidence
+is never written upstream, so the adapter still rejects the account. Full redacted probe data is in
 `docs/status/magicblock-oracle-probe-20260922.json`.
 
 Account history adds a provenance mismatch: the public `InitializePriceFeed`
 transaction at slot 426478311 (`2RemknQv…`) encoded trailing exponent `8`,
-while the current account bytes decode to `5`. This is recorded as an observed
-wire-version/provenance inconsistency, not interpreted or repaired locally.
+while the current account bytes decode to `5`. That value survives only in the
+stale L1 delegation-time copy. The ER copy holds `5`, and the mechanism behind
+the change is an open MagicBlock support question.
 
 An ER WebSocket subscription also observed three successive updates at slots
 612399707, 612399727, and 612399748. This proves the MagicBlock feed account is

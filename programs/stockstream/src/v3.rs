@@ -1518,7 +1518,7 @@ pub fn initialize_book_page_metadata(data: &mut [u8], page: u8) -> ProgramResult
     Ok(())
 }
 
-fn validate_event_shard(
+pub(crate) fn validate_event_shard(
     program_id: &Address,
     account: &AccountView,
     core: &Address,
@@ -1750,6 +1750,22 @@ pub fn validate_execution_bundle(
     accounts: &[AccountView],
     require_writable: bool,
 ) -> ProgramResult {
+    validate_execution_bundle_inner(program_id, accounts, require_writable, false)
+}
+
+/// True when MagicBlock's undelegation callback has handed the core back
+/// (program-owned, still marked Undelegating) and restoration awaits finalization.
+fn is_returned_v3_core(core: &[u8]) -> bool {
+    core[V3_CORE_DELEGATION_STATUS_OFFSET] == DelegationStatus::Undelegating as u8
+        && core[V3_CORE_COMMIT_PHASE_OFFSET] == V3_COMMIT_PHASE_UNDELEGATING
+}
+
+fn validate_execution_bundle_inner(
+    program_id: &Address,
+    accounts: &[AccountView],
+    require_writable: bool,
+    allow_returned_core: bool,
+) -> ProgramResult {
     if accounts.len() != V3_EXECUTION_BUNDLE_LEN {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
@@ -1781,7 +1797,11 @@ pub fn validate_execution_bundle(
     if core_bytes[V3_CORE_DELEGATION_STATUS_OFFSET] > DelegationStatus::Restored as u8 {
         return Err(bundle_error());
     }
-    if core_bytes[V3_CORE_COMMIT_PHASE_OFFSET] != V3_COMMIT_PHASE_IDLE {
+    // Every account was checked program-owned above, so a returned core here
+    // means the whole bundle is back on L1.
+    if core_bytes[V3_CORE_COMMIT_PHASE_OFFSET] != V3_COMMIT_PHASE_IDLE
+        && !(allow_returned_core && is_returned_v3_core(&core_bytes))
+    {
         return Err(StockStreamError::MagicBlockUndelegationInProgress.into());
     }
     let core_key = *core.address();
@@ -1870,7 +1890,10 @@ pub fn validate_v3_withdrawal_readiness(
     if expected != committed {
         return Err(StockStreamError::CustodyViolation.into());
     }
-    if core[V3_CORE_RECONCILIATION_STATUS_OFFSET] != ReconciliationStatus::Reconciled as u8 {
+    // A surplus (the vault holds more than it owes, e.g. inbox deposits not
+    // yet credited) is safe to pay out of; only a deficit blocks withdrawals.
+    let reconciliation = core[V3_CORE_RECONCILIATION_STATUS_OFFSET];
+    if reconciliation != ReconciliationStatus::Reconciled as u8 && reconciliation != ReconciliationStatus::SurplusDetected as u8 {
         return Err(StockStreamError::CustodyViolation.into());
     }
     Ok(())
@@ -1986,6 +2009,11 @@ pub fn validate_v3_session_actor(
     })
 }
 
+/// Never delegated, or restored after undelegation: either way the market lives on L1.
+fn is_on_l1(status: u8) -> bool {
+    status == DelegationStatus::NotDelegated as u8 || status == DelegationStatus::Restored as u8
+}
+
 fn validate_active_core(program_id: &Address, core: &AccountView) -> Result<Address, ProgramError> {
     if !core.owned_by(program_id) || !core.is_writable() {
         return Err(bundle_error());
@@ -1996,7 +2024,7 @@ fn validate_active_core(program_id: &Address, core: &AccountView) -> Result<Addr
         || bytes[8..10] != V3_LAYOUT_VERSION.to_le_bytes()
         || bytes[10] != 1
         || bytes[V3_CORE_MODE_OFFSET] != 1
-        || bytes[V3_CORE_DELEGATION_STATUS_OFFSET] != DelegationStatus::NotDelegated as u8
+        || !is_on_l1(bytes[V3_CORE_DELEGATION_STATUS_OFFSET])
         || bytes[V3_CORE_COMMIT_PHASE_OFFSET] != V3_COMMIT_PHASE_IDLE
     {
         return Err(bundle_error());
@@ -2004,7 +2032,27 @@ fn validate_active_core(program_id: &Address, core: &AccountView) -> Result<Addr
     Ok(*core.address())
 }
 
-fn validate_event_core(program_id: &Address, core: &AccountView) -> Result<Address, ProgramError> {
+/// Seat creation: an active core that is on L1 or live in the rollup.
+fn validate_seat_core(program_id: &Address, core: &AccountView) -> Result<Address, ProgramError> {
+    if !core.owned_by(program_id) || !core.is_writable() {
+        return Err(bundle_error());
+    }
+    let bytes = unsafe { core.borrow_unchecked() };
+    let status = bytes[V3_CORE_DELEGATION_STATUS_OFFSET];
+    if bytes.len() != V3_MARKET_CORE_SIZE
+        || bytes[0..8] != V3_MARKET_CORE_DISCRIMINATOR
+        || bytes[8..10] != V3_LAYOUT_VERSION.to_le_bytes()
+        || bytes[10] != 1
+        || bytes[V3_CORE_MODE_OFFSET] != 1
+        || !(is_on_l1(status) || status == DelegationStatus::Delegated as u8)
+        || bytes[V3_CORE_COMMIT_PHASE_OFFSET] != V3_COMMIT_PHASE_IDLE
+    {
+        return Err(bundle_error());
+    }
+    Ok(*core.address())
+}
+
+pub(crate) fn validate_event_core(program_id: &Address, core: &AccountView) -> Result<Address, ProgramError> {
     if !core.owned_by(program_id) || !core.is_writable() {
         return Err(bundle_error());
     }
@@ -2022,7 +2070,7 @@ fn validate_event_core(program_id: &Address, core: &AccountView) -> Result<Addre
     Ok(*core.address())
 }
 
-fn validate_seat_shard(
+pub(crate) fn validate_seat_shard(
     program_id: &Address,
     account: &AccountView,
     core: &Address,
@@ -2115,7 +2163,9 @@ pub fn create_trader_seat(
     if !accounts[9].is_signer() {
         return Err(ProgramError::MissingRequiredSignature);
     }
-    let core_key = validate_active_core(program_id, &accounts[0])?;
+    // Also while delegated: on L1 a delegated core is owned by the delegation
+    // program (rejected by the ownership check), so this only runs in the rollup.
+    let core_key = validate_seat_core(program_id, &accounts[0])?;
     for shard in 0..V3_SEAT_SHARDS {
         validate_seat_shard(program_id, &accounts[1 + shard], &core_key, shard as u8)?;
         validate_event_shard(program_id, &accounts[5 + shard], &core_key, shard as u8)?;
@@ -2200,7 +2250,7 @@ pub fn create_v3_trading_session(
         || core_bytes[8..10] != V3_LAYOUT_VERSION.to_le_bytes()
         || core_bytes[V3_CORE_MARKET_AUTHORITY_OFFSET..V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
             != owner.address().to_bytes()
-        || core_bytes[V3_CORE_DELEGATION_STATUS_OFFSET] != DelegationStatus::NotDelegated as u8
+        || !is_on_l1(core_bytes[V3_CORE_DELEGATION_STATUS_OFFSET])
     {
         return Err(StockStreamError::InvalidTradingSession.into());
     }
@@ -2635,7 +2685,7 @@ fn set_core_u64(bytes: &mut [u8], offset: usize, value: u64) -> ProgramResult {
     Ok(())
 }
 
-fn core_i128(bytes: &[u8], offset: usize) -> Result<i128, ProgramError> {
+pub(crate) fn core_i128(bytes: &[u8], offset: usize) -> Result<i128, ProgramError> {
     bytes
         .get(offset..offset + 16)
         .ok_or_else(bundle_error)
@@ -2643,7 +2693,7 @@ fn core_i128(bytes: &[u8], offset: usize) -> Result<i128, ProgramError> {
         .map(i128::from_le_bytes)
 }
 
-fn set_core_i128(bytes: &mut [u8], offset: usize, value: i128) -> ProgramResult {
+pub(crate) fn set_core_i128(bytes: &mut [u8], offset: usize, value: i128) -> ProgramResult {
     let target = bytes
         .get_mut(offset..offset + 16)
         .ok_or_else(bundle_error)?;
@@ -3115,14 +3165,26 @@ fn settle_v3_fill(
             .ok_or(StockStreamError::RiskViolation)?;
     }
     let mut core_bytes = unsafe { core.borrow_unchecked_mut() };
-    let protocol_balance = core_i128(&core_bytes, V3_CORE_PROTOCOL_FEE_BALANCE_OFFSET)?
-        .checked_add(maker_fee)
-        .and_then(|value| value.checked_add(taker_fee))
+    let fees = maker_fee
+        .checked_add(taker_fee)
         .ok_or(StockStreamError::ArithmeticOverflow)?;
+    let protocol_balance = core_i128(&core_bytes, V3_CORE_PROTOCOL_FEE_BALANCE_OFFSET)?
+        .checked_add(fees)
+        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    // Fees leave trader claims, so the vault liability shrinks by the same amount.
+    let vault_liability = core_i128(&core_bytes, V3_CORE_VAULT_LIABILITY_OFFSET)?
+        .checked_sub(fees)
+        .filter(|value| *value >= 0)
+        .ok_or(StockStreamError::RiskViolation)?;
     set_core_i128(
         &mut core_bytes,
         V3_CORE_PROTOCOL_FEE_BALANCE_OFFSET,
         protocol_balance,
+    )?;
+    set_core_i128(
+        &mut core_bytes,
+        V3_CORE_VAULT_LIABILITY_OFFSET,
+        vault_liability,
     )?;
     write_v3_seat_shards(seat_accounts, maker_shard, maker_slot, &maker)?;
     write_v3_seat_shards(seat_accounts, taker_shard, taker_slot, &taker)
@@ -3860,10 +3922,15 @@ fn place_order_v3_with_action(
 /// The operation is permissionless, but requires restored/core-owned state and
 /// records the result in the same event queue used by V3 custody writes.
 pub fn reconcile_vault_v3(program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
-    if accounts.len() != V3_EXECUTION_BUNDLE_LEN + 3 {
+    if accounts.len() != V3_EXECUTION_BUNDLE_LEN + 3 || !accounts[0].is_writable() {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
-    validate_execution_bundle(program_id, &accounts[..V3_EXECUTION_BUNDLE_LEN], false)?;
+    validate_execution_bundle_inner(
+        program_id,
+        &accounts[..V3_EXECUTION_BUNDLE_LEN],
+        false,
+        true,
+    )?;
     for index in V3_EXECUTION_BUNDLE_LEN..accounts.len() {
         if accounts[..index]
             .iter()
@@ -3874,10 +3941,12 @@ pub fn reconcile_vault_v3(program_id: &Address, accounts: &mut [AccountView]) ->
     }
     let core_key = *accounts[0].address();
     let core_bytes = unsafe { accounts[0].borrow_unchecked() };
-    if !matches!(
-        core_bytes[V3_CORE_DELEGATION_STATUS_OFFSET],
-        x if x == DelegationStatus::NotDelegated as u8 || x == DelegationStatus::Restored as u8
-    ) || core_bytes[V3_CORE_COMMIT_PHASE_OFFSET] != V3_COMMIT_PHASE_IDLE
+    let returned = is_returned_v3_core(&core_bytes);
+    if !(returned
+        || matches!(
+            core_bytes[V3_CORE_DELEGATION_STATUS_OFFSET],
+            x if x == DelegationStatus::NotDelegated as u8 || x == DelegationStatus::Restored as u8
+        ) && core_bytes[V3_CORE_COMMIT_PHASE_OFFSET] == V3_COMMIT_PHASE_IDLE)
         || *accounts[V3_EXECUTION_BUNDLE_LEN].address()
             != crate::handlers::derive_vault(&core_key, program_id)
         || *accounts[V3_EXECUTION_BUNDLE_LEN + 2].address() != pinocchio_token::ID
@@ -3935,6 +4004,10 @@ pub fn reconcile_vault_v3(program_id: &Address, accounts: &mut [AccountView]) ->
     let core = unsafe { core_copy.borrow_unchecked_mut() };
     core[V3_CORE_RECONCILIATION_STATUS_OFFSET] = status_byte;
     set_core_i128(&mut core[..], V3_CORE_VAULT_SURPLUS_OFFSET, surplus)?;
+    if returned {
+        core[V3_CORE_DELEGATION_STATUS_OFFSET] = DelegationStatus::Restored as u8;
+        core[V3_CORE_COMMIT_PHASE_OFFSET] = V3_COMMIT_PHASE_IDLE;
+    }
     if status != ReconciliationStatus::Reconciled {
         core[V3_CORE_MODE_OFFSET] = 0;
     }
@@ -4114,8 +4187,6 @@ pub fn deposit_collateral_v3(
                 || x == DelegationStatus::Undelegating as u8
         )
         || core_bytes[V3_CORE_COMMIT_PHASE_OFFSET] != V3_COMMIT_PHASE_IDLE
-        || core_bytes[V3_CORE_MARKET_AUTHORITY_OFFSET..V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
-            != authority.address().to_bytes()
     {
         return Err(StockStreamError::CustodyViolation.into());
     }
@@ -4213,12 +4284,9 @@ pub fn withdraw_collateral_v3(
         return Err(ProgramError::MissingRequiredSignature);
     }
     let core_key = *accounts[0].address();
+    // Custody binds to the seat's own trader (checked below), not the market
+    // authority, so every trader can fund and withdraw their own seat.
     let core_bytes = unsafe { accounts[0].borrow_unchecked() };
-    if core_bytes[V3_CORE_MARKET_AUTHORITY_OFFSET..V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
-        != authority.address().to_bytes()
-    {
-        return Err(StockStreamError::CustodyViolation.into());
-    }
     let shard = (seat_index as usize) / V3_SEATS_PER_SHARD;
     let slot = (seat_index as usize) % V3_SEATS_PER_SHARD;
     if shard >= V3_SEAT_SHARDS {
@@ -4246,7 +4314,7 @@ pub fn withdraw_collateral_v3(
         .checked_sub(i128::from(amount))
         .ok_or(StockStreamError::RiskViolation)?;
     let risk_config = read_v3_risk_config(&core_bytes)?;
-    let mut seat = crate::risk::prepare_withdrawal(
+    let seat = crate::risk::prepare_withdrawal(
         &seat,
         amount,
         funding_accumulator,
@@ -4281,10 +4349,7 @@ pub fn withdraw_collateral_v3(
             return Err(StockStreamError::CustodyViolation.into());
         }
     }
-    seat.available_collateral = seat
-        .available_collateral
-        .checked_sub(i128::from(amount))
-        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    // `prepare_withdrawal` has already debited `amount` from the seat.
     let market_bytes = core_key.to_bytes();
     let (derived_vault_authority, bump_value) =
         Address::find_program_address(&[b"vault-authority", &market_bytes], program_id);
@@ -4334,6 +4399,82 @@ pub fn withdraw_collateral_v3(
         &payload,
         crate::handlers::event_timestamp(),
     )
+}
+
+/// Rollup-side withdrawal request while the bundle is delegated:
+/// `[core (w), seat_shard (w), event_shard × 4 (w), trader (signer, w),
+/// magic_context (w), magic_program, oracle_snapshot]`, data
+/// `[62, seat_index:u16, amount:u64]`. Applies the same risk check as
+/// `withdraw_collateral_v3`, moves `amount` from available collateral into the
+/// seat's monotonic "requested" counter (`reserved[8..16]`), lowers the vault
+/// liability, and schedules a commit of the seat shard so L1 can pay it out
+/// (`inbox::claim_withdrawal_v3`).
+pub fn request_withdrawal_v3(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    seat_index: u16,
+    amount: u64,
+) -> ProgramResult {
+    if accounts.len() != 10 || amount == 0 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    let core_key = validate_event_core(program_id, &accounts[0])?;
+    let core_bytes = unsafe { accounts[0].borrow_unchecked() };
+    if core_bytes[V3_CORE_DELEGATION_STATUS_OFFSET] != DelegationStatus::Delegated as u8 {
+        return Err(StockStreamError::CustodyViolation.into());
+    }
+    let (shard, slot) = ((seat_index as usize) / V3_SEATS_PER_SHARD, (seat_index as usize) % V3_SEATS_PER_SHARD);
+    if shard >= V3_SEAT_SHARDS {
+        return Err(StockStreamError::InvalidSeat.into());
+    }
+    validate_seat_shard(program_id, &accounts[1], &core_key, shard as u8)?;
+    for index in 0..V3_EVENT_SHARDS {
+        validate_event_shard(program_id, &accounts[2 + index], &core_key, index as u8)?;
+    }
+    let trader = &accounts[6];
+    if !trader.is_signer() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    let seat = read_shard_seat(unsafe { accounts[1].borrow_unchecked() }, slot)?;
+    if seat.occupancy != 1 || seat.trader != trader.address().to_bytes() || seat.open_order_count != 0 {
+        return Err(StockStreamError::RiskViolation.into());
+    }
+    fresh_v3_execution_time_with_snapshot(program_id, accounts, Some(9))?;
+    let mark_price = oracle_price_after_freshness(accounts, Some(9))?;
+    let risk_config = read_v3_risk_config(&core_bytes)?;
+    let mut seat = crate::risk::prepare_withdrawal(
+        &seat,
+        amount,
+        core_i128(core_bytes, V3_CORE_FUNDING_ACCUMULATOR_OFFSET)?,
+        i128::from(mark_price),
+        risk_config.maintenance_margin_bps,
+        risk_config.withdrawal_buffer,
+    )
+    .map_err(v3_risk_error)?;
+    let requested = u64::from_le_bytes(seat.reserved[8..16].try_into().map_err(|_| bundle_error())?)
+        .checked_add(amount)
+        .ok_or(StockStreamError::ArithmeticOverflow)?;
+    seat.reserved[8..16].copy_from_slice(&requested.to_le_bytes());
+    let liability = core_i128(core_bytes, V3_CORE_VAULT_LIABILITY_OFFSET)?
+        .checked_sub(i128::from(amount))
+        .ok_or(StockStreamError::RiskViolation)?;
+    write_shard_seat(unsafe { accounts[1].borrow_unchecked_mut() }, slot, &seat)?;
+    let mut core_copy = accounts[0].clone();
+    set_core_i128(unsafe { core_copy.borrow_unchecked_mut() }, V3_CORE_VAULT_LIABILITY_OFFSET, liability)?;
+    let mut events = [accounts[2].clone(), accounts[3].clone(), accounts[4].clone(), accounts[5].clone()];
+    let mut payload = [0u8; crate::events::EVENT_PAYLOAD_SIZE];
+    payload[0..2].copy_from_slice(&seat_index.to_le_bytes());
+    payload[2..10].copy_from_slice(&amount.to_le_bytes());
+    payload[10..18].copy_from_slice(&(seat.available_collateral.max(0) as u64).to_le_bytes());
+    append_event_record(
+        program_id,
+        &mut core_copy,
+        &mut events,
+        crate::events::EventKind::CollateralWithdrawn as u16,
+        &payload,
+        crate::handlers::event_timestamp(),
+    )?;
+    crate::magicblock::schedule_member_commit(&accounts[6], &accounts[7], &accounts[8], &accounts[1])
 }
 
 /// Cancels one V3 order by searching both canonical roots.  The owner is

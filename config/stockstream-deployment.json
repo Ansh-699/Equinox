@@ -1,13 +1,13 @@
 {
   "cluster": "devnet",
   "programId": "8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ",
-  "localArtifactSha256": "1c1bb230d94520ead90e31cb1eb40d8c42d0c2b6391a8355a3457c5de51e05de",
-  "deployedArtifactSha256": "d90bd38a28e32c01c99243b9e69edd75c336e02077621ef2b14c6cf3f5ce943f",
-  "exchange": null,
-  "instrument": null,
-  "core": null,
-  "oracleSnapshot": null,
-  "collateralMint": null,
+  "localArtifactSha256": "75dd99a905b0432e24b8856eb74d22431c630001ec5b6b059286c5d98669d73d",
+  "deployedArtifactSha256": "75dd99a905b0432e24b8856eb74d22431c630001ec5b6b059286c5d98669d73d",
+  "exchange": "sjnDgFCKptJBgtByXtPnVt1tTCkGYngCgWR1khGUWYY",
+  "instrument": "9t5qbtNZsgdgg2ttHGkuZhQYwAq561C7f86WBKT9vzTC",
+  "core": "9Vea9MVZCzYFKNHaHMPET9fuXXjfof8mA2F75pbBDJyV",
+  "oracleSnapshot": "7g5Wz9NfxRzNJbQPvFFf8b8yf8JjRB6W4LnzwxzPi8JE",
+  "collateralMint": "GLgZYwSXmDTktcX9Hpizak7AjPJjd5QdwrRDkYc5oRtC",
   "magicBlock": {
     "executionDomain": "er",
     "validator": "MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57",
@@ -21,6 +21,7 @@
     "channelId": 2,
     "exponent": -5
   },
-  "status": "source-local-only",
-  "writeEnabled": false
+  "status": "devnet-lifecycle-verified",
+  "writeEnabled": false,
+  "lookupTable": "51c66aXvU4Kt9wvgXFR71uMGr7oamLfgvDNyF82t6z7a"
 }

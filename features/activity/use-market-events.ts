@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { marketStreamEvents } from "@/lib/market-stream-events";
 import { advanceSequence, seedFromSnapshot, INITIAL_SEQUENCE_TRACKER, type SequenceTrackerState } from "@/lib/sequence-recovery";
 
 export interface RawMarketEvent {
@@ -69,10 +70,10 @@ export function useMarketEvents(marketApiUrl: string | undefined, symbol: string
       try {
         const response = await fetch(`${marketApiUrl}/v1/markets/${symbol}/snapshot`);
         if (!response.ok) throw new Error("snapshot unavailable");
-        const data = (await response.json()) as { events: RawMarketEvent[] };
+        const events = marketStreamEvents<RawMarketEvent>(await response.json());
         if (stopped) return false;
-        trackerRef.current = seedFromSnapshot(trackerRef.current, data.events.filter(hasSequenceAndDomain));
-        setEvents([...data.events].reverse().slice(0, MAX_EVENTS));
+        trackerRef.current = seedFromSnapshot(trackerRef.current, events.filter(hasSequenceAndDomain));
+        setEvents([...events].reverse().slice(0, MAX_EVENTS));
         return true;
       } catch {
         if (!stopped) setStatus("unavailable");
@@ -111,10 +112,13 @@ export function useMarketEvents(marketApiUrl: string | undefined, symbol: string
       const socketUrl = new URL(`${marketApiUrl}/v1/markets/${symbol}/stream`);
       socketUrl.protocol = socketUrl.protocol === "https:" ? "wss:" : "ws:";
       socket = new WebSocket(socketUrl);
-      socket.onopen = () => { consecutiveFailures = 0; }; // a real connection proves the endpoint is reachable again
+      socket.onopen = () => {
+        consecutiveFailures = 0; // a real connection proves the endpoint is reachable again
+        // Connected after a good snapshot: the feed is live even with no events yet.
+        if (!stopped) setStatus((current) => (current === "resynchronizing" ? current : "live"));
+      };
       socket.onmessage = (message) => {
-        const data = JSON.parse(message.data) as RawMarketEvent | { events: RawMarketEvent[] };
-        ingest("events" in data ? [...data.events].reverse() : [data]);
+        ingest([...marketStreamEvents<RawMarketEvent>(JSON.parse(message.data))].reverse());
       };
       socket.onclose = () => {
         if (stopped) return;

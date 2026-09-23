@@ -7,21 +7,22 @@ test.beforeEach(async () => {
 });
 
 async function signIn(page: Page) {
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByRole("button", { name: "Connect wallet" }).click();
+  await page.getByRole("button", { name: "Test Wallet" }).click();
 }
 
 test("multiple wallets: nothing signs until one is explicitly chosen", async ({ page }) => {
-  await page.goto("/?e2eWallets=2");
+  await page.goto("/trade?e2eWallets=2");
   await signIn(page);
 
   // Fail closed: the top bar must never show a wallet address here -- it
   // shows the distinct "choose a wallet" affordance instead.
-  await expect(page.getByRole("link", { name: /Choose wallet \(2\)/ })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("button", { name: /Choose wallet \(2\)/ })).toBeVisible({ timeout: 10_000 });
   await expect(page.locator(".wallet-button").first()).not.toContainText("...");
 
-  await page.getByRole("link", { name: /Choose wallet/ }).click();
-  await expect(page).toHaveURL(/\/settings/);
-  await expect(page.getByRole("radiogroup", { name: "Active wallet" })).toBeVisible();
+  // Choosing happens in the wallet drawer, not on a separate page.
+  await page.getByRole("button", { name: /Choose wallet/ }).click();
+  await expect(page.getByRole("dialog").getByRole("radiogroup", { name: "Active wallet" })).toBeVisible();
   await expect(page.getByRole("radio")).toHaveCount(2);
   await expect(page.getByText("Multiple wallets are connected")).toBeVisible();
 });
@@ -49,7 +50,7 @@ test("switching the active wallet clears an authorized session immediately", asy
   await radios.first().click();
   await expect(page.locator(".wallet-button").first()).toContainText("...", { timeout: 10_000 });
 
-  await page.getByRole("link", { name: "Perps" }).click();
+  await page.getByRole("link", { name: "Trade", exact: true }).click();
   await page.getByRole("button", { name: "Authorize session" }).click();
   await expect(page.getByRole("button", { name: "Revoke session" })).toBeVisible({ timeout: 10_000 });
 
@@ -65,7 +66,7 @@ test("switching the active wallet clears an authorized session immediately", asy
 
   // And trading with the new wallet must go through a fresh authorization,
   // not the old session's key.
-  await page.getByRole("link", { name: "Perps" }).click();
+  await page.getByRole("link", { name: "Trade", exact: true }).click();
   await expect(page.getByRole("button", { name: "Authorize session" })).toBeVisible();
 });
 
@@ -93,11 +94,12 @@ test("logging out clears the active wallet selection", async ({ page }) => {
   await radios.first().click();
   await expect(page.locator(".wallet-button").first()).toContainText("...", { timeout: 10_000 });
 
-  await page.getByRole("button", { name: "Log out" }).click();
-  await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible({ timeout: 10_000 });
+  await page.locator(".wallet-chip").click();
+  await page.getByRole("dialog").getByRole("button", { name: "Disconnect" }).click();
+  await expect(page.getByRole("button", { name: "Connect wallet" })).toBeVisible({ timeout: 10_000 });
 
   // Logging back in must never silently reuse the old selection as an
   // implicit wallets[0] pick -- it goes back to the fail-closed state.
   await signIn(page);
-  await expect(page.getByRole("link", { name: /Choose wallet \(2\)/ })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("button", { name: /Choose wallet \(2\)/ })).toBeVisible({ timeout: 10_000 });
 });

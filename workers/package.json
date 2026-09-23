@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --local --port 8787",
-    "deploy": "wrangler deploy",
-    "deploy:dry-run": "wrangler deploy --dry-run",
+    "deploy": "wrangler deploy -c wrangler.jsonc",
+    "deploy:dry-run": "wrangler deploy -c wrangler.jsonc --dry-run",
     "types": "wrangler types ./src/worker-configuration.d.ts",
     "check": "tsc --noEmit",
     "test": "vitest run",

@@ -1,9 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { TopBar } from "@/components/layout/top-bar";
 import { useAppAuth } from "@/components/app-providers";
 import { useStockStreamProtocol } from "@/features/wallet/use-stockstream-protocol";
+import { useTradingKey } from "@/features/wallet/use-trading-key";
+import { useV3Book } from "@/features/trading/use-v3-book";
+import { seatFromPositions } from "@/features/trading/rollup-seat";
 import { usePosition } from "@/features/positions/use-position";
 import { PositionsPanel } from "@/features/positions/positions-panel";
 import { useDeposit } from "@/features/collateral/use-deposit";
@@ -26,18 +29,29 @@ export function PortfolioView() {
   const marketSymbol = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_SYMBOL ?? "AAPL-PERP";
   const marketConfig = marketForSymbol(marketSymbol);
   const marketAddress = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_ADDRESS ?? marketConfig.marketPda;
-  const protocol = useStockStreamProtocol(auth.authenticated ? marketAddress : null);
-  const position = usePosition(protocol?.rpc ?? null, marketAddress, 0, { marketApiUrl, core: process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS });
+  // Same identity as the Trade page: the in-app trading key, once unlocked there.
+  const tradingKey = useTradingKey(auth);
+  const trader = tradingKey.signer?.address ?? auth.walletAddress;
+  const protocol = useStockStreamProtocol(auth.authenticated ? marketAddress : null, tradingKey.signer);
+  const v3Core = process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS;
+  const l1Position = usePosition(protocol?.rpc ?? null, marketAddress, 0, { marketApiUrl, core: v3Core, ...(v3Core ? { trader: trader ?? null } : {}) });
   const executionStatus = useExecutionStatus(marketApiUrl, marketSymbol);
+  // While delegated the rollup holds the live seat.
+  const delegated = !!executionStatus?.marketDelegated;
+  const book = useV3Book(marketApiUrl, v3Core || undefined, executionStatus ? delegated : null);
+  const rollupSeat = useMemo(() => (delegated && trader && book.updatedAt !== null ? seatFromPositions(book.positions, trader) : null), [delegated, trader, book.positions, book.updatedAt]);
+  const position = delegated && rollupSeat ? { ...l1Position, seat: rollupSeat.view as NonNullable<typeof l1Position.seat> } : l1Position;
+  const seatIndex = delegated && rollupSeat ? rollupSeat.index : l1Position.seatIndex ?? 0;
   const deposit = useDeposit(protocol);
   const withdraw = useWithdraw(protocol);
-  const withdrawGate = evaluateWithdrawGate(executionStatus, position.reconciliationStatus);
+  const l1Gate = evaluateWithdrawGate(executionStatus, position.reconciliationStatus);
+  const withdrawGate = delegated && !executionStatus?.commitPending ? { allowed: true } : l1Gate;
   const [amount, setAmount] = useState("100");
 
   const mint = process.env.NEXT_PUBLIC_STOCKSTREAM_COLLATERAL_MINT;
   const tokenProgram = process.env.NEXT_PUBLIC_STOCKSTREAM_TOKEN_PROGRAM;
-  const collateralTokenAccount = auth.walletAddress && mint && tokenProgram ? deriveCollateralTokenAccount(auth.walletAddress, mint, tokenProgram) : null;
-  const balances = useWalletBalances(protocol?.rpc ?? null, auth.walletAddress, collateralTokenAccount);
+  const collateralTokenAccount = trader && mint && tokenProgram ? deriveCollateralTokenAccount(trader, mint, tokenProgram) : null;
+  const balances = useWalletBalances(protocol?.rpc ?? null, trader, collateralTokenAccount);
 
   const notice = withdraw.notice ?? deposit.notice;
   const estimatedBuffer = position.seat ? position.seat.availableCollateral - position.seat.reservedMargin : null;
@@ -78,9 +92,9 @@ export function PortfolioView() {
             <button
               disabled={deposit.pending}
               onClick={() => {
-                const accounts = resolveCustodyAccounts(auth.walletAddress, marketAddress, marketConfig);
+                const accounts = resolveCustodyAccounts(trader, marketAddress, marketConfig, seatIndex);
                 if (!accounts) return;
-                void deposit.submitDeposit(accounts, BigInt(amount || "0"));
+                void deposit.submitDeposit(accounts, BigInt(amount || "0"), delegated);
               }}
             >
               {deposit.pending ? "Depositing…" : "Deposit"}
@@ -89,9 +103,9 @@ export function PortfolioView() {
               disabled={!withdrawGate.allowed || withdraw.pending}
               title={!withdrawGate.allowed ? withdrawGate.reason : undefined}
               onClick={() => {
-                const accounts = resolveCustodyAccounts(auth.walletAddress, marketAddress, marketConfig);
+                const accounts = resolveCustodyAccounts(trader, marketAddress, marketConfig, seatIndex);
                 if (!accounts) return;
-                void withdraw.submitWithdraw(accounts, BigInt(amount || "0"), withdrawGate, position.seat);
+                void withdraw.submitWithdraw(accounts, BigInt(amount || "0"), withdrawGate, position.seat, delegated && !executionStatus?.commitPending, tradingKey.signer ? auth.walletAddress : null);
               }}
             >
               {withdraw.pending ? "Withdrawing…" : "Withdraw"}

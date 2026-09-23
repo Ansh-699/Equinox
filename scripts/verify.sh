@@ -26,6 +26,9 @@ run_logged rust-tests env NO_DNA=1 cargo test --workspace
 step "SBF build and artifact identity"
 run_logged sbf-build bash -c 'NO_DNA=1 cargo build-sbf --manifest-path programs/stockstream/Cargo.toml --features bpf-entrypoint && python3 scripts/verify-sbf-artifact.py target/deploy/stockstream.so'
 
+step "Rust runtime tests against the built SBF artifact"
+run_logged rust-runtime-tests env NO_DNA=1 cargo test -p stockstream --features runtime-tests
+
 step "ABI parity"
 run_logged abi npm run check:stockstream-abi
 

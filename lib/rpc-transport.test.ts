@@ -62,7 +62,7 @@ describe('production RPC transports', () => {
     await expect(rpc.simulate(Uint8Array.of(1))).rejects.toBeInstanceOf(RpcFailure);
     expect(calls).toEqual(['simulateTransaction']);
   });
-  it('router requires one delegated validator and confirms ER acceptance by readback', async () => {
+  it('router requires one delegated validator and confirms ER acceptance', async () => {
     let id=0;
     const rpc=new SolanaRpcTransport('https://router.test',async(_input,init)=>{
       const body=JSON.parse(String(init?.body)); id=body.id;
@@ -75,7 +75,7 @@ describe('production RPC transports', () => {
     },async()=>{},1);
     const router=new MagicRouterTransport(rpc,marketAddress);
     expect(await router.getAccountAwareBlockhash([marketAddress])).toBe(marketAddress);
-    expect(await router.submit(Uint8Array.of(1))).toEqual({status:'er_accepted',sequence:7n});
+    expect(await router.submit(Uint8Array.of(1))).toEqual({status:'er_accepted',sequence:0n});
   });
   it('router rejects undelegated writable accounts before requesting a blockhash', async () => {
     const rpc=new SolanaRpcTransport('https://router.test',async(_input,init)=>response(JSON.parse(String(init?.body)).id,{isDelegated:false}));

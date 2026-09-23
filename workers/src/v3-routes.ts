@@ -26,7 +26,7 @@ export async function fetchV3MarketSnapshot(
   domain: 'l1' | 'er' = 'l1',
   fetcher: typeof fetch = fetch,
 ): Promise<V3MarketAggregate | null> {
-  if (!env.SOLANA_RPC_URL) return null;
+  if (!env.SOLANA_RPC_URL) { console.error('v3 aggregate unavailable: SOLANA_RPC_URL is not configured'); return null; }
   try { address(coreAddress); } catch { return null; }
   const transport = domain === 'er'
     ? new MagicBlockErTransport(env.MAGICBLOCK_RPC_URL ?? env.SOLANA_RPC_URL, fetcher)
@@ -37,7 +37,10 @@ export async function fetchV3MarketSnapshot(
   ));
   const seatShards = await Promise.all(Array.from({ length: 4 }, (_, shard) => deriveSeatShardV3(coreAddress, shard)));
   const eventShards = await Promise.all(Array.from({ length: 4 }, (_, shard) => deriveEventShardV3(coreAddress, shard)));
-  return fetchAuthoritativeV3Market(transport, { core: coreAddress, bookPages, seatShards, eventShards }).catch(() => null);
+  return fetchAuthoritativeV3Market(transport, { core: coreAddress, bookPages, seatShards, eventShards }).catch((error: unknown) => {
+    console.error('v3 aggregate fetch failed', domain, error instanceof Error ? error.message : String(error));
+    return null;
+  });
 }
 
 /** Handles only the explicit V3 aggregate route. Returning null leaves the

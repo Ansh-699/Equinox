@@ -28,6 +28,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Keypair, VersionedTransaction } from "@solana/web3.js";
 import { PrivyIdentityContext, type PrivyIdentity, type DiscoveredWallet } from "@/components/privy-identity-context";
 
+const TEST_WALLET_ICON = "data:image/svg+xml;base64," + btoa('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" rx="6" fill="#16794f"/></svg>');
+
 export function isE2eTestMode(): boolean {
   return process.env.NEXT_PUBLIC_E2E_TEST_MODE === "1";
 }
@@ -83,12 +85,17 @@ export function TestAuthProvider({ children }: { children: React.ReactNode }) {
   const identity = useMemo<PrivyIdentity>(() => ({
     ready: true,
     privyAuthenticated: authenticated,
+    directWallet: false,
     userId: authenticated ? "e2e-test-user" : null,
+    userLabel: authenticated ? "e2e@stockstream.test" : null,
     wallets,
     authError: null,
     login: () => setAuthenticated(true),
+    walletOptions: [{ name: "Test Wallet", icon: TEST_WALLET_ICON }],
+    connectWith: async () => setAuthenticated(true),
     logout: async () => setAuthenticated(false),
     getAccessToken: async () => "e2e-test-token",
+    signMessage: async () => { throw new Error("E2E wallets do not sign messages"); },
     signWith: async (address, bytes) => {
       const wallet = testWallets.find((candidate) => candidate.publicKey.toBase58() === address);
       if (!wallet) throw new Error(`E2E test wallet ${address} not found`);

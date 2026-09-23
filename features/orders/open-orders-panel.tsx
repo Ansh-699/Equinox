@@ -20,7 +20,7 @@ export interface OpenOrdersPanelProps {
  * fabricating rows. */
 export function OpenOrdersPanel({ state, onCancel, onReplace, onCancelAll, pending }: OpenOrdersPanelProps) {
   return (
-    <section className="session-panel open-orders-panel">
+    <section className="open-orders-panel">
       <div className="panel-title">
         <h2>Open orders</h2>
         <span>{state.kind === "ready" && state.stale ? "stale" : state.kind}</span>

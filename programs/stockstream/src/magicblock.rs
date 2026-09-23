@@ -979,9 +979,15 @@ pub fn delegate_v3_account(
         bytes[v3::V3_CORE_DELEGATION_STATUS_OFFSET] = DelegationStatus::Delegated as u8;
         bytes[v3::V3_CORE_VALIDATOR_OFFSET..v3::V3_CORE_VALIDATOR_OFFSET + 32]
             .copy_from_slice(validator.as_ref());
+        // Continue the commit sequence across delegation cycles (a fresh core
+        // has last_committed = 0, so its first commit is still 1): a re-delegated
+        // market must never accept a replayed sequence from an earlier cycle.
+        let next = core_u64(bytes, v3::V3_CORE_LAST_COMMITTED_SEQUENCE_OFFSET)?
+            .checked_add(1)
+            .ok_or(ProgramError::InvalidAccountData)?;
         bytes[v3::V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET
             ..v3::V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET + 8]
-            .copy_from_slice(&1u64.to_le_bytes());
+            .copy_from_slice(&next.to_le_bytes());
     }
 
     let delegated = match kind {
@@ -1104,6 +1110,17 @@ pub fn delegate_v3_account(
     Ok(())
 }
 
+/// A core may be delegated when it has never been delegated, or when a prior
+/// rollup cycle fully returned it: restored, commit phase idle, vault reconciled.
+fn v3_core_delegatable(bytes: &[u8]) -> bool {
+    let status = bytes[v3::V3_CORE_DELEGATION_STATUS_OFFSET];
+    status == DelegationStatus::NotDelegated as u8
+        || (status == DelegationStatus::Restored as u8
+            && bytes[v3::V3_CORE_COMMIT_PHASE_OFFSET] == v3::V3_COMMIT_PHASE_IDLE
+            && bytes[v3::V3_CORE_RECONCILIATION_STATUS_OFFSET]
+                == crate::state::ReconciliationStatus::Reconciled as u8)
+}
+
 fn validate_v3_delegate_core(
     program_id: &Address,
     parent: &AccountView,
@@ -1145,7 +1162,7 @@ fn validate_v3_delegate_core(
             || instrument[111] != 0
             || bytes[v3::V3_CORE_INSTRUMENT_OFFSET..v3::V3_CORE_INSTRUMENT_OFFSET + 32]
                 != parent.address().to_bytes()
-            || bytes[v3::V3_CORE_DELEGATION_STATUS_OFFSET] != DelegationStatus::NotDelegated as u8
+            || !v3_core_delegatable(bytes)
         {
             return Err(custom(StockStreamError::MagicBlockInvalidAccount));
         }
@@ -2065,6 +2082,37 @@ fn commit_v3_member(
     Ok(())
 }
 
+/// Commit-only write-back of one delegated V3 member (no undelegation, no
+/// sequence bookkeeping), requested from inside the rollup by the program
+/// itself. `payer` pays the commit; `magic_context`/`magic_program` must be the
+/// canonical MagicBlock accounts. Used so a withdrawal request becomes visible
+/// on L1 at the next commit without the market authority.
+pub(crate) fn schedule_member_commit(
+    payer: &AccountView,
+    magic_context: &AccountView,
+    magic_program: &AccountView,
+    member: &AccountView,
+) -> ProgramResult {
+    if !payer.is_signer()
+        || !payer.is_writable()
+        || *magic_context.address() != MAGIC_CONTEXT_ID
+        || !magic_context.is_writable()
+        || *magic_program.address() != MAGIC_PROGRAM_ID
+        || !member.is_writable()
+    {
+        return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+    }
+    let mut data_buf = [0u8; SCHEDULE_DATA_MAX_LEN];
+    let data_len = encode_schedule_intent_bundle_data(&[2], false, &mut data_buf).map_err(custom)?;
+    let commit_accounts = [
+        InstructionAccount::writable_signer(payer.address()),
+        InstructionAccount::writable(magic_context.address()),
+        InstructionAccount::writable(member.address()),
+    ];
+    let commit_ix = InstructionView { program_id: &MAGIC_PROGRAM_ID, accounts: &commit_accounts, data: &data_buf[..data_len] };
+    invoke_signed_with_bounds::<3, _>(&commit_ix, &[payer, magic_context, member], &[])
+}
+
 /// Commit the V3 core alone after all child shards have been committed. This
 /// is also the final undelegation request for the core; child undelegations are
 /// submitted independently through `commit_v3_member`.
@@ -2907,4 +2955,31 @@ fn recreate_account_from_buffer(
         account_bytes.copy_from_slice(&buffer_bytes);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod delegation_status_tests {
+    use super::*;
+
+    fn core_with(status: u8, phase: u8, reconciliation: u8) -> [u8; v3::V3_MARKET_CORE_SIZE] {
+        let mut bytes = [0u8; v3::V3_MARKET_CORE_SIZE];
+        bytes[v3::V3_CORE_DELEGATION_STATUS_OFFSET] = status;
+        bytes[v3::V3_CORE_COMMIT_PHASE_OFFSET] = phase;
+        bytes[v3::V3_CORE_RECONCILIATION_STATUS_OFFSET] = reconciliation;
+        bytes
+    }
+
+    #[test]
+    fn fresh_and_cleanly_restored_cores_can_be_delegated() {
+        assert!(v3_core_delegatable(&core_with(DelegationStatus::NotDelegated as u8, 0, 0)));
+        assert!(v3_core_delegatable(&core_with(DelegationStatus::Restored as u8, v3::V3_COMMIT_PHASE_IDLE, 0)));
+    }
+
+    #[test]
+    fn live_unreconciled_or_mid_commit_cores_cannot_be_delegated() {
+        assert!(!v3_core_delegatable(&core_with(DelegationStatus::Delegated as u8, 0, 0)));
+        assert!(!v3_core_delegatable(&core_with(DelegationStatus::Undelegating as u8, 0, 0)));
+        assert!(!v3_core_delegatable(&core_with(DelegationStatus::Restored as u8, 1, 0)));
+        assert!(!v3_core_delegatable(&core_with(DelegationStatus::Restored as u8, 0, 2)));
+    }
 }

@@ -276,7 +276,7 @@ async function setup() {
   await ensureV3Account("V3 core", instrument, core, 0, 0, SIZES.core, payer);
   const coreInfo = await connection.getAccountInfo(core, "confirmed");
   if (coreInfo?.data?.length >= 108
-      && coreInfo.data[10] === 1
+      && coreInfo.data[11] !== 0
       && coreInfo.data.subarray(76, 108).every((byte) => byte === 0)) {
     throw new Error(`refusing activated zero-mint core ${core.toBase58()}; create a fresh market`);
   }

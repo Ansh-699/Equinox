@@ -217,3 +217,9 @@ it('e2e test mode bypasses Privy verification for the exact sentinel token, but 
   expect(notBypassed.status).toBe(503);
   expect(await notBypassed.json()).toEqual({ error: 'privy_unconfigured' });
 });
+
+it("operator mint refuses callers without the operator bearer token", async () => {
+    const { default: worker } = await import("./index");
+    const response = await worker.handle(new Request("https://api.test/v1/operator/mint", { method: "POST", body: JSON.stringify({ wallet: "x", tokens: "1" }) }), { INGESTION_TOKEN: "secret" } as unknown as Env);
+    expect(response.status).toBe(401);
+});

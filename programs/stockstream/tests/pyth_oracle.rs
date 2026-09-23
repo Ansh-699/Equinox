@@ -331,7 +331,7 @@ fn snapshot_fixture(delegated_core: bool) -> SnapshotFixture {
             .copy_from_slice(&(i32::from(VALID_EXPONENT)).to_le_bytes());
     }
     let snapshot = account(
-        Address::new_from_array([60; 32]),
+        stockstream::v3::derive_oracle_snapshot_v3(&ID, &core_address),
         ID,
         stockstream::oracle_snapshot::ORACLE_SNAPSHOT_SIZE,
         false,
@@ -388,6 +388,47 @@ fn valid_pyth_update_creates_authenticated_snapshot() {
     .unwrap();
     assert_eq!(bytes[stockstream::oracle_snapshot::OFFSET_AUTHENTICATED], 1);
     assert_eq!(bytes[stockstream::oracle_snapshot::OFFSET_SEQUENCE], 1);
+}
+
+/// The Pyth signature authenticates the price, so any fee payer may submit a
+/// newer signed update -- not only the market authority.
+#[test]
+fn snapshot_update_is_permissionless_for_a_newer_signed_price() {
+    let f = snapshot_fixture(false);
+    unsafe { f.core.view.clone().borrow_unchecked_mut()[44..76].copy_from_slice(&[77; 32]) };
+    let message = valid_message(0, fresh_timestamp_us());
+    let mut data = instruction_data(0, 0, &message);
+    data[0] = stockstream::instruction::UPDATE_ORACLE_SNAPSHOT_V3;
+    let mut accounts = f.accounts();
+    process_instruction(&ID, &mut accounts, &data).unwrap();
+    let bytes = unsafe { f.snapshot.view.borrow_unchecked() };
+    assert_eq!(bytes[stockstream::oracle_snapshot::OFFSET_AUTHENTICATED], 1);
+}
+
+/// Permissionless writes must never reach another program account: only the
+/// core's canonical snapshot PDA is writable, even if a same-sized
+/// program-owned account (e.g. a 128-byte instrument) is supplied.
+#[test]
+fn snapshot_update_rejects_a_non_canonical_snapshot_account() {
+    let mut f = snapshot_fixture(false);
+    f.snapshot = account(
+        Address::new_from_array([61; 32]),
+        ID,
+        stockstream::oracle_snapshot::ORACLE_SNAPSHOT_SIZE,
+        false,
+        true,
+        false,
+    );
+    let before = unsafe { f.snapshot.view.borrow_unchecked().to_vec() };
+    let message = valid_message(0, fresh_timestamp_us());
+    let mut data = instruction_data(0, 0, &message);
+    data[0] = stockstream::instruction::UPDATE_ORACLE_SNAPSHOT_V3;
+    let mut accounts = f.accounts();
+    assert!(process_instruction(&ID, &mut accounts, &data).is_err());
+    assert_eq!(
+        unsafe { f.snapshot.view.borrow_unchecked().to_vec() },
+        before
+    );
 }
 
 #[test]

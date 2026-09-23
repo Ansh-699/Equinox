@@ -13,3 +13,14 @@ test-ledger/
 test-results/
 playwright-report/
 blob-report/
+/dist/
+.vinext/
+.wrangler/
+!.env.production
+
+# local Playwright MCP screenshots/logs
+.playwright-mcp/
+
+# Local tool scratch
+.deepseek/
+.impeccable/

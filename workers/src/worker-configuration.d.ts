@@ -19,6 +19,7 @@ interface __BaseEnv_Env {
 	SOLANA_WS_URL?: string;
 	MAGIC_ROUTER_URL?: string;
 	MAGICBLOCK_RPC_URL?: string;
+	CORS_ALLOWED_ORIGINS?: string;
 	MAGICBLOCK_VALIDATOR?: string;
 	E2E_TEST_MODE?: string;
 	MARKET_STREAM?: DurableObjectNamespace<import("./index").MarketStream>;
@@ -31,7 +32,7 @@ declare namespace Cloudflare {
 	interface StagingEnv {
 		DB: D1Database;
 		ENVIRONMENT: "staging";
-		PYTH_PRO_FEED_ID: "922";
+		PYTH_PRO_FEED_ID: "1435";
 		PYTH_PRO_MIN_CHANNEL: "fixed_rate@50ms";
 		INGESTION_TOKEN: string;
 		PRIVY_APP_ID: string;
@@ -42,7 +43,7 @@ declare namespace Cloudflare {
 	interface ProductionEnv {
 		DB: D1Database;
 		ENVIRONMENT: "production";
-		PYTH_PRO_FEED_ID: "922";
+		PYTH_PRO_FEED_ID: "1435";
 		PYTH_PRO_MIN_CHANNEL: "fixed_rate@50ms";
 		INGESTION_TOKEN: string;
 		PRIVY_APP_ID: string;

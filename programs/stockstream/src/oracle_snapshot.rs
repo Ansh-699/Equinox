@@ -100,13 +100,6 @@ pub fn validate_for_core(
     Ok(())
 }
 
-pub fn validate_writer(core_bytes: &[u8], writer: &Address) -> ProgramResult {
-    if core_bytes.len() < 76 || core_bytes[44..76] != writer.to_bytes() {
-        return Err(ProgramError::MissingRequiredSignature);
-    }
-    Ok(())
-}
-
 pub fn initialize(
     bytes: &mut [u8],
     core: &Address,
@@ -226,15 +219,6 @@ mod tests {
             bytes[OFFSET_TRADING_STATUS] = status;
             assert!(validate_for_core(&bytes, &core, 1435, 2, -5, 1_005).is_err());
         }
-    }
-
-    #[test]
-    fn writer_is_bound_to_core_authority() {
-        let mut core = [0u8; 76];
-        let authority = Address::new_from_array([9; 32]);
-        core[44..76].copy_from_slice(&authority.to_bytes());
-        assert!(validate_writer(&core, &authority).is_ok());
-        assert!(validate_writer(&core, &Address::new_from_array([8; 32])).is_err());
     }
 
     #[test]
