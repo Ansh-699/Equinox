@@ -35,9 +35,24 @@ export function SettingsView() {
               <dt>Discovered wallets</dt><dd>{auth.wallets.length}</dd>
             </dl>
           ) : (
-            <p className="form-note">{auth.wallets.length > 0 ? "Choose a wallet below before trading." : "Sign in with Privy to see wallet details."}</p>
+            <p className="form-note">
+              {auth.wallets.length > 0
+                ? auth.privyAuthenticated
+                  ? "Choose a wallet below before trading."
+                  : "A wallet is connected but the Privy sign-in did not finish. Finish sign-in, or disconnect and try again. (If this keeps happening, enable Solana wallet login in the Privy dashboard.)"
+                : "Sign in with Privy to see wallet details."}
+            </p>
           )}
+          <dl className="session-detail" style={{ marginTop: 10 }}>
+            <dt>Privy account</dt><dd>{auth.privyAuthenticated ? auth.userLabel ?? "wallet login" : "not signed in"}</dd>
+          </dl>
           <WalletSelector />
+          {auth.wallets.length > 0 || auth.privyAuthenticated ? (
+            <div style={{ display: "flex", gap: 8 }}>
+              {!auth.walletAddress && auth.wallets.length === 1 ? <button onClick={auth.login}>Finish sign-in</button> : null}
+              <button onClick={() => void auth.logout()}>Disconnect wallet</button>
+            </div>
+          ) : null}
         </section>
 
         <section className="session-panel">

@@ -6,13 +6,14 @@ import { test, expect } from "@playwright/test";
 test.use({ viewport: { width: 375, height: 667 } });
 
 test("the login flow works at a real mobile viewport width", async ({ page }) => {
-  await page.goto("/");
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.goto("/trade");
+  await page.getByRole("button", { name: "Connect wallet" }).click();
+  await page.getByRole("button", { name: "Test Wallet" }).click();
   await expect(page.locator(".wallet-button").first()).toContainText("...", { timeout: 10_000 });
 });
 
-test("the settlement lifecycle panel and order ticket stack in a single column, not overlapping", async ({ page }) => {
-  await page.goto("/");
+test("the chart and order ticket stack in a single column, ticket first, not overlapping", async ({ page }) => {
+  await page.goto("/trade");
   const marketPanel = page.locator(".market-panel");
   const orderPanel = page.locator(".order-panel");
   await expect(marketPanel).toBeVisible();
@@ -21,11 +22,9 @@ test("the settlement lifecycle panel and order ticket stack in a single column, 
   const orderBox = await orderPanel.boundingBox();
   expect(marketBox).not.toBeNull();
   expect(orderBox).not.toBeNull();
-  // Stacked in a single column means the order panel starts at or below
-  // where the market panel ends -- not side-by-side (which would mean a
-  // shared vertical range and a much narrower individual width than the
-  // viewport).
-  expect(orderBox!.y).toBeGreaterThanOrEqual(marketBox!.y + marketBox!.height - 1);
+  // Single column, SlipStream order: the ticket comes first on a phone, so the
+  // chart starts at or below where the ticket ends -- never side by side.
+  expect(marketBox!.y).toBeGreaterThanOrEqual(orderBox!.y + orderBox!.height - 1);
 });
 
 test("no horizontal page overflow at mobile width", async ({ page }) => {
@@ -35,7 +34,7 @@ test("no horizontal page overflow at mobile width", async ({ page }) => {
 });
 
 test("the skip link is still present and functional at mobile width", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/trade");
   await page.locator("body").click({ position: { x: 5, y: 5 } });
   await page.keyboard.press("Tab");
   await expect(page.locator(".skip-link")).toBeFocused();

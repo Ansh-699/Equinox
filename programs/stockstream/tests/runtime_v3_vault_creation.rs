@@ -42,10 +42,10 @@ use stockstream::{
     },
     state::TRADER_SEAT_SIZE,
     v3::{
-        derive_event_shard_v3, derive_market_core_v3, derive_seat_shard_v3,
-        V3_CORE_DELEGATION_STATUS_OFFSET, V3_CORE_MARKET_AUTHORITY_OFFSET, V3_CORE_MODE_OFFSET,
-        V3_CORE_ORACLE_CONFIDENCE_OFFSET, V3_CORE_ORACLE_PRICE_OFFSET,
-        V3_CORE_ORACLE_TIMESTAMP_OFFSET, V3_CORE_ORACLE_VALID_OFFSET,
+        derive_book_page_v3, derive_event_shard_v3, derive_market_core_v3, derive_seat_shard_v3,
+        V3_BOOK_PAGES_PER_SIDE, V3_CORE_COMMIT_PHASE_OFFSET, V3_CORE_DELEGATION_STATUS_OFFSET,
+        V3_CORE_MARKET_AUTHORITY_OFFSET, V3_CORE_MODE_OFFSET, V3_CORE_ORACLE_CONFIDENCE_OFFSET,
+        V3_CORE_ORACLE_PRICE_OFFSET, V3_CORE_ORACLE_TIMESTAMP_OFFSET, V3_CORE_ORACLE_VALID_OFFSET,
         V3_CORE_RISK_CONFIG_VERSION_OFFSET, V3_EVENT_SHARD_SIZE, V3_MARKET_CORE_SIZE,
         V3_SEAT_AVAILABLE_COLLATERAL_OFFSET, V3_SEAT_SHARD_SIZE,
     },
@@ -57,6 +57,8 @@ const INITIALIZE_V3_MARKET: u8 = 47;
 const CREATE_V3_TRADER_SEAT: u8 = 49;
 const DEPOSIT_COLLATERAL_V3: u8 = 53;
 const CREATE_V3_VAULT_ACCOUNT: u8 = 56;
+const RECONCILE_VAULT_V3: u8 = 55;
+const WITHDRAW_COLLATERAL_V3: u8 = 54;
 const DECIMALS: u8 = 6;
 const SOURCE_FUNDING: u64 = 10_000;
 const DEPOSIT_AMOUNT: u64 = 400;
@@ -900,4 +902,309 @@ fn deposit_rejects_a_non_derived_user_controlled_vault() {
         seat_available_collateral(&env.svm, env.seat_shards[0], 0),
         seat_before
     );
+}
+
+/// Any trader, not only the market authority, funds their own seat from a
+/// source they own; nobody can credit or debit a seat they do not own.
+#[test]
+fn a_non_authority_trader_deposits_only_into_their_own_seat() {
+    let mut env = setup();
+    send(
+        &mut env.svm,
+        &env.authority,
+        create_vault_ix(env.core, env.vault, env.authority.pubkey(), env.mint),
+        &[],
+    )
+    .expect("CREATE_V3_VAULT_ACCOUNT");
+    let trader = Keypair::new();
+    env.svm.airdrop(&trader.pubkey(), 1_000_000_000).unwrap();
+    let mut seat_data = vec![CREATE_V3_TRADER_SEAT];
+    seat_data.extend_from_slice(&1u16.to_le_bytes());
+    let mut seat_metas = vec![writable(env.core)];
+    seat_metas.extend(env.seat_shards.iter().map(|shard| writable(*shard)));
+    seat_metas.extend(env.event_shards.iter().map(|shard| writable(*shard)));
+    seat_metas.push(readonly_signer(trader.pubkey()));
+    send(
+        &mut env.svm,
+        &trader,
+        stockstream_ix(seat_data, seat_metas),
+        &[],
+    )
+    .expect("trader seat");
+
+    let source = Address::new_unique();
+    install(&mut env.svm, source, vec![0; TokenAccount::LEN], TOKENKEG);
+    let init =
+        token_ix::initialize_account3(&TOKENKEG, &source, &env.mint, &trader.pubkey()).unwrap();
+    send(&mut env.svm, &env.authority, init, &[]).expect("trader source");
+    let mint_to = token_ix::mint_to(
+        &TOKENKEG,
+        &env.mint,
+        &source,
+        &env.authority.pubkey(),
+        &[],
+        SOURCE_FUNDING,
+    )
+    .unwrap();
+    send(&mut env.svm, &env.authority, mint_to, &[]).expect("fund trader source");
+
+    let deposit = |seat_index| {
+        deposit_ix(
+            env.core,
+            env.seat_shards[0],
+            &env.event_shards,
+            trader.pubkey(),
+            source,
+            env.vault,
+            env.mint,
+            TOKENKEG,
+            seat_index,
+            DEPOSIT_AMOUNT,
+        )
+    };
+    let into_authority_seat = deposit(0);
+    let into_own_seat = deposit(1);
+    assert!(
+        send(&mut env.svm, &trader, into_authority_seat, &[]).is_err(),
+        "a trader must not credit another trader's seat"
+    );
+    send(&mut env.svm, &trader, into_own_seat, &[]).expect("trader deposits into own seat");
+    assert_eq!(
+        seat_available_collateral(&env.svm, env.seat_shards[0], 1),
+        i128::from(DEPOSIT_AMOUNT)
+    );
+    assert_eq!(
+        seat_available_collateral(&env.svm, env.seat_shards[0], 0),
+        0
+    );
+    assert_eq!(token_amount(&env.svm, env.vault), DEPOSIT_AMOUNT);
+}
+
+/// MagicBlock's undelegation callback hands the core back still marked
+/// Undelegating. Reconciliation, the mandatory post-restore step, finalizes it
+/// only once every one of the 27 execution accounts is program-owned again.
+#[test]
+fn reconcile_finalizes_a_core_returned_by_undelegation() {
+    let mut env = setup();
+    send(
+        &mut env.svm,
+        &env.authority,
+        create_vault_ix(env.core, env.vault, env.authority.pubkey(), env.mint),
+        &[],
+    )
+    .expect("CREATE_V3_VAULT_ACCOUNT");
+    let pinocchio_core = pinocchio::Address::new_from_array(env.core.to_bytes());
+    let mut pages = Vec::new();
+    for index in 0..(2 * V3_BOOK_PAGES_PER_SIDE) as u8 {
+        let (side, page) = (
+            index / V3_BOOK_PAGES_PER_SIDE as u8,
+            index % V3_BOOK_PAGES_PER_SIDE as u8,
+        );
+        let target = solana_address(derive_book_page_v3(&ID, &pinocchio_core, side, page));
+        send_create(&mut env.svm, &env.authority, env.core, target, 1, index).expect("book page");
+        pages.push(target);
+    }
+    let deposit = standard_deposit(&env);
+    send(&mut env.svm, &env.authority, deposit, &[]).expect("deposit");
+    let mut core = env.svm.get_account(&env.core).unwrap();
+    core.data[V3_CORE_DELEGATION_STATUS_OFFSET] = 2;
+    core.data[V3_CORE_COMMIT_PHASE_OFFSET] = 2;
+    env.svm.set_account(env.core, core).unwrap();
+
+    let mut metas = vec![writable(env.core)];
+    metas.extend(pages.iter().map(|page| writable(*page)));
+    metas.extend(env.seat_shards.iter().map(|shard| writable(*shard)));
+    metas.extend(env.event_shards.iter().map(|shard| writable(*shard)));
+    metas.extend([writable(env.vault), readonly(env.mint), readonly(TOKENKEG)]);
+    let reconcile = stockstream_ix(vec![RECONCILE_VAULT_V3], metas);
+
+    // A child still owned by the delegation program blocks finalization.
+    let mut page = env.svm.get_account(&pages[0]).unwrap();
+    let owned_by_program = page.clone();
+    page.owner = DELEGATION_PROGRAM_ID;
+    env.svm.set_account(pages[0], page).unwrap();
+    let before = env.svm.get_account(&env.core).unwrap().data;
+    assert!(send(&mut env.svm, &env.authority, reconcile.clone(), &[]).is_err());
+    assert_eq!(env.svm.get_account(&env.core).unwrap().data, before);
+
+    env.svm.set_account(pages[0], owned_by_program).unwrap();
+    send(&mut env.svm, &env.authority, reconcile, &[]).expect("reconcile finalizes restore");
+    let core = env.svm.get_account(&env.core).unwrap().data;
+    assert_eq!(core[V3_CORE_DELEGATION_STATUS_OFFSET], 3, "Restored");
+    assert_eq!(core[V3_CORE_COMMIT_PHASE_OFFSET], 0, "idle");
+    assert_eq!(
+        core[V3_CORE_MODE_OFFSET], 1,
+        "vault matches liability, market stays active"
+    );
+
+    // The restored seat withdraws half its collateral; the seat is debited once.
+    set_core_oracle(&mut env.svm, env.core);
+    let half = DEPOSIT_AMOUNT / 2;
+    let mut data = vec![WITHDRAW_COLLATERAL_V3];
+    data.extend_from_slice(&0u16.to_le_bytes());
+    data.extend_from_slice(&half.to_le_bytes());
+    let mut metas = vec![writable(env.core)];
+    metas.extend(pages.iter().map(|page| writable(*page)));
+    metas.extend(env.seat_shards.iter().map(|shard| writable(*shard)));
+    metas.extend(env.event_shards.iter().map(|shard| writable(*shard)));
+    metas.extend([
+        readonly_signer(env.authority.pubkey()),
+        writable(env.source),
+        readonly(env.mint),
+        writable(env.vault),
+        readonly(env.vault_authority),
+        readonly(TOKENKEG),
+    ]);
+    send(
+        &mut env.svm,
+        &env.authority,
+        stockstream_ix(data, metas),
+        &[],
+    )
+    .expect("withdraw");
+    assert_eq!(token_amount(&env.svm, env.vault), DEPOSIT_AMOUNT - half);
+    assert_eq!(
+        seat_available_collateral(&env.svm, env.seat_shards[0], 0),
+        i128::from(DEPOSIT_AMOUNT - half),
+        "the seat is debited exactly once"
+    );
+}
+
+// ── Deposit inbox (opcodes 60/61): deposits while the bundle is delegated ──
+
+const DEPOSIT_TO_INBOX_V3: u8 = 60;
+const CLAIM_INBOX_DEPOSIT_V3: u8 = 61;
+
+fn derive_receipt(core: &Address, trader: &Address) -> Address {
+    Address::find_program_address(&[b"deposit-receipt-v3", core.as_ref(), trader.as_ref()], &solana_address(ID)).0
+}
+
+fn inbox_deposit_ix(env: &Env, amount: u64) -> Instruction {
+    let mut data = vec![DEPOSIT_TO_INBOX_V3];
+    data.extend_from_slice(&amount.to_le_bytes());
+    stockstream_ix(
+        data,
+        vec![
+            readonly(env.core),
+            writable(derive_receipt(&env.core, &env.authority.pubkey())),
+            writable_signer(env.authority.pubkey()),
+            writable(env.source),
+            writable(env.vault),
+            readonly(env.mint),
+            readonly(TOKENKEG),
+            readonly(system_program_id()),
+        ],
+    )
+}
+
+fn claim_ix(env: &Env, seat_index: u16, receipt: Address) -> Instruction {
+    let mut data = vec![CLAIM_INBOX_DEPOSIT_V3];
+    data.extend_from_slice(&seat_index.to_le_bytes());
+    stockstream_ix(
+        data,
+        vec![
+            writable(env.core),
+            writable(env.seat_shards[(seat_index / 32) as usize]),
+            writable(env.event_shards[0]),
+            writable(env.event_shards[1]),
+            writable(env.event_shards[2]),
+            writable(env.event_shards[3]),
+            readonly(receipt),
+        ],
+    )
+}
+
+#[test]
+fn inbox_deposit_is_credited_exactly_once_while_the_market_is_delegated() {
+    let mut env = setup();
+    send(&mut env.svm, &env.authority, create_vault_ix(env.core, env.vault, env.authority.pubkey(), env.mint), &[]).expect("vault");
+    // Delegated: seats cannot take a direct deposit, but the inbox still works.
+    set_core_delegation_status(&mut env.svm, env.core, 1);
+    assert!({ let ix = standard_deposit(&env); send(&mut env.svm, &env.authority, ix, &[]) }.is_err(), "direct deposits stay L1-only");
+
+    { let ix = inbox_deposit_ix(&env, DEPOSIT_AMOUNT); send(&mut env.svm, &env.authority, ix, &[]) }.expect("DEPOSIT_TO_INBOX_V3");
+    assert_eq!(token_amount(&env.svm, env.vault), DEPOSIT_AMOUNT, "tokens reach the vault immediately");
+    assert_eq!(seat_available_collateral(&env.svm, env.seat_shards[0], 0), 0, "nothing is credited until claimed");
+
+    let receipt = derive_receipt(&env.core, &env.authority.pubkey());
+    { let ix = claim_ix(&env, 0, receipt); send(&mut env.svm, &env.authority, ix, &[]) }.expect("CLAIM_INBOX_DEPOSIT_V3");
+    assert_eq!(seat_available_collateral(&env.svm, env.seat_shards[0], 0), i128::from(DEPOSIT_AMOUNT));
+    env.svm.expire_blockhash();
+    assert!({ let ix = claim_ix(&env, 0, receipt); send(&mut env.svm, &env.authority, ix, &[]) }.is_err(), "a receipt cannot be credited twice");
+
+    // A second deposit credits only the new amount.
+    env.svm.expire_blockhash();
+    { let ix = inbox_deposit_ix(&env, 7); send(&mut env.svm, &env.authority, ix, &[]) }.expect("second inbox deposit");
+    env.svm.expire_blockhash();
+    { let ix = claim_ix(&env, 0, receipt); send(&mut env.svm, &env.authority, ix, &[]) }.expect("second claim");
+    assert_eq!(seat_available_collateral(&env.svm, env.seat_shards[0], 0), i128::from(DEPOSIT_AMOUNT) + 7);
+    assert_eq!(token_amount(&env.svm, env.vault), DEPOSIT_AMOUNT + 7);
+}
+
+#[test]
+fn inbox_claim_only_credits_the_receipt_owners_seat() {
+    let mut env = setup();
+    send(&mut env.svm, &env.authority, create_vault_ix(env.core, env.vault, env.authority.pubkey(), env.mint), &[]).expect("vault");
+    { let ix = inbox_deposit_ix(&env, DEPOSIT_AMOUNT); send(&mut env.svm, &env.authority, ix, &[]) }.expect("inbox deposit");
+    let receipt = derive_receipt(&env.core, &env.authority.pubkey());
+    // Seat 1 is empty / not the receipt owner's: refused.
+    assert!({ let ix = claim_ix(&env, 1, receipt); send(&mut env.svm, &env.authority, ix, &[]) }.is_err());
+    assert_eq!(seat_available_collateral(&env.svm, env.seat_shards[0], 0), 0);
+}
+
+// ── Withdrawal payout (opcode 63): pays committed rollup requests once ──
+
+const CLAIM_WITHDRAWAL_V3: u8 = 63;
+/// `TraderSeat` is packed(8): `reserved` starts at 184; its [8..16] is the requested total.
+const SEAT_REQUESTED_OFFSET: usize = 192;
+
+fn set_seat_requested(svm: &mut LiteSVM, shard: Address, slot: usize, requested: u64) {
+    let mut account = svm.get_account(&shard).unwrap();
+    let start = V3_SHARD_HEADER_SIZE + slot * TRADER_SEAT_SIZE + SEAT_REQUESTED_OFFSET;
+    account.data[start..start + 8].copy_from_slice(&requested.to_le_bytes());
+    svm.set_account(shard, account).unwrap();
+}
+
+fn claim_withdrawal_ix(env: &Env, seat_index: u16) -> Instruction {
+    let mut data = vec![CLAIM_WITHDRAWAL_V3];
+    data.extend_from_slice(&seat_index.to_le_bytes());
+    let receipt = Address::find_program_address(&[b"withdraw-receipt-v3", env.core.as_ref(), env.authority.pubkey().as_ref()], &solana_address(ID)).0;
+    stockstream_ix(
+        data,
+        vec![
+            readonly(env.core),
+            readonly(env.seat_shards[(seat_index / 32) as usize]),
+            writable_signer(env.authority.pubkey()),
+            writable(env.source),
+            writable(env.vault),
+            readonly(env.vault_authority),
+            readonly(env.mint),
+            readonly(TOKENKEG),
+            writable(receipt),
+            readonly(system_program_id()),
+        ],
+    )
+}
+
+#[test]
+fn withdrawal_payout_pays_each_committed_request_exactly_once() {
+    let mut env = setup();
+    send(&mut env.svm, &env.authority, create_vault_ix(env.core, env.vault, env.authority.pubkey(), env.mint), &[]).expect("vault");
+    { let ix = standard_deposit(&env); send(&mut env.svm, &env.authority, ix, &[]) }.expect("deposit");
+    let before = token_amount(&env.svm, env.source);
+
+    // Nothing requested yet: nothing to pay.
+    assert!({ let ix = claim_withdrawal_ix(&env, 0); send(&mut env.svm, &env.authority, ix, &[]) }.is_err());
+
+    // The rollup's request (as committed to L1) is paid once.
+    set_seat_requested(&mut env.svm, env.seat_shards[0], 0, 150);
+    { let ix = claim_withdrawal_ix(&env, 0); send(&mut env.svm, &env.authority, ix, &[]) }.expect("CLAIM_WITHDRAWAL_V3");
+    assert_eq!(token_amount(&env.svm, env.source), before + 150);
+    assert_eq!(token_amount(&env.svm, env.vault), DEPOSIT_AMOUNT - 150);
+    assert!({ let ix = claim_withdrawal_ix(&env, 0); send(&mut env.svm, &env.authority, ix, &[]) }.is_err(), "no double payout");
+
+    // A later request pays only the difference.
+    set_seat_requested(&mut env.svm, env.seat_shards[0], 0, 200);
+    { let ix = claim_withdrawal_ix(&env, 0); send(&mut env.svm, &env.authority, ix, &[]) }.expect("second payout");
+    assert_eq!(token_amount(&env.svm, env.source), before + 200);
 }

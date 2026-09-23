@@ -19,18 +19,19 @@ function formatViolations(violations: { id: string; help: string; nodes: { targe
 }
 
 async function login(page: import("@playwright/test").Page) {
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByRole("button", { name: "Connect wallet" }).click();
+  await page.getByRole("button", { name: "Test Wallet" }).click();
   await expect(page.locator(".wallet-button").first()).toContainText("...", { timeout: 10_000 });
 }
 
 test("trade page (signed out) has no automated accessibility violations", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/trade");
   const results = await scan(page);
   expect(results.violations, formatViolations(results.violations)).toEqual([]);
 });
 
 test("trade page (signed in) has no automated accessibility violations", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/trade");
   await login(page);
   const results = await scan(page);
   expect(results.violations, formatViolations(results.violations)).toEqual([]);

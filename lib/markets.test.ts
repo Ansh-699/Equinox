@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { MARKET_BY_SYMBOL, PERP_MARKETS, deriveInstrumentPda, derivePerpMarketPda, deriveScratchPda, deriveVaultPda } from "./markets";
 
 describe("generic market registry", () => {
-  it("ships isolated AAPL, TSLA and NVDA fixtures without declaring them live", () => {
+  it("declares only the manifest's deployed TSLA market live", () => {
     expect(PERP_MARKETS.map((market) => market.symbol)).toEqual(["AAPL-PERP", "TSLA-PERP", "NVDA-PERP"]);
-    expect(PERP_MARKETS.every((market) => !market.live)).toBe(true);
+    expect(PERP_MARKETS.filter((market) => market.live).map((market) => market.symbol)).toEqual(["TSLA-PERP"]);
     expect(new Set(PERP_MARKETS.map((market) => market.marketPda)).size).toBe(3);
   });
   it("derives independent instrument, market, vault and scratch addresses", () => {

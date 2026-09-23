@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { PublicKey, TransactionInstruction } from '@solana/web3.js';
 import { PythLazerClient, type ParsedFeedPayload } from '@pythnetwork/pyth-lazer-sdk';
 import { consumeOracleUpdate, consumeOracleUpdateV3, CONSUME_ORACLE_UPDATE_MESSAGE_OFFSET } from '../../clients/stockstream/src';
-import type { V3OracleAccounts } from '../../clients/stockstream/src/abi/v3-instructions';
+import { updateOracleSnapshotV3, type V3OracleAccounts, type V3OracleSnapshotAccounts } from '../../clients/stockstream/src/abi/v3-instructions';
 import { requirePythServerConfig } from '../oracle';
 
 const ED25519_PROGRAM = new PublicKey('Ed25519SigVerify111111111111111111111111111');
@@ -104,6 +104,11 @@ export class PythKeeper {
       ed25519(update.message,consumerIndex),
       consumeOracleUpdateV3(accounts,update.message,baseIndex,0),
     ];
+  }
+  /** L1 snapshot variant; its data layout matches ConsumeOracleUpdate, so the Ed25519 offsets are shared. */
+  buildV3SnapshotTransaction(update:SignedPythUpdate, accounts:V3OracleSnapshotAccounts, baseIndex=0):TransactionInstruction[] {
+    if(update.feedId!==this.config.feedId) throw new Error('Unexpected Pyth feed');
+    return [ed25519(update.message,baseIndex+1), updateOracleSnapshotV3(accounts,update.message,baseIndex,0)];
   }
   get health(){return{configured:true,feedId:this.config.feedId,lastTimestamp:this.lastTimestamp,lastPayloadHash:this.lastHash};}
 }

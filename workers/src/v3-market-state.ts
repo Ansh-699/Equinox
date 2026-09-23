@@ -135,7 +135,7 @@ const NONE_HANDLE = 0xffff_ffff;
  * Walk each root separately so a leaf retains its fixed/oracle-pegged tree
  * identity when pages are flattened for API consumers. Invalid/cyclic links
  * are ignored; aggregate validation still requires the page ABI itself. */
-function annotateBookTrees(pages: readonly V3BookPageState[]): boolean {
+export function annotateBookTrees(pages: readonly V3BookPageState[]): boolean {
   for (const side of [0, 1] as const) {
     const sidePages = pages.filter((page) => page.side === side);
     const byHandle = new Map<number, V3BookNodeState>();

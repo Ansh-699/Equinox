@@ -195,8 +195,25 @@ export interface DelegationFields {
 /** Pure decode of the raw account bytes -- no RPC, no trust decision beyond
  * "these are the bytes at these offsets" (the same boundary
  * `chain-transports.ts` draws for `classifyWritableAccountDomain`). */
+/** V3 market cores (`STKMK003`, programs/stockstream/src/v3.rs offsets). */
+const V3_CORE_DISCRIMINATOR = "STKMK003";
+const V3_OFFSETS = { globalEventSequence: 148, delegationStatus: 197, expectedCommitSequence: 198, lastCommittedSequence: 206 } as const;
+
 export function decodeDelegationFields(bytes: Uint8Array): DelegationFields {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (bytes.length >= 214 && new TextDecoder().decode(bytes.subarray(0, 8)) === V3_CORE_DISCRIMINATOR) {
+    const status = bytes[V3_OFFSETS.delegationStatus];
+    const lastCommitted = Number(view.getBigUint64(V3_OFFSETS.lastCommittedSequence, true));
+    return {
+      delegationStatus: status,
+      // V3 has no separate delegation counter; the commit sequence advances per cycle.
+      delegationSequence: lastCommitted,
+      expectedCommitSequence: Number(view.getBigUint64(V3_OFFSETS.expectedCommitSequence, true)),
+      lastCommittedSequence: lastCommitted,
+      pendingUndelegation: status === 2,
+      globalEventSequence: Number(view.getBigUint64(V3_OFFSETS.globalEventSequence, true)),
+    };
+  }
   return {
     delegationStatus: bytes[FIELD_OFFSETS.delegationStatus],
     delegationSequence: Number(view.getBigUint64(FIELD_OFFSETS.delegationSequence, true)),

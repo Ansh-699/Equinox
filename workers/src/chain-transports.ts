@@ -13,7 +13,9 @@ export class JsonRpcTransport {
   }
 
   async call<T>(method: string, params: unknown[]): Promise<T> {
-    const response = await this.request(this.endpoint, {
+    // Call unbound: workerd's native fetch throws "Illegal invocation" as a method.
+    const request = this.request;
+    const response = await request(this.endpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),

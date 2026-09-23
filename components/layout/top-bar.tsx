@@ -1,11 +1,21 @@
 "use client";
+/* eslint-disable @next/next/no-img-element -- wallet icons are extension data URIs */
 
 import Link from "next/link";
-import { useEffect, useRef } from "react";
-import { WalletCards } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronDown, Compass, WalletCards, Zap } from "lucide-react";
+import { WalletDrawer } from "@/components/wallet/wallet-drawer";
 import type { AppAuth } from "@/components/app-providers";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { DEMO_PROGRAM_ID } from "@/lib/demo-config";
 
-export type ActiveSection = "trade" | "launch" | "portfolio" | "activity" | "settings" | "diagnostics";
+const OPEN_WALLET_EVENT = "stockstream:open-wallet";
+/** Opens the wallet drawer from anywhere (e.g. "Sign in to trade"). */
+export function openWalletDrawer() {
+  window.dispatchEvent(new Event(OPEN_WALLET_EVENT));
+}
+
+export type ActiveSection = "trade" | "launch" | "pre-ipo" | "portfolio" | "activity" | "settings" | "diagnostics";
 
 type AuthDisplayBranch = "signed_in" | "choose_wallet" | "signed_out";
 
@@ -15,26 +25,34 @@ function branchFor(auth: AppAuth): AuthDisplayBranch {
   return "signed_out";
 }
 
-export function TopBar({
-  active,
-  onTabChange,
-  auth,
-}: {
-  active: ActiveSection;
-  /** Present only on the Trade route, where "trade"/"launch" are in-page
-   * tabs rather than separate routes. */
-  onTabChange?: (tab: "trade" | "launch") => void;
-  auth: AppAuth;
-}) {
-  // The topbar's Sign in / Choose wallet / wallet-address+Log out controls
-  // are mutually exclusive -- activating one always unmounts it and mounts
-  // a different element in its place. Left alone, a keyboard user's focus
-  // silently falls back to <body> the instant that happens (found via
-  // tests/browser/keyboard-only.spec.ts), stranding them with no visible
-  // focus indicator anywhere on the page. Move focus to whichever one of
-  // these three replaces the one they were just on.
+const NAV = [
+  { id: "trade", href: "/trade", label: "Trade" },
+  { id: "launch", href: "/launch", label: "Launch" },
+  { id: "pre-ipo", href: "/pre-ipo", label: "Pre-IPO" },
+  { id: "portfolio", href: "/portfolio", label: "Portfolio" },
+  { id: "activity", href: "/activity", label: "Activity" },
+  { id: "settings", href: "/settings", label: "Settings" },
+  { id: "diagnostics", href: "/diagnostics", label: "Diagnostics" },
+] as const satisfies readonly { id: ActiveSection; href: string; label: string }[];
+
+const ICON_LINK = "hidden h-8 w-8 items-center justify-center rounded text-[var(--t-text-2)] transition-colors hover:bg-[var(--t-surface-3)] hover:text-[var(--t-text)] sm:inline-flex";
+
+/** Terminal top bar (SlipStream TerminalNav): identity and sections on the
+ * left; utilities, theme and wallet on the right. 52px, flat. */
+export function TopBar({ active, auth }: { active: ActiveSection; auth: AppAuth }) {
+  // Sign in / Choose wallet / address+Log out are mutually exclusive: activating
+  // one unmounts it. Move focus to whichever replaces it so keyboard users are
+  // never stranded on <body> (tests/browser/keyboard-only.spec.ts).
   const primaryActionRef = useRef<HTMLElement | null>(null);
   const setPrimaryActionRef = (el: HTMLElement | null) => { primaryActionRef.current = el; };
+  const [drawer, setDrawer] = useState(false);
+  const closeDrawer = useCallback(() => { setDrawer(false); primaryActionRef.current?.focus(); }, []);
+  useEffect(() => {
+    const open = () => setDrawer(true);
+    window.addEventListener(OPEN_WALLET_EVENT, open);
+    return () => window.removeEventListener(OPEN_WALLET_EVENT, open);
+  }, []);
+  const walletIcon = auth.walletOptions.find((option) => option.name.toLowerCase() === auth.walletClientType)?.icon;
   const branch = branchFor(auth);
   const previousBranchRef = useRef(branch);
   useEffect(() => {
@@ -43,40 +61,55 @@ export function TopBar({
   }, [branch]);
 
   return (
-    <header className="topbar">
+    <header className="relative flex h-[52px] shrink-0 items-center border-b border-[var(--t-border)] bg-[var(--t-bg)] px-4">
       <a href="#main-content" className="skip-link">Skip to main content</a>
-      <div className="brand"><span className="brand-mark">S</span><span>StockStream</span></div>
-      <nav aria-label="Primary navigation">
-        {onTabChange ? (
-          <>
-            <button className={active === "trade" ? "nav-active" : ""} onClick={() => onTabChange("trade")}>Perps</button>
-            <button className={active === "launch" ? "nav-active" : ""} onClick={() => onTabChange("launch")}>Launch Lab</button>
-          </>
-        ) : (
-          <Link href="/">Perps</Link>
-        )}
-        <Link href="/portfolio" className={active === "portfolio" ? "nav-active" : ""}>Portfolio</Link>
-        <Link href="/activity" className={active === "activity" ? "nav-active" : ""}>Activity</Link>
-        <Link href="/settings" className={active === "settings" ? "nav-active" : ""}>Settings</Link>
-        <Link href="/diagnostics" className={active === "diagnostics" ? "nav-active" : ""}>Diagnostics</Link>
-      </nav>
-      <div className="topbar-meta">
-        <span className="network"><i /> Devnet</span>
-        {auth.walletAddress ? (
-          <>
-            <button ref={setPrimaryActionRef} className="wallet-button" onClick={() => void navigator.clipboard.writeText(auth.walletAddress ?? "")} title={`Copy wallet address (${auth.walletClientType ?? "unknown type"})`}>
-              <WalletCards size={16} /> {auth.walletAddress?.slice(0, 4)}...{auth.walletAddress?.slice(-4)}
-            </button>
-            <button className="wallet-button" onClick={() => void auth.logout()}>Log out</button>
-          </>
-        ) : auth.wallets.length > 0 ? (
-          <Link ref={setPrimaryActionRef} href="/settings" className="wallet-button">
-            <WalletCards size={16} /> Choose wallet ({auth.wallets.length})
+      <Link href="/" className="flex items-center gap-2.5" aria-label="StockStream home">
+        <img src="/favicon.svg" alt="" className="h-6 w-6 rounded" />
+        <span className="text-[15px] font-semibold tracking-tight text-[var(--t-text)]">StockStream</span>
+      </Link>
+      <span className="ml-3 hidden rounded bg-[var(--t-surface-3)] px-2 py-0.5 text-[10px] font-medium text-[var(--t-text-2)] sm:inline">Devnet</span>
+
+      <nav aria-label="Primary navigation" className="ml-6 hidden h-full items-stretch gap-5 md:flex">
+        {NAV.map((item) => (
+          <Link
+            key={item.id}
+            href={item.href}
+            aria-current={active === item.id ? "page" : undefined}
+            className={`relative flex items-center text-[13px] font-medium transition-colors ${
+              active === item.id
+                ? "text-[var(--t-text)] after:absolute after:inset-x-0 after:-bottom-px after:h-[2px] after:bg-[var(--t-text)]"
+                : "text-[var(--t-text-2)] hover:text-[var(--t-text)]"
+            }`}
+          >
+            {item.label}
           </Link>
-        ) : (
-          <button ref={setPrimaryActionRef} className="wallet-button" onClick={auth.login}><WalletCards size={16} /> Sign in</button>
-        )}
+        ))}
+      </nav>
+
+      <div className="ml-auto flex items-center gap-1">
+        <a href={`https://explorer.solana.com/address/${DEMO_PROGRAM_ID}?cluster=devnet`} target="_blank" rel="noopener noreferrer" className={ICON_LINK} aria-label="Program on Solana Explorer" title="Program on Explorer">
+          <Compass className="h-4 w-4" strokeWidth={1.75} />
+        </a>
+        <a href="https://www.magicblock.gg/" target="_blank" rel="noopener noreferrer" className={ICON_LINK} aria-label="MagicBlock" title="MagicBlock">
+          <Zap className="h-4 w-4" strokeWidth={1.75} />
+        </a>
+        <ThemeToggle />
+        <div className="ml-2 flex items-center gap-2">
+          {auth.walletAddress ? (
+            <button ref={setPrimaryActionRef} className="wallet-button wallet-chip" onClick={() => setDrawer(true)} aria-label={`Account ${auth.walletAddress.slice(0, 4)}...${auth.walletAddress.slice(-4)}`}>
+              {walletIcon ? <img src={walletIcon} alt="" className="h-[18px] w-[18px] rounded-[5px]" /> : <WalletCards size={15} />}
+              <span className="font-mono">{auth.walletAddress.slice(0, 4)}...{auth.walletAddress.slice(-4)}</span>
+              <ChevronDown size={14} className="opacity-60" />
+            </button>
+          ) : (
+            <button ref={setPrimaryActionRef} className="wallet-button" onClick={() => setDrawer(true)}>
+              <WalletCards size={15} />
+              {auth.wallets.length > 1 ? `Choose wallet (${auth.wallets.length})` : auth.wallets.length === 1 ? "Finish sign-in" : "Connect wallet"}
+            </button>
+          )}
+        </div>
       </div>
+    <WalletDrawer auth={auth} open={drawer} onClose={closeDrawer} />
     </header>
   );
 }

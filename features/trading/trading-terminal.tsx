@@ -1,17 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CircleAlert } from "lucide-react";
-import { TopBar } from "@/components/layout/top-bar";
+import { openWalletDrawer, TopBar } from "@/components/layout/top-bar";
 import { ExecutionStatusBanner, ProtocolStatusStrip } from "@/components/layout/status-strip";
 import { useAppAuth } from "@/components/app-providers";
 import { isSessionUsable } from "@/lib/session-trading";
-import { createTraderSeat, createV3TraderSeat, deriveV3ExecutionAccounts, initializeSettlementScratch, initializeVault, previewPlaceOrder } from "@/clients/stockstream/src";
+import { ComputeBudgetProgram } from "@solana/web3.js";
+import { cancelAllV3, cancelOrderV3, createTraderSeat, createV3TraderSeat, deriveV3ExecutionAccounts, initializeSettlementScratch, initializeVault, previewPlaceOrder } from "@/clients/stockstream/src";
 import { marketForSymbol } from "@/lib/markets";
 import { useWithdraw, evaluateWithdrawGate } from "@/features/collateral/use-withdraw";
 import { useDeposit } from "@/features/collateral/use-deposit";
 import { resolveCustodyAccounts } from "@/features/collateral/custody-accounts";
 import { useStockStreamProtocol } from "@/features/wallet/use-stockstream-protocol";
+import { useTradingKey } from "@/features/wallet/use-trading-key";
 import { useTradingSession } from "@/features/sessions/use-trading-session";
 import { useSessionOrder } from "@/features/sessions/use-session-order";
 import { SessionPolicyPanel } from "@/features/sessions/session-policy-panel";
@@ -20,41 +21,46 @@ import type { OrderTree } from "@/clients/stockstream/src";
 import { useExecutionStatus } from "@/features/magicblock/use-execution-status";
 import { useV3MarketState } from "@/features/magicblock/use-v3-market-state";
 import { usePosition } from "@/features/positions/use-position";
-import { PositionsPanel } from "@/features/positions/positions-panel";
 import { useMarketClock } from "@/features/oracle/use-market-clock";
 import { deriveOracleSafety, ORACLE_LIFECYCLE_EVENT_KINDS } from "@/lib/oracle-safety";
-import { decimal } from "./format";
-import { MarketPanel } from "./market-panel";
-import { OrderBookPanel, type BookLevel } from "./order-book";
-import { OrderTicket } from "./order-ticket";
+import { MarketBar, MarketPanel } from "./market-panel";
+import { OrderBookDisplay } from "./order-book";
+import { DEFAULT_TICKET, OrderTicket, sizeTicket, type Ticket } from "./order-ticket";
 import { LifecyclePanel } from "./lifecycle-panel";
-import { LaunchLab } from "@/features/launch/launch-lab";
+import { ActivityDrawer } from "./activity-drawer";
+import { ErTxPanel } from "./er-tx-panel";
+import { InstantTradingCard } from "./instant-trading-card";
+import { Spinner } from "@/components/ui/spinner";
+import { useV3Book } from "./use-v3-book";
+import { RESOLUTIONS, useCandles } from "./use-candles";
+import { refreshWalletBalances, useWalletBalances } from "@/features/portfolio/use-wallet-balances";
 import { useOpenOrders } from "@/features/orders/use-open-orders";
 import { OpenOrdersPanel } from "@/features/orders/open-orders-panel";
 import { createV3OpenOrdersAdapter, unimplementedOpenOrdersAdapter } from "@/lib/open-orders";
 import type { TransactionPreview } from "@/lib/execution-boundary";
 import { recordSignature } from "@/lib/last-signature";
-import { publicMarketApiUrl, publicV3Core } from "@/lib/demo-config";
+import { claimTestFunds } from "@/lib/faucet-client";
+import { DEMO_ORACLE_SNAPSHOT, publicMarketApiUrl, publicV3Core } from "@/lib/demo-config";
+import { SolanaRpcTransport } from "@/lib/rpc-transport";
+import { marketStreamEvents } from "@/lib/market-stream-events";
+import { buildV3OrderInstructions } from "./v3-order";
+import { firstFreeSeat, seatFromPositions } from "./rollup-seat";
 
 const marketApiUrl = publicMarketApiUrl;
+const ONBOARDING_DEPOSIT = 100_000_000n; // 100 test USDC
 const publicDemoReadOnly = process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_STOCKSTREAM_DEMO_READ_ONLY !== "false";
 
-interface MarketEvent { kind: string; sequence?: number; payload: { bids?: BookLevel[]; asks?: BookLevel[]; kind?: string } }
+interface MarketEvent { kind: string; sequence?: number; payload: { kind?: string } }
 
 export function TradingTerminal() {
   const auth = useAppAuth();
-  const [side, setSide] = useState<"short" | "long">("short");
-  const [tab, setTab] = useState<"trade" | "launch">("trade");
-  const [quantity, setQuantity] = useState("12");
-  const [limitPrice, setLimitPrice] = useState("");
-  const [orderType, setOrderType] = useState<"limit" | "post-only" | "ioc" | "oracle-pegged">("limit");
-  const [reduceOnly, setReduceOnly] = useState(false);
-  const [expiresInMinutes, setExpiresInMinutes] = useState("");
+  const [ticket, setTicket] = useState<Ticket>(DEFAULT_TICKET);
+  const [orderPending, setOrderPending] = useState(false);
+  const [cancelPending, setCancelPending] = useState(false);
+  const [faucetPending, setFaucetPending] = useState(false);
   const [notice, setNotice] = useState("Live submission requires verified Pyth pricing, USDC custody and MagicBlock delegation.");
   const [sessionActionReason, setSessionActionReason] = useState<SessionActionResult["reason"]>(null);
   const [marketSymbol, setMarketSymbol] = useState(process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_SYMBOL ?? "AAPL-PERP");
-  const [book, setBook] = useState<{ bids: BookLevel[]; asks: BookLevel[] }>({ bids: [], asks: [] });
-  const [marketFeedStatus, setMarketFeedStatus] = useState<"connecting" | "live" | "unavailable">(marketApiUrl ? "connecting" : "unavailable");
   const [latestLifecycleEventKind, setLatestLifecycleEventKind] = useState<string | null>(null);
   const lifecycleEventRef = useRef<{ sequence: number; kind: string } | null>(null);
   const [nowUnixSeconds, setNowUnixSeconds] = useState(0);
@@ -70,36 +76,89 @@ export function TradingTerminal() {
   }, []);
   const marketConfig = marketForSymbol(marketSymbol);
   const marketAddress = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_ADDRESS ?? (publicV3Core ? marketConfig.marketPda : null);
-  const protocol = useStockStreamProtocol(auth.authenticated ? marketAddress : null);
-  const session = useTradingSession(protocol, auth.walletAddress, marketAddress, 0);
+  // The in-app trading key (lib/trading-key.ts) is the trader: it signs seats,
+  // deposits, orders and withdrawals silently once the wallet unlocked it.
+  const tradingKey = useTradingKey(auth);
+  const trader = tradingKey.signer?.address ?? auth.walletAddress;
+  const traderAuth = tradingKey.signer
+    ? { privyAuthenticated: false, getAccessToken: async () => null, signMessage: (_address: string, bytes: Uint8Array) => tradingKey.signer!.signMessage(bytes) }
+    : auth;
+  const protocol = useStockStreamProtocol(auth.authenticated ? marketAddress : null, tradingKey.signer);
+  // V3: each wallet uses its own seat (or the first free one), never seat 0 by default.
+  const position = usePosition(protocol?.rpc ?? null, marketAddress, 0, { marketApiUrl, core: publicV3Core, ...(publicV3Core ? { trader: trader ?? null } : {}) });
+  const l1SeatIndex = position.seatIndex ?? 0;
+  const session = useTradingSession(protocol, trader, marketAddress, l1SeatIndex);
   const handleSessionResult = (result: SessionActionResult) => { setNotice(result.detail ? `${result.message}: ${result.detail}` : result.message); setSessionActionReason(result.reason); };
   const executionStatus = useExecutionStatus(marketApiUrl, marketSymbol);
   const v3MarketState = useV3MarketState(marketApiUrl, publicV3Core);
   const sessionOrder = useSessionOrder(protocol?.rpc ?? null, session.status, auth, handleSessionResult, session.advanceNonce, executionStatus);
   const canTrade = session.status !== null && isSessionUsable(session.status);
-  const position = usePosition(protocol?.rpc ?? null, marketAddress, 0, { marketApiUrl, core: publicV3Core });
   const openOrdersAdapter = useMemo(
     () => marketApiUrl && publicV3Core
       ? createV3OpenOrdersAdapter({ marketApiUrl, core: publicV3Core })
       : unimplementedOpenOrdersAdapter,
     [],
   );
-  const openOrders = useOpenOrders(openOrdersAdapter, marketAddress, 0);
-  const marketClock = useMarketClock(protocol?.rpc ?? null, marketAddress);
+  const openOrders = useOpenOrders(openOrdersAdapter, marketAddress, l1SeatIndex);
+  // The oracle clock is public chain state: read it before sign-in too.
+  const readRpc = useMemo(() => new SolanaRpcTransport(process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://api.devnet.solana.com"), []);
+  const marketClock = useMarketClock(
+    DEMO_ORACLE_SNAPSHOT ? readRpc : protocol?.rpc ?? null,
+    DEMO_ORACLE_SNAPSHOT ? publicV3Core || null : marketAddress,
+    DEMO_ORACLE_SNAPSHOT,
+  );
   const oracleSafety = deriveOracleSafety({
     oracleValid: marketClock?.oracleValid ?? null,
     lastVerifiedOracleTimestamp: marketClock?.lastVerifiedOracleTimestamp ?? null,
     nowUnixSeconds,
     latestLifecycleEventKind,
   });
-  const withdraw = useWithdraw(protocol);
-  const deposit = useDeposit(protocol);
+  const withdraw = useWithdraw(protocol, setNotice);
+  // The main wallet's own signer, for collateral left in a seat the wallet itself owns.
+  const walletProtocol = useStockStreamProtocol(auth.authenticated ? marketAddress : null);
+  const walletWithdraw = useWithdraw(walletProtocol, setNotice);
+  const deposit = useDeposit(protocol, setNotice);
   const withdrawGate = evaluateWithdrawGate(executionStatus, position.reconciliationStatus);
-  const quantityNumber = Number(quantity) || 0;
-  const bestBid = book.bids[0] ? decimal(book.bids[0].price, 1_000_000) : Number.NaN;
-  const bestAsk = book.asks[0] ? decimal(book.asks[0].price, 1_000_000) : Number.NaN;
-  const markPrice = Number.isFinite(bestBid) && Number.isFinite(bestAsk) ? (bestBid + bestAsk) / 2 : Number.NaN;
-  const notional = Number.isFinite(markPrice) ? quantityNumber * markPrice : Number.NaN;
+  // While the market trades in the rollup, withdrawals go through the rollup outbox, except mid-commit.
+  const rollupWithdraw = !!executionStatus?.marketDelegated && !executionStatus.commitPending;
+  const book = useV3Book(marketApiUrl, publicV3Core || undefined, executionStatus ? executionStatus.marketDelegated : null);
+  // While delegated, the rollup is the source of truth for seats (the L1 copy
+  // is frozen), so resolve the wallet's seat from the live bundle.
+  const fromRollup = !!executionStatus?.marketDelegated && !!trader && book.updatedAt !== null;
+  const rollupSeat = useMemo(() => (fromRollup ? seatFromPositions(book.positions, trader!) : null), [fromRollup, book.positions, trader]);
+  const seatIndex = fromRollup ? rollupSeat?.index ?? firstFreeSeat(book.positions) : l1SeatIndex;
+  const seat = fromRollup ? rollupSeat?.view ?? null : position.seat;
+  // A signed-in trader whose seat has not been read yet (never "no seat" while unknown).
+  const seatLoading = !!trader && (executionStatus === null || (executionStatus.marketDelegated && book.updatedAt === null));
+  const walletSeatView = useMemo(() => (fromRollup && tradingKey.signer && auth.walletAddress ? seatFromPositions(book.positions, auth.walletAddress) : null), [fromRollup, tradingKey.signer, auth.walletAddress, book.positions]);
+  const walletSeat = walletSeatView ? { index: walletSeatView.index, available: walletSeatView.view.availableCollateral } : null;
+  function withdrawWalletSeat() {
+    if (!walletSeatView || !auth.walletAddress) return;
+    const accounts = resolveCustodyAccounts(auth.walletAddress, marketAddress, marketConfig, walletSeatView.index);
+    if (accounts) void walletWithdraw.submitWithdraw(accounts, walletSeatView.view.availableCollateral, withdrawGate, walletSeatView.view, rollupWithdraw);
+  }
+  // While delegated, "my open orders" come straight from the live rollup book.
+  const liveOpenOrders = useMemo((): typeof openOrders => {
+    if (seatLoading) return { kind: "loading" };
+    if (!fromRollup) return openOrders;
+    const mine = rollupSeat ? book.orders.filter((order) => order.owner === rollupSeat.index) : [];
+    return mine.length
+      ? { kind: "ready", stale: false, orders: mine.map((order) => ({ ...order, tree: "fixed" as const, filledQuantity: 0n, expiresAt: order.expiresAt === 2n ** 64n - 1n ? null : order.expiresAt })) }
+      : { kind: "empty" };
+  }, [seatLoading, fromRollup, openOrders, rollupSeat, book.orders]);
+  // The headline price is the verified Pyth snapshot; the book mid only stands in without one.
+  const bookMid = book.bids[0] && book.asks[0] ? (book.bids[0].price + book.asks[0].price) / 2 : null;
+  // A stale snapshot (it only refreshes when someone trades) is not the price:
+  // then the freshest Pyth close stands in, and the market bar says so.
+  const snapshotStale = !!marketClock && nowUnixSeconds - Number(marketClock.lastVerifiedOracleTimestamp) > 10;
+  const latestClose = useCandles(marketApiUrl, marketSymbol, RESOLUTIONS[0], null).candles.at(-1)?.c ?? null;
+  const indexPrice = snapshotStale && latestClose !== null ? latestClose : marketClock?.oracle?.price ?? latestClose;
+  const markPrice = indexPrice ?? bookMid;
+  const sized = sizeTicket(ticket, markPrice, marketConfig.initialMarginBps);
+  const quantity = BigInt(sized?.shares ?? 0);
+  const orderTypeFor = (t: Ticket) => (t.kind === "market" ? "ioc" : t.postOnly ? "post-only" : "limit");
+  const walletCollateral = useMemo(() => resolveCustodyAccounts(trader, marketAddress, marketConfig, seatIndex)?.sourceOrDestination?.toString() ?? null, [trader, marketAddress, marketConfig, seatIndex]);
+  const balances = useWalletBalances(readRpc, trader, walletCollateral);
 
   useEffect(() => {
     if (!marketApiUrl) {
@@ -108,11 +167,6 @@ export function TradingTerminal() {
 
     let stopped = false;
     const applyEvents = (events: MarketEvent[]) => {
-      const latestBook = [...events].reverse().find((event) => event.kind === "book");
-      if (latestBook) {
-        setBook({ bids: latestBook.payload.bids ?? [], asks: latestBook.payload.asks ?? [] });
-        setMarketFeedStatus("live");
-      }
       // Tracks the most recent oracle/market-lifecycle event kind (a fully
       // decoded, verified discriminator name -- see lib/oracle-safety.ts)
       // for the oracle safety banner. Never gated on a "book" event being
@@ -135,53 +189,61 @@ export function TradingTerminal() {
 
     void fetch(`${marketApiUrl}/v1/markets/${marketSymbol}/snapshot`)
       .then(async (response) => response.ok ? response.json() : Promise.reject(new Error("snapshot unavailable")))
-      .then((data: { events: MarketEvent[] }) => { if (!stopped) applyEvents(data.events); })
-      .catch(() => { if (!stopped) setMarketFeedStatus("unavailable"); });
+      .then((data: unknown) => {
+        if (stopped) return;
+        applyEvents(marketStreamEvents<MarketEvent>(data));
+      })
+      .catch(() => undefined);
 
     const socketUrl = new URL(`${marketApiUrl}/v1/markets/${marketSymbol}/stream`);
     socketUrl.protocol = socketUrl.protocol === "https:" ? "wss:" : "ws:";
     const socket = new WebSocket(socketUrl);
     socket.onmessage = (message) => {
-      const data = JSON.parse(message.data) as MarketEvent | { events: MarketEvent[] };
-      if ("events" in data) applyEvents(data.events);
-      else applyEvents([data]);
+      applyEvents(marketStreamEvents<MarketEvent>(JSON.parse(message.data)));
     };
-    socket.onerror = () => { if (!stopped) setMarketFeedStatus("unavailable"); };
+    socket.onerror = () => undefined;
     return () => { stopped = true; socket.close(); };
   }, [marketSymbol]);
 
-  async function runLifecycle() {
-    if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: lifecycle writes are disabled."); return; }
-    if (!auth.walletAddress || !marketAddress || !protocol) { setNotice("Configure the market, sign in, and connect a wallet before creating a seat."); return; }
+  async function runLifecycle(): Promise<boolean> {
+    if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: lifecycle writes are disabled."); return false; }
+    if (!trader || !marketAddress || !protocol) { setNotice("Configure the market, sign in, and connect a wallet before creating a seat."); return false; }
     try {
       const v3Core = publicV3Core;
       if (v3Core) {
-        // A seat mutates the V3 core and seat/event shards, so it is an L1
-        // lifecycle write. Never send it while the bundle is delegated or in
-        // transition; the authoritative execution-status route is the gate.
-        if (executionStatus?.orderRoutingDomain !== "l1") {
-          setNotice("CreateV3TraderSeat blocked: the V3 bundle is not currently L1-owned.");
-          return;
+        // Seats are created wherever the bundle lives: on L1, or inside the
+        // MagicBlock rollup while delegated. Never mid-transition.
+        const domain = executionStatus?.orderRoutingDomain;
+        if (domain !== "l1" && domain !== "er") {
+          setNotice("CreateV3TraderSeat blocked: the V3 bundle is between L1 and the rollup right now.");
+          return false;
         }
-        const execution = deriveV3ExecutionAccounts(v3Core, auth.walletAddress);
-        const seat = createV3TraderSeat({ core: v3Core, seatShards: execution.seatShards, eventShards: execution.eventShards, trader: auth.walletAddress }, 0);
+        const execution = deriveV3ExecutionAccounts(v3Core, trader);
+        const seat = createV3TraderSeat({ core: v3Core, seatShards: execution.seatShards, eventShards: execution.eventShards, trader }, seatIndex);
         const preview: TransactionPreview = {
           instruction: "CreateV3TraderSeat",
           programId: seat.programId.toBase58(),
           accounts: seat.keys.map((meta) => ({ address: meta.pubkey.toBase58(), signer: meta.isSigner, writable: meta.isWritable })),
           status: "constructed",
         };
+        if (domain === "er") {
+          setNotice("Creating your seat in the MagicBlock rollup…");
+          await protocol.service.executeEr(preview, [seat], [v3Core, ...execution.seatShards, ...execution.eventShards].map(String));
+          setNotice(`Seat #${seatIndex} created in the rollup. Deposit USDC to start trading.`);
+          return true;
+        }
         setNotice("Submitting CreateV3TraderSeat…");
         const result = await protocol.service.executeL1(preview, [seat]);
         recordSignature("CreateV3TraderSeat", result.signature, "l1");
         setNotice(`CreateV3TraderSeat ${result.confirmation} — signature ${result.signature.slice(0, 8)}…${result.signature.slice(-8)}.`);
-        return;
+        return true;
       }
-      const seat = createTraderSeat({ market: marketAddress, authority: auth.walletAddress }, 0);
+      const seat = createTraderSeat({ market: marketAddress, authority: trader }, 0);
       const scratchAddress = process.env.NEXT_PUBLIC_STOCKSTREAM_SETTLEMENT_SCRATCH_ADDRESS ?? marketConfig.scratchPda(0);
-      const scratch = scratchAddress ? initializeSettlementScratch({ market: marketAddress, authority: auth.walletAddress, settlementScratch: scratchAddress }, 0) : null;
+      const scratch = scratchAddress ? initializeSettlementScratch({ market: marketAddress, authority: trader, settlementScratch: scratchAddress }, 0) : null;
       setNotice(`Constructed ${scratch ? "CreateTraderSeat + InitializeSettlementScratch" : "CreateTraderSeat"} (${seat.keys.length + (scratch?.keys.length ?? 0)} account metas). V2 lifecycle writes remain preview-only.`);
-    } catch (error) { setNotice(error instanceof Error ? error.message : "Could not construct lifecycle action"); }
+      return false;
+    } catch (error) { setNotice(error instanceof Error ? error.message : "Could not construct lifecycle action"); return false; }
   }
 
   function constructVault() {
@@ -195,136 +257,316 @@ export function TradingTerminal() {
     setNotice(`Constructed InitializeVault with ${ix.keys.length} accounts. Token CPI runtime remains unavailable in this environment.`);
   }
 
-  // Shared by LifecyclePanel's manual order-key form and OpenOrdersPanel's
-  // per-row Replace button: both replace using the CURRENT order-ticket
-  // side/size/price/type, matching handlers.rs::replace_order semantics
-  // (replace is place-with-a-cancel, not a partial edit).
+  /** Legacy (V2) session orders price in the 1e6 book scale. */
+  const sessionOrderFields = () => ({
+    settlementScratch: process.env.NEXT_PUBLIC_STOCKSTREAM_SETTLEMENT_SCRATCH_ADDRESS ?? marketConfig.scratchPda(0),
+    side: (ticket.side === "long" ? "bid" : "ask") as "bid" | "ask",
+    tree: "fixed" as OrderTree,
+    postOnly: orderTypeFor(ticket) === "post-only",
+    immediateOrCancel: orderTypeFor(ticket) === "ioc",
+    reduceOnly: ticket.reduceOnly,
+    quantity,
+    priceOrOffset: BigInt(Math.round((Number(sized?.limitPriceUsd) || 0) * 1_000_000)),
+    clientOrderId: BigInt(Date.now()),
+  });
+
+  // Shared by the manual order-key form and OpenOrdersPanel's per-row Replace:
+  // both replace with the CURRENT ticket (replace is place-with-a-cancel).
+  /** Cancels one order (or up to 8) straight in the rollup, signed by the trading key. */
+  async function cancelV3(orderKey: bigint | null) {
+    if (!protocol || !trader || !publicV3Core || !DEMO_ORACLE_SNAPSHOT || !seat) return;
+    const execution = { ...deriveV3ExecutionAccounts(publicV3Core, trader), oracleSnapshot: DEMO_ORACLE_SNAPSHOT };
+    const ix = orderKey === null ? cancelAllV3(execution, seatIndex, 8) : cancelOrderV3(execution, seatIndex, orderKey);
+    const preview: TransactionPreview = { instruction: orderKey === null ? "CancelAll" : "CancelOrder", programId: ix.programId.toBase58(), accounts: ix.keys.map((meta) => ({ address: meta.pubkey.toBase58(), signer: meta.isSigner, writable: meta.isWritable })), status: "constructed" };
+    setCancelPending(true);
+    try {
+      await protocol.service.executeEr(preview, [ComputeBudgetProgram.setComputeUnitLimit({ units: 1_000_000 }), ix], [execution.core, ...execution.bookPages, ...execution.seatShards, ...execution.eventShards].map(String));
+      setNotice(orderKey === null ? "Cancelled your open orders." : "Order cancelled.");
+    } catch (error) {
+      setNotice(`Cancel failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setCancelPending(false);
+    }
+  }
+
   function replaceWithCurrentTicket(orderKey: bigint) {
-    const settlementScratch = process.env.NEXT_PUBLIC_STOCKSTREAM_SETTLEMENT_SCRATCH_ADDRESS ?? marketConfig.scratchPda(0);
-    void sessionOrder.replaceSessionOrder(orderKey, {
-      settlementScratch,
-      side: side === "long" ? "bid" : "ask",
-      tree: (orderType === "oracle-pegged" ? "oracle-pegged" : "fixed") as OrderTree,
-      postOnly: orderType === "post-only",
-      immediateOrCancel: orderType === "ioc",
-      reduceOnly,
-      quantity: BigInt(quantityNumber),
-      priceOrOffset: BigInt(limitPrice || 0),
-      clientOrderId: BigInt(Date.now()),
+    void sessionOrder.replaceSessionOrder(orderKey, sessionOrderFields());
+  }
+
+  /** Main-wallet V3 order: routed to MagicBlock ER while the market is delegated, else L1. */
+  async function placeV3Order() {
+    if (!protocol || !trader || !publicV3Core || !DEMO_ORACLE_SNAPSHOT || !sized) return;
+    if (!seat) { setNotice("Create your seat and deposit collateral before placing an order."); return; }
+    if (!marketClock) { setNotice("Waiting for the verified price before placing an order."); return; }
+    const built = buildV3OrderInstructions({
+      core: publicV3Core, wallet: trader, oracleSnapshot: DEMO_ORACLE_SNAPSHOT, seatIndex,
+      side: ticket.side === "long" ? "bid" : "ask", orderType: orderTypeFor(ticket), reduceOnly: ticket.reduceOnly, quantity,
+      limitPriceUsd: sized.limitPriceUsd, expiresInMinutes: Number(ticket.expiresInMinutes) || 0, oracleClock: marketClock.lastVerifiedOracleTimestamp,
     });
+    if ("error" in built) { setNotice(built.error); return; }
+    const [, order] = built.instructions;
+    const preview: TransactionPreview = { instruction: "PlaceOrder", programId: order.programId.toBase58(), accounts: order.keys.map((meta) => ({ address: meta.pubkey.toBase58(), signer: meta.isSigner, writable: meta.isWritable })), status: "constructed" };
+    setOrderPending(true);
+    try {
+      // The indexer's live execution status already says where the market lives: no extra round trip.
+      if (executionStatus?.orderRoutingDomain === "er") {
+        setNotice("Placing your order in the MagicBlock rollup…");
+        await protocol.service.executeEr(preview, built.instructions, built.writableAccounts);
+        setNotice("Order accepted by the MagicBlock rollup.");
+      } else {
+        setNotice("Placing your order on Solana L1 (the market is not delegated right now)…");
+        const result = await protocol.service.executeL1(preview, built.instructions, { freshOracle: true });
+        recordSignature("PlaceOrder", result.signature, "l1");
+        setNotice(`Order ${result.confirmation} on L1.`);
+      }
+    } catch (error) {
+      setNotice(`Order not placed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setOrderPending(false);
+    }
   }
 
   function submitOrder() {
+    if (!auth.authenticated) { openWalletDrawer(); return; }
     if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: live order submission is unavailable."); return; }
-    const settlementScratch = process.env.NEXT_PUBLIC_STOCKSTREAM_SETTLEMENT_SCRATCH_ADDRESS ?? marketConfig.scratchPda(0);
+    if (!canTrade && walletTrading) { void placeV3Order(); return; }
     if (canTrade) {
-      const minutes = Number(expiresInMinutes) || 0;
+      const minutes = Number(ticket.expiresInMinutes) || 0;
       if (minutes > 0 && !marketClock?.oracleValid) { setNotice("Cannot set an order expiration: the market's oracle clock is unavailable."); return; }
       void sessionOrder.placeSessionOrder({
-        settlementScratch,
-        side: side === "long" ? "bid" : "ask",
-        tree: (orderType === "oracle-pegged" ? "oracle-pegged" : "fixed") as OrderTree,
-        postOnly: orderType === "post-only",
-        immediateOrCancel: orderType === "ioc",
-        reduceOnly,
-        quantity: BigInt(quantityNumber),
-        priceOrOffset: BigInt(limitPrice || 0),
-        // Unix seconds, anchored to the market's own oracle-verified clock
-        // (handlers.rs::place_order_core reads header.last_verified_oracle_
-        // timestamp as "now" for expiry, not Clock::get() or wall-clock).
+        ...sessionOrderFields(),
+        // Anchored to the market's oracle-verified clock, which the program reads as "now" for expiry.
         expiresAt: minutes > 0 && marketClock ? marketClock.lastVerifiedOracleTimestamp + BigInt(minutes * 60) : undefined,
-        clientOrderId: BigInt(Date.now()),
       });
       return;
     }
-    if (!auth.authenticated) { setNotice("Sign in with Privy to construct a safe PlaceOrder preview. No transaction was created."); return; }
-    if (!marketAddress || !auth.walletAddress || !settlementScratch) { setNotice("Preview unavailable: configure market and settlement scratch addresses. No transaction was created."); return; }
+    const fields = sessionOrderFields();
+    if (!marketAddress || !auth.walletAddress || !fields.settlementScratch) { setNotice("Preview unavailable: configure market and settlement scratch addresses. No transaction was created."); return; }
     try {
-      const preview = previewPlaceOrder({ market: marketAddress, authority: auth.walletAddress, settlementScratch, seatIndex: 0, side: side === "long" ? "bid" : "ask", quantity: BigInt(quantityNumber), priceOrOffset: BigInt(limitPrice || 0), clientOrderId: 0n });
+      const preview = previewPlaceOrder({ market: marketAddress, authority: auth.walletAddress, settlementScratch: fields.settlementScratch, seatIndex: 0, side: fields.side, quantity, priceOrOffset: fields.priceOrOffset, clientOrderId: 0n });
       setNotice(`Unsigned ${preview.instruction} preview: ${preview.accounts.length} accounts, ${preview.signers.length} signer, margin ${preview.estimatedInternalMargin}. Authorize a trading session to submit for real.`);
     } catch (error) { setNotice(error instanceof Error ? error.message : "Could not construct order preview"); }
   }
 
-  return (
-    <main className="shell">
-      <TopBar active={tab} onTabChange={setTab} auth={auth} />
-      <section className="demo-banner" aria-label="Demo limitations">
-        <strong>Read-only Devnet demo</strong>
-        <span>Known V3 core configured · local deterministic trading fixtures available · live trading unavailable (Pyth feed 922 not entitled) · session relay unavailable (Privy/relayer credentials) · withdrawals unavailable (MagicBlock restoration).</span>
-      </section>
-      <ExecutionStatusBanner display={executionStatus} canTrade={canTrade} oracleSafety={oracleSafety} />
-      <ProtocolStatusStrip marketSymbol={marketSymbol} onMarketSymbolChange={setMarketSymbol} authenticated={auth.authenticated} v3={v3MarketState} />
+  // V3 orders can be signed by the main wallet directly (no session key needed).
+  const walletTrading = !!publicV3Core && !!DEMO_ORACLE_SNAPSHOT && auth.authenticated && !!protocol;
+  const live = marketClock?.oracle ? { price: marketClock.oracle.price, publishTime: Number(marketClock.lastVerifiedOracleTimestamp) } : null;
+  const oracleAgeSeconds = marketClock && nowUnixSeconds ? Math.max(0, nowUnixSeconds - Number(marketClock.lastVerifiedOracleTimestamp)) : null;
 
-      {tab === "trade" ? (
-        <div id="main-content" tabIndex={-1} className="terminal-grid">
-          <MarketPanel marketSymbol={marketSymbol} marketFeedStatus={marketFeedStatus} markPrice={markPrice} bestBid={bestBid} bestAsk={bestAsk} />
-          <OrderBookPanel book={book} markPrice={markPrice} bestBid={bestBid} bestAsk={bestAsk} />
-          <OrderTicket
-            side={side}
-            onSideChange={setSide}
-            quantity={quantity}
-            onQuantityChange={setQuantity}
-            limitPrice={limitPrice}
-            onLimitPriceChange={setLimitPrice}
-            orderType={orderType}
-            onOrderTypeChange={setOrderType}
-            reduceOnly={reduceOnly}
-            onReduceOnlyChange={setReduceOnly}
-            expiresInMinutes={expiresInMinutes}
-            onExpiresInMinutesChange={setExpiresInMinutes}
+  /** Devnet faucet: 1,000 test USDC (and a little SOL for fees) to the signed-in wallet. */
+  async function claimFunds() {
+    if (!trader) { openWalletDrawer(); return; }
+    setFaucetPending(true);
+    setNotice("Sending test funds…");
+    try { setNotice(await claimTestFunds(traderAuth, trader)); } finally { setFaucetPending(false); refreshWalletBalances(); }
+  }
+
+  /** One click from a connected wallet to a funded seat: unlock the trading
+   * key (the only wallet prompt), then faucet → seat → deposit, all signed
+   * silently by the trading key. */
+  const [onboarding, setOnboarding] = useState<string | null>(null);
+  const [autoStart, setAutoStart] = useState(false);
+  async function startTrading() {
+    if (!auth.walletAddress) { openWalletDrawer(); return; }
+    if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: onboarding is unavailable."); return; }
+    if (!tradingKey.signer) {
+      setOnboarding("Unlocking trading account…");
+      try { await tradingKey.unlock(); setAutoStart(true); }
+      catch (error) { setNotice(`Trading account not unlocked: ${error instanceof Error ? error.message : String(error)}`); }
+      finally { setOnboarding(null); }
+      return;
+    }
+    if (!protocol || !trader || !walletCollateral) return;
+    const amount = ONBOARDING_DEPOSIT;
+    try {
+      let usdc = await readRpc.tokenBalance(walletCollateral).catch(() => 0n);
+      const sol = await readRpc.solBalance(trader).catch(() => 0n);
+      if (!seat && (usdc < amount || sol < 10_000_000n)) {
+        setOnboarding("1/3 · Funding…");
+        setNotice("1/3 · Funding your trading account with test USDC and SOL…");
+        const message = await claimTestFunds(traderAuth, trader);
+        refreshWalletBalances();
+        for (let attempt = 0; attempt < 30 && usdc < amount; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1_000));
+          usdc = await readRpc.tokenBalance(walletCollateral).catch(() => 0n);
+        }
+        refreshWalletBalances();
+        if (usdc < amount) { setNotice(message); return; }
+      }
+      if (!seat) {
+        setOnboarding("2/3 · Creating seat…");
+        if (!(await runLifecycle())) return;
+      }
+      setOnboarding("3/3 · Depositing…");
+      const accounts = resolveCustodyAccounts(trader, marketAddress, marketConfig, seatIndex);
+      if (accounts) await deposit.submitDeposit(accounts, amount, executionStatus?.marketDelegated ?? false);
+    } finally {
+      setOnboarding(null);
+      refreshWalletBalances();
+    }
+  }
+  useEffect(() => {
+    if (!autoStart || !protocol || !tradingKey.signer) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setAutoStart(false);
+    void startTrading();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart, protocol, tradingKey.signer]);
+
+
+  // Anything signing or confirming right now: its label greys out every other action.
+  const busy = onboarding
+    ?? (tradingKey.unlocking ? "Waiting for your wallet signature…" : null)
+    ?? (deposit.pending ? "Depositing…" : null)
+    ?? (withdraw.pending || walletWithdraw.pending ? "Withdrawing…" : null)
+    ?? (orderPending || sessionOrder.pending ? "Placing your order in the rollup…" : null)
+    ?? (cancelPending ? "Cancelling in the rollup…" : null)
+    ?? (faucetPending ? "Sending test funds…" : null);
+  const blocker = busy && !orderPending ? busy : !auth.authenticated
+    ? null
+    : !sized
+      ? ticket.kind === "limit" && !(Number(ticket.price) > 0) ? "Enter a limit price" : markPrice === null ? "Waiting for the verified price" : "Enter an amount"
+      : sized.shares <= 0 ? "Below one share" : null;
+  const tickerName = marketSymbol.replace("-PERP", "");
+  const ctaLabel = !auth.authenticated
+    ? "Sign in to trade"
+    : `${canTrade || walletTrading ? "Place order" : "Preview order"} · ${ticket.side === "long" ? "Long" : "Short"} ${sized?.shares ?? 0} ${tickerName}`;
+  const available = seat ? Number(seat.availableCollateral) / 1e6 : null;
+
+  const guard = (action: string, run: () => void) => () => { if (publicDemoReadOnly) { setNotice(`Read-only Devnet demo: ${action} is unavailable.`); return; } run(); };
+  const onCancelOrder = (orderKey: bigint) => guard("order cancellation", () => void (walletTrading && !canTrade ? cancelV3(orderKey) : sessionOrder.cancelSessionOrder(orderKey)))();
+  const onCancelAllOrders = guard("order cancellation", () => void (walletTrading && !canTrade ? cancelV3(null) : sessionOrder.cancelAllSessionOrders(4)));
+
+  return (
+    <div className="terminal flex min-h-screen flex-col xl:h-screen xl:overflow-hidden">
+      <TopBar active="trade" auth={auth} />
+      <MarketBar
+        marketSymbol={marketSymbol}
+        onMarketSymbolChange={setMarketSymbol}
+        marketApiUrl={marketApiUrl}
+        live={live}
+        price={indexPrice}
+        oracle={marketClock?.oracle ?? null}
+        oracleAgeSeconds={oracleAgeSeconds}
+        delegated={executionStatus ? executionStatus.marketDelegated : null}
+        lastCommit={executionStatus ? String(executionStatus.lastCommittedL1Sequence) : v3MarketState?.lastCommittedSequence != null ? String(v3MarketState.lastCommittedSequence) : null}
+      />
+
+      <main id="main-content" tabIndex={-1} className="flex min-h-0 flex-1 flex-col outline-none xl:flex-row">
+        {/* Chart + activity. Owns the slack at xl; fixed height while stacked. */}
+        <div className="tk-col order-2 flex min-h-0 min-w-0 flex-col xl:order-none xl:flex-1">
+          <div className="h-[420px] shrink-0 xl:h-auto xl:min-h-0 xl:flex-1">
+            <MarketPanel marketSymbol={marketSymbol} marketApiUrl={marketApiUrl} live={live} />
+          </div>
+          <ActivityDrawer
+            aside={<ErTxPanel marketApiUrl={marketApiUrl} />}
+            loading={seatLoading}
+            signedIn={!!trader}
+            seat={seat}
+            seatError={position.error}
+            seatIndex={trader && seat ? seatIndex : null}
+            symbol={marketSymbol}
             markPrice={markPrice}
-            notional={notional}
-            authenticated={auth.authenticated}
-            canTrade={canTrade}
-            marketConfig={marketConfig}
+            trades={book.trades}
+            openOrders={
+              <OpenOrdersPanel
+                state={liveOpenOrders}
+                pending={sessionOrder.pending}
+                onCancel={onCancelOrder}
+                onReplace={(orderKey) => guard("order replacement", () => replaceWithCurrentTicket(orderKey))()}
+                onCancelAll={onCancelAllOrders}
+              />
+            }
+          />
+        </div>
+
+        {/* Depth. */}
+        <div className="tk-col order-3 flex h-[560px] w-full shrink-0 flex-col xl:order-none xl:h-auto xl:w-[320px]">
+          <OrderBookDisplay book={book} symbol={marketSymbol} onPickPrice={(price) => setTicket((t) => ({ ...t, kind: "limit", price: price.toFixed(2) }))} />
+        </div>
+
+        {/* Entry, wallet, and system truth. */}
+        <div className="tk-col slim-scroll order-1 flex w-full shrink-0 flex-col xl:order-none xl:w-[340px] xl:overflow-y-auto">
+          <OrderTicket
+            ticket={ticket}
+            onChange={setTicket}
+            ticker={tickerName}
+            markPrice={markPrice}
+            maxLeverage={marketConfig.maximumLeverage}
+            initialMarginBps={marketConfig.initialMarginBps}
+            availableUsd={available}
+            ctaLabel={ctaLabel}
+            blocker={blocker}
+            pending={orderPending || sessionOrder.pending}
+            footnote={canTrade ? `Session key active — orders sign locally, no wallet popup.` : walletTrading ? "Orders sign with your wallet and route to the MagicBlock rollup while the market is delegated." : `Session scope: ${marketConfig.symbol}. Withdrawals and collateral transfers are excluded.`}
             onSubmit={submitOrder}
           />
+          <div className="notice flex items-start gap-2 border-b border-[var(--t-border)] px-3 py-2.5 text-[11.5px] leading-snug text-[var(--t-text-2)]" role="status">
+            {busy ? <Spinner className="mt-px h-3.5 w-3.5 text-[var(--t-up)]" /> : null}
+            <span>{notice}</span>
+            {sessionActionReason ? <span className="text-[var(--t-down)]"> [{sessionActionReason}]</span> : null}
+          </div>
           <LifecyclePanel
-            onSeatAndScratch={runLifecycle}
+            walletAddress={trader}
+            privyLabel={tradingKey.signer ? "in-app trading account · signs silently" : [auth.userLabel, auth.walletClientType === "privy" ? "embedded wallet" : auth.walletClientType].filter(Boolean).join(" · ") || "wallet"}
+            onSignIn={openWalletDrawer}
+            walletUsdc={balances.collateralTokenBalance}
+            walletSol={balances.solLamports}
+            seat={seat}
+            seatIndex={seat ? seatIndex : null}
+            seatLoading={seatLoading}
+            onSeatAndScratch={() => void runLifecycle()}
+            onStartTrading={() => void startTrading()}
+            onboarding={onboarding ?? (tradingKey.unlocking ? "Waiting for wallet signature…" : null)}
+            busy={busy}
             seatActionLabel="Create V3 seat"
-            onDeposit={() => {
-              if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: deposits are unavailable."); return; }
-              const accounts = resolveCustodyAccounts(auth.walletAddress, marketAddress, marketConfig);
-              if (!accounts) { setNotice("Configure the market, collateral mint/vault addresses and sign in before depositing."); return; }
-              void deposit.submitDeposit(accounts, BigInt(quantityNumber || 1));
-            }}
-            onWithdraw={() => {
-              if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: withdrawals are unavailable while MagicBlock restoration is blocked."); return; }
-              const accounts = resolveCustodyAccounts(auth.walletAddress, marketAddress, marketConfig);
-              if (!accounts) { setNotice("Configure the market, collateral mint/vault addresses and sign in before withdrawing."); return; }
-              void withdraw.submitWithdraw(accounts, BigInt(quantityNumber || 1), withdrawGate, position.seat);
-            }}
-            withdrawDisabled={!withdrawGate.allowed || withdraw.pending}
+            onFaucet={publicV3Core ? () => void claimFunds() : undefined}
+            onDeposit={(units) => guard("deposits", () => {
+              const accounts = resolveCustodyAccounts(trader, marketAddress, marketConfig, seatIndex);
+              if (!accounts) { setNotice("Sign in before depositing."); return; }
+              void deposit.submitDeposit(accounts, units, executionStatus?.marketDelegated ?? false);
+            })()}
+            onWithdraw={(units) => guard("withdrawals", () => {
+              const accounts = resolveCustodyAccounts(trader, marketAddress, marketConfig, seatIndex);
+              if (!accounts) { setNotice("Sign in before withdrawing."); return; }
+              void withdraw.submitWithdraw(accounts, units, withdrawGate, seat, rollupWithdraw, tradingKey.signer ? auth.walletAddress : null);
+            })()}
+            withdrawDisabled={!withdrawGate.allowed && !rollupWithdraw}
+            withdrawReason={withdrawGate.allowed || rollupWithdraw ? null : withdrawGate.reason ?? null}
+            rollupLive={executionStatus?.marketDelegated ?? false}
             onInitializeVault={constructVault}
-            onCancelAll={() => { if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: order cancellation is unavailable."); return; } void sessionOrder.cancelAllSessionOrders(4); }}
-            onCancelOrder={(orderKey) => { if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: order cancellation is unavailable."); return; } void sessionOrder.cancelSessionOrder(orderKey); }}
-            onReplaceOrder={(orderKey) => { if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: order replacement is unavailable."); return; } replaceWithCurrentTicket(orderKey); }}
+            onCancelAll={onCancelAllOrders}
+            onCancelOrder={onCancelOrder}
+            onReplaceOrder={(orderKey) => guard("order replacement", () => replaceWithCurrentTicket(orderKey))()}
           />
-          <OpenOrdersPanel
-            state={openOrders}
-            pending={sessionOrder.pending}
-            onCancel={(orderKey) => { if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: order cancellation is unavailable."); return; } void sessionOrder.cancelSessionOrder(orderKey); }}
-            onReplace={(orderKey) => { if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: order replacement is unavailable."); return; } replaceWithCurrentTicket(orderKey); }}
-            onCancelAll={() => { if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: order cancellation is unavailable."); return; } void sessionOrder.cancelAllSessionOrders(4); }}
-          />
-          <SessionPolicyPanel
-            status={session.status}
-            pending={session.pending}
-            error={session.error}
-            onAuthorize={(config) => { if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: Privy session relay is unavailable."); return; } void session.authorize(config); }}
-            onRevoke={() => { if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: session writes are unavailable."); return; } void session.revoke(); }}
-          />
-          <PositionsPanel seat={position.seat} error={position.error} />
-          <div className="notice">
-            <CircleAlert size={16} />
-            <span>{withdraw.notice ?? deposit.notice ?? notice}</span>
-            {sessionActionReason ? <span className="negative"> [{sessionActionReason}]</span> : null}
-            {!withdrawGate.allowed ? <span className="muted"> · Withdrawals disabled: {withdrawGate.reason}</span> : null}
+          {/* Live V3 wallet trading uses the in-app trading key. User sessions only exist for
+              markets on L1 authorized by the market authority, so that panel stays for the fixture. */}
+          {DEMO_ORACLE_SNAPSHOT ? (auth.walletAddress ? <div className="border-t border-[var(--t-border)]">
+            <InstantTradingCard
+              tradingAddress={tradingKey.signer?.address ?? null}
+              unlocking={tradingKey.unlocking}
+              onEnable={() => void tradingKey.unlock().catch((error: unknown) => setNotice(`Trading account not unlocked: ${error instanceof Error ? error.message : String(error)}`))}
+              walletSeat={walletSeat}
+              walletSeatBusy={walletWithdraw.pending}
+              onWithdrawWalletSeat={withdrawWalletSeat}
+              disabled={!!busy}
+            />
+          </div> : null) : <div className="border-t border-[var(--t-border)]">
+            <SessionPolicyPanel
+              status={session.status}
+              pending={session.pending}
+              error={session.error}
+              onAuthorize={(config) => guard("Privy session relay", () => void session.authorize(config))()}
+              onRevoke={guard("session writes", () => void session.revoke())}
+            />
+          </div>}
+          <div className="border-t border-[var(--t-border)]">
+            <ExecutionStatusBanner display={executionStatus} canTrade={canTrade} walletTrading={walletTrading} oracleSafety={oracleSafety} v3={v3MarketState} privy={tradingKey.signer ? "in-app trading key · silent signing" : auth.walletAddress ? `${auth.userLabel ?? "wallet login"} · ${auth.walletClientType === "privy" ? "embedded wallet" : auth.walletClientType ?? "wallet"}` : auth.wallets.length ? "sign-in incomplete" : "not signed in"} />
           </div>
         </div>
-      ) : (
-        <LaunchLab onLaunch={() => setNotice("DBC execution is not enabled until an issuer wallet and configured Meteora pool parameters are available. No launch was created.")} />
-      )}
-    </main>
+      </main>
+
+      <ProtocolStatusStrip authenticated={auth.authenticated} v3={v3MarketState} delegated={executionStatus ? executionStatus.marketDelegated : null} oracleOnline={oracleSafety === "fresh"} />
+    </div>
   );
 }

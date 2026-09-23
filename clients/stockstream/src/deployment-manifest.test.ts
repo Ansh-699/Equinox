@@ -10,10 +10,12 @@ describe("deployment manifest", () => {
     expect(deployment.oracle).toMatchObject({ feedId: 1435, channelId: 2, exponent: -5 });
   });
 
-  it("does not expose an abandoned zero-mint market as the demo", () => {
-    expect(deployment.core).toBeNull();
-    expect(deployment.collateralMint).toBeNull();
-    expect(deployment.exchange).toBeNull();
-    expect(deployment.instrument).toBeNull();
+  it("exposes only the lifecycle-verified market with a real collateral mint", () => {
+    expect(deployment.status).toBe("devnet-lifecycle-verified");
+    expect(deployment.localArtifactSha256).toBe(deployment.deployedArtifactSha256);
+    for (const key of ["exchange", "instrument", "core", "oracleSnapshot", "collateralMint", "lookupTable"] as const) {
+      expect(deployment[key]).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+    }
+    expect(deployment.core).not.toBe("82yWLiEcbcszxGgxouGRFMX7BaYWNAVboU7aVnDaxK34");
   });
 });

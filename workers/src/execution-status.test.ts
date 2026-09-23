@@ -251,3 +251,16 @@ describe("reconcileMarketExecutionStatus", () => {
     expect(second.changed).toBe(false);
   });
 });
+
+describe("decodeDelegationFields on a V3 core", () => {
+  it("reads the V3 offsets, not the V2 ones", () => {
+    const bytes = new Uint8Array(4096);
+    bytes.set(new TextEncoder().encode("STKMK003"));
+    const view = new DataView(bytes.buffer);
+    bytes[197] = 1;
+    view.setBigUint64(198, 55n, true);
+    view.setBigUint64(206, 54n, true);
+    view.setBigUint64(148, 900n, true);
+    expect(decodeDelegationFields(bytes)).toEqual({ delegationStatus: 1, delegationSequence: 54, expectedCommitSequence: 55, lastCommittedSequence: 54, pendingUndelegation: false, globalEventSequence: 900 });
+  });
+});

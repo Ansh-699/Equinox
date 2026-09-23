@@ -454,6 +454,18 @@ pub fn dispatch(
         StockStreamInstruction::RollbackV3Undelegation => {
             crate::magicblock::rollback_v3_undelegation(program_id, accounts)
         }
+        StockStreamInstruction::DepositToInboxV3 { amount } => {
+            crate::inbox::deposit_to_inbox_v3(program_id, accounts, amount)
+        }
+        StockStreamInstruction::ClaimInboxDepositV3 { seat_index } => {
+            crate::inbox::claim_inbox_deposit_v3(program_id, accounts, seat_index)
+        }
+        StockStreamInstruction::RequestWithdrawalV3 { seat_index, amount } => {
+            crate::v3::request_withdrawal_v3(program_id, accounts, seat_index, amount)
+        }
+        StockStreamInstruction::ClaimWithdrawalV3 { seat_index } => {
+            crate::inbox::claim_withdrawal_v3(program_id, accounts, seat_index)
+        }
         StockStreamInstruction::DepositCollateralV3 { seat_index, amount } => {
             crate::v3::deposit_collateral_v3(program_id, accounts, seat_index, amount)
         }

@@ -1,0 +1,434 @@
+{
+  "date": "2026-09-23",
+  "cluster": "devnet",
+  "programId": "8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ",
+  "deployedArtifactSha256": "bc8da09dd96924f841adf768b00fd25727a9677ca306ace01c7e42a7ae5d0fc0",
+  "artifactVerification": "solana program dump prefix sha256 equals target/deploy/stockstream.so",
+  "reproduce": "scripts/v3-e2e-run.sh v3-e2e3",
+  "market": {
+    "exchange": "sjnDgFCKptJBgtByXtPnVt1tTCkGYngCgWR1khGUWYY",
+    "instrument": "9t5qbtNZsgdgg2ttHGkuZhQYwAq561C7f86WBKT9vzTC",
+    "core": "9Vea9MVZCzYFKNHaHMPET9fuXXjfof8mA2F75pbBDJyV",
+    "oracleSnapshot": "7g5Wz9NfxRzNJbQPvFFf8b8yf8JjRB6W4LnzwxzPi8JE",
+    "vault": "YG15LxDgbHfPBjaVs1PgcKVDofwfYWA2U837MVpYavV",
+    "lookupTable": "51c66aXvU4Kt9wvgXFR71uMGr7oamLfgvDNyF82t6z7a",
+    "collateralMint": "GLgZYwSXmDTktcX9Hpizak7AjPJjd5QdwrRDkYc5oRtC",
+    "collateralDecimals": 6,
+    "testCollateral": true
+  },
+  "oracle": {
+    "source": "Pyth Lazer signed update verified on L1 by the Pyth verifier CPI into OracleSnapshotV3",
+    "feedId": 1435,
+    "channel": "fixed_rate@50ms",
+    "exponent": -5,
+    "magicBlockOracleAccountUsed": false
+  },
+  "traders": {
+    "maker": {
+      "wallet": "A5sV4PkkVM4gm3rejACvKFgxEMmj8ouGsffSKT5qYVc8",
+      "seat": 0,
+      "isMarketAuthority": true
+    },
+    "taker": {
+      "wallet": "8FfLriMAyH5MCxP9UmUJ5Qh5i8xiq97AHv1h3tzjmuCi",
+      "seat": 1,
+      "isMarketAuthority": false
+    }
+  },
+  "erSnapshotVisibilityMs": [
+    284,
+    90,
+    223,
+    73
+  ],
+  "trades": [
+    {
+      "domain": "er",
+      "maker": "post-only ask 10 @ oracle+0.1%",
+      "taker": "IOC bid crossing it",
+      "result": "maker -10, taker +10, taker fee 5 bps"
+    },
+    {
+      "domain": "er",
+      "maker": "post-only reduce-only bid 10 @ oracle-0.1%",
+      "taker": "IOC reduce-only ask",
+      "result": "both flat"
+    }
+  ],
+  "commit": {
+    "mode": "sharded (26 children + core)",
+    "epoch": 1,
+    "coreSequence": 27,
+    "coreSignature": "2csKob9vdwUtXqpqsfQWNCozYzWV9AxqQuAh5AS1B8BWvutpqMWYKcRyEutba66K8B8Y2kw5PMmLsiNSn1YBm3Z"
+  },
+  "undelegation": {
+    "mode": "sharded commit+undelegate",
+    "coreSequence": 54,
+    "coreSignature": "5D5BTnWt1oNeZA3Er8q6Qhyu9RDyQT4YuyJv6cy7WZBEs4AYc2buJxbYU27dV83oB8xktktLrybEcz5FNZvUUEWP",
+    "restored": "27/27 program-owned, reconcile finalized Restored"
+  },
+  "final": {
+    "maker": {
+      "position": 0,
+      "realizedPnl": 649120,
+      "withdrawn": 1000000000
+    },
+    "taker": {
+      "position": 0,
+      "realizedPnl": -1028659,
+      "withdrawn": 998971341
+    },
+    "ledger": {
+      "vaultLiability": 649120,
+      "protocolFees": 379539,
+      "insurance": 0,
+      "badDebt": 0,
+      "expected": 1028659,
+      "vault": 1028659,
+      "balanced": true
+    },
+    "core": {
+      "delegationStatus": "Restored",
+      "commitPhase": "idle",
+      "mode": "active"
+    }
+  },
+  "transactions": [
+    {
+      "name": "create V3 exchange",
+      "signature": "jVQdQbZM2cLAk9sMKYd2tbJV13zg2c3TduTQreuN7smAqhTTMLe4z3pwwiSf2uPt8iD8aSYC3EmDxaQTaqWVJn1",
+      "slot": 502568587,
+      "bytes": 319
+    },
+    {
+      "name": "create V3 instrument",
+      "signature": "348hZL6REWTRE357pf5J8YhsXN2MrELu74fakidixHLh1pfu5rva8Dm2GKhz3kjzUjhiBte9MyjL5ARgiywAAiEX",
+      "slot": 502568601,
+      "bytes": 269
+    },
+    {
+      "name": "initialize V3 exchange",
+      "signature": "2PK5DXBf5j3FZvKWNyPHgC8gUkUfPRtK7o6jmULuVuXyDGUAhfEvDJcuoSZcPH2b2vVYyj78YbKAP4M6gjp8tMeL",
+      "slot": 502568618,
+      "bytes": 204
+    },
+    {
+      "name": "configure V3 exchange",
+      "signature": "gWEMLN1aQSQHoeHYukDVxR4uEJcEnvK6YVwhUi3dRzFH7zepYp4YXZy2hDPUdFJRkE7aMtr5yjXA4djU5cXUhgL",
+      "slot": 502568641,
+      "bytes": 400
+    },
+    {
+      "name": "register V3 instrument",
+      "signature": "43nrSwR1rqNDDuJEobga9ZkD3jvYwZYhdCtoBXgCUMHXAapkm4WTg9PLjsKwAZrV539Ba38BLoKxqC3jQbLSvH1A",
+      "slot": 502568655,
+      "bytes": 269
+    },
+    {
+      "name": "configure V3 instrument oracle",
+      "signature": "562fYZLi4tdCALdVuUfS8oYvsqM7xvG59dg1MGeeSyPba7NVydEJkeFJ17cR8a9quRsMhJswZX4KBvf6gFrBec1F",
+      "slot": 502568671,
+      "bytes": 278
+    },
+    {
+      "name": "V3 core create/resume",
+      "signature": "XB6iNujQ9nRG1kcbZib2LpyvTXBzHFrNj51zKY8a9vPS2hsFeGs73ehEz9TMbysPxe1aHoydyz3pNZ4ismSFRZe",
+      "slot": 502568689,
+      "bytes": 272
+    },
+    {
+      "name": "activate V3 core",
+      "signature": "2e9RST9gCuhxqti1w74MXQs9K1eF2cnxgKQeWGvzbBrkKpybpobyMz8mzbATfw5fppv7WoSK71cCmUsCiZHRjTkK",
+      "slot": 502568713,
+      "bytes": 303
+    },
+    {
+      "name": "create V3 vault",
+      "signature": "3M5GckoPoF6vBobEDNu5Q7axXmm71B7QqBzZW1C82J2MFPhDt3aUv3b6vRftQ2bHEkkpZh98u4vWDXGgASVDMv7T",
+      "slot": 502568731,
+      "bytes": 336
+    },
+    {
+      "name": "V3 book 0/0 create/resume",
+      "signature": "29emomyvPQtv7a1NvTRXiLuF5UouAhVj7dAu7SDzaCRWPEmJ2ujbGMXgLZ2PVt2afdve2rfz3e2jrNLDoAVUU6Mb",
+      "slot": 502568748,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 0/1 create/resume",
+      "signature": "27us7TvrnfW2UcNCDSK3pwvKhf14uFLKubJuyHNRcsKsN4sHwcwGSZqRuWCJNP1ox76hi94pcCF1F5sUcsv6S6zF",
+      "slot": 502568766,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 0/2 create/resume",
+      "signature": "25PnakQq6H7ktyrGm4VbBUt45CrSogAZQZtR2MBPUw7JwXpfbueEXxaG6z48nS9mxzuTmLX53PfTiokREjcJhWN9",
+      "slot": 502568784,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 0/3 create/resume",
+      "signature": "xpLUakTz1yvdKJ5UFMnbPfh5VR5Gn8c4whk3k2zzf1ZaGBxcXsMpS144pisGav6W6DNpCemRxpKbqRMPyH1TTQQ",
+      "slot": 502568808,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 0/4 create/resume",
+      "signature": "4mxsAWoE4bzG9q9uRfDamEi5vWqTpQattZWpub8afyzJ3tCy1WA1UPfFsL8HmChxmrrbdjujb6ewmmUXmnuNTe8R",
+      "slot": 502568837,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 0/5 create/resume",
+      "signature": "61PUvY12Ci7KDD5wKBXDRh2ytzPzWXfAyXA6im4GjbbtYmTHYEkg8SVTHSyB6D8jfpSoCcHuyA7zYTk8kDzSZ2UW",
+      "slot": 502568855,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 0/6 create/resume",
+      "signature": "k1qzXVpLBbeJ87gbmizYufjayJ7a2VDzdR9zUQCy8XALHFzBWzw1nkoFFctx43JPYfK2tzkMgLpdvLQnkpMYiaN",
+      "slot": 502568872,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 0/7 create/resume",
+      "signature": "5hzwhVFKYbuycYDaXhNeD1yEMQ1dJYKBwAMJrBWAgSeDyYbGvvZam93oFoVcaaCwrUf1huSS4QJdCxXLgFRjATdv",
+      "slot": 502568889,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 0/8 create/resume",
+      "signature": "4aLhShFnJPcu2KLvY9pSdK2YjvQyBFgYeZ7UKDiDNZFfJGKQkWrx1cY2NxLYSqGVwrCzhW9XkWfFUY5RL4wAdwrg",
+      "slot": 502568909,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 1/0 create/resume",
+      "signature": "3uEnThVedHdtBqVP9s7FA2yDUbzv3RGrygHDKSAkUn7RZGZsUBdDsDox6aN72BfU3saYwJKgd4FtrkruDauyh1oX",
+      "slot": 502568929,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 1/1 create/resume",
+      "signature": "5CrMpJU8tm5pfBLn2htVsC94CVmrnTqNJm7XeSsZ3UVEwtnUoWtMFvMzn4RfEKeuW2YNsZz2Pebm5UK19HPRHF6h",
+      "slot": 502568958,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 1/2 create/resume",
+      "signature": "5Lw1QLFxXqdzpUkSo9ukudBJnGas3zmeHV3Sy1Dqm7oVwtphMQDRADNGN3vC9qhkY2gczgvy6qMqKXYCyGWBY3sE",
+      "slot": 502568975,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 1/3 create/resume",
+      "signature": "4gz9yH8PHf3r7vQi3UenvBCrDniBvQitdskxqNz1HwB8iMo6tu94DHsjq7kjLePVeX1YzmhiQK2nuQA1AfUfB3XX",
+      "slot": 502568993,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 1/4 create/resume",
+      "signature": "5vt9Axbqek3WuU1aaDRyTNp3wmkEHMQKc4yugXM8svuR3VEXMY6MzdBBai7EXpfUVRKEhNCRWNeWuGjtW1SfB75u",
+      "slot": 502569012,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 1/5 create/resume",
+      "signature": "d8d6M4EoVYPB3wS3AwZmV2xAhkDxGZ1zwXawDG5zb6mLpUWUYbiEZpmzdpG3Vd1uwr5xSMBDnfnEtQroeNk66R5",
+      "slot": 502569028,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 1/6 create/resume",
+      "signature": "DTob5fC4TmQR7RH3JtSG55NecoGBbB59RdVuoYEZFPAT5oU2trb8GuS3z4wdSzfn3dVfxHr2jFHjtiDwA4bwumH",
+      "slot": 502569049,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 1/7 create/resume",
+      "signature": "3YCW33Qsjv1qydEuU7PyZuQB1qbWxmrzn82d2FbgRTmyvqVKPwnRwx5dA1TYguUuAKakvEqzMgt89uFrhSassLRb",
+      "slot": 502569082,
+      "bytes": 272
+    },
+    {
+      "name": "V3 book 1/8 create/resume",
+      "signature": "mTfATBGhxnLuB7NkQaFnyXnntDGc5RwaxyfDn3wUTH9puCVaUj319RKyrj1zTQedovNNpDZQnhrNwme7Lze6ka9",
+      "slot": 502569100,
+      "bytes": 272
+    },
+    {
+      "name": "V3 seat shard 0 create/resume",
+      "signature": "bxpMmE7zu9pxdEGeSSDFuZaFvXoyreKmajNpLkdm3KL1nwzam967mwGpaNRa5tHmd4PbDtFkU7iJkorUipAf9QL",
+      "slot": 502569114,
+      "bytes": 272
+    },
+    {
+      "name": "V3 event shard 0 create/resume",
+      "signature": "3SFaKuHW8JqHHdduiUtMZBg9ygey2FmYiSrfg1M1XsnmRn7DtjjTZXnntn448Y5UCg9MaALHKJJiF9jeMfDG4aXi",
+      "slot": 502569138,
+      "bytes": 272
+    },
+    {
+      "name": "V3 seat shard 1 create/resume",
+      "signature": "2LhmCFL9W6immQxyn7iSYwkjf9gFdMfyneTiUfbkvFbzD2SBodY7NK23xja3F5Gbyxs6DwUBCZFmjWBRTQaHjVKD",
+      "slot": 502569157,
+      "bytes": 272
+    },
+    {
+      "name": "V3 event shard 1 create/resume",
+      "signature": "PU1Qhb2SAvsKq3rcKN9RMCBcpZvhWBsFRScEoTL67Qt63DRCDiRDA8pbjVhLCZH3T3iRT4dd7vu85kVueXYYaGy",
+      "slot": 502569184,
+      "bytes": 272
+    },
+    {
+      "name": "V3 seat shard 2 create/resume",
+      "signature": "TV9DiFJaK82PVcS482uGbSjWecpyY172QRseA5VjeqfJwELEugsNz7U2PdrVK9S7r8928pJKL9w1zenWciKS729",
+      "slot": 502569214,
+      "bytes": 272
+    },
+    {
+      "name": "V3 event shard 2 create/resume",
+      "signature": "4rk333R7hWXHZ327szNDpFjwUjjQyFr4SCEoPTKGhVWZQxM6ynGkQaXsDXG2PyK7NumrWXGTTWT7DLukdELSGoGi",
+      "slot": 502569237,
+      "bytes": 272
+    },
+    {
+      "name": "V3 seat shard 3 create/resume",
+      "signature": "2p4qwnrftPdrY9SqwGNquQqFo5sP5TR9xdagpaDcpdirtGTNQLQffTehR8rVedTHczYVCLEs5yCc9w5nuR7Es8MW",
+      "slot": 502569261,
+      "bytes": 272
+    },
+    {
+      "name": "V3 event shard 3 create/resume",
+      "signature": "5z1ek76zXV4xxxLTbnjgKkfuHut1BPv98nMUY8tEEVdbGekSbX28nFpYs8YA7G4gZe9KcjvtcJvw7QETCbQrVDsv",
+      "slot": 502569280,
+      "bytes": 272
+    },
+    {
+      "name": "create V3 oracle snapshot",
+      "signature": "2eX6qYztzyZuSVDMQVjwxymNzGdJTfRFtErdCcY4hdmc2pTZPmaNtHBhSUMDo7KFpDCZQKqmMph3kCupNUzaQuAg",
+      "slot": 502569298,
+      "bytes": 270
+    },
+    {
+      "name": "create maker seat",
+      "signature": "3bof8jhNAqqYmNEefWA8S453e3RAXurdybVi64MV35cyzw2cMyfcUfTCZ3RSzDYS8skvghBAzhkZkpRdcjP3h8TG",
+      "domain": "l1"
+    },
+    {
+      "name": "create taker seat",
+      "signature": "4sfMoWyj3JMEN8GojeDr9WWjgsYch45mNcrDzuDSgM9jQVn8KHcQCtuBUcVvms3CePM8DoTe2YJEZqhCBb4WhWxC",
+      "domain": "l1"
+    },
+    {
+      "name": "L1 snapshot update",
+      "signature": "5kXg3Da5Za8Ta1gd3ppLqVoTQ12MxbghLi8W7gPro4jmuxsiJvRmfm497EzWnTWSwNqxcTz6KGCnN5xrnbzeCdQS",
+      "domain": "l1"
+    },
+    {
+      "name": "deposit seat 0",
+      "signature": "5Qpg96MqYFetJwoo1yFpeTbArPyZWGtv59GwQ5kS5gcSJKMNCLSSC3wrkVmN9FtUzeAvzpuZvd1tdNd9stx1EDUC",
+      "domain": "l1"
+    },
+    {
+      "name": "L1 snapshot update",
+      "signature": "4M6hdnYNvB2NkV5R7eoosMxf5omoUEJGhn6X4A529Zxr5M2w9krwSx5H8p16C7Nf7sdf74Ay1VqqSBECTvNxyNBz",
+      "domain": "l1"
+    },
+    {
+      "name": "deposit seat 1",
+      "signature": "WkLD1p2L9Et1BrCxvnE8J617qbUCPjTEpbZRL1z5vceqUn4jfudsk2CjFjCRF68PBbCZgKKuwhApA2L53CQi47E",
+      "domain": "l1"
+    },
+    {
+      "name": "create lookup table",
+      "signature": "nVhmygm13q8y5Xiz5fzzcLMG1GSwCLT4Nter7eTxrjSjARkkhzC8jtHSVHFa7DFjjdDBqFnPPX2vNkv563VVEW2",
+      "domain": "l1"
+    },
+    {
+      "name": "extend lookup table 0",
+      "signature": "5XcGtDJtRGAgLLg2uQBLEnaN4Ziz6yNAtNGtiykUxmbwVQNtKeno5a8FmptizHqnd5sugNjjTkTWUc6ohEGwJnqf",
+      "domain": "l1"
+    },
+    {
+      "name": "extend lookup table 20",
+      "signature": "2E9MBDcEi7V2B4c57cpt4Sx87zakxhJm2j2yCmzFZXVmxYQWAND12hupf8s4pM1jWJfSwbwonQQFKzDbdYtdDFi3",
+      "domain": "l1"
+    },
+    {
+      "name": "L1 snapshot update",
+      "signature": "3RtxospdsvZ11YTCEoem7Psfyooks2WuuXKeu7wX8qgDsdjHJqWUQWe5g15tUni5Rj1T9YSvaXA7najTbHRRGfpo",
+      "domain": "l1"
+    },
+    {
+      "name": "L1 snapshot update",
+      "signature": "4fncomEVUnqV2XCvSEBF9UgcN84Yid2LYt93UbSW8d1qGxctWcp5w1Q1MrvHw7XrFMk6z6pNCv5smkqzYT3HW1dS",
+      "domain": "l1"
+    },
+    {
+      "name": "ER maker ask (post-only)",
+      "signature": "yrGT6JasxmmRP8dwWXxP9g8Tr5qergDHzCqQjEusQTC8XHgMXUbkzWWdFTjSREdBP19xfvJmmByjgxnNLbNZvts",
+      "domain": "er"
+    },
+    {
+      "name": "L1 snapshot update",
+      "signature": "3u5WwijAB67Tx125D7JsGQpaeBYYn82sp2U2wnEFNnKYwsnffCY1CoQE2wA6Q3d1e5NLTqBeASKkqu4UiSR5L5GP",
+      "domain": "l1"
+    },
+    {
+      "name": "ER taker bid (IOC)",
+      "signature": "5VFarfaKCAQNWpteQt5QdiZtzHeoS7UmjhEm9W9eiBjbY5zmx3a9DZ4cperaYMigbdb18egM4rKDpf51LoB1719C",
+      "domain": "er"
+    },
+    {
+      "name": "L1 snapshot update",
+      "signature": "BpqgtzeaXAd9ujWKs7nEp1tL3wWXV5cxJkPAKmAm77z3ftCbHKRwD5anJWC1WBxHZ3zS3zNU8DjYFvcYPXKDv4f",
+      "domain": "l1"
+    },
+    {
+      "name": "ER maker bid (post-only, reduce-only)",
+      "signature": "N5tsebeTyF76S3LgKnCnX5z5MEL4d5vZ6FDzqBPGu3rWLaceCcgtjEF1yoffteTrCmsJxXSPxMQpAW4McejhWhd",
+      "domain": "er"
+    },
+    {
+      "name": "L1 snapshot update",
+      "signature": "4ZpnsmMfco1btNP2x6R14EY9XtNpd3ho29vX5sakCXvKSrD4RoLCPgMp6TCRiHEd5czYATDh3xRmHqjmQ7ugWch",
+      "domain": "l1"
+    },
+    {
+      "name": "ER taker ask (IOC, reduce-only)",
+      "signature": "4JVgTgQNqqpUMxJgAyNeZVsFj1PbAxDo62acRx4583cSdkW8NEMiSQ9shnpCnV5h2s7WurAABpUF5a3LkUn1on1f",
+      "domain": "er"
+    },
+    {
+      "name": "L1 reconcile + finalize restore",
+      "signature": "wSNGqGeE3C7ztvt9V36t3J1HYXMU9XUUL2cAUe4qTio4zF97b2jitQ2Jf45m4WGt48e9FzGrGDYcUkfizaf1Ewq",
+      "domain": "l1"
+    },
+    {
+      "name": "L1 snapshot update",
+      "signature": "4NfMmNfb9wqzADHntBjDZs33jsiri6KfCFgJ654sNmoPBLVDeHXArF46uZz7x4n11ZPna8dUyE1VRmTgDeR7nLHU",
+      "domain": "l1"
+    },
+    {
+      "name": "withdraw seat 0 (1000000000)",
+      "signature": "3LQHdPtUeQ9hAhuM8nQkEF6YB65r6cbw6EZp3E1bKeUmQ81mZ4KNafjw19PXUShRRxyr94ew8qN7y4gZ2kcchWiR",
+      "domain": "l1"
+    },
+    {
+      "name": "L1 snapshot update",
+      "signature": "2Pp2HQKzmPAnKGX6ACqEPQ4JWU7anPndX267qWBksUN4Fq6bZqJLHYzqJjto5N8bQtTU1qoQd13aQ8e8XLbi3yAx",
+      "domain": "l1"
+    },
+    {
+      "name": "withdraw seat 1 (998971341)",
+      "signature": "5Tqybfsjysa4eKCXsemZ55faL8T9wqbQVEX27K8JVLQxQxbqy2oCCTKCusHhzCShFjP27FSfz2UrdyXBwcTUrSUA",
+      "domain": "l1"
+    }
+  ],
+  "knownLimitations": [
+    "Realized PnL is never folded into available collateral, so a profitable trader cannot withdraw gains (maker 649,120 remains in the vault as liability).",
+    "Liquidation-fee ledger accounting with bad debt is unresolved; liquidation was not exercised.",
+    "Trading used main-wallet signatures; the browser session-key/relayer path is not yet ported to the delegated V3 lifecycle."
+  ]
+}

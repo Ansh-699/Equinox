@@ -77,10 +77,16 @@ for (let index = 0; index < entries.length; index += 1) {
   if (!info || !info.owner.equals(expectedOwner) || info.data.length !== entry.size) throw new Error(`${entry.label}: missing, wrong-sized, or not in the required canonical delegation state`);
 }
 const coreView = decodeV3MarketCore(infos[0]!.data);
-if (selectedPosition === 0) assertV3L1Readiness({
-  core: infos[0]!.data, seatShards: infos.slice(19, 23).map(info => info!.data),
-  accountCount: entries.length, nowSeconds: Math.floor(Date.now() / 1000),
-});
+if (selectedPosition === 0) {
+  // The L1-owned snapshot, never delegated, is the ER price source.
+  const snapshotAddress = PublicKey.findProgramAddressSync([Buffer.from("oracle-snapshot-v3"), CORE.toBuffer()], PROGRAM)[0];
+  const snapshot = await connection.getAccountInfo(snapshotAddress, "confirmed");
+  if (snapshot && !snapshot.owner.equals(PROGRAM)) throw new Error("oracle snapshot is not owned by StockStream");
+  assertV3L1Readiness({
+    core: infos[0]!.data, seatShards: infos.slice(19, 23).map(info => info!.data),
+    accountCount: entries.length, nowSeconds: Math.floor(Date.now() / 1000), snapshot: snapshot?.data,
+  });
+}
 if (!coreView.instrument.equals(INSTRUMENT) || !coreView.marketAuthority.equals(signer.publicKey) || coreView.mode !== 1) throw new Error("TSLA core authority/instrument/mode mismatch");
 const statuses = await Promise.all(entries.map(({ target }) => routerStatus(target)));
 for (let index = 0; index < statuses.length; index += 1) {

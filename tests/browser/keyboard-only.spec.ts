@@ -19,9 +19,9 @@ async function tabToButtonNamed(page: Page, name: string, maxPresses = 40): Prom
 }
 
 test("the entire login flow is reachable and operable by keyboard alone", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/trade");
   await page.locator("body").click({ position: { x: 5, y: 5 } }); // establish a starting focus point, no widget interaction
-  await tabToButtonNamed(page, "Sign in");
+  await tabToButtonNamed(page, "Connect wallet");
 
   // Focus must be visibly indicated -- a real outline/box-shadow, not
   // `outline: none` with nothing standing in for it.
@@ -34,6 +34,9 @@ test("the entire login flow is reachable and operable by keyboard alone", async 
   expect(hasVisibleFocusRing).toBe(true);
 
   await page.keyboard.press("Enter");
+  // The wallet drawer opens with focus on the first installed wallet.
+  await expect(page.getByRole("button", { name: "Test Wallet" })).toBeFocused();
+  await page.keyboard.press("Enter");
   await expect(page.locator(".wallet-button").first()).toContainText("...", { timeout: 10_000 });
 
   // Focus must land somewhere real after activation, never silently reset
@@ -43,7 +46,7 @@ test("the entire login flow is reachable and operable by keyboard alone", async 
 });
 
 test("a skip link lets a keyboard user bypass the nav straight to the main content", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/trade");
   await page.locator("body").click({ position: { x: 5, y: 5 } });
   await page.keyboard.press("Tab"); // the skip link is the very first focusable element on the page
   const skipLink = page.locator(".skip-link");
@@ -55,12 +58,16 @@ test("a skip link lets a keyboard user bypass the nav straight to the main conte
 });
 
 test("the order preview button is reachable and operable by keyboard once signed in", async ({ page }) => {
-  await page.goto("/");
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.goto("/trade");
+  await page.getByRole("button", { name: "Connect wallet" }).click();
+  await page.getByRole("button", { name: "Test Wallet" }).click();
   await expect(page.locator(".wallet-button").first()).toContainText("...", { timeout: 10_000 });
 
+  await page.getByLabel("Limit price").fill("250");
+  await page.getByLabel("Amount", { exact: true }).fill("1000");
+
   await page.locator("body").click({ position: { x: 5, y: 5 } });
-  await tabToButtonNamed(page, "Preview order");
+  await tabToButtonNamed(page, "Preview order", 80);
   await page.keyboard.press("Enter");
   await expect(page.locator(".notice")).toContainText("preview", { timeout: 10_000 });
 });

@@ -24,11 +24,21 @@ export interface PrivyIdentity {
    * which also requires a wallet to be selected and an app session established
    * for it. */
   privyAuthenticated: boolean;
+  /** A browser wallet is connected directly (Wallet Standard): it is the session, Privy or not. */
+  directWallet: boolean;
   userId: string | null;
+  /** The Privy login the user signed in with (email, Google, or wallet), for display. */
+  userLabel: string | null;
   wallets: readonly DiscoveredWallet[];
   authError: string | null;
   login: () => void;
+  /** Installed Solana wallets (name + icon) the connect drawer can offer. */
+  walletOptions: readonly { name: string; icon: string }[];
+  /** Connect one wallet and sign in with it (one signature, no Privy modal). */
+  connectWith: (walletName: string) => Promise<void>;
   logout: () => Promise<void>;
+  /** Signs an arbitrary message with the directly connected wallet. */
+  signMessage: (address: string, bytes: Uint8Array) => Promise<Uint8Array>;
   getAccessToken: () => Promise<string | null>;
   /** Signs with a SPECIFIC wallet by address -- never "the active one" at
    * this layer, since this layer doesn't know about selection. */
@@ -38,11 +48,16 @@ export interface PrivyIdentity {
 export const disabledIdentity: PrivyIdentity = {
   ready: true,
   privyAuthenticated: false,
+  directWallet: false,
   userId: null,
+  userLabel: null,
   wallets: [],
   authError: "Privy is not configured",
   login: () => undefined,
+  walletOptions: [],
+  connectWith: async () => undefined,
   logout: async () => undefined,
+  signMessage: async () => { throw new Error("No wallet connected"); },
   getAccessToken: async () => null,
   signWith: async () => { throw new Error("No wallet signer available"); },
 };

@@ -60,8 +60,10 @@ export function WalletSelectionProvider({ children }: { children: React.ReactNod
   const [sessionError, setSessionError] = useState<string | null>(null);
 
   const selectedAddress = useMemo<string | null>(
-    () => resolveSelectedWallet({ privyAuthenticated: identity.privyAuthenticated, wallets: identity.wallets, explicitSelection, storedAddress: readStoredWallet() }),
-    [identity.privyAuthenticated, identity.wallets, explicitSelection],
+    () => identity.directWallet
+      ? identity.wallets[0]?.address ?? null // the one picked browser wallet
+      : resolveSelectedWallet({ privyAuthenticated: identity.privyAuthenticated, wallets: identity.wallets, explicitSelection, storedAddress: readStoredWallet() }),
+    [identity.directWallet, identity.privyAuthenticated, identity.wallets, explicitSelection],
   );
 
   const selectWallet = useCallback((address: string) => {
@@ -94,13 +96,20 @@ export function WalletSelectionProvider({ children }: { children: React.ReactNod
 
   const auth = useMemo<AppAuth>(() => ({
     ready: identity.ready,
-    authenticated: identity.privyAuthenticated && !!selectedAddress && sessionReadyForAddress === selectedAddress,
+    // A directly connected wallet signs its own transactions; the Privy app
+    // session only gates the legacy session-key relayer.
+    authenticated: !!selectedAddress && (identity.directWallet || (identity.privyAuthenticated && sessionReadyForAddress === selectedAddress)),
     userId: identity.userId,
+    userLabel: identity.userLabel,
+    privyAuthenticated: identity.privyAuthenticated,
+    signMessage: identity.signMessage,
     walletAddress: selectedAddress,
     walletClientType: identity.wallets.find((wallet) => wallet.address === selectedAddress)?.walletClientType ?? null,
     wallets: identity.wallets,
     authError: identity.authError ?? sessionError,
     login: identity.login,
+    walletOptions: identity.walletOptions,
+    connectWith: identity.connectWith,
     logout: async () => {
       const csrf = readCsrfToken();
       await fetch("/api/auth/logout", { method: "POST", credentials: "include", headers: csrf ? { "x-stockstream-csrf": csrf } : {} });

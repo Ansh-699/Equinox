@@ -1,5 +1,6 @@
 import { PublicKey, SystemProgram, TransactionInstruction, type AccountMeta } from "@solana/web3.js";
 import { OPCODE } from "./instructions";
+import { MAGIC_CONTEXT, MAGIC_PROGRAM } from "./constants";
 import { checkedSigned, checkedUnsigned, writeSigned, writeUnsigned } from "./encoding";
 import { accountMeta, instruction, publicKey, STOCKSTREAM_PROGRAM_KEY, type AddressInput } from "./transaction";
 import { deriveBookPageV3, deriveEventShardV3, deriveMarketCoreV3, deriveSeatShardV3, deriveOracleSnapshotV3, V3_BOOK_PAGES_PER_SIDE } from "./v3";
@@ -379,6 +380,60 @@ export function depositCollateralV3(accounts: V3DepositAccounts, seatIndex: numb
     ...accounts.eventShards.map((event) => accountMeta(event, false, true)), accountMeta(accounts.authority, true, false),
     accountMeta(accounts.source, false, true), accountMeta(accounts.vault, false, true), accountMeta(accounts.mint, false, false), accountMeta(accounts.tokenProgram, false, false),
     ...(accounts.oracleSnapshot ? [accountMeta(accounts.oracleSnapshot, false, false)] : [])]);
+}
+
+/** Per-(market, trader) deposit receipt used by the inbox (programs/stockstream/src/inbox.rs). */
+export function deriveDepositReceiptV3(core: AddressInput, trader: AddressInput): PublicKey {
+  return PublicKey.findProgramAddressSync([Buffer.from("deposit-receipt-v3"), publicKey(core).toBuffer(), publicKey(trader).toBuffer()], STOCKSTREAM_PROGRAM_KEY)[0];
+}
+
+export interface V3InboxDepositAccounts { core: AddressInput; trader: AddressInput; source: AddressInput; vault: AddressInput; mint: AddressInput; tokenProgram: AddressInput }
+
+/** L1 deposit into the trader's inbox receipt; works while the market is delegated. Opcode 60. */
+export function depositToInboxV3(accounts: V3InboxDepositAccounts, amount: bigint | number): TransactionInstruction {
+  const data = new Uint8Array(9); data[0] = OPCODE.depositToInboxV3;
+  writeUnsigned(data, 1, checkedUnsigned(amount, 64, "amount"), 8);
+  return instruction(data, [
+    accountMeta(accounts.core, false, false), accountMeta(deriveDepositReceiptV3(accounts.core, accounts.trader), false, true),
+    accountMeta(accounts.trader, true, true), accountMeta(accounts.source, false, true), accountMeta(accounts.vault, false, true),
+    accountMeta(accounts.mint, false, false), accountMeta(accounts.tokenProgram, false, false), accountMeta(SystemProgram.programId, false, false)]);
+}
+
+/** Credits the receipt's uncredited balance to the trader's seat, wherever the bundle lives. Opcode 61. */
+export function claimInboxDepositV3(accounts: { core: AddressInput; seatShard: AddressInput; eventShards: readonly AddressInput[]; trader: AddressInput }, seatIndex: number): TransactionInstruction {
+  if (accounts.eventShards.length !== 4) throw new RangeError("exactly four V3 event shards are required");
+  const data = new Uint8Array(3); data[0] = OPCODE.claimInboxDepositV3;
+  writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2);
+  return instruction(data, [
+    accountMeta(accounts.core, false, true), accountMeta(accounts.seatShard, false, true),
+    ...accounts.eventShards.map((event) => accountMeta(event, false, true)),
+    accountMeta(deriveDepositReceiptV3(accounts.core, accounts.trader), false, false)]);
+}
+
+/** Per-(market, trader) payout receipt: how much of the rollup-requested withdrawal L1 has paid. */
+export function deriveWithdrawReceiptV3(core: AddressInput, trader: AddressInput): PublicKey {
+  return PublicKey.findProgramAddressSync([Buffer.from("withdraw-receipt-v3"), publicKey(core).toBuffer(), publicKey(trader).toBuffer()], STOCKSTREAM_PROGRAM_KEY)[0];
+}
+
+/** Rollup: debits the seat (risk-checked) and schedules its shard commit to L1. Opcode 62. */
+export function requestWithdrawalV3(accounts: { core: AddressInput; seatShard: AddressInput; eventShards: readonly AddressInput[]; trader: AddressInput; oracleSnapshot: AddressInput }, seatIndex: number, amount: bigint | number): TransactionInstruction {
+  if (accounts.eventShards.length !== 4) throw new RangeError("exactly four V3 event shards are required");
+  return instruction(v3AmountData(OPCODE.requestWithdrawalV3, seatIndex, amount), [
+    accountMeta(accounts.core, false, true), accountMeta(accounts.seatShard, false, true),
+    ...accounts.eventShards.map((event) => accountMeta(event, false, true)),
+    accountMeta(accounts.trader, true, true), accountMeta(MAGIC_CONTEXT, false, true), accountMeta(MAGIC_PROGRAM, false, false),
+    accountMeta(accounts.oracleSnapshot, false, false)]);
+}
+
+/** L1: pays out whatever the committed seat requested beyond what was already paid. Opcode 63. */
+export function claimWithdrawalV3(accounts: { core: AddressInput; seatShard: AddressInput; trader: AddressInput; destination: AddressInput; vault: AddressInput; vaultAuthority: AddressInput; mint: AddressInput; tokenProgram: AddressInput }, seatIndex: number): TransactionInstruction {
+  const data = new Uint8Array(3); data[0] = OPCODE.claimWithdrawalV3;
+  writeUnsigned(data, 1, checkedUnsigned(seatIndex, 16, "seatIndex"), 2);
+  return instruction(data, [
+    accountMeta(accounts.core, false, false), accountMeta(accounts.seatShard, false, false),
+    accountMeta(accounts.trader, true, true), accountMeta(accounts.destination, false, true), accountMeta(accounts.vault, false, true),
+    accountMeta(accounts.vaultAuthority, false, false), accountMeta(accounts.mint, false, false), accountMeta(accounts.tokenProgram, false, false),
+    accountMeta(deriveWithdrawReceiptV3(accounts.core, accounts.trader), false, true), accountMeta(SystemProgram.programId, false, false)]);
 }
 
 export function withdrawCollateralV3(accounts: V3WithdrawAccounts, seatIndex: number, amount: bigint | number): TransactionInstruction {

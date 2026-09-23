@@ -1,5 +1,6 @@
 import { PublicKey } from "@solana/web3.js";
 import { STOCKSTREAM_PROGRAM_KEY } from "../clients/stockstream/src";
+import deployment from "../config/stockstream-deployment.json";
 
 export type MarketSessionPolicy = "regular" | "extended" | "close-only";
 export interface StockInstrument {
@@ -31,26 +32,31 @@ function seedId(symbol: string): Uint8Array {
   return Uint8Array.from(hex.match(/.{2}/g)!.map((part) => Number.parseInt(part, 16)));
 }
 
+// No Node Buffer: this module loads in the browser before any polyfill (the landing page).
+const utf8 = (text: string) => new TextEncoder().encode(text);
+
 export function deriveInstrumentPda(instrumentId: string, program = STOCKSTREAM_PROGRAM_KEY): PublicKey {
-  return PublicKey.findProgramAddressSync([Buffer.from("instrument"), Buffer.from(seedId(instrumentId))], program)[0];
+  return PublicKey.findProgramAddressSync([utf8("instrument"), seedId(instrumentId)], program)[0];
 }
 export function derivePerpMarketPda(instrumentPda: PublicKey, program = STOCKSTREAM_PROGRAM_KEY): PublicKey {
-  return PublicKey.findProgramAddressSync([Buffer.from("perp-market"), instrumentPda.toBuffer()], program)[0];
+  return PublicKey.findProgramAddressSync([utf8("perp-market"), instrumentPda.toBytes()], program)[0];
 }
 export function deriveVaultPda(market: PublicKey, program = STOCKSTREAM_PROGRAM_KEY): PublicKey {
-  return PublicKey.findProgramAddressSync([Buffer.from("vault"), market.toBuffer()], program)[0];
+  return PublicKey.findProgramAddressSync([utf8("vault"), market.toBytes()], program)[0];
 }
 export function deriveScratchPda(market: PublicKey, seatIndex: number, program = STOCKSTREAM_PROGRAM_KEY): PublicKey {
-  const seat = Buffer.alloc(2); seat.writeUInt16LE(seatIndex);
-  return PublicKey.findProgramAddressSync([Buffer.from("settlement"), market.toBuffer(), seat], program)[0];
+  const seat = Uint8Array.of(seatIndex & 0xff, seatIndex >> 8); // u16 LE
+  return PublicKey.findProgramAddressSync([utf8("settlement"), market.toBytes(), seat], program)[0];
 }
 
 const fixture = (symbol: string, displayName: string, session: MarketSessionPolicy): PerpMarketConfig => {
-  const id = Buffer.from(seedId(symbol)).toString("hex");
+  const id = Array.from(seedId(symbol), (b) => b.toString(16).padStart(2, "0")).join("");
   const instrument = deriveInstrumentPda(id);
   const market = derivePerpMarketPda(instrument);
   return {
-    id, symbol: `${symbol}-PERP`, displayName, oracleFeedId: `unverified-${symbol.toLowerCase()}`, marketSession: session, live: false,
+    id, symbol: `${symbol}-PERP`, displayName, oracleFeedId: `unverified-${symbol.toLowerCase()}`, marketSession: session,
+    // Only the market recorded in the deployment manifest is actually deployed.
+    live: deployment.core !== null && deployment.oracle.symbol === `Equity.US.${symbol}/USD`,
     instrumentPda: instrument.toBase58(), marketPda: market.toBase58(), vaultPda: deriveVaultPda(market).toBase58(),
     scratchPda: (seatIndex) => deriveScratchPda(market, seatIndex).toBase58(),
     maximumLeverage: 5, initialMarginBps: 2_000, maintenanceMarginBps: 1_000,

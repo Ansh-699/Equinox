@@ -1,34 +1,435 @@
-/* --muted, --green and --red were each just under WCAG AA's 4.5:1 minimum
-   contrast for normal-size text against their typical backgrounds (axe-core
-   color-contrast, see tests/browser/accessibility.spec.ts):
-     --muted #65777a: 4.35:1 on --paper, 4.69:1 on white -> #556669: 5.57/6.02
-     --green #008d70: 3.63:1 on --green-soft, 4.16:1 on white -> #006e57: 5.45/6.24
-     --red   #c94d50: 3.84:1 on --red-soft -> #a83a41: 5.36:1 on --red-soft, 6.28:1 on white
-   --green-soft/--red-soft (the light fills text sits on) are unchanged. */
-:root { --ink:#102226; --muted:#556669; --line:#d7e0de; --paper:#f4f7f4; --panel:#ffffff; --green:#006e57; --green-soft:#e0f4ee; --red:#a83a41; --red-soft:#fbe9e9; --blue:#2b6aa7; }
-* { box-sizing:border-box; }
-body { margin:0; background:var(--paper); color:var(--ink); font-family:Arial, Helvetica, sans-serif; }
-button, input, select { font:inherit; }
-button { cursor:pointer; }
-.shell { min-height:100vh; max-width:1600px; margin:0 auto; padding:0 24px 36px; }
-.topbar { height:72px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--line); position:relative; }
-.skip-link { position:absolute; top:-48px; left:8px; z-index:10; background:var(--ink); color:#fff; padding:9px 14px; border-radius:6px; font-size:13px; text-decoration:none; transition:top .15s; }
-.skip-link:focus { top:8px; }
-.brand { display:flex; align-items:center; gap:10px; font-size:18px; font-weight:750; }.brand-mark { display:grid; place-items:center; width:28px; height:28px; border-radius:7px; color:white; background:var(--green); }
-nav { display:flex; align-self:stretch; align-items:center; gap:24px; } nav button, nav a { color:var(--muted); border:0; background:transparent; padding:0; border-bottom:2px solid transparent; text-decoration:none; font-size:14px; display:flex; align-items:center; } nav .nav-active { color:var(--ink); border-color:var(--green); font-weight:700; }
-.topbar-meta,.status-strip,.panel-title,.market-heading,.book-spread,.book-foot,.execution-note,.sponsor-panel,.notice,.launch-hero,.monitor-items p { display:flex; align-items:center; }.topbar-meta { gap:14px; }.network { display:flex; gap:7px; font-size:13px; color:var(--muted); }.network i { width:7px; height:7px; background:var(--green); border-radius:50%; }.wallet-button,.lifecycle-action,.quiet-action { display:flex; align-items:center; justify-content:center; gap:8px; border:1px solid var(--ink); background:var(--ink); color:white; padding:10px 14px; border-radius:6px; font-weight:700; font-size:13px; }
-.status-strip { min-height:42px; justify-content:space-between; color:#365154; font-size:12px; border-bottom:1px solid var(--line); }.status-strip div { display:flex; align-items:center; gap:6px; }.status-strip span { color:var(--muted); }
-.terminal-grid { display:grid; grid-template-columns: minmax(0, 1.5fr) minmax(270px, .7fr) minmax(280px, .75fr); gap:16px; margin-top:20px; }.market-panel,.book-panel,.order-panel,.lifecycle-panel,.sponsor-panel,.launch-config,.launch-monitor { border:1px solid var(--line); background:var(--panel); border-radius:8px; }.market-panel { padding:22px; }.market-heading { justify-content:space-between; }.muted { margin:0 0 7px; color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.06em; }.market-heading h1,.launch-hero h1 { font-size:28px; margin:0; letter-spacing:0; }.market-heading h1 span { color:var(--green); font-size:11px; background:var(--green-soft); border-radius:4px; padding:4px 6px; vertical-align:middle; }.price { display:grid; text-align:right; gap:5px; }.price strong { font-size:26px; }.positive { color:var(--green); }.negative { color:var(--red); }.market-stats,.config-stats { display:grid; grid-template-columns:repeat(4,1fr); border-top:1px solid var(--line); border-bottom:1px solid var(--line); margin-top:20px; padding:14px 0; }.market-stats div,.config-stats div { display:grid; gap:5px; }.market-stats span,.config-stats span,.book-foot,.panel-title span { color:var(--muted); font-size:12px; }.market-stats strong,.config-stats strong { font-size:14px; }.chart-area { color:var(--green); padding-top:24px; }.chart-label { display:flex; justify-content:space-between; font-size:12px; margin-bottom:8px; }.chart-area svg { height:240px; width:100%; overflow:visible; }.chart-fill { fill:color-mix(in srgb, var(--green) 12%, transparent); stroke:none; }.chart-axis { display:flex; justify-content:space-between; color:var(--muted); font-size:11px; }.execution-note { gap:9px; background:#f3f7f9; color:#3d555a; margin-top:20px; padding:11px; border-radius:5px; font-size:12px; line-height:1.4; }
-.book-panel,.order-panel,.lifecycle-panel { padding:18px; }.panel-title { justify-content:space-between; margin-bottom:16px; }.panel-title h2,.sponsor-panel h2 { font-size:14px; margin:0; }.book-rows { display:grid; gap:5px; }.book-rows > div { position:relative; display:grid; grid-template-columns:1fr .8fr .8fr; padding:4px 0; font-size:12px; text-align:right; overflow:hidden; }.book-rows i { position:absolute; right:0; top:0; bottom:0; z-index:0; opacity:.5; }.book-rows span { position:relative; z-index:1; }.ask { color:var(--red); }.ask i { background:var(--red-soft); }.bid { color:var(--green); }.bid i { background:var(--green-soft); }.book-spread { justify-content:space-between; padding:10px 0; margin:8px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }.book-spread span { font-size:11px; color:var(--muted); }.book-foot { justify-content:space-between; padding-top:14px; }
-.side-toggle { display:grid; grid-template-columns:1fr 1fr; border:1px solid var(--line); border-radius:6px; overflow:hidden; margin-bottom:15px; }.side-toggle button { display:flex; gap:6px; justify-content:center; align-items:center; padding:9px; border:0; background:white; font-weight:700; font-size:13px; }.side-toggle .long { color:var(--green); }.side-toggle .short { color:var(--red); }.side-toggle .active-side.long { background:var(--green-soft); }.side-toggle .active-side.short { background:var(--red-soft); }.order-panel label,.launch-config label { display:grid; gap:6px; position:relative; font-size:12px; color:var(--muted); margin-top:12px; }.order-panel input,.order-panel select,.launch-config select { height:39px; padding:0 10px; color:var(--ink); border:1px solid var(--line); border-radius:5px; background:#fff; outline-color:var(--green); }.input-suffix { position:absolute; right:11px; bottom:12px; color:var(--muted); }.order-review { display:grid; grid-template-columns:1fr auto; gap:8px; font-size:12px; padding:16px 0; }.order-review span { color:var(--muted); }.submit { border:0; width:100%; padding:11px; color:white; font-weight:700; border-radius:6px; }.long-submit { background:var(--green); }.short-submit { background:var(--red); }.form-note { margin:11px 0 0; color:var(--muted); line-height:1.35; font-size:11px; }
-.lifecycle-panel { grid-column:1 / span 2; }.steps { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }.step { display:grid; grid-template-columns:23px 1fr; align-items:start; gap:6px; color:var(--muted); font-size:12px; }.step span { display:grid; place-items:center; height:20px; width:20px; border-radius:50%; border:1px solid var(--line); }.step p { margin:2px 0; line-height:1.25; }.complete-step { color:var(--ink); }.complete-step span { background:var(--green); color:white; border-color:var(--green); }.active-step span { color:var(--green); border-color:var(--green); animation:spin 1.4s linear infinite; }.lifecycle-action { width:100%; margin-top:18px; background:var(--ink); }.quiet-action { width:100%; background:white; color:var(--ink); margin-top:8px; border-color:var(--line); }.sponsor-panel { gap:12px; padding:16px; }.sponsor-panel { grid-column:3; }.sponsor-icon { color:#956600; background:#fff3cc; padding:8px; border-radius:6px; }.sponsor-panel p { margin:5px 0 0; color:var(--muted); font-size:12px; line-height:1.35; }.sponsor-panel button { margin-left:auto; border:0; background:transparent; color:var(--ink); }.notice { grid-column:1 / -1; gap:8px; color:#5d4c25; background:#fff6d8; border:1px solid #eddfad; border-radius:6px; padding:11px 13px; font-size:12px; }
-.session-panel { grid-column:1 / span 2; border:1px solid var(--line); background:var(--panel); border-radius:8px; padding:18px; }.session-panel label,.session-panel input { display:grid; gap:6px; font-size:12px; color:var(--muted); margin-top:12px; }.session-panel input { height:39px; padding:0 10px; color:var(--ink); border:1px solid var(--line); border-radius:5px; background:#fff; }.session-panel button { margin-top:16px; }.session-actions { border:0; margin-top:14px; padding:0; display:flex; flex-wrap:wrap; gap:12px; }.session-actions legend { font-size:12px; color:var(--muted); margin-bottom:6px; width:100%; }.session-actions label { display:flex; align-items:center; gap:6px; margin-top:0; font-size:12px; }.session-detail { display:grid; grid-template-columns:auto 1fr; gap:6px 14px; font-size:12px; margin:0; }.session-detail dt { color:var(--muted); }.session-detail dd { margin:0; text-align:right; }
-.settings-grid,.portfolio-grid,.activity-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:20px; }.settings-grid .session-panel,.portfolio-grid .session-panel,.activity-grid .session-panel { grid-column:auto; }.wallet-list { list-style:none; margin:10px 0 0; padding:0; font-size:12px; display:grid; gap:6px; word-break:break-all; }.activity-table-wrap { overflow-x:auto; }.activity-table { width:100%; border-collapse:collapse; font-size:12px; margin-top:10px; }.activity-table th { text-align:left; color:var(--muted); font-weight:600; padding:6px 8px; border-bottom:1px solid var(--line); }.activity-table td { padding:6px 8px; border-bottom:1px solid var(--line); }.negative.form-note { color:var(--red); }.wallet-selector { display:grid; gap:8px; margin-top:10px; }.wallet-option { display:flex; align-items:center; justify-content:space-between; gap:10px; border:1px solid var(--line); border-radius:6px; padding:9px 12px; background:#fff; font-size:12px; text-align:left; width:100%; }.wallet-option-active { border-color:var(--green); background:var(--green-soft); }
-.open-orders-panel { grid-column:1 / span 2; }.open-orders-table-wrap { overflow-x:auto; }.open-orders-table { min-width:560px; }.open-orders-actions { display:flex; gap:6px; white-space:nowrap; }.open-orders-actions button { padding:5px 9px; font-size:11px; border:1px solid var(--line); background:#fff; border-radius:4px; font-weight:600; }
-.launch-layout { display:grid; grid-template-columns:1.15fr .85fr; gap:16px; margin-top:20px; }.launch-hero { justify-content:space-between; min-height:230px; color:white; background:#16474a; border-radius:8px; padding:34px; }.launch-hero .muted { color:#b9d5ce; }.launch-hero h1 { max-width:640px; font-size:38px; }.launch-hero p:not(.muted) { max-width:620px; line-height:1.5; color:#dcebe6; }.launch-config { padding:20px; }.launch-monitor { grid-column:1 / -1; padding:20px; }.progress { height:8px; background:#e8efed; border-radius:5px; overflow:hidden; }.progress span { display:block; height:100%; background:var(--green); }.monitor-items { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-top:20px; }.monitor-items p { margin:0; gap:8px; color:var(--muted); font-size:13px; }.monitor-items strong { margin-left:auto; color:var(--ink); }.launch-submit { background:var(--green); margin-top:20px; }
-@keyframes spin { to { transform:rotate(360deg); } }
-.demo-banner { display:flex; gap:10px; align-items:baseline; margin-top:14px; padding:12px 14px; border:1px solid #c7dce8; border-radius:7px; background:#eef7fb; color:#244c5a; font-size:12px; line-height:1.4; }
-.demo-banner strong { color:var(--ink); white-space:nowrap; }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration:0.001ms !important; animation-iteration-count:1 !important; transition-duration:0.001ms !important; scroll-behavior:auto !important; } }
-@media (max-width: 1040px) { .terminal-grid { grid-template-columns:1fr 1fr; }.market-panel { grid-column:1 / -1; }.order-panel { grid-column:2; grid-row:2 / span 2; }.lifecycle-panel { grid-column:1; }.session-panel { grid-column:1; }.sponsor-panel { grid-column:1; }.launch-layout { grid-template-columns:1fr; }.launch-monitor { grid-column:auto; } }
-@media (max-width: 680px) { .shell { padding:0 14px 24px; }.topbar { height:auto; min-height:64px; gap:10px; }.topbar nav,.network { display:none; }.topbar-meta { margin-left:auto; }.wallet-button { font-size:0; padding:9px; }.status-strip { align-items:flex-start; flex-direction:column; padding:8px 0; gap:5px; }.terminal-grid { display:flex; flex-direction:column; }.market-panel,.book-panel,.order-panel,.lifecycle-panel,.session-panel,.sponsor-panel { width:100%; }.market-stats { grid-template-columns:1fr 1fr; gap:14px; }.steps,.monitor-items { grid-template-columns:1fr; }.launch-hero { min-height:300px; padding:24px; align-items:flex-start; }.launch-hero h1 { font-size:30px; }.config-stats { grid-template-columns:1fr; gap:12px; }.sponsor-panel { grid-column:auto; }.chart-area svg { height:170px; }.open-orders-table-wrap { overflow-x:visible; }.open-orders-table { min-width:0; width:100%; }.open-orders-table thead { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }.open-orders-table,.open-orders-table tbody,.open-orders-row { display:block; width:100%; }.open-orders-row { border:1px solid var(--line); border-radius:6px; margin-bottom:8px; padding:8px 10px; }.open-orders-table td { display:flex; justify-content:space-between; gap:10px; padding:4px 0; border-bottom:0; }.open-orders-table td::before { content:attr(data-label); color:var(--muted); font-size:11px; }.open-orders-actions { justify-content:flex-end; } }
+@import "tailwindcss";
+
+/* StockStream theme — the SlipStream terminal design language.
+   `.dark` on <html> (set before paint by the script in app/layout.tsx and
+   flipped by components/theme-toggle.tsx) selects the dark palette; light is
+   the :root default. Every surface reads the --t-* tokens, so both themes
+   stay in step. */
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: var(--font-ui);
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+:root {
+  --t-bg: #ffffff;
+  --t-surface: #ffffff;
+  --t-surface-2: #f3f5f7;
+  --t-surface-3: #e9edf0;
+  --t-border: #d5dbdf;
+  --t-text: #0e1417;      /* 16.9:1 on --t-surface */
+  --t-text-2: #46515b;    /*  8.3:1 */
+  --t-text-3: #5f6a74;    /*  5.9:1 */
+  --t-text-hi: #000000;
+  --t-up: #047857;        /*  4.8:1  emerald-700 */
+  --t-up-2: #036b4d;
+  --t-up-3: #025c42;
+  --t-down: #be123c;      /*  6.4:1  rose-700 */
+  --t-down-2: #a10f33;
+  --t-down-3: #8c0d2c;
+  --t-down-bg: #fdeaee;
+  /* Ink for text sitting ON a saturated fill (--t-up-3 / --t-down-3). Those
+     fills are dark in BOTH themes, so this stays white in both. Without it,
+     filled buttons took `text-white` -- which the light remap above rewrites to
+     dark ink -- and rendered black-on-dark-green at 2.26:1. */
+  --t-on-fill: #ffffff;
+  /* --t-border is a hairline DIVIDER (decorative, no WCAG bar). A control whose
+     only boundary is its border must clear 3:1 per 1.4.11, which #d5dbdf at
+     1.40:1 does not — so interactive edges take --t-border-strong instead. */
+  --t-border-strong: #84919c;   /* 3.23:1 on white */
+  --t-scroll-thumb: rgba(15, 23, 23, 0.28);
+  --t-scroll-thumb-hover: rgba(15, 23, 23, 0.45);
+  --t-warn: #a2490a;      /*  6.0:1 on white, 5.1:1 on --t-surface-3.
+                             amber-700 (#b45309) measured 4.27:1 against
+                             surface-3 -- an AA failure only the darkest
+                             surface exposed, which is exactly the kind of
+                             pair the old code never checked. */
+  --t-link: #0369a1;      /*  5.6:1  sky-700 */
+}
+.dark {
+  --t-bg: #0b0d0e;
+  --t-surface: #121516;
+  --t-surface-2: #15191a;
+  --t-surface-3: #171b1c;
+  --t-border: #1d2224;
+  --t-text: #e6e9ea;
+  --t-text-2: #a2abb1;
+  --t-text-3: #838c92;
+  --t-text-hi: #ffffff;
+  --t-up: #22c55e;
+  --t-up-2: #1c9463;
+  --t-up-3: #16794f;
+  --t-down: #ef4444;
+  --t-down-2: #c04447;
+  --t-down-3: #a93436;
+  --t-down-bg: #2b1416;
+  --t-on-fill: #ffffff;
+  --t-border-strong: #5f696d;   /* 3.01:1 on --t-bg */
+  --t-scroll-thumb: rgba(255, 255, 255, 0.18);
+  --t-scroll-thumb-hover: rgba(255, 255, 255, 0.3);
+  --t-warn: #f59e0b;
+  --t-link: #58a6ff;
+}
+
+/* StockStream extras + legacy aliases (older components use these names). */
+:root {
+  --t-up-soft: rgba(4, 120, 87, 0.1);
+  --t-down-soft: #fdeaee;
+  --ink: var(--t-text);
+  --muted: var(--t-text-2);
+  --line: var(--t-border);
+  --paper: var(--t-bg);
+  --panel: var(--t-surface);
+  --green: var(--t-up);
+  --green-soft: var(--t-up-soft);
+  --red: var(--t-down);
+  --red-soft: var(--t-down-soft);
+  --blue: var(--t-link);
+  --font-ui: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-poppins), ui-sans-serif, system-ui, sans-serif;
+}
+.dark {
+  color-scheme: dark;
+  --t-up-soft: rgba(34, 197, 94, 0.12);
+  --t-down-soft: #2b1416;
+}
+
+html, body { background: var(--t-bg); }
+body { margin: 0; color: var(--t-text); font-family: var(--font-ui); font-size: 13px; -webkit-font-smoothing: antialiased; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.positive { color: var(--t-up); }
+.negative { color: var(--t-down); }
+.muted { margin: 0; color: var(--t-text-2); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+.skip-link { position: absolute; top: -48px; left: 8px; z-index: 50; background: var(--t-surface-3); color: var(--t-text); padding: 9px 14px; border-radius: 6px; font-size: 13px; text-decoration: none; transition: top .15s; }
+.skip-link:focus { top: 8px; }
+
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "ss01" 1;
+}
+
+/* Emerald glow accent for primary CTAs */
+.glow-emerald {
+  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.35), 0 8px 30px rgba(16, 185, 129, 0.28);
+}
+
+/* Live pulse dot */
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.5); }
+  70% { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: #10b981;
+  animation: pulse-ring 2s infinite;
+}
+
+/* Value flash animations for live-updating numbers */
+@keyframes flash-up {
+  0% { color: #34d399; }
+  100% { color: inherit; }
+}
+@keyframes flash-down {
+  0% { color: #fb7185; }
+  100% { color: inherit; }
+}
+.flash-up { animation: flash-up 0.6s ease-out; }
+.flash-down { animation: flash-down 0.6s ease-out; }
+
+/* Depth-bar fill behind orderbook rows */
+.depth-bid { background: linear-gradient(90deg, transparent, rgba(16, 185, 129, 0.14)); }
+.depth-ask { background: linear-gradient(90deg, transparent, rgba(244, 63, 94, 0.13)); }
+
+/* Gentle entrance */
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rise-in { animation: rise-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+
+/* Every animation here is decorative: panel entrances, the live-dot pulse and
+   the price flash all restate something already visible statically. So honour
+   the OS setting by removing motion outright rather than just shortening it —
+   a shortened animation still moves, which is the thing being opted out of. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  /* `both` fill would otherwise leave these stuck at their opacity-0 start. */
+  .rise-in {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+::selection {
+  background: rgba(16, 185, 129, 0.28);
+  color: inherit;
+}
+:root:not(.dark) ::selection {
+  background: rgba(16, 185, 129, 0.24);
+}
+
+input,
+textarea,
+[contenteditable] {
+  /* --t-up rather than a literal emerald-500, which measured ~2.5:1 on a white
+     input — the cursor was hard to find while typing an order price. */
+  caret-color: var(--t-up);
+}
+
+/* The default focus ring is invisible against the dark canvas. Keyboard users
+   get an emerald ring; pointer users are unaffected.
+
+   --t-up, not the old literal rgba(16, 185, 129, 0.75). That literal had no
+   light-mode value: at 75% alpha it composited to rgb(76, 203, 161) over the
+   light `.app-bg`, measuring 1.70:1 against that gradient's darkest stop
+   (#ebebeb) and 2.03:1 on plain white — under the 3:1 WCAG 2.2 SC 2.4.11 asks
+   of a focus indicator, so a keyboard user in light mode could not tell which
+   control was focused. --t-up is opaque #047857 in light (5.16:1 at the top of
+   the gradient, 4.60:1 at the bottom) and #22c55e in dark, so one token clears
+   the bar in both themes. */
+:focus-visible {
+  outline: 2px solid var(--t-up);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Page scrollbar. `.slim-scroll` keeps its own tighter treatment below. */
+html {
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+/* NOT `:root:not(.dark) html` — `:root` IS the <html> element, so that asked
+   for an html inside an html and could never match. The light page scrollbar
+   was white-on-white for as long as this rule has existed. */
+:root:not(.dark) {
+  scrollbar-color: rgba(15, 23, 23, 0.22) transparent;
+}
+body::-webkit-scrollbar {
+  width: 11px;
+}
+body::-webkit-scrollbar-track {
+  background: transparent;
+}
+body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 9999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+body::-webkit-scrollbar-thumb:hover {
+  background: rgba(16, 185, 129, 0.45);
+  background-clip: content-box;
+}
+:root:not(.dark) body::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 23, 0.2);
+  background-clip: content-box;
+}
+
+/* Links inside prose sit closer to their underline than the browser default. */
+a {
+  text-underline-offset: 0.18em;
+}
+
+
+/* Slim, visible scrollbar for the order-form/session column so the session-key
+   controls at the bottom are always reachable inside the viewport lock. */
+.slim-scroll {
+  scrollbar-width: thin;
+  /* Was a literal rgba(255,255,255,.18) with no light counterpart: an invisible
+     thumb on a white ground, on the very column this rule exists to keep
+     reachable. Specifying scrollbar-color also disables the ::-webkit-*
+     fallback below in Chrome, so there was no second chance. */
+  scrollbar-color: var(--t-scroll-thumb) transparent;
+}
+.slim-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.slim-scroll::-webkit-scrollbar-thumb {
+  background: var(--t-scroll-thumb);
+  border-radius: 9999px;
+}
+.slim-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--t-scroll-thumb-hover);
+}
+
+/* Hide native number-input spin buttons (the up/down arrows looked broken on the
+   dark glass inputs). Users type or use the quick-pick buttons / leverage slider. */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.terminal {
+  --tk-bg: var(--t-bg);
+  --tk-elev: var(--t-surface);
+  --tk-hover: var(--t-surface-3);
+  --tk-line: var(--t-border);
+  --tk-line-soft: var(--t-surface-2);
+  --tk-text: var(--t-text);
+  --tk-text-2: var(--t-text-2);
+  --tk-text-3: var(--t-text-3);
+  --tk-green: var(--t-up);
+  --tk-red: var(--t-down);
+  font-family: var(--font-ui), ui-sans-serif, system-ui, sans-serif;
+  background: var(--tk-bg);
+  color: var(--tk-text);
+  font-feature-settings: "cv05", "ss01";
+}
+.terminal ::selection { background: rgba(34, 197, 94, 0.3); }
+
+/* Panel chrome shared by every column. */
+.tk-head {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--tk-line);
+}
+.tk-tab {
+  position: relative;
+  height: 40px;
+  padding: 0 2px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--tk-text-2);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: color 100ms;
+}
+.tk-tab:hover:not(:disabled) { color: var(--tk-text); }
+.tk-tab[aria-selected="true"] { color: var(--tk-text); }
+/* The underline sits ON the header's bottom border, not above it. */
+.tk-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--tk-text);
+}
+.tk-tab:disabled { color: var(--tk-text-3); cursor: not-allowed; }
+
+.tk-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: var(--tk-elev);
+  border: 1px solid var(--tk-line);
+  color: var(--tk-text-2);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* Keyboard focus must stay visible on a ground this dark. */
+.terminal :focus-visible {
+  outline: 1px solid var(--tk-green);
+  outline-offset: 1px;
+  border-radius: 3px;
+}
+
+/* Column dividers: the grid draws them so panels stay flush and gapless. */
+.tk-col + .tk-col { border-left: 1px solid var(--tk-line); }
+
+@media (max-width: 1279px) {
+  .tk-col + .tk-col { border-left: none; border-top: 1px solid var(--tk-line); }
+}
+
+/* Scroll reveal (components/reveal.tsx adds .visible on intersection). */
+.reveal { opacity: 0; transform: translateY(18px); transition: opacity 600ms cubic-bezier(0.2, 0.7, 0.25, 1), transform 600ms cubic-bezier(0.2, 0.7, 0.25, 1); }
+.reveal.visible { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; transition: none; } }
+
+/* ── App pages (portfolio / activity / settings / diagnostics) ───────── */
+.shell { min-height: 100vh; }
+.shell > :not(header) { max-width: 1480px; margin-left: auto; margin-right: auto; padding-left: 20px; padding-right: 20px; }
+.wallet-button, .lifecycle-action, .quiet-action { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid var(--t-up-3); background: var(--t-up-3); color: var(--t-on-fill); padding: 6px 12px; height: 32px; border-radius: 6px; font-weight: 600; font-size: 12.5px; text-decoration: none; white-space: nowrap; }
+.wallet-button:hover, .lifecycle-action:hover { background: var(--t-up-2); }
+.quiet-action, .quiet-action:hover { background: var(--t-surface); border-color: var(--t-border-strong); color: var(--t-text); }
+.quiet-action:hover { background: var(--t-surface-3); }
+.demo-banner { display: flex; gap: 10px; align-items: baseline; margin: 12px 0 0; padding: 10px 14px; border: 1px solid var(--t-border); border-radius: 6px; background: var(--t-surface); color: var(--t-text-2); font-size: 12px; }
+.demo-banner strong { color: var(--t-text); white-space: nowrap; }
+/* ── Panels ──────────────────────────────────────────────────────────── */
+.session-panel { background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 8px; }
+.session-panel { padding: 14px; }
+.panel-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 8px; }
+.panel-title h2 { font-size: 12px; font-weight: 600; margin: 0; text-transform: uppercase; letter-spacing: .1em; color: var(--t-text); }
+.panel-title span, .book-foot { color: var(--t-text-3); font-size: 11px; }
+.form-note { margin: 10px 0 0; color: var(--t-text-2); line-height: 1.45; font-size: 12px; }
+.negative.form-note { color: var(--t-down); }
+
+/* ── Account panel ───────────────────────────────────────────────────── */
+.lifecycle-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.lifecycle-actions button, .open-orders-actions button { padding: 8px 10px; border: 1px solid var(--t-border); border-radius: 6px; background: var(--t-surface-2); color: var(--t-text); font-weight: 600; font-size: 12px; }
+.lifecycle-actions button:hover:not(:disabled) { background: var(--t-surface-3); }
+.advanced-tools { margin-top: 4px; border-top: 1px solid var(--t-border); padding-top: 8px; }
+.advanced-tools summary { cursor: pointer; color: var(--t-text-2); font-size: 12px; }
+.advanced-tools[open] > * + * { margin-top: 8px; }
+
+/* ── Sessions, positions, tables ─────────────────────────────────────── */
+.session-panel button, .open-orders-panel button { margin-top: 12px; padding: 7px 12px; border: 1px solid var(--t-border-strong); border-radius: 6px; background: var(--t-surface-2); color: var(--t-text); font-weight: 600; font-size: 12px; }
+.open-orders-panel td button { margin-top: 0; }
+.session-actions { border: 0; margin-top: 12px; padding: 0; display: flex; flex-wrap: wrap; gap: 12px; }
+.session-actions legend { font-size: 12px; color: var(--t-text-2); margin-bottom: 6px; width: 100%; }
+.session-actions label { display: flex; align-items: center; gap: 6px; margin-top: 0; font-size: 12px; }
+.session-detail { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 12px; margin: 0; font-variant-numeric: tabular-nums; }
+.session-detail dt { color: var(--t-text-2); }
+.session-detail dd { margin: 0; text-align: right; word-break: break-all; }
+.settings-grid, .portfolio-grid, .activity-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 20px; }
+.wallet-list { list-style: none; margin: 10px 0 0; padding: 0; font-size: 12px; display: grid; gap: 6px; word-break: break-all; }
+.activity-table-wrap, .open-orders-table-wrap { overflow-x: auto; }
+.activity-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px; font-variant-numeric: tabular-nums; }
+.activity-table th { text-align: left; color: var(--t-text-3); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--t-border); }
+.activity-table td { padding: 6px 8px; border-bottom: 1px solid var(--t-border); }
+.wallet-selector { display: grid; gap: 8px; margin-top: 10px; }
+.wallet-option { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid var(--t-border); border-radius: 6px; padding: 9px 12px; background: var(--t-surface-2); font-size: 12px; text-align: left; width: 100%; }
+.wallet-option-active { border-color: var(--t-up-3); background: var(--t-up-soft); }
+.open-orders-panel { padding: 8px 12px; }
+.open-orders-table { min-width: 520px; }
+.open-orders-actions { display: flex; gap: 6px; white-space: nowrap; }
+
+/* ── Launch lab ──────────────────────────────────────────────────────── */
+
+.session-panel label { display: grid; gap: 6px; position: relative; font-size: 12px; color: var(--t-text-2); margin-top: 12px; }
+.session-panel input, .session-panel select { height: 38px; padding: 0 10px; color: var(--t-text); border: 1px solid var(--t-border); border-radius: 6px; background: var(--t-bg); outline: none; font-variant-numeric: tabular-nums; }
+.session-panel input:focus, .session-panel select:focus { border-color: var(--t-border-strong); }
+.session-panel input[type=checkbox] { height: auto; accent-color: var(--t-up); }
+.input-suffix { position: absolute; right: 11px; bottom: 11px; color: var(--t-text-3); font-size: 12px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (max-width: 1040px) { .settings-grid, .portfolio-grid, .activity-grid { grid-template-columns: 1fr; } }
+@media (max-width: 680px) {
+  .open-orders-table { min-width: 0; width: 100%; }
+  .open-orders-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .open-orders-table, .open-orders-table tbody, .open-orders-row { display: block; width: 100%; }
+  .open-orders-row { border: 1px solid var(--t-border); border-radius: 6px; margin-bottom: 8px; padding: 8px 10px; }
+  .open-orders-table td { display: flex; justify-content: space-between; gap: 10px; padding: 4px 0; border-bottom: 0; }
+  .open-orders-table td::before { content: attr(data-label); color: var(--t-text-3); font-size: 11px; }
+  .open-orders-actions { justify-content: flex-end; }
+}
+@layer base {
+  *, ::before, ::after { border-color: var(--t-border); }
+}
+/* Connected wallet: a quiet chip, not a call to action. */
+.wallet-button.wallet-chip { background: var(--t-surface); border-color: var(--t-border-strong); color: var(--t-text); font-weight: 500; }
+.wallet-button.wallet-chip:hover { background: var(--t-surface-3); }

@@ -5,6 +5,8 @@ export default defineConfig([
   ...nextVitals,
   globalIgnores([
     ".next/**",
+    "dist/**",
+    ".vinext/**",
     "node_modules/**",
     "coverage/**",
     "client/**",

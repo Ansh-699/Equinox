@@ -117,6 +117,12 @@ test("base58Decode matches @solana/kit's decoder", async () => {
   expect(Array.from(decoded!)).toEqual(Array.from(bytes));
 });
 
+test("base58Decode keeps leading zero bytes (leading '1' characters)", () => {
+  for (const bytes of [new Uint8Array(32), Uint8Array.from({ length: 32 }, (_, i) => (i < 2 ? 0 : i))]) {
+    expect(Array.from(base58Decode(getBase58Decoder().decode(bytes))!)).toEqual(Array.from(bytes));
+  }
+});
+
 // ---------------------------------------------------------------------
 // Keeper transaction allowlist: the signer boundary rejects anything a
 // keeper must never be able to submit.

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { decodeTraderSeat, type TraderSeatView } from "@/lib/positions";
 import type { SolanaRpcTransport } from "@/lib/rpc-transport";
+import { resolveV3Seat } from "@/lib/v3-seat";
 
 const POLL_INTERVAL_MS = 8_000;
 
@@ -39,8 +40,11 @@ export function decodeV3Position(value: unknown, seatIndex: number): TraderSeatV
  * (workers/src/private-sessions.ts's decoder is built but never wired to
  * an HTTP/WS route), so this reads the same market account
  * useStockStreamProtocol's transport already fetches for L1 actions. */
-export function usePosition(rpc: SolanaRpcTransport | null, marketAddress: string | null, seatIndex: number, v3?: { marketApiUrl?: string; core?: string }) {
+/** In V3 mode with `trader` set, the seat is the wallet's own (or the first
+ * free slot, reported as `seatIndex` with no seat); signed out shows none. */
+export function usePosition(rpc: SolanaRpcTransport | null, marketAddress: string | null, seatIndex: number, v3?: { marketApiUrl?: string; core?: string; trader?: string | null }) {
   const [seat, setSeat] = useState<TraderSeatView | null>(null);
+  const [resolvedSeatIndex, setResolvedSeatIndex] = useState<number | null>(null);
   const [reconciliationStatus, setReconciliationStatus] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,8 +58,16 @@ export function usePosition(rpc: SolanaRpcTransport | null, marketAddress: strin
           .then((aggregate) => {
             if (stopped) return;
             const values = aggregate && Array.isArray(aggregate.positions) ? aggregate.positions : [];
-            const position = values.find((value) => value && typeof value === "object" && "shard" in value && "slot" in value && (value as { shard?: unknown; slot?: unknown }).shard === Math.floor(seatIndex / 32) && (value as { slot?: unknown }).slot === seatIndex % 32);
-            setSeat(decodeV3Position(position, seatIndex));
+            let index: number | null = seatIndex;
+            if (v3.trader !== undefined) {
+              const occupied = values.filter((value): value is { shard: number; slot: number; trader: string } =>
+                !!value && typeof value === "object" && typeof (value as { shard?: unknown }).shard === "number"
+                && typeof (value as { slot?: unknown }).slot === "number" && typeof (value as { trader?: unknown }).trader === "string");
+              index = v3.trader ? resolveV3Seat(occupied, v3.trader)?.seatIndex ?? null : null;
+            }
+            setResolvedSeatIndex(index);
+            const position = index === null ? undefined : values.find((value) => value && typeof value === "object" && "shard" in value && "slot" in value && (value as { shard?: unknown; slot?: unknown }).shard === Math.floor(index! / 32) && (value as { slot?: unknown }).slot === index! % 32);
+            setSeat(index === null ? null : decodeV3Position(position, index));
             setReconciliationStatus(null);
             setError(null);
           })
@@ -78,7 +90,7 @@ export function usePosition(rpc: SolanaRpcTransport | null, marketAddress: strin
     poll();
     const interval = setInterval(poll, POLL_INTERVAL_MS);
     return () => { stopped = true; clearInterval(interval); };
-  }, [rpc, marketAddress, seatIndex, v3?.marketApiUrl, v3?.core]);
+  }, [rpc, marketAddress, seatIndex, v3?.marketApiUrl, v3?.core, v3?.trader]);
 
-  return { seat, reconciliationStatus, error };
+  return { seat, reconciliationStatus, error, seatIndex: v3?.trader !== undefined ? resolvedSeatIndex : seatIndex };
 }

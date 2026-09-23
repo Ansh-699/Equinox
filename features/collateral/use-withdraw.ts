@@ -1,10 +1,13 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { withdrawCollateral, withdrawCollateralV3 } from "@/clients/stockstream/src";
+import { ComputeBudgetProgram, PublicKey } from "@solana/web3.js";
+import { createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction, getAssociatedTokenAddressSync } from "@solana/spl-token";
+import { claimWithdrawalV3, requestWithdrawalV3, withdrawCollateral, withdrawCollateralV3 } from "@/clients/stockstream/src";
 import type { ResolvedCustodyAccounts } from "./custody-accounts";
 import type { TransactionPreview } from "@/lib/execution-boundary";
 import { RpcFailure } from "@/lib/rpc-transport";
+import { refreshWalletBalances } from "@/features/portfolio/use-wallet-balances";
 import { recordSignature } from "@/lib/last-signature";
 import type { StockStreamProtocol } from "@/features/wallet/use-stockstream-protocol";
 import type { ExecutionDisplayState } from "@/lib/execution-status";
@@ -37,17 +40,77 @@ export function evaluateWithdrawGate(execution: ExecutionDisplayState | null, re
   return { allowed: true };
 }
 
-export function useWithdraw(protocol: StockStreamProtocol | null) {
+export function useWithdraw(protocol: StockStreamProtocol | null, report?: (message: string) => void) {
   const [pending, setPending] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNoticeState] = useState<string | null>(null);
+  // Mirrors every status into the caller's single status line.
+  const setNotice = useCallback((message: string) => { setNoticeState(message); report?.(message); }, [report]);
 
   const submitWithdraw = useCallback(async (
     accounts: ResolvedCustodyAccounts,
     amount: bigint,
     gate: WithdrawGate,
     seat: TraderSeatView | null,
+    inRollup = false,
+    /** Pay out to this wallet's USDC account instead (the trading key's owner). */
+    payoutOwner: string | null = null,
   ) => {
     if (!protocol) { setNotice("Withdraw blocked: connect a wallet capable of signing on Devnet."); return; }
+    if (inRollup && accounts.v3) {
+      if (amount <= 0n) { setNotice("Withdraw blocked: enter a positive amount."); return; }
+      if (seat && amount > seat.availableCollateral) { setNotice("Withdraw blocked: amount exceeds your free collateral."); return; }
+      const w = accounts.v3.withdraw;
+      const seatShard = w.seatShards[Math.floor(accounts.seatIndex / 32)];
+      if (!w.oracleSnapshot) { setNotice("Withdraw blocked: no oracle snapshot configured."); return; }
+      const toPreview = (name: string, ixs: readonly { programId: { toBase58(): string }; keys: readonly { pubkey: { toBase58(): string }; isSigner: boolean; isWritable: boolean }[] }[]): TransactionPreview => {
+        const ix = ixs[ixs.length - 1];
+        return { instruction: name, programId: ix.programId.toBase58(), status: "constructed", accounts: ix.keys.map((meta) => ({ address: meta.pubkey.toBase58(), signer: meta.isSigner, writable: meta.isWritable })) };
+      };
+      setPending(true);
+      try {
+        // TraderSeat.reserved[8..16] (shard header 44, seat 256, offset 192): total requested so far.
+        const requestedOnL1 = async () => {
+          const bytes = await protocol.rpc.rawAccountBytes(String(seatShard));
+          if (!bytes) throw new Error("seat shard not found on Solana");
+          return new DataView(bytes.buffer, bytes.byteOffset).getBigUint64(44 + (accounts.seatIndex % 32) * 256 + 192, true);
+        };
+        const target = (await requestedOnL1()) + amount;
+        // Step 1: the rollup debits the seat (risk-checked) and commits the shard to Solana.
+        setNotice("Step 1/2 · Requesting the withdrawal in the MagicBlock rollup…");
+        const request = [ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 }),
+          requestWithdrawalV3({ core: w.core, seatShard, eventShards: w.eventShards, trader: w.authority, oracleSnapshot: w.oracleSnapshot }, accounts.seatIndex, amount)];
+        await protocol.service.executeEr(toPreview("RequestWithdrawalV3", request), request, [w.core, seatShard, ...w.eventShards].map(String));
+        // The commit usually lands on Solana in < 1 s; wait up to 45 s before signing the payout.
+        setNotice("Step 2/2 · Waiting for the rollup commit on Solana…");
+        const deadline = Date.now() + 45_000;
+        while ((await requestedOnL1().catch(() => 0n)) < target) {
+          if (Date.now() > deadline) throw new Error("the rollup commit has not reached Solana yet — press Withdraw again later to collect it");
+          await new Promise((resolve) => setTimeout(resolve, 750));
+        }
+        setNotice("Step 2/2 · Paying out from the vault on Solana…");
+        // The vault pays the trader's own USDC account (the program insists); for a
+        // trading key, the same transaction forwards it to the owner's wallet.
+        const claim = claimWithdrawalV3({ core: w.core, seatShard, trader: w.authority, destination: w.destination, vault: w.vault, vaultAuthority: w.vaultAuthority, mint: w.mint, tokenProgram: w.tokenProgram }, accounts.seatIndex);
+        const payoutIxs = [claim];
+        if (payoutOwner) {
+          const mint = new PublicKey(String(w.mint)), tokenProgram = new PublicKey(String(w.tokenProgram)), trader = new PublicKey(String(w.authority));
+          const payout = getAssociatedTokenAddressSync(mint, new PublicKey(payoutOwner), false, tokenProgram);
+          payoutIxs.push(
+            createAssociatedTokenAccountIdempotentInstruction(trader, payout, new PublicKey(payoutOwner), mint, tokenProgram),
+            createTransferCheckedInstruction(new PublicKey(String(w.destination)), mint, payout, trader, amount, 6, [], tokenProgram),
+          );
+        }
+        const result = await protocol.service.executeL1(toPreview("ClaimWithdrawalV3", payoutIxs), payoutIxs);
+        recordSignature("ClaimWithdrawalV3", result.signature, "l1");
+        setNotice(`Withdrew ${Number(amount) / 1e6} USDC to ${payoutOwner ? "your wallet" : "your USDC account"}.`);
+      } catch (error) {
+        setNotice(`Withdraw not completed: ${error instanceof Error ? error.message : String(error)}. A requested amount that was not paid out is paid by the next withdrawal.`);
+      } finally {
+        setPending(false);
+        refreshWalletBalances();
+      }
+      return;
+    }
     if (!gate.allowed) { setNotice(`Withdraw blocked: ${gate.reason ?? "market lifecycle state"}.`); return; }
     if (amount <= 0n) { setNotice("Withdraw blocked: enter a positive amount."); return; }
     if (seat && amount > seat.availableCollateral) {
@@ -64,7 +127,7 @@ export function useWithdraw(protocol: StockStreamProtocol | null) {
     setPending(true);
     setNotice(`Simulating WithdrawCollateral for ${amount} base units…`);
     try {
-      const result = await protocol.service.executeL1(preview, [instruction]);
+      const result = await protocol.service.executeL1(preview, [instruction], { freshOracle: true });
       recordSignature("WithdrawCollateral", result.signature, "l1");
       const [vaultBalance, destinationBalance, readbackSeat] = await Promise.all([
         protocol.rpc.tokenBalance(String(accounts.vault)).catch(() => null),
@@ -85,8 +148,9 @@ export function useWithdraw(protocol: StockStreamProtocol | null) {
       setNotice(error instanceof RpcFailure ? `WithdrawCollateral failed at ${error.method} (${error.code}) -- the program may have rejected the current health/lifecycle state.` : error instanceof Error ? error.message : "Withdraw failed");
     } finally {
       setPending(false);
+      refreshWalletBalances();
     }
-  }, [protocol]);
+  }, [protocol, setNotice]);
 
   return { pending, notice, submitWithdraw };
 }

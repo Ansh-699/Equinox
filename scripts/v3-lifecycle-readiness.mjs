@@ -5,17 +5,28 @@ export const V3_LIFECYCLE_ORDER = Object.freeze([
   "er-delegation", "session-member-delegation", "limited-session", "er-orders-and-fills",
 ]);
 
-export function assertV3L1Readiness({ core, seatShards, accountCount, nowSeconds, requireCollateral = true }) {
+/** An authenticated, fresh, open TSLA `OracleSnapshotV3` (the ER price source). */
+function snapshotFresh(snapshot, nowSeconds) {
+  if (snapshot?.length !== 128 || snapshot.subarray(0, 8).toString() !== "STKORS03" || snapshot[87] !== 1
+    || snapshot.readUInt32LE(44) !== 1435 || snapshot[48] !== 2 || snapshot.readInt32LE(49) !== -5
+    || snapshot[86] !== 0 || snapshot.readBigUInt64LE(77) === 0n) return false;
+  const price = snapshot.readBigInt64LE(53); const published = Number(snapshot.readBigUInt64LE(69));
+  return price > 0n && snapshot.readBigUInt64LE(61) <= price / 5n
+    && nowSeconds <= published + 10 && published <= nowSeconds + 2;
+}
+
+export function assertV3L1Readiness({ core, seatShards, accountCount, nowSeconds, requireCollateral = true, snapshot }) {
   if (accountCount !== 27 || core?.length !== 4096 || seatShards?.length !== 4
     || seatShards.some(bytes => bytes?.length !== 8236)) throw new Error("incomplete execution bundle");
   if (core.subarray(0, 8).toString() !== "STKMK003" || core.readUInt16LE(8) !== 3
     || core[10] !== 1 || core[371] !== 2) throw new Error("revision-2 active core required");
   if ([1, 2].includes(core[197])) throw new Error("L1 deposit must precede delegation");
   const published = Number(core.readBigUInt64LE(189));
-  if (!Number.isSafeInteger(nowSeconds) || core[180] !== 1 || core[11] !== 1
-    || core[1686] > 2 || nowSeconds > published + 10 || published > nowSeconds + 2
-    || core.readBigInt64LE(181) <= 0n
-    || core.readBigUInt64LE(1687) > core.readBigInt64LE(181) / 5n) throw new Error("oracle stale or unavailable");
+  const coreOracleFresh = core[180] === 1 && core[1686] <= 2
+    && nowSeconds <= published + 10 && published <= nowSeconds + 2
+    && core.readBigInt64LE(181) > 0n && core.readBigUInt64LE(1687) <= core.readBigInt64LE(181) / 5n;
+  if (!Number.isSafeInteger(nowSeconds) || core[11] !== 1
+    || !(snapshot ? snapshotFresh(snapshot, nowSeconds) : coreOracleFresh)) throw new Error("oracle stale or unavailable");
   if (core.readUInt32LE(246) !== 1435 || core[250] !== 2 || core.readInt32LE(251) !== -5)
     throw new Error("TSLA oracle metadata mismatch");
   let seats = 0; let funded = 0;

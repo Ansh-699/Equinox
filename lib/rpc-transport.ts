@@ -1,3 +1,5 @@
+import { recordErTx } from './er-latency';
+import { firstSignature, type ErSocket } from './er-socket';
 import { PublicKey } from '@solana/web3.js';
 import { Buffer } from 'buffer';
 import { decodeMarketState, decodeTradingSession, type TradingSessionView } from '../clients/stockstream/src';
@@ -29,7 +31,7 @@ export class SolanaRpcTransport implements L1Transport {
   // such branding check, so vitest never caught this -- only a real
   // browser (Playwright) does. Binding here fixes every call site without
   // requiring every constructor caller to remember to do it themselves.
-  constructor(private readonly endpoint: string, private readonly fetcher: Fetch = fetch.bind(globalThis),
+  constructor(readonly endpoint: string, private readonly fetcher: Fetch = fetch.bind(globalThis),
     private readonly wait: (ms: number) => Promise<void> = ms => new Promise(resolve => setTimeout(resolve, ms)),
     private readonly attempts = 30) {
     const url = new URL(endpoint);
@@ -100,6 +102,13 @@ export class SolanaRpcTransport implements L1Transport {
     if (!state.initialized) throw new RpcFailure('getAccountInfo','uninitialized_market');
     return { state, bytes, eventSequence:bytes.readBigUInt64LE(262), commitSequence:bytes.readBigUInt64LE(330), restoredSequence:bytes.readBigUInt64LE(338) };
   }
+  /** Account bytes with no owner check (e.g. a shard held by the delegation program). */
+  async rawAccountBytes(address: string): Promise<Buffer | null> {
+    const value = object(await this.request('getAccountInfo',[key(address),{encoding:'base64',commitment:'confirmed'}])).value;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const data = object(value).data;
+    return Array.isArray(data) && typeof data[0] === 'string' ? Buffer.from(data[0], 'base64') : null;
+  }
   /** Reads raw program-owned account bytes for versioned V3 decoders. */
   async accountBytes(address: string, commitment: 'confirmed'|'finalized' = 'confirmed'): Promise<Buffer> {
     const response = object(await this.request('getAccountInfo',[key(address),{encoding:'base64',commitment}]));
@@ -138,27 +147,67 @@ export class SolanaRpcTransport implements L1Transport {
   }
 }
 
+/** The rollup that holds the market, reached directly (no router hop). */
+export interface DirectRollup { validator: string; rpc: SolanaRpcTransport; socket: ErSocket }
+
 export class MagicRouterTransport implements RouterBoundary {
-  constructor(private readonly rpc: SolanaRpcTransport, private readonly marketAddress: string) { key(marketAddress); }
+  private readonly delegationCache = new Map<string, { validator: string; until: number }>();
+  private viaRollup = false;
+  private blockhash: { value: string; until: number } | null = null;
+  constructor(private readonly rpc: SolanaRpcTransport, private readonly marketAddress: string, private readonly direct?: DirectRollup) { key(marketAddress); }
   async getAccountAwareBlockhash(writableAccounts: readonly string[]): Promise<string> {
     if (!writableAccounts.length || writableAccounts.length>64 || new Set(writableAccounts).size !== writableAccounts.length || !writableAccounts.includes(this.marketAddress))
       throw new Error('Invalid writable account cluster');
-    let validator: string | undefined;
-    for (const account of writableAccounts) {
+    // In parallel, and cached briefly: a serial check per account cost seconds per order.
+    const validators = await Promise.all(writableAccounts.map(async (account) => {
+      const cached = this.delegationCache.get(account);
+      if (cached && cached.until > Date.now()) return cached.validator;
       const status = object(await this.rpc.request('getDelegationStatus',[key(account)]));
       if (status.isDelegated !== true) throw new Error('Mixed or undelegated writable account');
-      const authority = key(object(status.delegationRecord).authority);
-      if (validator && validator !== authority) throw new Error('Mixed validators');
-      validator = authority;
+      const validator = key(object(status.delegationRecord).authority);
+      this.delegationCache.set(account, { validator, until: Date.now() + 30_000 });
+      return validator;
+    }));
+    if (new Set(validators).size !== 1) throw new Error('Mixed validators');
+    // Every writable account sits on the rollup we know: talk to it directly.
+    this.viaRollup = !!this.direct && validators[0] === this.direct.validator;
+    if (this.viaRollup) {
+      // Reused briefly: each transaction still differs (fresh client order ids / amounts).
+      if (!this.blockhash || this.blockhash.until < Date.now()) this.blockhash = { value: (await this.direct!.rpc.latestBlockhash()).blockhash, until: Date.now() + 2_000 };
+      return this.blockhash.value;
     }
     const result = object(await this.rpc.request('getBlockhashForAccounts',[writableAccounts]));
     count(result.lastValidBlockHeight);
     return key(result.blockhash);
   }
-  async submit(serialized: Uint8Array): Promise<{status:'er_accepted';sequence:bigint}> {
+  async submit(serialized: Uint8Array, kind = 'tx'): Promise<{status:'er_accepted';sequence:bigint}> {
+    if (this.viaRollup && this.direct) {
+      const signature = firstSignature(serialized);
+      // Subscribed before the clock starts: the time is network + rollup execution, nothing else.
+      const watch = await this.direct.socket.watch(signature).catch(() => null);
+      const startedAt = Date.now();
+      const t0 = performance.now();
+      await this.direct.rpc.submit(serialized);
+      const processed = watch ? await watch.done : null;
+      if (processed) {
+        recordErTx({ kind, ms: Math.round(processed.at - t0), netMs: watch!.pingMs, ok: processed.ok, at: startedAt, signature });
+        if (!processed.ok) throw new RpcFailure('signatureNotification','transaction_rejected');
+        return {status:'er_accepted',sequence:0n};
+      }
+      await this.direct.rpc.confirm(signature).then(
+        () => recordErTx({ kind, ms: Date.now() - startedAt, netMs: watch?.pingMs ?? null, ok: true, at: startedAt, signature }),
+        (error: unknown) => { recordErTx({ kind, ms: null, netMs: null, ok: false, at: startedAt, signature }); throw error; });
+      return {status:'er_accepted',sequence:0n};
+    }
+    const startedAt = Date.now();
     const {signature} = await this.rpc.submit(serialized);
-    await this.rpc.confirm(signature);
-    const market = await this.rpc.market(this.marketAddress);
-    return {status:'er_accepted',sequence:market.eventSequence};
+    try {
+      await this.rpc.confirm(signature);
+      recordErTx({ kind, ms: Date.now() - startedAt, netMs: null, ok: true, at: startedAt, signature });
+    } catch (error) {
+      recordErTx({ kind, ms: null, netMs: null, ok: false, at: startedAt, signature });
+      throw error;
+    }
+    return {status:'er_accepted',sequence:0n};
   }
 }

@@ -1,3 +1,10 @@
+import { applyCors, preflight } from "./cors";
+import type { RefreshResult } from "./oracle-refresh";
+import { runOracleRefresh } from "./oracle-runner";
+import { fetchCandles, parseCandleQuery } from "./candles";
+import { signAndSerializeTransaction } from "./transactions";
+import { CLAIM_INTERVAL_MS, FAUCET_TOKENS, faucetInstructions, SOL_TOP_UP_BELOW, verifyFaucetSignature } from "./faucet";
+import deployment from "../../config/stockstream-deployment.json";
 import { MarketStream } from "./market-stream";
 import type { MarketDefinition, MarketEvent } from "./types";
 import { DeadLetterRepository, ExecutionStatusRepository, IndexerRepository, ProtocolRepository, type IndexedWrite } from './repositories';
@@ -16,6 +23,7 @@ import { relaySessionTransaction, validateSessionTransaction } from './session-r
 import { ProtocolKeeperOrchestrator, type OrchestratorRunSummary } from './keeper-orchestrator';
 import { STOCKSTREAM_PROGRAM_ID } from '../../clients/stockstream/src/constants';
 import { handleV3MarketRoute } from './v3-routes';
+import { fetchPreIpoTokens } from './pre-ipo';
 import { getBase58Decoder } from '@solana/kit';
 import { deriveSeatShardV3 } from './v3-pdas';
 import { decodeV3Core, decodeV3SeatShard } from './v3-market-state';
@@ -24,6 +32,7 @@ import { asMarketDefinition, asMarketEvent, isAuthorized, json } from './route-i
 export { fetchV3MarketSnapshot } from './v3-routes';
 
 export { MarketStream };
+export { MarketMaker } from './market-maker';
 
 /** Must equal lib/auth/e2e-test-mode.ts::E2E_TEST_TOKEN exactly -- a fixed,
  * public, non-secret string forwarded as-is by
@@ -193,10 +202,136 @@ export async function runKeeperOrchestrationTick(env: Env, fetcher: typeof fetch
   return { ran: true, summary, signerState: resolution.state };
 }
 
-export default {
+/** Verifies a Privy access token and returns the user's linked Solana wallets. */
+function privyVerifier(env: Env): PrivyVerifier {
+  return {
+    verify: async (token: string) => {
+      const { PrivyClient } = await import("@privy-io/node");
+      const client = new PrivyClient({ appId: env.PRIVY_APP_ID!, appSecret: env.PRIVY_APP_SECRET! });
+      const verified = await client.utils().auth().verifyAccessToken(token);
+      const user = await client.users()._get(verified.user_id);
+      const solanaWallets = (user.linked_accounts ?? [])
+        .filter((account): account is typeof account & { chain_type: "solana"; address: string } => "chain_type" in account && account.chain_type === "solana" && "address" in account)
+        .map((account) => account.address);
+      return { user_id: verified.user_id, app_id: verified.app_id, solanaWallets };
+    },
+  };
+}
+
+/** Most an operator mint may issue at once: 10M test tokens (6 decimals). */
+const OPERATOR_MINT_MAX = 10_000_000_000_000n;
+
+/** POST /v1/operator/mint: operator-only (ingestion bearer) test-collateral
+ * mint for market-maker seats. Test collateral only; the keeper is its mint authority. */
+async function operatorMint(request: Request, env: Env): Promise<Response> {
+  if (!isAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
+  const body = await request.json().catch(() => null) as { wallet?: unknown; tokens?: unknown } | null;
+  const wallet = typeof body?.wallet === "string" ? body.wallet : "";
+  const tokens = typeof body?.tokens === "string" && /^\d+$/.test(body.tokens) ? BigInt(body.tokens) : 0n;
+  if (!wallet || tokens <= 0n || tokens > OPERATOR_MINT_MAX) return json({ error: "wallet and 0 < tokens <= 10M (base units) required" }, 400);
+  if (!env.SOLANA_RPC_URL || !deployment.collateralMint) return json({ error: "mint unavailable" }, 503);
+  const signing = await resolveKeeperSigning(env);
+  if (signing.state !== "signer-ready" || !signing.signer) return json({ error: "keeper signer unavailable" }, 503);
+  const l1 = new SolanaL1Transport(env.SOLANA_RPC_URL);
+  const keeper = getBase58Decoder().decode(await signing.signer.publicKey());
+  const instructions = await faucetInstructions(keeper, wallet, deployment.collateralMint, false, tokens);
+  const { value } = await l1.latestBlockhash("confirmed");
+  const transaction = await signAndSerializeTransaction({ instructions, signer: signing.signer, recentBlockhash: value.blockhash, lastValidBlockHeight: BigInt(value.lastValidBlockHeight) });
+  const signature = await l1.sendTransaction(transaction, { preflightCommitment: "confirmed" });
+  const outcome = await l1.confirmTransaction(signature, { targetCommitment: "confirmed", lastValidBlockHeight: value.lastValidBlockHeight, timeoutMs: 30_000, pollIntervalMs: 500 });
+  return json({ signature, status: outcome.status }, outcome.status === "confirmed" || outcome.status === "finalized" ? 200 : 502);
+}
+
+/** POST /v1/faucet: Privy-authenticated, one claim per linked wallet per day. */
+async function claimFaucet(request: Request, env: Env): Promise<Response> {
+  const token = request.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
+  const body = await request.json().catch(() => null) as { wallet?: unknown; message?: unknown; signature?: unknown } | null;
+  const wallet = typeof body?.wallet === "string" ? body.wallet : "";
+  if (!wallet) return json({ error: "sign in first" }, 401);
+  if (!env.SOLANA_RPC_URL || !env.DB || !deployment.collateralMint) return json({ error: "faucet unavailable" }, 503);
+  // Either a Privy session for this wallet, or a fresh wallet-signed claim.
+  if (typeof body?.message === "string" && typeof body?.signature === "string") {
+    if (!await verifyFaucetSignature(wallet, body.message, body.signature, Math.floor(Date.now() / 1000))) return json({ error: "invalid wallet signature" }, 401);
+  } else {
+    if (!token) return json({ error: "sign in first" }, 401);
+    if (!env.PRIVY_APP_ID || !env.PRIVY_APP_SECRET) return json({ error: "faucet unavailable" }, 503);
+    const identity = await verifyPrivyToken(token, env.PRIVY_APP_ID, wallet, privyVerifier(env));
+    if ("error" in identity) return json({ error: identity.error }, 401);
+  }
+  const previous = await env.DB.prepare("SELECT claimed_at AS claimedAt FROM faucet_claims WHERE wallet = ?").bind(wallet).first<{ claimedAt: number }>();
+  if (previous && Date.now() - previous.claimedAt < CLAIM_INTERVAL_MS) return json({ error: "already claimed today" }, 429);
+  const signing = await resolveKeeperSigning(env);
+  if (signing.state !== "signer-ready" || !signing.signer) return json({ error: "faucet signer unavailable" }, 503);
+  const l1 = new SolanaL1Transport(env.SOLANA_RPC_URL);
+  const balance = await l1.call<{ value: number }>("getBalance", [wallet, { commitment: "confirmed" }]);
+  const keeper = getBase58Decoder().decode(await signing.signer.publicKey());
+  const instructions = await faucetInstructions(keeper, wallet, deployment.collateralMint, BigInt(balance.value) < SOL_TOP_UP_BELOW);
+  const { value } = await l1.latestBlockhash("confirmed");
+  const transaction = await signAndSerializeTransaction({ instructions, signer: signing.signer, recentBlockhash: value.blockhash, lastValidBlockHeight: BigInt(value.lastValidBlockHeight) });
+  const signature = await l1.sendTransaction(transaction, { preflightCommitment: "confirmed" });
+  const outcome = await l1.confirmTransaction(signature, { targetCommitment: "confirmed", lastValidBlockHeight: value.lastValidBlockHeight, timeoutMs: 30_000, pollIntervalMs: 500 });
+  if (outcome.status !== "confirmed" && outcome.status !== "finalized") return json({ error: `faucet transfer ${outcome.status}`, signature }, 502);
+  await env.DB.prepare("INSERT INTO faucet_claims (wallet, claimed_at) VALUES (?, ?) ON CONFLICT(wallet) DO UPDATE SET claimed_at = excluded.claimed_at").bind(wallet, Date.now()).run();
+  return json({ signature, tokens: FAUCET_TOKENS.toString(), sol: BigInt(balance.value) < SOL_TOP_UP_BELOW });
+}
+
+// Pinned to Southeast Asia, next to the MagicBlock devnet-as validator (Singapore): every quote is a round trip.
+const marketMakerStub = (env: Env) => env.MARKET_MAKER.get(env.MARKET_MAKER.idFromName("TSLA-PERP-sg"), { locationHint: "apac-se" });
+
+const PUBLIC_POST_ROUTES = new Set(["/v1/oracle/refresh", "/v1/faucet"]);
+let inflightRefresh: Promise<RefreshResult> | null = null;
+/** One refresh per isolate at a time; concurrent callers share its result. */
+function refreshSnapshotOnce(env: Env): Promise<RefreshResult> {
+  inflightRefresh ??= runOracleRefresh(env).finally(() => { inflightRefresh = null; });
+  return inflightRefresh;
+}
+
+
+const worker = {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const publicPost = PUBLIC_POST_ROUTES.has(new URL(request.url).pathname);
+    if (request.method === "OPTIONS") return preflight(request, env, publicPost);
+    return applyCors(request, env, await worker.handle(request, env), publicPost);
+  },
+  async handle(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     const parts = url.pathname.split("/").filter(Boolean);
+
+    // GET /v1/markets/TSLA-PERP/candles?resolution=5&from=..&to=.. (Pyth Pro history).
+    if (request.method === "GET" && parts[0] === "v1" && parts[1] === "markets" && parts[3] === "candles" && parts.length === 4) {
+      if (parts[2] !== "TSLA-PERP" || !env.PYTH_PRO_API_KEY) return json({ s: "error", errmsg: "no history for this market" }, 404);
+      const query = parseCandleQuery(url.searchParams);
+      if (!query) return json({ s: "error", errmsg: "invalid candle query" }, 400);
+      const cache = caches.default;
+      const cached = await cache.match(request);
+      if (cached) return cached;
+      const response = json(await fetchCandles(env.PYTH_PRO_API_KEY, deployment.oracle.symbol, query));
+      response.headers.set("cache-control", "public, max-age=30");
+      await cache.put(request, response.clone());
+      return response;
+    }
+
+    if (request.method === "GET" && url.pathname === "/v1/pre-ipo") {
+      const response = json({ tokens: await fetchPreIpoTokens() });
+      response.headers.set("cache-control", "public, max-age=60");
+      return response;
+    }
+    if (request.method === "POST" && url.pathname === "/v1/faucet") return claimFaucet(request, env);
+    if (request.method === "POST" && url.pathname === "/v1/operator/mint") return operatorMint(request, env);
+    // Market-maker bot: status is public; start/stop are operator-only.
+    if (parts[0] === "v1" && parts[1] === "mm" && parts.length === 3 && env.MARKET_MAKER) {
+      const action = parts[2];
+      if (request.method === "GET" && action === "status") return marketMakerStub(env).fetch("https://mm/status");
+      if (request.method === "POST" && (action === "start" || action === "stop")) {
+        if (!isAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
+        return marketMakerStub(env).fetch(`https://mm/${action}`);
+      }
+    }
+
+    if (request.method === "POST" && url.pathname === "/v1/oracle/refresh") {
+      const result = await refreshSnapshotOnce(env);
+      return json(result, result.status === "failed" ? 503 : 200);
+    }
 
     if (request.method === "GET" && url.pathname === "/health") {
       return json({ ok: true, service: "stockstream-market-api", environment: env.ENVIRONMENT });
@@ -371,18 +506,7 @@ export default {
         ? await verifyPrivyToken(privyToken, "e2e", body.ownerWallet, {
             verify: async () => ({ user_id: "e2e-test-user", app_id: "e2e", solanaWallets: [body.ownerWallet!] }),
           })
-        : await verifyPrivyToken(privyToken, env.PRIVY_APP_ID!, body.ownerWallet, {
-            verify: async (token: string) => {
-              const { PrivyClient } = await import("@privy-io/node");
-              const client = new PrivyClient({ appId: env.PRIVY_APP_ID!, appSecret: env.PRIVY_APP_SECRET! });
-              const verified = await client.utils().auth().verifyAccessToken(token);
-              const user = await client.users()._get(verified.user_id);
-              const solanaWallets = (user.linked_accounts ?? [])
-                .filter((account): account is typeof account & { chain_type: "solana"; address: string } => "chain_type" in account && account.chain_type === "solana" && "address" in account)
-                .map((account) => account.address);
-              return { user_id: verified.user_id, app_id: verified.app_id, solanaWallets };
-            },
-          });
+        : await verifyPrivyToken(privyToken, env.PRIVY_APP_ID!, body.ownerWallet, privyVerifier(env));
       if ("error" in privyResult) return json({ error: privyResult.error }, 401);
 
       // Authoritative on-chain chain: market bytes, the real TradingSession
@@ -459,6 +583,11 @@ export default {
     return json({ error: "not_found" }, 404);
   },
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+    // Keep the on-chain Pyth snapshot current for display and risk; orders
+    // still refresh it themselves under the ten-second rule.
+    await refreshSnapshotOnce(env).catch((error: unknown) => console.error("scheduled oracle refresh failed", error));
+    // Keep the market maker's alarm armed if it is meant to be running.
+    if (env.MARKET_MAKER) await marketMakerStub(env).fetch("https://mm/ensure").catch(() => undefined);
     if (!env.DB) return;
     const db = env.DB;
     const now = Date.now();
@@ -495,7 +624,10 @@ export default {
       // here (e.g. a transport error before any market-level try/catch
       // applies) must never take down ingestion/cleanup, which already ran
       // above.
-      await runKeeperOrchestrationTick(env).catch(() => {});
+      // Opt-in: these jobs submit transactions, so they never start just
+      // because a cron trigger exists.
+      if (env.KEEPER_ORCHESTRATION === "on") await runKeeperOrchestrationTick(env).catch(() => {});
     }
   },
-} satisfies ExportedHandler<Env>;
+} satisfies ExportedHandler<Env> & { handle(request: Request, env: Env): Promise<Response> };
+export default worker;

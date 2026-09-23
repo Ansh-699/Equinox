@@ -30,7 +30,7 @@ while IFS= read -r -d '' file; do
     ./.keys/*) ;;
     *) status=1; echo "SECRET VIOLATION: keypair-format file outside the gitignored .keys/ directory: $file" ;;
   esac
-done < <(find . -path ./node_modules -prune -o -path ./.git -prune -o -path ./target -prune -o -path ./.next -prune -o -path ./.keys -prune -o -type f \( -name "*keypair*.json" -o -name "id.json" \) -print0)
+done < <(find . -path ./node_modules -prune -o -path ./.git -prune -o -path ./target -prune -o -path ./.next -prune -o -path ./dist -prune -o -path ./.keys -prune -o -type f \( -name "*keypair*.json" -o -name "id.json" \) -print0)
 
 # 2. Tracked files: 64-byte JSON keypair arrays in any text file.
 while IFS= read -r hit; do
@@ -44,7 +44,7 @@ while IFS= read -r hit; do
   esac
 done < <(grep -rEl '\[ *[0-9]{1,3}( *, *[0-9]{1,3}){63} *\]' \
   --include="*.ts" --include="*.tsx" --include="*.rs" --include="*.js" --include="*.json" --include="*.md" \
-  --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=target --exclude-dir=.next . 2>/dev/null | while IFS= read -r f; do grep -nE '\[ *[0-9]{1,3}( *, *[0-9]{1,3}){63} *\]' "$f" | head -1 | sed "s|^|$f:|"; done)
+  --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=target --exclude-dir=.next --exclude-dir=dist . 2>/dev/null | while IFS= read -r f; do grep -nE '\[ *[0-9]{1,3}( *, *[0-9]{1,3}){63} *\]' "$f" | head -1 | sed "s|^|$f:|"; done)
 
 # 3. Actual JWK private material (an "OKP" key WITH a "d" private value)
 # in tracked source. Parsers that merely handle the format are fine.
@@ -58,12 +58,22 @@ while IFS= read -r f; do
   esac
 done < <(grep -rEl '"(kty|crv)" *: *"OKP"' \
   --include="*.ts" --include="*.tsx" --include="*.rs" --include="*.js" \
-  --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=target --exclude-dir=.next . 2>/dev/null || true)
+  --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=target --exclude-dir=.next --exclude-dir=dist . 2>/dev/null || true)
 
 # 4. Browser bundle: the server-only secret names must never appear.
 if [ -d .next ]; then
   if grep -rlE 'PRIVY_APP_SECRET|PYTH_PRO_API_KEY|KEEPER_KEYPAIR_JSON' .next/static 2>/dev/null | grep -q .; then
     echo "SECRET VIOLATION: server-only secret name in built browser bundle (.next/static)"
+    status=1
+  fi
+fi
+
+# 4b. vinext browser bundle (dist/client): the same rule. Generated bundles
+# are excluded from the source heuristics above, like .next, because they
+# embed library constants (e.g. BLAKE2b tables) that look like keypairs.
+if [ -d dist/client ]; then
+  if grep -rlE 'PRIVY_APP_SECRET|PYTH_PRO_API_KEY|KEEPER_KEYPAIR_JSON' dist/client 2>/dev/null | grep -q .; then
+    echo "SECRET VIOLATION: server-only secret name in built browser bundle (dist/client)"
     status=1
   fi
 fi

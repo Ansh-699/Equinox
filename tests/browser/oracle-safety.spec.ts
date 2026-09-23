@@ -39,8 +39,9 @@ test.beforeEach(async () => {
 // terminal.tsx) reads the real decoded account fields and classifies a
 // stale timestamp as "stale", not "fresh".
 test("oracle safety banner reads the real account header and shows 'stale' for an ancient verified timestamp", async ({ page }) => {
-  await page.goto("/");
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.goto("/trade");
+  await page.getByRole("button", { name: "Connect wallet" }).click();
+  await page.getByRole("button", { name: "Test Wallet" }).click();
   await expect(page.locator(".status-strip[aria-live='polite']")).toContainText("stale", { timeout: 10_000 });
 });
 
@@ -54,7 +55,7 @@ for (const [eventKind, expectedLabel] of [
   ["CorporateActionEntered", "corporate action"],
 ] as const) {
   test(`a live "${eventKind}" event flips the oracle safety banner to "${expectedLabel}"`, async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/trade");
     await waitForStreamConnected(connectionBaseline);
     // `waitForStreamConnected` only proves SOME new connection appeared
     // after the baseline -- it can't distinguish this test's own page from

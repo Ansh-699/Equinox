@@ -7,13 +7,25 @@
   "observability": {
     "enabled": true
   },
+  // Every minute: refresh the TSLA Pyth snapshot (see scheduled() in src/index.ts).
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
   "vars": {
     "ENVIRONMENT": "development",
-    "PYTH_PRO_FEED_ID": "922",
-    "PYTH_PRO_MIN_CHANNEL": "fixed_rate@50ms"
+    "PYTH_PRO_FEED_ID": "1435",
+    "PYTH_PRO_MIN_CHANNEL": "fixed_rate@50ms",
+    "MAGICBLOCK_RPC_URL": "https://devnet-as.magicblock.app",
+    "CORS_ALLOWED_ORIGINS": "https://stockstream.ansht.workers.dev,http://localhost:3000,http://127.0.0.1:3000"
   },
+  // Only declared secrets are bound at runtime; every secret the Worker reads must be listed.
   "secrets": {
-    "required": ["INGESTION_TOKEN"]
+    "required": [
+      "INGESTION_TOKEN", "SOLANA_RPC_URL", "MAGIC_ROUTER_URL", "PYTH_PRO_API_KEY",
+      "PRIVY_APP_ID", "PRIVY_APP_SECRET", "RELAYER_KEYPAIR_JSON", "RELAYER_SERVICE_TOKEN",
+      "KEEPER_KEYPAIR_JSON", "KEEPER_PUBLIC_KEY",
+      "MM_MAKER_KEYPAIR_JSON", "MM_TAKER_KEYPAIR_JSON"
+    ]
   },
   "d1_databases": [
     {
@@ -28,6 +40,10 @@
       {
         "name": "MARKET_STREAM",
         "class_name": "MarketStream"
+      },
+      {
+        "name": "MARKET_MAKER",
+        "class_name": "MarketMaker"
       }
     ]
   },
@@ -35,6 +51,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["MarketStream"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["MarketMaker"]
     }
   ],
   "env": {
@@ -42,7 +62,7 @@
       "name": "stockstream-market-api-staging",
       "vars": {
         "ENVIRONMENT": "staging",
-        "PYTH_PRO_FEED_ID": "922",
+        "PYTH_PRO_FEED_ID": "1435",
         "PYTH_PRO_MIN_CHANNEL": "fixed_rate@50ms"
       },
       "secrets": {
@@ -69,7 +89,7 @@
       "name": "stockstream-market-api-production",
       "vars": {
         "ENVIRONMENT": "production",
-        "PYTH_PRO_FEED_ID": "922",
+        "PYTH_PRO_FEED_ID": "1435",
         "PYTH_PRO_MIN_CHANNEL": "fixed_rate@50ms"
       },
       "secrets": {
