@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { V3_MARKETS } from "@/lib/v3-markets";
 import { PriceChart } from "./price-chart";
+import type { BookLevel } from "./use-v3-book";
 import { RESOLUTIONS, useCandles } from "./use-candles";
 
 export interface OracleView { price: number; confidence: number; tradingOpen: boolean }
@@ -147,11 +148,11 @@ export function MarketBar({
 }
 
 /** Chart column head; the sr-only h1 names the page for assistive tech. */
-export function MarketPanel({ marketSymbol, marketApiUrl, live }: { marketSymbol: string; marketApiUrl: string | undefined; live: { price: number; publishTime: number } | null }) {
+export function MarketPanel({ marketSymbol, marketApiUrl, live, depth }: { marketSymbol: string; marketApiUrl: string | undefined; live: { price: number; publishTime: number } | null; depth: { bids: BookLevel[]; asks: BookLevel[] } }) {
   return (
     <section className="market-panel h-full">
       <h1 className="sr-only">{marketSymbol}</h1>
-      <PriceChart marketApiUrl={marketApiUrl} symbol={marketSymbol} live={live} />
+      <PriceChart marketApiUrl={marketApiUrl} symbol={marketSymbol} live={live} depth={depth} />
     </section>
   );
 }

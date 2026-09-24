@@ -94,7 +94,7 @@ export function ErTxPanel({ marketApiUrl, market }: { marketApiUrl: string | und
           : <>Your order ≈ <span className="tnum font-medium text-[var(--t-up)]">{viewerRtt === null ? "—" : `${viewerRtt + (trip ?? 15)} ms`}</span></>}
           <span className="ml-2">in a block <span className="tnum">{trip ?? "—"} ms</span></span></span>
       </div>
-      <div className="slim-scroll h-[168px] overflow-auto">
+      <div className="slim-scroll h-[120px] overflow-auto">
         {rows.length === 0 ? (
           <div className="flex h-full items-center justify-center gap-2 px-4 text-center text-[12px] text-[var(--t-text-2)]">
             {bot?.offline ? "Market maker offline — no bot transactions to show." : bot?.marketOpen === false ? "US market closed — the bot is idle until the session reopens." : <><Spinner /> Waiting for rollup transactions…</>}

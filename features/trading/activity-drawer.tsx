@@ -111,7 +111,7 @@ export function ActivityDrawer({ seat, seatError, seatIndex, symbol, markPrice, 
         </button>
       </div>
       {/* Open orders stays mounted (hidden) so its state and actions survive tab switches. */}
-      <div id="activity-panel" role="tabpanel" className={`slim-scroll h-[168px] overflow-auto ${open ? "" : "hidden"}`}>
+      <div id="activity-panel" role="tabpanel" className={`slim-scroll h-[120px] overflow-auto ${open ? "" : "hidden"}`}>
         {tab === "positions" && (loading ? <Loading what="your position" /> : <PositionsTable seat={seat} error={seatError} symbol={symbol} markPrice={markPrice} signedIn={signedIn} />)}
         <div className={tab === "orders" ? "" : "hidden"}>{openOrders}</div>
         {tab === "history" && (loading ? <Loading what="your fills" /> : <TradeHistory trades={trades} seatIndex={seatIndex} />)}

@@ -11,7 +11,7 @@ import { SolanaRpcTransport } from "@/lib/rpc-transport";
 import deployment from "@/config/equinox-deployment.json";
 import { decodeV3SeatShard } from "../../workers/src/v3-market-state";
 
-const L1_RPC = process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
+const L1_RPC = process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://rpc.magicblock.app/devnet";
 const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const SEAT_POLL_MS = 5_000;
 export const ACCOUNT_MARKET = "TSLA-PERP";

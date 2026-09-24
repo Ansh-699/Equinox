@@ -176,7 +176,7 @@ function BasketPanel() {
   const [result, setResult] = useState<{ ok: boolean; legs: LegResult[]; message?: string; ms?: number } | null>(null);
   const basket = BASKETS.find((b) => b.id === basketId) ?? BASKETS[0];
   const notional = Number(amount);
-  const rpc = useMemo(() => new SolanaRpcTransport(process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://api.devnet.solana.com"), []);
+  const rpc = useMemo(() => new SolanaRpcTransport(process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://rpc.magicblock.app/devnet"), []);
   // The real legs (whole shares) and their margin, shown before anything trades.
   useEffect(() => {
     if (!(notional > 0)) return;

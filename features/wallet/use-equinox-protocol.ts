@@ -17,7 +17,7 @@ let sharedSocket: ErSocket | null = null;
 const rollupSocket = () => (sharedSocket ??= new ErSocket(deployment.magicBlock.rpc));
 import { encodeTransaction } from "@/lib/solana-transaction";
 
-const DEVNET_PUBLIC_RPC = "https://api.devnet.solana.com";
+const DEVNET_PUBLIC_RPC = "https://rpc.magicblock.app/devnet";
 const RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? DEVNET_PUBLIC_RPC;
 
 export interface EquinoxProtocol {

@@ -41,7 +41,7 @@ function sampleActivity(price: number): ActivityRow[] {
 }
 
 export function LandingView() {
-  const rpc = useMemo(() => new SolanaRpcTransport(process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://api.devnet.solana.com"), []);
+  const rpc = useMemo(() => new SolanaRpcTransport(process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://rpc.magicblock.app/devnet"), []);
   const clock = useMarketClock(DEMO_ORACLE_SNAPSHOT ? rpc : null, publicV3Core || null, DEMO_ORACLE_SNAPSHOT);
   const live = clock?.oracle ? { price: clock.oracle.price, publishTime: Number(clock.lastVerifiedOracleTimestamp) } : null;
   const { candles } = useCandles(publicMarketApiUrl, LIVE_SYMBOL, HOURLY, live);

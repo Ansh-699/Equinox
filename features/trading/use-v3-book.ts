@@ -69,7 +69,7 @@ export function tradesFrom(shards: RawAggregate["eventShards"]): Trade[] {
 
 const EMPTY: Omit<V3Book, "status" | "domain"> = { bids: [], asks: [], trades: [], positions: [], orders: [], updatedAt: null };
 const ER_RPC = deployment.magicBlock.rpc;
-const L1_RPC = process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
+const L1_RPC = process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://rpc.magicblock.app/devnet";
 /** One failed read is not an outage; only a silent feed for this long is. */
 const STALE_AFTER_MS = 20_000;
 const REQUOTE_GAP_MS = 2_500;

@@ -14,7 +14,7 @@ import { formatCompactUsd, formatTinyUsd } from "./format";
 import { Badge, EmptyState, Skeleton, type Tone } from "@/components/ui/primitives";
 import { Rocket } from "lucide-react";
 
-const RPC = process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
+const RPC = process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://rpc.magicblock.app/devnet";
 const explorer = (address: string, kind: "address" | "tx" = "address") => `https://explorer.solana.com/${kind}/${address}?cluster=devnet`;
 const AVATAR_COLORS = ["#16a34a", "#2563eb", "#9333ea", "#db2777", "#ea580c", "#0891b2", "#ca8a04"];
 
