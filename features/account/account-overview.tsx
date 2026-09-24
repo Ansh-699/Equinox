@@ -74,7 +74,9 @@ export function AccountOverview({ summary }: { summary: AccountSummary }) {
       ) : null}
       <div>
         <h3 className="mb-2 text-[12px] font-semibold text-[var(--t-text-2)]">Vault · TSLA-PERP</h3>
-        {summary.seat === undefined ? (
+        {summary.seat === undefined && summary.seatUnavailable ? (
+          <p className="rounded-[8px] border border-[var(--t-border)] px-3 py-3 text-[12px] text-[var(--t-text-2)]">Couldn&apos;t read the vault right now. Retrying every few seconds.</p>
+        ) : summary.seat === undefined ? (
           <div className="grid grid-cols-2 gap-2"><StatTile label="Available" value="" loading /><StatTile label="In orders" value="" loading /></div>
         ) : summary.seat === null ? (
           <p className="rounded-[8px] border border-dashed border-[var(--t-border-strong)] px-3 py-3 text-[12px] leading-relaxed text-[var(--t-text-2)]">No vault seat yet. Press <b className="text-[var(--t-text)]">Start trading</b> on the Trade page: it funds your trading account, opens a seat and deposits in one go.</p>

@@ -6,8 +6,11 @@ import type { AccountSeat } from "@/features/portfolio/use-account-summary";
 import { Badge, BUTTON_PRIMARY, EmptyState, formatUsdUnits, Skeleton } from "@/components/ui/primitives";
 
 /** The seat's TSLA-PERP position: side, size and margin, or a clear way in. */
-export function PositionCard({ seat, market = "TSLA-PERP", compact = false }: { seat: AccountSeat | null | undefined; market?: string; compact?: boolean }) {
+export function PositionCard({ seat, unavailable = false, market = "TSLA-PERP", compact = false }: { seat: AccountSeat | null | undefined; unavailable?: boolean; market?: string; compact?: boolean }) {
   const base = market.replace(/-PERP$/, "");
+  if (seat === undefined && unavailable) {
+    return <p className="py-4 text-center text-[12.5px] text-[var(--t-text-2)]">Couldn&apos;t read your position right now. Retrying every few seconds.</p>;
+  }
   if (seat === undefined) {
     return <div className="space-y-2 p-1"><Skeleton className="h-5 w-32" /><Skeleton className="h-4 w-48" /></div>;
   }

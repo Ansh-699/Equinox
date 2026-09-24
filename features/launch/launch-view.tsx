@@ -45,7 +45,7 @@ function FeeChart({ preset }: { preset: LaunchPreset }) {
           <text x={L - 6} y={y(bps) + 3} textAnchor="end" fontSize="9" fill="var(--t-text-3)">{bps / 100}%</text>
         </g>
       ))}
-      {[0, 60, 120, 180].map((m) => <text key={m} x={x(m)} y={H - 4} textAnchor="middle" fontSize="9" fill="var(--t-text-3)">{m === 0 ? "launch" : `${m / 60}h`}</text>)}
+      {[0, 60, 120, 180].map((m) => <text key={m} x={x(m)} y={H - 4} textAnchor={m === 180 ? "end" : m === 0 ? "start" : "middle"} fontSize="9" fill="var(--t-text-3)">{m === 0 ? "launch" : `${m / 60}h`}</text>)}
       <path d={`${d} L${x(180)},${y(0)} L${x(0)},${y(0)} Z`} fill="var(--t-up-soft)" />
       <path d={d} fill="none" stroke="var(--t-up)" strokeWidth={2.25} strokeLinejoin="round" />
       <circle cx={x(0)} cy={y(preset.startingFeeBps)} r={3} fill="var(--t-up)" />
