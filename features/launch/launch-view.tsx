@@ -108,6 +108,7 @@ export function LaunchView() {
       if ((await connection.getBalance(creator)) < 30_000_000) {
         await claimTestFunds({ privyAuthenticated: false, getAccessToken: async () => null, signMessage: (_a: string, bytes: Uint8Array) => signer.signMessage(bytes) }, signer.address!);
         for (let i = 0; i < 20 && (await connection.getBalance(creator)) < 30_000_000; i += 1) await new Promise((r) => setTimeout(r, 1_000));
+        if ((await connection.getBalance(creator)) < 30_000_000) throw new Error("your trading account has no devnet SOL for rent and the faucet couldn't send any (it may be empty); try again in a while");
       }
       setPhase("build");
       const built = await buildLaunchTransaction(connection, {

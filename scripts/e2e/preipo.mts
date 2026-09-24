@@ -22,8 +22,9 @@ try {
   await page.locator('section[aria-label="Place order"] button.w-full').last().click();
   await waitNotice(/Order accepted by the MagicBlock rollup/, 30_000);
   await page.getByRole("tab", { name: "Positions" }).click().catch(() => undefined);
-  await page.getByText(new RegExp(`${symbol}.*Long|Long`)).first().waitFor({ timeout: 20_000 });
-  step(`position row: ${(await page.locator('section[aria-label="Your activity"] table tbody tr').first().innerText()).replace(/\s+/g, " ")}`);
+  const position = page.locator("#activity-panel article").filter({ hasText: /Long|Short/ }).first();
+  await position.waitFor({ timeout: 20_000 });
+  step(`position card: ${(await position.innerText()).replace(/\s+/g, " ")}`);
   step(`wallet prompts: ${prompts.join(", ")}`);
   console.log(`PASS preipo ${symbol}`);
 } finally {

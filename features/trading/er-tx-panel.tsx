@@ -4,6 +4,9 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import deployment from "@/config/equinox-deployment.json";
 import { myErTxs, onErTx, type ErTxSample } from "@/lib/er-latency";
 import { useNewKeys } from "@/lib/use-new-keys";
+
+// One formatter for every row: toLocaleTimeString builds a new one per call (the panel's hottest line).
+const MIN_SEC = new Intl.DateTimeFormat([], { hour12: false, minute: "2-digit", second: "2-digit" });
 import { Spinner } from "@/components/ui/spinner";
 
 /** Header facts and a backfill; the rows themselves arrive over the live stream. */
@@ -29,6 +32,8 @@ export function ErTxPanel({ marketApiUrl, market }: { marketApiUrl: string | und
     const samples: number[] = [];
     let stopped = false;
     const ping = async () => {
+      // Five samples make the median; after that a slow refresh is plenty.
+      if (document.hidden || (samples.length >= 5 && Date.now() % 15_000 >= 3_000)) return;
       const started = performance.now();
       const ok = await fetch(deployment.magicBlock.rpc, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getHealth" }) }).then((r) => r.ok).catch(() => false);
       if (!ok || stopped) return;
@@ -45,7 +50,9 @@ export function ErTxPanel({ marketApiUrl, market }: { marketApiUrl: string | und
     if (!marketApiUrl && !MM_STATUS_URL) return;
     let stopped = false;
     const url = MM_STATUS_URL ?? `${(marketApiUrl ?? "").replace(/\/$/, "")}/v1/mm/status`;
-    const poll = () => fetch(url)
+    const poll = () => {
+      if (document.hidden || (stream?.readyState === EventSource.OPEN && ++polls % 3 !== 1)) return;
+      void fetch(url)
       .then((response) => response.json())
       .then((status: { recent?: ErTxSample[]; colo?: string | null; pingMs?: number | null; marketOpen?: boolean | null } | null) => {
         if (stopped) return;
@@ -59,10 +66,13 @@ export function ErTxPanel({ marketApiUrl, market }: { marketApiUrl: string | und
         setBot({ colo: status?.colo ?? null, pingMs: status?.pingMs ?? null, marketOpen: status?.marketOpen ?? null, offline: !status?.recent });
       })
       .catch(() => undefined);
+    };
+    // Live: each bot transaction arrives the moment the service sees it confirmed (server-sent events);
+    // the status poll backfills, and slows to every third tick while the stream is open.
+    let polls = 0;
+    const stream = MM_STATUS_URL ? new EventSource(MM_STATUS_URL.replace(/\/v1\/mm\/status$/, "/v1/mm/stream")) : null;
     void poll();
     const interval = setInterval(poll, POLL_MS);
-    // Live: each bot transaction arrives the moment the service sees it confirmed (server-sent events).
-    const stream = MM_STATUS_URL ? new EventSource(MM_STATUS_URL.replace(/\/v1\/mm\/status$/, "/v1/mm/stream")) : null;
     stream?.addEventListener("tx", (event) => {
       const row = JSON.parse((event as MessageEvent<string>).data) as ErTxSample;
       if (market && (row.market ?? "TSLA-PERP") !== market) return;
@@ -71,7 +81,7 @@ export function ErTxPanel({ marketApiUrl, market }: { marketApiUrl: string | und
     return () => { stopped = true; clearInterval(interval); stream?.close(); };
   }, [marketApiUrl, market]);
 
-  const rows = [...mine, ...bots].sort((a, b) => b.at - a.at).slice(0, 40);
+  const rows = [...mine, ...bots].sort((a, b) => b.at - a.at).slice(0, 20);
   const fresh = useNewKeys(rows.map((row) => row.signature));
   const median = (list: readonly ErTxSample[], pick: (row: ErTxSample) => number | null) => {
     const times = list.flatMap((row) => { const value = row.ok ? pick(row) : null; return value === null ? [] : [value]; }).sort((a, b) => a - b);
@@ -103,10 +113,10 @@ export function ErTxPanel({ marketApiUrl, market }: { marketApiUrl: string | und
           </div>
         ) : (
           <ul className="space-y-1 p-1.5">
-            {rows.map((row) => (
-              <li key={row.signature} className={`glass-card grid h-[28px] grid-cols-[52px_1fr_auto] items-center gap-2 px-2.5 text-[11.5px] ${row.mine ? "ring-1 ring-[var(--t-accent)]/40" : ""} ${fresh.has(row.signature) ? "card-enter" : ""}`}>
+            {rows.map((row, index) => (
+              <li key={row.signature} className={`glass-card grid h-[28px] grid-cols-[52px_1fr_auto] items-center gap-2 px-2.5 text-[11.5px] ${row.mine ? "ring-1 ring-[var(--t-accent)]/40" : ""} ${index === 0 && fresh.has(row.signature) ? "card-enter" : ""}`}>
                 <a href={rollupExplorer(row.signature)} target="_blank" rel="noreferrer" className="tnum truncate text-[var(--t-text-3)] hover:text-[var(--t-text)]">
-                  {new Date(row.at).toLocaleTimeString([], { hour12: false, minute: "2-digit", second: "2-digit" })}
+                  {MIN_SEC.format(row.at)}
                 </a>
                 <span className="min-w-0 truncate">
                   <span className={row.mine ? "font-medium text-[var(--t-accent,var(--t-text))]" : "text-[var(--t-text-2)]"}>{row.mine ? `You · ${row.kind}` : LABEL[row.kind] ?? row.kind}</span>

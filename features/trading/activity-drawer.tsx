@@ -37,7 +37,8 @@ function Stat({ label, children }: { label: string; children: ReactNode }) {
   return <span className="whitespace-nowrap"><span className="text-[var(--t-text-3)]">{label}</span> <span className="tnum text-[var(--t-text)]">{children}</span></span>;
 }
 
-const usd = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const USD = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const usd = (n: number) => `$${USD.format(n)}`;
 
 /** Positions as glass cards (Hyperliquid's columns): size and value, entry
  * and mark, PnL with return on the initial margin, collateral and health,

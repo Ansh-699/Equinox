@@ -43,7 +43,8 @@ export function PortfolioView() {
   const executionStatus = useExecutionStatus(marketApiUrl, marketSymbol);
   // While delegated the rollup holds the live seat.
   const delegated = !!executionStatus?.marketDelegated;
-  const book = useV3Book(marketApiUrl, v3Core || undefined, executionStatus ? delegated : null);
+  // Manifest markets are delegated: start on the rollup book; the status call corrects it if not.
+  const book = useV3Book(marketApiUrl, v3Core || undefined, executionStatus ? delegated : true);
   const rollupSeat = useMemo(() => (delegated && trader && book.updatedAt !== null ? seatFromPositions(book.positions, trader) : null), [delegated, trader, book.positions, book.updatedAt]);
   const position = delegated && rollupSeat ? { ...l1Position, seat: rollupSeat.view as NonNullable<typeof l1Position.seat> } : l1Position;
   const seatIndex = delegated && rollupSeat ? rollupSeat.index : l1Position.seatIndex ?? 0;

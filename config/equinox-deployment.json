@@ -1,8 +1,8 @@
 {
   "cluster": "devnet",
   "programId": "8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ",
-  "localArtifactSha256": "efff215550dcec97e4fc823b6cc71a5bc67e593c21e7a715b7a0c62ee4f44c16",
-  "deployedArtifactSha256": "efff215550dcec97e4fc823b6cc71a5bc67e593c21e7a715b7a0c62ee4f44c16",
+  "localArtifactSha256": "c935055e5435044e588a371aa7c3206d9a7aa043fb6cfe0d5b6cca5ef37c16bb",
+  "deployedArtifactSha256": "c935055e5435044e588a371aa7c3206d9a7aa043fb6cfe0d5b6cca5ef37c16bb",
   "exchange": "sjnDgFCKptJBgtByXtPnVt1tTCkGYngCgWR1khGUWYY",
   "instrument": "9t5qbtNZsgdgg2ttHGkuZhQYwAq561C7f86WBKT9vzTC",
   "core": "9Vea9MVZCzYFKNHaHMPET9fuXXjfof8mA2F75pbBDJyV",

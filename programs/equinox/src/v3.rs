@@ -1620,10 +1620,8 @@ pub(crate) fn validate_event_shard(
     core: &Address,
     index: u8,
 ) -> ProgramResult {
-    if !account.owned_by(program_id)
-        || !account.is_writable()
-        || *account.address() != derive_event_shard_v3(program_id, core, index)
-    {
+    // Header-identified; see `validate_execution_bundle_inner`.
+    if !account.owned_by(program_id) || !account.is_writable() {
         return Err(bundle_error());
     }
     let bytes = unsafe { account.borrow_unchecked() };
@@ -1855,6 +1853,13 @@ fn is_returned_v3_core(core: &[u8]) -> bool {
         && core[V3_CORE_COMMIT_PHASE_OFFSET] == V3_COMMIT_PHASE_UNDELEGATING
 }
 
+/// Child accounts are identified by their program-written header, not by
+/// re-deriving their PDA: `create_v3_account` (registry.rs) writes a
+/// discriminator + (side, page | shard) + parent core only after checking the
+/// target is exactly `derive_v3_account(parent, kind, index)`, and nothing else
+/// writes those header bytes. So a program-owned account whose header matches
+/// (kind, index, core) *is* that PDA. Re-deriving cost a `find_program_address`
+/// (a SHA-256 bump search) for each of 26 accounts on every order.
 fn validate_execution_bundle_inner(
     program_id: &Address,
     accounts: &[AccountView],
@@ -1905,9 +1910,6 @@ fn validate_execution_bundle_inner(
         let account = &accounts[1 + flat];
         let side = (flat / V3_BOOK_PAGES_PER_SIDE) as u8;
         let page = (flat % V3_BOOK_PAGES_PER_SIDE) as u8;
-        if *account.address() != derive_book_page_v3(program_id, &core_key, side, page) {
-            return Err(bundle_error());
-        }
         let bytes = unsafe { account.borrow_unchecked() };
         if bytes.len() != V3_BOOK_PAGE_SIZE
             || bytes[0..8] != V3_BOOK_PAGE_DISCRIMINATOR
@@ -1927,9 +1929,6 @@ fn validate_execution_bundle_inner(
     }
     for shard in 0..V3_SEAT_SHARDS {
         let account = &accounts[1 + book_account_count + shard];
-        if *account.address() != derive_seat_shard_v3(program_id, &core_key, shard as u8) {
-            return Err(bundle_error());
-        }
         let bytes = unsafe { account.borrow_unchecked() };
         if bytes.len() != V3_SEAT_SHARD_SIZE
             || bytes[0..8] != V3_SEAT_SHARD_DISCRIMINATOR
@@ -1943,9 +1942,6 @@ fn validate_execution_bundle_inner(
     }
     for shard in 0..V3_EVENT_SHARDS {
         let account = &accounts[1 + book_account_count + V3_SEAT_SHARDS + shard];
-        if *account.address() != derive_event_shard_v3(program_id, &core_key, shard as u8) {
-            return Err(bundle_error());
-        }
         let bytes = unsafe { account.borrow_unchecked() };
         if bytes.len() != V3_EVENT_SHARD_SIZE
             || bytes[0..8] != V3_EVENT_SHARD_DISCRIMINATOR
@@ -2037,9 +2033,8 @@ pub fn validate_v3_session_actor(
         return Err(EquinoxError::InvalidTradingSession.into());
     }
     for (shard, account) in seat_shards.iter().enumerate() {
-        if !account.owned_by(program_id)
-            || *account.address() != derive_seat_shard_v3(program_id, &core_key, shard as u8)
-        {
+        // Header-identified; see `validate_execution_bundle_inner`.
+        if !account.owned_by(program_id) {
             return Err(EquinoxError::InvalidTradingSession.into());
         }
         let bytes = unsafe { account.borrow_unchecked() };
@@ -2171,10 +2166,8 @@ pub(crate) fn validate_seat_shard(
     core: &Address,
     index: u8,
 ) -> ProgramResult {
-    if !account.owned_by(program_id)
-        || !account.is_writable()
-        || *account.address() != derive_seat_shard_v3(program_id, core, index)
-    {
+    // Header-identified; see `validate_execution_bundle_inner`.
+    if !account.owned_by(program_id) || !account.is_writable() {
         return Err(bundle_error());
     }
     let bytes = unsafe { account.borrow_unchecked() };

@@ -13,7 +13,8 @@ export interface OpenOrdersPanelProps {
   symbol?: string;
 }
 
-const usd = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const USD = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const usd = (n: number) => `$${USD.format(n)}`;
 const until = (unix: bigint) => {
   const s = Number(unix) - Math.floor(Date.now() / 1000);
   return s <= 0 ? "expiring" : s < 3600 ? `${Math.ceil(s / 60)}m left` : s < 86_400 ? `${Math.floor(s / 3600)}h left` : `${Math.floor(s / 86_400)}d left`;

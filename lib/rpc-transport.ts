@@ -71,10 +71,15 @@ export class SolanaRpcTransport implements L1Transport {
     return BigInt(count(result.value));
   }
   async simulate(bytes: Uint8Array): Promise<{units:number}> {
-    const value = object(object(await this.request('simulateTransaction',[
-      Buffer.from(bytes).toString('base64'), {encoding:'base64',sigVerify:false,replaceRecentBlockhash:false,commitment:'confirmed'}])).value);
-    if (value.err !== null) throw new RpcFailure('simulateTransaction','simulation_rejected');
-    return {units:count(value.unitsConsumed)};
+    for (let attempt = 0; ; attempt += 1) {
+      const value = object(object(await this.request('simulateTransaction',[
+        Buffer.from(bytes).toString('base64'), {encoding:'base64',sigVerify:false,replaceRecentBlockhash:false,commitment:'confirmed'}])).value);
+      // A just-funded fee payer can be missing on a load-balanced node for a
+      // moment (first deposit right after the faucet): ask again, briefly.
+      if (value.err === 'AccountNotFound' && attempt < 4) { await this.wait(500); continue; }
+      if (value.err !== null) throw new RpcFailure('simulateTransaction','simulation_rejected');
+      return {units:count(value.unitsConsumed)};
+    }
   }
   async submit(bytes: Uint8Array): Promise<{signature:string}> {
     // No automatic send retry: a transport timeout is an ambiguous submission.

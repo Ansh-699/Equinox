@@ -146,8 +146,8 @@ export function OrderBookDisplay({ book, symbol, onPickPrice, marketClosed = fal
                 return (
                   <div key={t.sequence} className="grid h-5 grid-cols-3 items-center px-3 text-[12px] hover:bg-[var(--t-surface-3)]">
                     <span className={`tnum ${up ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>{t.price.toFixed(2)}</span>
-                    <span className="tnum text-right text-[var(--t-text)]">{t.size.toLocaleString()}</span>
-                    <span className="tnum text-right text-[var(--t-text-2)]">{t.time ? new Date(t.time * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}</span>
+                    <span className="tnum text-right text-[var(--t-text)]">{WHOLE.format(t.size)}</span>
+                    <span className="tnum text-right text-[var(--t-text-2)]">{t.time ? CLOCK.format(t.time * 1000) : "—"}</span>
                   </div>
                 );
               })
@@ -171,6 +171,10 @@ export function OrderBookDisplay({ book, symbol, onPickPrice, marketClosed = fal
 }
 
 const BOOK_EASE = "cubic-bezier(0.16, 1, 0.3, 1)";
+// Shared formatters: toLocaleString with options builds one per call, per row, per book update.
+const WHOLE = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+const FRACTION = new Intl.NumberFormat("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+const CLOCK = new Intl.DateTimeFormat([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
 function tintNumber(element: HTMLElement | null, direction: "up" | "down", duration = 180) {
   if (!element || typeof element.animate !== "function") return;
@@ -251,11 +255,10 @@ const Row = memo(function Row({
   const sizeText = fmtAmt(size);
   const totalText = fmtAmt(total);
   const priceRef = useNumericTint(price, priceText);
-  const sizeRef = useNumericTint(size, sizeText);
-  const totalRef = useNumericTint(total, totalText);
+
   const rowRef = useRef<HTMLDivElement>(null);
   const waveRef = useRef<HTMLSpanElement>(null);
-  const previous = useRef({ price, size, total });
+  const previous = useRef({ price, size });
   const runningWave = useRef<Animation[]>([]);
   // A just-placed own order far from the mid: scroll its column (not the page) to it.
   const wasMine = useRef(mine);
@@ -271,9 +274,11 @@ const Row = memo(function Row({
     wasMine.current = mine;
   }, [mine]);
   useEffect(() => {
+    // Only this level's own change waves: a total shifting because a level
+    // nearer the mid changed is not news (and animated the whole ladder).
     const before = previous.current;
-    previous.current = { price, size, total };
-    if (price === before.price && size === before.size && total === before.total) return;
+    previous.current = { price, size };
+    if (price === before.price && size === before.size) return;
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
     runningWave.current.forEach((animation) => animation.cancel());
     const delay = Math.min(slot * 25, 225);
@@ -282,7 +287,7 @@ const Row = memo(function Row({
       rowRef.current?.animate([{ transform: "translateY(0)" }, { transform: "translateY(-3px)" }, { transform: "translateY(0)" }], timing),
       waveRef.current?.animate([{ opacity: 0 }, { opacity: 1 }, { opacity: 0 }], timing),
     ].filter((animation): animation is Animation => animation !== undefined);
-  }, [price, size, total, slot]);
+  }, [price, size, slot]);
   return (
     <div
       ref={rowRef}
@@ -293,15 +298,7 @@ const Row = memo(function Row({
     >
       <div
         aria-hidden
-        className="absolute inset-y-0 right-0 w-full origin-right opacity-[0.08] will-change-transform motion-safe:transition-transform motion-safe:duration-[1100ms] motion-safe:ease-[cubic-bezier(0.33,1,0.68,1)]"
-        style={{
-          transform: `scaleX(${pct / 100})`,
-          backgroundColor: side === "bid" ? "var(--t-book-bid)" : "var(--t-book-ask)",
-        }}
-      />
-      <div
-        aria-hidden
-        className="absolute inset-y-0 right-0 w-full origin-right opacity-[0.15] dark:opacity-[0.20] will-change-transform motion-safe:transition-transform motion-safe:duration-[350ms] motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]"
+        className="absolute inset-y-0 right-0 w-full origin-right opacity-[0.22] dark:opacity-[0.26] will-change-transform motion-safe:transition-transform motion-safe:duration-[200ms] motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]"
         style={{
           transform: `scaleX(${pct / 100})`,
           backgroundColor: side === "bid" ? "var(--t-book-bid)" : "var(--t-book-ask)",
@@ -317,12 +314,12 @@ const Row = memo(function Row({
         {mine ? <span aria-label="Your order" className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--t-accent,var(--t-text))]" /> : null}
         {priceText}
       </span>
-      <span ref={sizeRef} className="relative text-right tnum text-[var(--t-text)]">{sizeText}</span>
-      <span ref={totalRef} className="relative text-right tnum text-[var(--t-text-2)]">{totalText}</span>
+      <span className="relative text-right tnum text-[var(--t-text)]">{sizeText}</span>
+      <span className="relative text-right tnum text-[var(--t-text-2)]">{totalText}</span>
     </div>
   );
 });
 
 function fmtAmt(n: number): string {
-  return n.toLocaleString("en-US", { minimumFractionDigits: Number.isInteger(n) ? 0 : 4, maximumFractionDigits: 4 });
+  return (Number.isInteger(n) ? WHOLE : FRACTION).format(n);
 }
