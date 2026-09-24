@@ -1,5 +1,11 @@
 # Equinox documentation map
 
+[Project overview](../README.md) · [Frontend guide](../app/README.md) ·
+[Program guide](../programs/equinox/README.md) ·
+[Client guide](../clients/equinox/README.md) ·
+[Market API guide](../workers/README.md) ·
+[Market-maker guide](../services/market-maker/README.md)
+
 `docs/status/current.md` is the authoritative current-state snapshot. The
 remaining documents are classified here so historical design notes are not
 mistaken for live guarantees.
