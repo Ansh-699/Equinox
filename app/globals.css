@@ -43,8 +43,12 @@
   --t-down-2: #a82520;
   --t-down-3: #a82520;
   --t-down-bg: #fbeae8;
-  --t-book-bid: #167a38;
-  --t-book-ask: #c8312a;
+  /* ordr.trade light book: pastel depth bars (bar colour at ~24% over the
+     paper) with darker price text that keeps 5:1 on the bar. */
+  --t-book-bid: #3abf72;
+  --t-book-ask: #e05555;
+  --t-book-bid-text: #10622c;   /* 5.8:1 on a full bid bar */
+  --t-book-ask-text: #a82520;   /* 5.0:1 on a full ask bar */
   /* Ink for text sitting ON a saturated fill (--t-up-3 / --t-down-3). Those
      fills are dark in BOTH themes, so this stays white in both. */
   --t-on-fill: #ffffff;
@@ -77,6 +81,8 @@
   --t-down-bg: #2a1716;
   --t-book-bid: #3abf72;
   --t-book-ask: #e05555;
+  --t-book-bid-text: #3abf72;
+  --t-book-ask-text: #e86666;
   --t-on-fill: #ffffff;
   --t-border-strong: #6f6967;   /* 3.0:1 on surface-3 */
   --t-scroll-thumb: rgba(255, 255, 255, 0.14);
@@ -88,8 +94,10 @@
 
 /* Equinox extras + legacy aliases (older components use these names). */
 :root {
-  --t-up-soft: rgba(22, 122, 56, 0.1);
-  --t-down-soft: #fbeae8;
+  /* ordr's pale green / pink selection fills; --t-up / --t-down text on
+     them stays at 5.0:1 / 4.5:1. */
+  --t-up-soft: rgba(58, 191, 114, 0.28);
+  --t-down-soft: #f6d7d6;
   --ink: var(--t-text);
   --muted: var(--t-text-2);
   --line: var(--t-border);

@@ -257,7 +257,7 @@ const Row = memo(function Row({
     >
       <div
         aria-hidden
-        className="absolute inset-y-0 right-0 w-full origin-right opacity-[0.08] will-change-transform motion-safe:transition-transform motion-safe:duration-[1100ms] motion-safe:ease-[cubic-bezier(0.33,1,0.68,1)]"
+        className="absolute inset-y-0 right-0 w-full origin-right opacity-[0.10] dark:opacity-[0.08] will-change-transform motion-safe:transition-transform motion-safe:duration-[1100ms] motion-safe:ease-[cubic-bezier(0.33,1,0.68,1)]"
         style={{
           transform: `scaleX(${pct / 100})`,
           backgroundColor: side === "bid" ? "var(--t-book-bid)" : "var(--t-book-ask)",
@@ -265,7 +265,7 @@ const Row = memo(function Row({
       />
       <div
         aria-hidden
-        className="absolute inset-y-0 right-0 w-full origin-right opacity-[0.15] dark:opacity-[0.20] will-change-transform motion-safe:transition-transform motion-safe:duration-[350ms] motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]"
+        className="absolute inset-y-0 right-0 w-full origin-right opacity-[0.16] dark:opacity-[0.20] will-change-transform motion-safe:transition-transform motion-safe:duration-[350ms] motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]"
         style={{
           transform: `scaleX(${pct / 100})`,
           backgroundColor: side === "bid" ? "var(--t-book-bid)" : "var(--t-book-ask)",
@@ -277,7 +277,7 @@ const Row = memo(function Row({
         className="pointer-events-none absolute inset-y-0 left-0 w-1/3 opacity-0"
         style={{ background: `linear-gradient(to right, color-mix(in srgb, var(--t-book-${side === "bid" ? "bid" : "ask"}) 32%, transparent), transparent)` }}
       />
-      <span ref={priceRef} className={`relative tnum ${side === "bid" ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
+      <span ref={priceRef} className={`relative tnum ${side === "bid" ? "text-[var(--t-book-bid-text)]" : "text-[var(--t-book-ask-text)]"}`}>
         {priceText}
       </span>
       <span ref={sizeRef} className="relative text-right tnum text-[var(--t-text)]">{sizeText}</span>
