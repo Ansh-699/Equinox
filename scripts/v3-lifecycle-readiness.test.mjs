@@ -23,8 +23,7 @@ for (const [label, mutate] of [
   ["missing seat", x => { x.seatShards[0][44]=0; }],
   ["incomplete", x => { x.accountCount=26; }],
   ["legacy layout", x => { x.core[371]=1; }],
-  ["wrong feed", x => { x.core.writeUInt32LE(922,246); }],
-  ["wrong channel", x => { x.core[250]=1; }],
+  ["missing feed", x => { x.core.writeUInt32LE(0,246); }],
   ["wrong exponent", x => { x.core.writeInt32LE(-6,251); }],
   ["closed", x => { x.core[1686]=3; }],
   ["halted", x => { x.core[11]=0; }],
@@ -52,3 +51,16 @@ for (const [label, mutate] of [
   ["unsequenced snapshot", s => { s.writeBigUInt64LE(0n, 77); }],
   ["wide snapshot confidence", s => { s.writeBigUInt64LE(37_900_000n, 61); }],
 ]) test(`rejects ${label}`, () => { const x = snapshotFixture(); mutate(x.snapshot); assert.throws(() => assertV3L1Readiness(x)); });
+
+// The snapshot must carry the core's own feed: Pyth (TSLA) or a reporter-priced market's reserved id.
+for (const [label, mutate] of [
+  ["a snapshot of another feed", x => { x.snapshot.writeUInt32LE(922, 44); }],
+  ["a snapshot of another channel", x => { x.snapshot[48] = 1; }],
+]) test(`rejects ${label}`, () => { const x = snapshotFixture(); mutate(x); assert.throws(() => assertV3L1Readiness(x)); });
+
+test("a reporter-priced (pre-IPO) market is ready with its own reserved feed", () => {
+  const x = snapshotFixture();
+  x.core.writeUInt32LE(4_000_000_001, 246); x.core[250] = 4;
+  x.snapshot.writeUInt32LE(4_000_000_001, 44); x.snapshot[48] = 4;
+  assert.equal(assertV3L1Readiness(x).funded, 1);
+});

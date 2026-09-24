@@ -2,7 +2,8 @@
 
 import { useMemo } from "react";
 import { AddressLookupTableAccount, PublicKey } from "@solana/web3.js";
-import { DEMO_LOOKUP_TABLE, DEMO_ORACLE_SNAPSHOT, publicMarketApiUrl, publicV3Core } from "@/lib/demo-config";
+import { publicMarketApiUrl } from "@/lib/demo-config";
+import { isReporterPriced, PRIMARY_MARKET, type V3Market } from "@/lib/v3-markets";
 import { createOracleFreshness } from "@/lib/oracle-freshness";
 import { decodeOracleSnapshotV3, deriveV3ExecutionAccounts } from "@/clients/stockstream/src";
 import deployment from "@/config/stockstream-deployment.json";
@@ -33,7 +34,7 @@ export interface StockStreamProtocol {
  * Deliberately never calls @privy-io/react-auth/solana's hooks directly:
  * they throw when rendered without a PrivyProvider ancestor, which used
  * to crash the whole trading terminal whenever Privy was unconfigured. */
-export function useStockStreamProtocol(marketAddress: string | null, override?: ActiveWalletSigner | null): StockStreamProtocol | null {
+export function useStockStreamProtocol(marketAddress: string | null, override?: ActiveWalletSigner | null, market: V3Market = PRIMARY_MARKET): StockStreamProtocol | null {
   const walletSigner = useActiveWalletSigner();
   const signer = override ?? walletSigner;
 
@@ -48,15 +49,15 @@ export function useStockStreamProtocol(marketAddress: string | null, override?: 
     const erRpc = new SolanaRpcTransport(deployment.magicBlock.rpc, fetch.bind(globalThis), () => new Promise((resolve) => setTimeout(resolve, 50)), 120);
     const er = new MagicRouterTransport(router, marketAddress, { validator: deployment.magicBlock.validator, rpc: erRpc, socket: rollupSocket() });
     // Warm the per-account delegation check and the blockhash so the first order pays no setup round trips.
-    if (publicV3Core) {
-      const bundle = deriveV3ExecutionAccounts(publicV3Core, walletAddress);
+    if (market.core) {
+      const bundle = deriveV3ExecutionAccounts(market.core, walletAddress);
       void er.getAccountAwareBlockhash([bundle.core, ...bundle.bookPages, ...bundle.seatShards, ...bundle.eventShards].map(String)).catch(() => undefined);
     }
     let lookupTable: Promise<AddressLookupTableAccount[]> | undefined;
-    const marketLookupTables = () => lookupTable ??= DEMO_LOOKUP_TABLE
+    const marketLookupTables = () => lookupTable ??= market.lookupTable
       // Owned by the address-lookup-table program, so read it without the StockStream owner check.
-      ? rpc.rawAccountBytes(DEMO_LOOKUP_TABLE).then((bytes) => (bytes ? [new AddressLookupTableAccount({
-        key: new PublicKey(DEMO_LOOKUP_TABLE), state: AddressLookupTableAccount.deserialize(bytes),
+      ? rpc.rawAccountBytes(market.lookupTable).then((bytes) => (bytes ? [new AddressLookupTableAccount({
+        key: new PublicKey(market.lookupTable), state: AddressLookupTableAccount.deserialize(bytes),
       })] : []))
       : Promise.resolve([]);
     // L1 transactions (no ER blockhash) compile through the market lookup table so
@@ -66,9 +67,16 @@ export function useStockStreamProtocol(marketAddress: string | null, override?: 
       const [latest, tables] = await Promise.all([rpc.latestBlockhash(), marketLookupTables()]);
       return encodeTransaction(walletAddress, instructions, latest.blockhash, tables);
     };
-    const freshOracle = DEMO_ORACLE_SNAPSHOT && publicMarketApiUrl
-      ? createOracleFreshness({ marketApiUrl: publicMarketApiUrl, readErSequence: async () => decodeOracleSnapshotV3(await erRpc.accountBytes(DEMO_ORACLE_SNAPSHOT)).sequence, readErPublishTime: async () => decodeOracleSnapshotV3(await erRpc.accountBytes(DEMO_ORACLE_SNAPSHOT)).publishTimestamp })
+    const snapshot = market.oracleSnapshot;
+    const freshOracle = snapshot && publicMarketApiUrl
+      ? createOracleFreshness({
+        marketApiUrl: publicMarketApiUrl,
+        // Reporter-priced markets are kept fresh by the market-maker service; only Pyth markets refresh on demand.
+        refreshable: !isReporterPriced(market),
+        readErSequence: async () => decodeOracleSnapshotV3(await erRpc.accountBytes(snapshot)).sequence,
+        readErPublishTime: async () => decodeOracleSnapshotV3(await erRpc.accountBytes(snapshot)).publishTimestamp,
+      })
       : undefined;
     return { walletAddress, rpc, router, service: new StockStreamProtocolService({ encode, wallet: signer, l1: rpc, er, freshOracle }) };
-  }, [signer, marketAddress]);
+  }, [signer, marketAddress, market]);
 }

@@ -2031,3 +2031,56 @@ fn withdrawals_never_wait_for_a_live_price() {
     let (accounts, forged) = withdrawal_price_accounts(Address::new_from_array([3; 32]), STATUS_CLOSED, now - 86_400);
     assert!(call(&accounts, &forged, 5).is_err());
 }
+
+#[test]
+fn price_reporter_posts_bounded_prices_only_for_its_own_market() {
+    use stockstream::handlers::{dispatch, OFF_CHAIN_TEST_NOW};
+    use stockstream::instruction::StockStreamInstruction as Ix;
+    use stockstream::oracle_snapshot as snap;
+    let now = OFF_CHAIN_TEST_NOW as u64;
+    let mut accounts = bundle();
+    let authority = account(Address::new_from_array([61; 32]), 0, true);
+    let reporter = account(Address::new_from_array([62; 32]), 0, true);
+    let stranger = account(Address::new_from_array([63; 32]), 0, true);
+    let core_key = *accounts[0].view.address();
+    unsafe {
+        let core = accounts[0].view.borrow_unchecked_mut();
+        core[44..76].copy_from_slice(authority.view.address().as_ref());
+        core[246..250].copy_from_slice(&4_000_000_001u32.to_le_bytes());
+        core[250] = 1;
+        core[251..255].copy_from_slice(&(-5i32).to_le_bytes());
+    }
+    let snapshot_key = stockstream::v3::derive_oracle_snapshot_v3(&ID, &core_key);
+    let mut snapshot = account(snapshot_key, snap::ORACLE_SNAPSHOT_SIZE, false);
+    unsafe { snap::initialize(snapshot.view.borrow_unchecked_mut(), &core_key, 4_000_000_001, 1, -5).unwrap() };
+    // The core is passed read-only: a copy of its current bytes.
+    let report = |accounts: &[TestAccount], signer: &TestAccount, price: i64, at: u64| {
+        let mut core = account(core_key, V3_MARKET_CORE_SIZE, false);
+        unsafe { core.view.borrow_unchecked_mut().copy_from_slice(accounts[0].view.borrow_unchecked()) };
+        core.set_readonly();
+        let mut list = [snapshot.view.clone(), core.view.clone(), signer.view.clone()];
+        let ix = Ix::ReportPriceV3 { price, confidence: price.unsigned_abs() / 200, publish_timestamp: at };
+        dispatch(&ID, &mut list, ix, &[])
+    };
+    // No reporter configured (every Pyth market): refused.
+    assert!(report(&accounts, &reporter, 100_000_000, now).is_err());
+    let set = |accounts: &[TestAccount], signer: &TestAccount, key: [u8; 32]| {
+        let mut list = [accounts[0].view.clone(), signer.view.clone()];
+        dispatch(&ID, &mut list, Ix::SetV3PriceReporter { reporter: key }, &[])
+    };
+    assert!(set(&accounts, &reporter, reporter.view.address().to_bytes()).is_err()); // only the authority names it
+    set(&accounts, &authority, reporter.view.address().to_bytes()).unwrap();
+    assert!(report(&accounts, &stranger, 100_000_000, now).is_err());
+    report(&accounts, &reporter, 100_000_000, now - 5).unwrap(); // first price: any level
+    let price = |s: &TestAccount| unsafe { i64::from_le_bytes(s.view.borrow_unchecked()[snap::OFFSET_PRICE..snap::OFFSET_PRICE + 8].try_into().unwrap()) };
+    assert_eq!(price(&snapshot), 100_000_000);
+    // One second later: at most 0.6% (0.5% + 0.1%/s).
+    assert!(report(&accounts, &reporter, 101_000_000, now - 4).is_err());
+    report(&accounts, &reporter, 100_500_000, now - 4).unwrap();
+    // Never backwards in time, and never stale.
+    assert!(report(&accounts, &reporter, 100_500_000, now - 4).is_err());
+    assert!(report(&accounts, &reporter, 100_500_000, now - 60).is_err());
+    let bytes = unsafe { snapshot.view.borrow_unchecked() };
+    assert_eq!(bytes[snap::OFFSET_TRADING_STATUS], snap::STATUS_OPEN);
+    assert_eq!(bytes[snap::OFFSET_AUTHENTICATED], 1);
+}

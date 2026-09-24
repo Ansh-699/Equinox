@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
-import { PERP_MARKETS } from "@/lib/markets";
+import { V3_MARKETS } from "@/lib/v3-markets";
 import { PriceChart } from "./price-chart";
 import { RESOLUTIONS, useCandles } from "./use-candles";
 
@@ -33,7 +33,7 @@ function MarketPicker({ symbol, onChange }: { symbol: string; onChange: (symbol:
     document.addEventListener("keydown", close);
     return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", close); };
   }, [open]);
-  const current = PERP_MARKETS.find((m) => m.symbol === symbol);
+  const current = V3_MARKETS.find((m) => m.symbol === symbol);
 
   return (
     <div ref={ref} className="relative shrink-0">
@@ -48,13 +48,13 @@ function MarketPicker({ symbol, onChange }: { symbol: string; onChange: (symbol:
         <span className="grid h-6 w-6 place-items-center rounded-full bg-[var(--t-surface-3)] text-[10px] font-bold text-[var(--t-text)]">{symbol.slice(0, 1)}</span>
         <span className="flex flex-col items-start leading-none">
           <span className="text-[14px] font-semibold tracking-tight text-[var(--t-text)]">{symbol}</span>
-          <span className="mt-0.5 text-[10.5px] text-[var(--t-text-3)]">{current?.displayName ?? ""} perpetual</span>
+          <span className="mt-0.5 text-[10.5px] text-[var(--t-text-3)]">{current?.name ?? ""} {current?.kind === "pre-ipo" ? "pre-IPO perpetual" : "perpetual"}</span>
         </span>
         <ChevronDown className={`h-4 w-4 text-[var(--t-text-2)] transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={1.75} />
       </button>
       {open && (
         <ul role="listbox" aria-label="Markets" className="absolute left-0 top-[calc(100%+6px)] z-40 w-[280px] overflow-hidden rounded-[8px] border border-[var(--t-border)] bg-[var(--t-surface)] py-1 shadow-2xl">
-          {PERP_MARKETS.map((m) => (
+          {V3_MARKETS.map((m) => (
             <li key={m.symbol} role="option" aria-selected={m.symbol === symbol}>
               <button
                 type="button"
@@ -64,11 +64,11 @@ function MarketPicker({ symbol, onChange }: { symbol: string; onChange: (symbol:
                 <span className="grid h-7 w-7 place-items-center rounded-full bg-[var(--t-surface-3)] text-[11px] font-bold">{m.symbol.slice(0, 1)}</span>
                 <span className="flex flex-1 flex-col">
                   <span className="text-[13px] font-semibold text-[var(--t-text)]">{m.symbol}</span>
-                  <span className="text-[11px] text-[var(--t-text-3)]">{m.displayName} · up to {m.maximumLeverage}×</span>
+                  <span className="text-[11px] text-[var(--t-text-3)]">{m.name} · {m.oracle.kind === "pyth" ? "Pyth price" : "PreStocks price"} · up to 5×</span>
                 </span>
-                {m.live
-                  ? <span className="rounded bg-[var(--t-up-soft)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--t-up)]">LIVE</span>
-                  : <span className="rounded bg-[var(--t-surface-3)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--t-text-3)]">SOON</span>}
+                {m.kind === "pre-ipo"
+                  ? <span className="rounded bg-[var(--t-surface-3)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--t-text)]">PRE-IPO</span>
+                  : <span className="rounded bg-[var(--t-up-soft)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--t-up)]">LIVE</span>}
                 {m.symbol === symbol ? <Check className="h-3.5 w-3.5 text-[var(--t-up)]" /> : <span className="w-3.5" />}
               </button>
             </li>

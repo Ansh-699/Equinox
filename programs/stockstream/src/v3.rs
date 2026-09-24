@@ -127,6 +127,9 @@ pub const V3_CORE_ORACLE_CONFIDENCE_OFFSET: usize = 1687;
 /// Optional keeper key (all zeroes = none). It may sign funding, liquidation
 /// and commit-only snapshots; everything else stays market-authority-only.
 pub const V3_CORE_KEEPER_OFFSET: usize = 1728;
+/// Price reporter for a market without a Pyth feed (all zeroes = none; Pyth markets
+/// never have one). Its updates are bounded per second in `report_price_v3`.
+pub const V3_CORE_PRICE_REPORTER_OFFSET: usize = 1760;
 
 /// True when `signer` is the market authority or the configured keeper.
 pub fn is_v3_operator(core: &[u8], signer: &[u8; 32]) -> bool {
@@ -171,13 +174,18 @@ pub fn abort_v3_snapshot(program_id: &Address, accounts: &mut [AccountView]) -> 
     Ok(())
 }
 
-/// Accounts: `[core (writable), market authority (signer)]`. Runs wherever the
-/// core currently lives (L1 or the rollup).
-pub fn set_v3_keeper(
+/// Accounts: `[core (writable), market authority (signer)]`. Set before the core
+/// is delegated: the L1 price path reads it from the core's L1 copy.
+pub fn set_v3_price_reporter(
     program_id: &Address,
     accounts: &mut [AccountView],
-    keeper: [u8; 32],
+    reporter: [u8; 32],
 ) -> ProgramResult {
+    set_core_key(program_id, accounts, V3_CORE_PRICE_REPORTER_OFFSET, reporter)
+}
+
+/// Writes a 32-byte key into the core, market authority only.
+fn set_core_key(program_id: &Address, accounts: &mut [AccountView], offset: usize, key: [u8; 32]) -> ProgramResult {
     if accounts.len() != 2 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
@@ -199,8 +207,18 @@ pub fn set_v3_keeper(
     if bytes[V3_CORE_MARKET_AUTHORITY_OFFSET..V3_CORE_MARKET_AUTHORITY_OFFSET + 32] != authority {
         return Err(ProgramError::MissingRequiredSignature);
     }
-    bytes[V3_CORE_KEEPER_OFFSET..V3_CORE_KEEPER_OFFSET + 32].copy_from_slice(&keeper);
+    bytes[offset..offset + 32].copy_from_slice(&key);
     Ok(())
+}
+
+/// Accounts: `[core (writable), market authority (signer)]`. Runs wherever the
+/// core currently lives (L1 or the rollup).
+pub fn set_v3_keeper(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    keeper: [u8; 32],
+) -> ProgramResult {
+    set_core_key(program_id, accounts, V3_CORE_KEEPER_OFFSET, keeper)
 }
 
 /// Validate stored provider-verified data against the execution clock, never

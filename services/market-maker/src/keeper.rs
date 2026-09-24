@@ -23,11 +23,11 @@ use stockstream::v3::{
     read_shard_seat, read_v3_risk_config, V3_CORE_CHILD_RECORDS_OFFSET, V3_CORE_CHILD_RECORD_SIZE,
     V3_CORE_COMMIT_PHASE_OFFSET, V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET, V3_CORE_FUNDING_ACCUMULATOR_OFFSET,
     V3_CORE_LAST_FUNDING_TIMESTAMP_OFFSET, V3_CORE_SNAPSHOT_EPOCH_OFFSET,
-    V3_COMMIT_PHASE_SNAPSHOT, V3_CORE_VALIDATOR_OFFSET, V3_SEATS_PER_SHARD,
+    V3_COMMIT_PHASE_SNAPSHOT, V3_CORE_DELEGATION_STATUS_OFFSET, V3_CORE_VALIDATOR_OFFSET, V3_SEATS_PER_SHARD,
 };
 use tokio::sync::Mutex;
 
-use crate::maker::{now_ms, Status};
+use crate::maker::{now_ms, MarketConfig, Status};
 use crate::rpc::{Rpc, SignatureSocket};
 use crate::solana::{b58, find_program_address, set_compute_unit_limit, sign_transaction, AccountMeta, Instruction, Keypair, Pubkey};
 use crate::v3::{best_prices, snapshot, Bundle};
@@ -60,6 +60,8 @@ pub struct KeeperStatus {
 pub struct Keeper {
     rpc: Rpc,
     rpc_url: String,
+    symbol: String,
+    primary: bool,
     bundle: Bundle,
     key: Keypair,
     /// Set while a snapshot is open: the maker skips its ticks.
@@ -100,8 +102,8 @@ pub fn funding_mark(best_bid: Option<i64>, best_ask: Option<i64>, oracle: i64, d
 }
 
 impl Keeper {
-    pub fn new(rpc_url: &str, bundle: Bundle, key: Keypair, status: Arc<Mutex<Status>>, committing: Arc<AtomicBool>, commit_every: Duration, funding_every: Duration) -> Result<Self> {
-        Ok(Self { rpc: Rpc::new(rpc_url)?, rpc_url: rpc_url.to_string(), bundle, key, committing, status, commit_every, funding_every })
+    pub fn new(rpc_url: &str, market: &MarketConfig, key: Keypair, status: Arc<Mutex<Status>>, committing: Arc<AtomicBool>, commit_every: Duration, funding_every: Duration) -> Result<Self> {
+        Ok(Self { rpc: Rpc::new(rpc_url)?, rpc_url: rpc_url.to_string(), symbol: market.symbol.clone(), primary: market.primary, bundle: market.bundle.clone(), key, committing, status, commit_every, funding_every })
     }
 
     pub fn pubkey(&self) -> Pubkey {
@@ -109,10 +111,23 @@ impl Keeper {
     }
 
     pub async fn run(self: Arc<Self>) {
-        self.status.lock().await.keeper = Some(KeeperStatus { key: b58(&self.key.pubkey()), ..KeeperStatus::default() });
+        {
+            let initial = KeeperStatus { key: b58(&self.key.pubkey()), ..KeeperStatus::default() };
+            let mut status = self.status.lock().await;
+            status.market(&self.symbol).keeper = Some(initial.clone());
+            if self.primary {
+                status.keeper = Some(initial);
+            }
+        }
         let start = Instant::now();
         let (mut next_commit, mut next_funding) = (start + Duration::from_secs(20), start + Duration::from_secs(40));
         loop {
+            // Only a market in the rollup has anything to fund, liquidate or commit.
+            let core = self.rpc.account(&self.bundle.core).await.ok().flatten();
+            if core.is_none_or(|core| core.get(V3_CORE_DELEGATION_STATUS_OFFSET) != Some(&1)) {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                continue;
+            }
             let liquidated = self.liquidations().await;
             self.record("liquidation", liquidated.map(|count| {
                 move |k: &mut KeeperStatus| {
@@ -156,14 +171,17 @@ impl Keeper {
 
     async fn record(&self, job: &str, outcome: Result<impl FnOnce(&mut KeeperStatus)>) {
         let mut status = self.status.lock().await;
-        let Some(keeper) = status.keeper.as_mut() else { return };
+        let Some(keeper) = status.market(&self.symbol).keeper.as_mut() else { return };
         match outcome {
             Ok(apply) => apply(keeper),
             Err(error) => {
                 keeper.errors += 1;
                 keeper.last_error = Some(format!("{job}: {error:#}").chars().take(300).collect());
-                tracing::warn!("keeper {job} failed: {error:#}");
+                tracing::warn!(market = %self.symbol, "keeper {job} failed: {error:#}");
             }
+        }
+        if self.primary {
+            status.keeper = status.markets.get(&self.symbol).and_then(|m| m.keeper.clone());
         }
     }
 

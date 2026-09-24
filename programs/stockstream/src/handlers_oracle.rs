@@ -185,3 +185,67 @@ pub(crate) fn configure_market_oracle(
     header.reserved_upgrade[68] = channel;
     write_header(data, &header)
 }
+
+/// Largest move a reporter may post, in bps: 0.5% plus 0.1% per second since
+/// the previous price, capped at 10% per update.
+pub fn max_report_move_bps(elapsed_seconds: u64) -> u64 {
+    elapsed_seconds.saturating_mul(10).saturating_add(50).min(1_000)
+}
+
+/// Price for a market with no Pyth feed (pre-IPO): the core's reporter posts it
+/// into the core's canonical L1 snapshot, through the same writer and checks as
+/// a Pyth update, bounded per second of elapsed time.
+/// Accounts: `[snapshot (writable), core, reporter (signer)]`.
+pub(crate) fn report_price_v3(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    price: i64,
+    confidence: u64,
+    publish_timestamp: u64,
+) -> ProgramResult {
+    if accounts.len() != 3
+        || !accounts[0].is_writable()
+        || !accounts[0].owned_by(program_id)
+        || *accounts[0].address() != crate::v3::derive_oracle_snapshot_v3(program_id, accounts[1].address())
+        || accounts[1].is_writable()
+        || !accounts[2].is_signer()
+    {
+        return Err(StockStreamError::OracleUnavailable.into());
+    }
+    let (feed_id, channel, exponent) = {
+        use crate::v3::*;
+        let core = accounts[1].try_borrow()?;
+        // Delegated cores are owned by the delegation program on L1; the bytes are still ours.
+        if !(accounts[1].owned_by(program_id)
+            || accounts[1].owned_by(&crate::magicblock::DELEGATION_PROGRAM_ID))
+            || core.len() != V3_MARKET_CORE_SIZE
+            || core[0..8] != V3_MARKET_CORE_DISCRIMINATOR
+            || core[V3_CORE_PRICE_REPORTER_OFFSET..V3_CORE_PRICE_REPORTER_OFFSET + 32] == [0u8; 32]
+            || core[V3_CORE_PRICE_REPORTER_OFFSET..V3_CORE_PRICE_REPORTER_OFFSET + 32]
+                != accounts[2].address().to_bytes()
+        {
+            return Err(StockStreamError::OracleUnavailable.into());
+        }
+        (
+            u32::from_le_bytes(core[V3_CORE_ORACLE_FEED_ID_OFFSET..V3_CORE_ORACLE_FEED_ID_OFFSET + 4].try_into().unwrap()),
+            core[V3_CORE_ORACLE_CHANNEL_OFFSET],
+            i32::from_le_bytes(core[V3_CORE_ORACLE_EXPONENT_OFFSET..V3_CORE_ORACLE_EXPONENT_OFFSET + 4].try_into().unwrap()),
+        )
+    };
+    let now = u64::try_from(crate::handlers::current_unix_timestamp()?)
+        .map_err(|_| ProgramError::from(StockStreamError::OracleUnavailable))?;
+    let core_address = *accounts[1].address();
+    let bytes = &mut *accounts[0].try_borrow_mut()?;
+    use crate::oracle_snapshot::*;
+    let previous_price = i64::from_le_bytes(bytes[OFFSET_PRICE..OFFSET_PRICE + 8].try_into().unwrap());
+    let previous_publish = u64::from_le_bytes(bytes[OFFSET_PUBLISH_TIMESTAMP..OFFSET_PUBLISH_TIMESTAMP + 8].try_into().unwrap());
+    if previous_price > 0 && bytes[OFFSET_AUTHENTICATED] == 1 {
+        let limit = max_report_move_bps(publish_timestamp.saturating_sub(previous_publish));
+        let moved = i128::from(price).abs_diff(i128::from(previous_price)).saturating_mul(10_000);
+        if moved > u128::from(limit).saturating_mul(previous_price.unsigned_abs().into()) {
+            return Err(StockStreamError::RiskViolation.into());
+        }
+    }
+    write_verified(bytes, &core_address, feed_id, channel, exponent, price, confidence, publish_timestamp, 0, now)
+}
+

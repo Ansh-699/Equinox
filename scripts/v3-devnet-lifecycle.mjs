@@ -214,7 +214,11 @@ async function setup() {
   const state = load(); assertFresh(state);
   const payer = authority();
   let exchangePublicKey; let exchangeCreateInstruction; let exchangeCreateSigners;
-  if (EXCHANGE_SEED) {
+  if (process.env.V3_EXISTING_EXCHANGE) {
+    // Another market on an exchange that already exists (shared collateral mint and config).
+    exchangePublicKey = new PublicKey(process.env.V3_EXISTING_EXCHANGE);
+    if (!state.exchangeCreated) { save({ exchangeCreated: true, exchange: exchangePublicKey.toBase58() }); state.exchangeCreated = true; }
+  } else if (EXCHANGE_SEED) {
     if (Buffer.byteLength(EXCHANGE_SEED, "utf8") > 32) throw new Error("V3_EXCHANGE_SEED must be at most 32 bytes");
     exchangePublicKey = await PublicKey.createWithSeed(payer.publicKey, EXCHANGE_SEED, PROGRAM);
     const lamports = await connection.getMinimumBalanceForRentExemption(256);

@@ -40,7 +40,9 @@ import { createV3OpenOrdersAdapter, unimplementedOpenOrdersAdapter } from "@/lib
 import type { TransactionPreview } from "@/lib/execution-boundary";
 import { recordSignature } from "@/lib/last-signature";
 import { claimTestFunds } from "@/lib/faucet-client";
-import { DEMO_ORACLE_SNAPSHOT, publicMarketApiUrl, publicV3Core } from "@/lib/demo-config";
+import { publicMarketApiUrl } from "@/lib/demo-config";
+import { isReporterPriced, MM_SERVICE_URL, PRIMARY_MARKET, v3MarketFor } from "@/lib/v3-markets";
+import { MARKET_BY_SYMBOL } from "@/lib/markets";
 import { SolanaRpcTransport } from "@/lib/rpc-transport";
 import { marketStreamEvents } from "@/lib/market-stream-events";
 import { buildV3OrderInstructions } from "./v3-order";
@@ -49,6 +51,8 @@ import { TxToasts, useTxToasts } from "./tx-toasts";
 
 const marketApiUrl = publicMarketApiUrl;
 const ONBOARDING_DEPOSIT = 100_000_000n; // 100 test USDC
+/** Pre-IPO shares trade in the hundreds to thousands of dollars: 500 test USDC buys at least one at 5×. */
+const PRE_IPO_ONBOARDING_DEPOSIT = 500_000_000n;
 const publicDemoReadOnly = process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_STOCKSTREAM_DEMO_READ_ONLY !== "false";
 
 interface MarketEvent { kind: string; sequence?: number; payload: { kind?: string } }
@@ -64,7 +68,7 @@ export function TradingTerminal() {
   const [faucetPending, setFaucetPending] = useState(false);
   const [notice, setNotice] = useState("Live submission requires verified Pyth pricing, USDC custody and MagicBlock delegation.");
   const [sessionActionReason, setSessionActionReason] = useState<SessionActionResult["reason"]>(null);
-  const [marketSymbol, setMarketSymbol] = useState(process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_SYMBOL ?? "AAPL-PERP");
+  const [marketSymbol, setMarketSymbol] = useState(process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_SYMBOL ?? PRIMARY_MARKET.symbol);
   const [latestLifecycleEventKind, setLatestLifecycleEventKind] = useState<string | null>(null);
   const lifecycleEventRef = useRef<{ sequence: number; kind: string } | null>(null);
   const [nowUnixSeconds, setNowUnixSeconds] = useState(0);
@@ -78,8 +82,13 @@ export function TradingTerminal() {
     const interval = setInterval(tick, 5_000);
     return () => clearInterval(interval);
   }, []);
-  const marketConfig = marketForSymbol(marketSymbol);
-  const marketAddress = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_ADDRESS ?? (publicV3Core ? marketConfig.marketPda : null);
+  // The live V3 market (its core, snapshot and price source) drives every read and write.
+  const v3 = v3MarketFor(marketSymbol);
+  // Legacy per-symbol config (V2 fixtures); pre-IPO symbols have none, so they borrow TSLA's.
+  const marketConfig = MARKET_BY_SYMBOL.get(marketSymbol) ?? marketForSymbol(PRIMARY_MARKET.symbol);
+  // Pre-IPO prices have no Pyth history: their candles come from the market-maker service.
+  const candlesApiUrl = isReporterPriced(v3) ? MM_SERVICE_URL : marketApiUrl;
+  const marketAddress = v3.core || null;
   // The in-app trading key (lib/trading-key.ts) is the trader: it signs seats,
   // deposits, orders and withdrawals silently once the wallet unlocked it.
   const tradingKey = useTradingKey(auth);
@@ -87,29 +96,30 @@ export function TradingTerminal() {
   const traderAuth = tradingKey.signer
     ? { privyAuthenticated: false, getAccessToken: async () => null, signMessage: (_address: string, bytes: Uint8Array) => tradingKey.signer!.signMessage(bytes) }
     : auth;
-  const protocol = useStockStreamProtocol(auth.authenticated ? marketAddress : null, tradingKey.signer);
+  const protocol = useStockStreamProtocol(auth.authenticated ? marketAddress : null, tradingKey.signer, v3);
   // V3: each wallet uses its own seat (or the first free one), never seat 0 by default.
-  const position = usePosition(protocol?.rpc ?? null, marketAddress, 0, { marketApiUrl, core: publicV3Core, ...(publicV3Core ? { trader: trader ?? null } : {}) });
+  const position = usePosition(protocol?.rpc ?? null, marketAddress, 0, { marketApiUrl, core: v3.core, ...(v3.core ? { trader: trader ?? null } : {}) });
   const l1SeatIndex = position.seatIndex ?? 0;
   const session = useTradingSession(protocol, trader, marketAddress, l1SeatIndex);
   const handleSessionResult = (result: SessionActionResult) => { setNotice(result.detail ? `${result.message}: ${result.detail}` : result.message); setSessionActionReason(result.reason); };
   const executionStatus = useExecutionStatus(marketApiUrl, marketSymbol);
-  const v3MarketState = useV3MarketState(marketApiUrl, publicV3Core);
+  const v3MarketState = useV3MarketState(marketApiUrl, v3.core);
   const sessionOrder = useSessionOrder(protocol?.rpc ?? null, session.status, auth, handleSessionResult, session.advanceNonce, executionStatus);
   const canTrade = session.status !== null && isSessionUsable(session.status);
+  const v3Core = v3.core;
   const openOrdersAdapter = useMemo(
-    () => marketApiUrl && publicV3Core
-      ? createV3OpenOrdersAdapter({ marketApiUrl, core: publicV3Core })
+    () => marketApiUrl && v3Core
+      ? createV3OpenOrdersAdapter({ marketApiUrl, core: v3Core })
       : unimplementedOpenOrdersAdapter,
-    [],
+    [v3Core],
   );
   const openOrders = useOpenOrders(openOrdersAdapter, marketAddress, l1SeatIndex);
   // The oracle clock is public chain state: read it before sign-in too.
   const readRpc = useMemo(() => new SolanaRpcTransport(process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://api.devnet.solana.com"), []);
   const marketClock = useMarketClock(
-    DEMO_ORACLE_SNAPSHOT ? readRpc : protocol?.rpc ?? null,
-    DEMO_ORACLE_SNAPSHOT ? publicV3Core || null : marketAddress,
-    DEMO_ORACLE_SNAPSHOT,
+    v3.oracleSnapshot ? readRpc : protocol?.rpc ?? null,
+    v3.oracleSnapshot ? v3.core || null : marketAddress,
+    v3.oracleSnapshot,
   );
   const oracleSafety = deriveOracleSafety({
     oracleValid: marketClock?.oracleValid ?? null,
@@ -119,13 +129,13 @@ export function TradingTerminal() {
   });
   const withdraw = useWithdraw(protocol, setNotice);
   // The main wallet's own signer, for collateral left in a seat the wallet itself owns.
-  const walletProtocol = useStockStreamProtocol(auth.authenticated ? marketAddress : null);
+  const walletProtocol = useStockStreamProtocol(auth.authenticated ? marketAddress : null, undefined, v3);
   const walletWithdraw = useWithdraw(walletProtocol, setNotice);
   const deposit = useDeposit(protocol, setNotice);
   const withdrawGate = evaluateWithdrawGate(executionStatus, position.reconciliationStatus);
   // While the market trades in the rollup, withdrawals go through the rollup outbox, except mid-commit.
   const rollupWithdraw = !!executionStatus?.marketDelegated && !executionStatus.commitPending;
-  const book = useV3Book(marketApiUrl, publicV3Core || undefined, executionStatus ? executionStatus.marketDelegated : null);
+  const book = useV3Book(marketApiUrl, v3.core || undefined, executionStatus ? executionStatus.marketDelegated : null);
   // While delegated, the rollup is the source of truth for seats (the L1 copy
   // is frozen), so resolve the wallet's seat from the live bundle.
   const fromRollup = !!executionStatus?.marketDelegated && !!trader && book.updatedAt !== null;
@@ -138,7 +148,7 @@ export function TradingTerminal() {
   const walletSeat = walletSeatView ? { index: walletSeatView.index, available: walletSeatView.view.availableCollateral } : null;
   function withdrawWalletSeat() {
     if (!walletSeatView || !auth.walletAddress) return;
-    const accounts = resolveCustodyAccounts(auth.walletAddress, marketAddress, marketConfig, walletSeatView.index);
+    const accounts = resolveCustodyAccounts(auth.walletAddress, marketAddress, marketConfig, walletSeatView.index, v3);
     if (accounts) void walletWithdraw.submitWithdraw(accounts, walletSeatView.view.availableCollateral, withdrawGate, walletSeatView.view, rollupWithdraw);
   }
   // While delegated, "my open orders" come straight from the live rollup book.
@@ -155,13 +165,13 @@ export function TradingTerminal() {
   // A stale snapshot (it only refreshes when someone trades) is not the price:
   // then the freshest Pyth close stands in, and the market bar says so.
   const snapshotStale = !!marketClock && nowUnixSeconds - Number(marketClock.lastVerifiedOracleTimestamp) > 10;
-  const latestClose = useCandles(marketApiUrl, marketSymbol, RESOLUTIONS[0], null).candles.at(-1)?.c ?? null;
+  const latestClose = useCandles(candlesApiUrl, marketSymbol, RESOLUTIONS[0], null).candles.at(-1)?.c ?? null;
   const indexPrice = snapshotStale && latestClose !== null ? latestClose : marketClock?.oracle?.price ?? latestClose;
   const markPrice = indexPrice ?? bookMid;
   const sized = sizeTicket(ticket, markPrice, marketConfig.initialMarginBps);
   const quantity = BigInt(sized?.shares ?? 0);
   const orderTypeFor = (t: Ticket) => (t.kind === "market" ? "ioc" : t.postOnly ? "post-only" : "limit");
-  const walletCollateral = useMemo(() => resolveCustodyAccounts(trader, marketAddress, marketConfig, seatIndex)?.sourceOrDestination?.toString() ?? null, [trader, marketAddress, marketConfig, seatIndex]);
+  const walletCollateral = useMemo(() => resolveCustodyAccounts(trader, marketAddress, marketConfig, seatIndex, v3)?.sourceOrDestination?.toString() ?? null, [trader, marketAddress, marketConfig, v3, seatIndex]);
   const balances = useWalletBalances(readRpc, trader, walletCollateral);
 
   useEffect(() => {
@@ -213,7 +223,7 @@ export function TradingTerminal() {
     if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: lifecycle writes are disabled."); return false; }
     if (!trader || !marketAddress || !protocol) { setNotice("Configure the market, sign in, and connect a wallet before creating a seat."); return false; }
     try {
-      const v3Core = publicV3Core;
+      const v3Core = v3.core;
       if (v3Core) {
         // Seats are created wherever the bundle lives: on L1, or inside the
         // MagicBlock rollup while delegated. Never mid-transition.
@@ -278,8 +288,8 @@ export function TradingTerminal() {
   // both replace with the CURRENT ticket (replace is place-with-a-cancel).
   /** Cancels one order (or up to 8) straight in the rollup, signed by the trading key. */
   async function cancelV3(orderKey: bigint | null) {
-    if (!protocol || !trader || !publicV3Core || !DEMO_ORACLE_SNAPSHOT || !seat) return;
-    const execution = { ...deriveV3ExecutionAccounts(publicV3Core, trader), oracleSnapshot: DEMO_ORACLE_SNAPSHOT };
+    if (!protocol || !trader || !v3.core || !v3.oracleSnapshot || !seat) return;
+    const execution = { ...deriveV3ExecutionAccounts(v3.core, trader), oracleSnapshot: v3.oracleSnapshot };
     const ix = orderKey === null ? cancelAllV3(execution, seatIndex, 8) : cancelOrderV3(execution, seatIndex, orderKey);
     const preview: TransactionPreview = { instruction: orderKey === null ? "CancelAll" : "CancelOrder", programId: ix.programId.toBase58(), accounts: ix.keys.map((meta) => ({ address: meta.pubkey.toBase58(), signer: meta.isSigner, writable: meta.isWritable })), status: "constructed" };
     setCancelPending(true);
@@ -299,11 +309,11 @@ export function TradingTerminal() {
 
   /** Main-wallet V3 order: routed to MagicBlock ER while the market is delegated, else L1. */
   async function placeV3Order() {
-    if (!protocol || !trader || !publicV3Core || !DEMO_ORACLE_SNAPSHOT || !sized) return;
+    if (!protocol || !trader || !v3.core || !v3.oracleSnapshot || !sized) return;
     if (!seat) { setNotice("Create your seat and deposit collateral before placing an order."); return; }
     if (!marketClock) { setNotice("Waiting for the verified price before placing an order."); return; }
     const built = buildV3OrderInstructions({
-      core: publicV3Core, wallet: trader, oracleSnapshot: DEMO_ORACLE_SNAPSHOT, seatIndex,
+      core: v3.core, wallet: trader, oracleSnapshot: v3.oracleSnapshot, seatIndex,
       side: ticket.side === "long" ? "bid" : "ask", orderType: orderTypeFor(ticket), reduceOnly: ticket.reduceOnly, quantity,
       limitPriceUsd: sized.limitPriceUsd, expiresInMinutes: Number(ticket.expiresInMinutes) || 0, oracleClock: marketClock.lastVerifiedOracleTimestamp,
     });
@@ -361,7 +371,7 @@ export function TradingTerminal() {
   }
 
   // V3 orders can be signed by the main wallet directly (no session key needed).
-  const walletTrading = !!publicV3Core && !!DEMO_ORACLE_SNAPSHOT && auth.authenticated && !!protocol;
+  const walletTrading = !!v3.core && !!v3.oracleSnapshot && auth.authenticated && !!protocol;
   const live = marketClock?.oracle ? { price: marketClock.oracle.price, publishTime: Number(marketClock.lastVerifiedOracleTimestamp) } : null;
   const oracleAgeSeconds = marketClock && nowUnixSeconds ? Math.max(0, nowUnixSeconds - Number(marketClock.lastVerifiedOracleTimestamp)) : null;
 
@@ -381,7 +391,10 @@ export function TradingTerminal() {
   const [autoStart, setAutoStart] = useState<bigint | null>(null);
   // The book feed can lag a just-created seat; never create it twice in a session.
   const seatCreatedFor = useRef<string | null>(null);
-  async function startTrading(amount: bigint = ONBOARDING_DEPOSIT) {
+  // Computed per render and passed explicitly: a default parameter reading the
+  // selected market was frozen at the first render by the compiler's memoization.
+  const onboardingDeposit = v3.kind === "pre-ipo" ? PRE_IPO_ONBOARDING_DEPOSIT : ONBOARDING_DEPOSIT;
+  async function startTrading(amount: bigint) {
     if (!auth.walletAddress) { openWalletDrawer(); return; }
     if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: onboarding is unavailable."); return; }
     if (!tradingKey.signer) {
@@ -415,7 +428,7 @@ export function TradingTerminal() {
         seatCreatedFor.current = trader;
       }
       setOnboarding("3/3 · Depositing…");
-      const accounts = resolveCustodyAccounts(trader, marketAddress, marketConfig, seatIndex);
+      const accounts = resolveCustodyAccounts(trader, marketAddress, marketConfig, seatIndex, v3);
       if (accounts) await deposit.submitDeposit(accounts, amount, executionStatus?.marketDelegated ?? false);
     } finally {
       setOnboarding(null);
@@ -457,10 +470,10 @@ export function TradingTerminal() {
   // Keep an order's prerequisites (delegation check, blockhash, price age) warm:
   // a click then only signs and sends.
   const orderAccounts = useMemo(() => {
-    if (!publicV3Core || !trader) return null;
-    const execution = deriveV3ExecutionAccounts(publicV3Core, trader);
+    if (!v3.core || !trader) return null;
+    const execution = deriveV3ExecutionAccounts(v3.core, trader);
     return [execution.core, ...execution.bookPages, ...execution.seatShards, ...execution.eventShards].map(String);
-  }, [trader]);
+  }, [trader, v3.core]);
   useEffect(() => {
     if (!protocol || !orderAccounts || !executionStatus?.marketDelegated) return;
     const warm = () => { if (!document.hidden) protocol.service.warm(orderAccounts); };
@@ -477,7 +490,7 @@ export function TradingTerminal() {
       <MarketBar
         marketSymbol={marketSymbol}
         onMarketSymbolChange={setMarketSymbol}
-        marketApiUrl={marketApiUrl}
+        marketApiUrl={candlesApiUrl}
         live={live}
         price={indexPrice}
         oracle={marketClock?.oracle ?? null}
@@ -490,10 +503,10 @@ export function TradingTerminal() {
         {/* Chart + activity. Owns the slack at xl; fixed height while stacked. */}
         <div className="tk-col order-2 flex min-h-0 min-w-0 flex-col xl:order-none xl:flex-1">
           <div className="h-[420px] shrink-0 xl:h-auto xl:min-h-0 xl:flex-1">
-            <MarketPanel marketSymbol={marketSymbol} marketApiUrl={marketApiUrl} live={live} />
+            <MarketPanel marketSymbol={marketSymbol} marketApiUrl={candlesApiUrl} live={live} />
           </div>
           <ActivityDrawer
-            aside={<ErTxPanel marketApiUrl={marketApiUrl} />}
+            aside={<ErTxPanel marketApiUrl={marketApiUrl} market={v3.symbol} />}
             loading={seatLoading}
             signedIn={!!trader}
             seat={seat}
@@ -550,22 +563,22 @@ export function TradingTerminal() {
             seatIndex={seat ? seatIndex : null}
             seatLoading={seatLoading}
             onSeatAndScratch={() => void runLifecycle()}
-            onStartTrading={() => void startTrading()}
+            onStartTrading={() => void startTrading(onboardingDeposit)}
             onboarding={onboarding ?? (tradingKey.unlocking ? "Waiting for wallet signature…" : null)}
             busy={busy}
             seatActionLabel="Create V3 seat"
-            onFaucet={publicV3Core ? () => void claimFunds() : undefined}
+            onFaucet={v3.core ? () => void claimFunds() : undefined}
             onDeposit={(units) => guard("deposits", () => {
               // Never guess the path: the market's location decides who signs.
               if (!executionStatus) { setNotice("Checking where the market runs — try again in a moment."); return; }
               // Deposits into the rollup always go through the trading key: never a wallet popup per step.
               if (executionStatus.marketDelegated) { void startTrading(units); return; }
-              const accounts = resolveCustodyAccounts(trader, marketAddress, marketConfig, seatIndex);
+              const accounts = resolveCustodyAccounts(trader, marketAddress, marketConfig, seatIndex, v3);
               if (!accounts) { setNotice("Sign in before depositing."); return; }
               void deposit.submitDeposit(accounts, units, false);
             })()}
             onWithdraw={(units) => guard("withdrawals", () => {
-              const accounts = resolveCustodyAccounts(trader, marketAddress, marketConfig, seatIndex);
+              const accounts = resolveCustodyAccounts(trader, marketAddress, marketConfig, seatIndex, v3);
               if (!accounts) { setNotice("Sign in before withdrawing."); return; }
               void withdraw.submitWithdraw(accounts, units, withdrawGate, seat, rollupWithdraw, tradingKey.signer ? auth.walletAddress : null);
             })()}
@@ -579,7 +592,7 @@ export function TradingTerminal() {
           />
           {/* Live V3 wallet trading uses the in-app trading key. User sessions only exist for
               markets on L1 authorized by the market authority, so that panel stays for the fixture. */}
-          {DEMO_ORACLE_SNAPSHOT ? (auth.walletAddress ? <div className="border-t border-[var(--t-border)]">
+          {v3.oracleSnapshot ? (auth.walletAddress ? <div className="border-t border-[var(--t-border)]">
             <InstantTradingCard
               tradingAddress={tradingKey.signer?.address ?? null}
               unlocking={tradingKey.unlocking}

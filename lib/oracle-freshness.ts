@@ -16,6 +16,8 @@ export function createOracleFreshness(options: {
   /** The rollup's snapshot publish time (unix seconds): a recent one skips the refresh round trip. */
   readErPublishTime?: () => Promise<bigint | null>;
   now?: () => number;
+  /** False for reporter-priced markets: there is no on-demand refresh, only the reporter's posts. */
+  refreshable?: boolean;
   fetcher?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
   erTimeoutMs?: number;
@@ -47,6 +49,10 @@ export function createOracleFreshness(options: {
       const published = await readPublished();
       const age = published == null ? null : clock() / 1000 - Number(published);
       if (age !== null && age <= ER_FAST_PATH_MAX_AGE_S) return;
+      if (options.refreshable === false) {
+        if (age !== null && age <= ER_FALLBACK_MAX_AGE_S) return;
+        throw new Error("This market's price is stale (its price reporter is behind); try again in a few seconds.");
+      }
       let sequence: bigint;
       lastRead = null;
       try {

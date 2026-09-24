@@ -1,6 +1,6 @@
 /** The terminal's own rollup transactions (submit → confirmed), for the latency panel. */
 /** `ms`: send → rollup "processed" push; `netMs`: the plain network round trip to the rollup at that time. */
-export interface ErTxSample { kind: string; ms: number | null; netMs?: number | null; ok: boolean; at: number; signature: string; side?: "bid" | "ask"; price?: number; quantity?: number; mine?: boolean }
+export interface ErTxSample { market?: string; kind: string; ms: number | null; netMs?: number | null; ok: boolean; at: number; signature: string; side?: "bid" | "ask"; price?: number; quantity?: number; mine?: boolean }
 
 let samples: readonly ErTxSample[] = [];
 const listeners = new Set<() => void>();
