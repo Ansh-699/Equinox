@@ -32,7 +32,7 @@ test.beforeEach(async () => {
 test("market event stream gives up and reports unavailable after repeated reconnect failures, rather than retrying forever", async ({ page }) => {
   await control({ streamDown: true });
   await page.goto("/activity");
-  await expect(page.locator(".panel-title", { hasText: "Recent market events" }).locator("span")).toHaveText("unavailable", { timeout: 20_000 });
+  await expect(page.getByTestId("market-events-status")).toHaveText("unavailable", { timeout: 20_000 });
 });
 
 test("a sequence gap is detected, reported honestly, and triggers a resync -- never silently dropped or fabricated", async ({ page }) => {
@@ -42,7 +42,7 @@ test("a sequence gap is detected, reported honestly, and triggers a resync -- ne
   // First event establishes the baseline cursor at sequence 1 and is what
   // actually flips the stream status to "live" (a snapshot alone never does).
   await control({ pushEvent: { id: "e1", kind: "fill", sequence: 1, domain: "l1", observedAt: Date.now() } });
-  await expect(page.locator(".panel-title", { hasText: "Recent market events" }).locator("span")).toHaveText("live", { timeout: 10_000 });
+  await expect(page.getByTestId("market-events-status")).toHaveText("live", { timeout: 10_000 });
 
   // Skips straight to 5 -- a real 3-event gap (2, 3, 4 never arrived).
   await control({ pushEvent: { id: "e2", kind: "fill", sequence: 5, domain: "l1", observedAt: Date.now() } });
@@ -56,9 +56,9 @@ test("a duplicate/replayed event is dropped, not shown twice or treated as a gap
   await waitForStreamConnected(connectionBaseline);
 
   await control({ pushEvent: { id: "d1", kind: "fill", sequence: 10, domain: "l1", observedAt: Date.now() } });
-  await expect(page.locator(".activity-table tbody tr")).toHaveCount(1, { timeout: 10_000 });
+  await expect(page.getByTestId("activity-feed").locator("li")).toHaveCount(1, { timeout: 10_000 });
   await control({ pushEvent: { id: "d1-again", kind: "fill", sequence: 10, domain: "l1", observedAt: Date.now() } });
 
   await expect(page.getByText(/duplicate\/out-of-order event/)).toBeVisible({ timeout: 10_000 });
-  await expect(page.locator(".activity-table tbody tr")).toHaveCount(1);
+  await expect(page.getByTestId("activity-feed").locator("li")).toHaveCount(1);
 });
