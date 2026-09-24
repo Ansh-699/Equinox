@@ -100,6 +100,38 @@ pub fn validate_for_core(
     Ok(())
 }
 
+/// The last authenticated price in this market's snapshot, however old and
+/// whatever the session: every identity check of `validate_for_core`, none of
+/// the freshness ones. For decisions that must not wait for a live price.
+pub fn last_verified_price(
+    bytes: &[u8],
+    core: &Address,
+    feed_id: u32,
+    channel: u8,
+    exponent: i32,
+) -> Result<i64, ProgramError> {
+    if bytes.len() != ORACLE_SNAPSHOT_SIZE
+        || bytes[0..8] != ORACLE_SNAPSHOT_DISCRIMINATOR
+        || u16::from_le_bytes(bytes[OFFSET_VERSION..OFFSET_VERSION + 2].try_into().unwrap())
+            != ORACLE_SNAPSHOT_VERSION
+        || bytes[OFFSET_INITIALIZED] != 1
+        || bytes[OFFSET_CORE..OFFSET_CORE + 32] != core.to_bytes()
+        || bytes[OFFSET_AUTHENTICATED] != 1
+        || bytes[OFFSET_REVISION] != 1
+        || u32::from_le_bytes(bytes[OFFSET_FEED_ID..OFFSET_FEED_ID + 4].try_into().unwrap()) != feed_id
+        || bytes[OFFSET_CHANNEL] != channel
+        || i32::from_le_bytes(bytes[OFFSET_EXPONENT..OFFSET_EXPONENT + 4].try_into().unwrap()) != exponent
+        || u64::from_le_bytes(bytes[OFFSET_SEQUENCE..OFFSET_SEQUENCE + 8].try_into().unwrap()) == 0
+    {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    let price = i64::from_le_bytes(bytes[OFFSET_PRICE..OFFSET_PRICE + 8].try_into().unwrap());
+    if price <= 0 {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    Ok(price)
+}
+
 pub fn initialize(
     bytes: &mut [u8],
     core: &Address,

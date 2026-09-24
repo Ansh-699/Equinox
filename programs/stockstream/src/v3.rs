@@ -4485,6 +4485,45 @@ pub fn withdraw_collateral_v3(
 /// seat's monotonic "requested" counter (`reserved[8..16]`), lowers the vault
 /// liability, and schedules a commit of the seat shard so L1 can pay it out
 /// (`inbox::claim_withdrawal_v3`).
+/// How far a stale price is pushed against an open position before a withdrawal
+/// is checked against it (covers a weekend or outage gap).
+pub const V3_STALE_WITHDRAWAL_STRESS_BPS: i64 = 2_500;
+
+/// The mark a withdrawal is checked at. Withdrawals never wait for a live price:
+/// - live Pyth price (fresh, session open): that price;
+/// - no position: 1 (a flat seat's equity does not depend on the price);
+/// - position, no live price (weekend, holiday, outage): the market's last
+///   authenticated price moved `V3_STALE_WITHDRAWAL_STRESS_BPS` against the position.
+pub fn withdrawal_mark_price(program_id: &Address, accounts: &[AccountView], base_position: i128) -> Result<i64, ProgramError> {
+    if fresh_v3_execution_time_with_snapshot(program_id, accounts, Some(9)).is_ok() {
+        return oracle_price_after_freshness(accounts, Some(9));
+    }
+    if base_position == 0 {
+        return Ok(1);
+    }
+    let snapshot = accounts.get(9).ok_or(ProgramError::NotEnoughAccountKeys)?;
+    if snapshot.is_writable() || !snapshot.owned_by(program_id) {
+        return Err(StockStreamError::OracleUnavailable.into());
+    }
+    let core = unsafe { accounts[0].borrow_unchecked() };
+    let price = crate::oracle_snapshot::last_verified_price(
+        unsafe { snapshot.borrow_unchecked() },
+        accounts[0].address(),
+        u32::from_le_bytes(core[V3_CORE_ORACLE_FEED_ID_OFFSET..V3_CORE_ORACLE_FEED_ID_OFFSET + 4].try_into().map_err(|_| bundle_error())?),
+        core[V3_CORE_ORACLE_CHANNEL_OFFSET],
+        i32::from_le_bytes(core[V3_CORE_ORACLE_EXPONENT_OFFSET..V3_CORE_ORACLE_EXPONENT_OFFSET + 4].try_into().map_err(|_| bundle_error())?),
+    )
+    .map_err(|_| ProgramError::from(StockStreamError::OracleUnavailable))?;
+    let stressed = if base_position > 0 {
+        price.checked_mul(10_000 - V3_STALE_WITHDRAWAL_STRESS_BPS)
+    } else {
+        price.checked_mul(10_000 + V3_STALE_WITHDRAWAL_STRESS_BPS)
+    }
+    .ok_or(StockStreamError::ArithmeticOverflow)?
+        / 10_000;
+    Ok(stressed.max(1))
+}
+
 pub fn request_withdrawal_v3(
     program_id: &Address,
     accounts: &mut [AccountView],
@@ -4517,8 +4556,7 @@ pub fn request_withdrawal_v3(
     if seat.occupancy != 1 || seat.trader != trader.address().to_bytes() || seat.open_order_count != 0 {
         return Err(StockStreamError::RiskViolation.into());
     }
-    fresh_v3_execution_time_with_snapshot(program_id, accounts, Some(9))?;
-    let mark_price = oracle_price_after_freshness(accounts, Some(9))?;
+    let mark_price = withdrawal_mark_price(program_id, accounts, seat.base_position)?;
     let risk_config = read_v3_risk_config(&core_bytes)?;
     let mut seat = crate::risk::prepare_withdrawal(
         &seat,

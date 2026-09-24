@@ -81,7 +81,9 @@ export function useWithdraw(protocol: StockStreamProtocol | null, report?: (mess
         const request = [ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 }),
           // The core pays the shard commit through the fee vault: trader-paid commits stop at 10 per delegation.
           requestWithdrawalV3({ core: w.core, seatShard, eventShards: w.eventShards, trader: w.authority, oracleSnapshot: w.oracleSnapshot, feeVault: deriveMagicFeeVault(deployment.magicBlock.validator) }, accounts.seatIndex, amount)];
-        await protocol.service.executeEr(toPreview("RequestWithdrawalV3", request), request, [w.core, seatShard, ...w.eventShards].map(String));
+        // Withdrawals never wait for a live price: with none (weekend, outage) the
+        // program uses the last verified one, stressed against any open position.
+        await protocol.service.executeEr(toPreview("RequestWithdrawalV3", request), request, [w.core, seatShard, ...w.eventShards].map(String), { oracle: "best-effort" });
         // The commit usually lands on Solana in < 1 s; wait up to 45 s before signing the payout.
         setNotice("Step 2/2 · Waiting for the rollup commit on Solana…");
         const deadline = Date.now() + 45_000;
