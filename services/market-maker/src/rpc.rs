@@ -88,14 +88,14 @@ impl Rpc {
         result.as_str().map(str::to_string).ok_or_else(|| anyhow!("sendTransaction: no signature"))
     }
 
-    /// Polls until the rollup reports `signature` processed: Some(ok) or None on timeout.
-    pub async fn poll_processed(&self, signature: &str, limit: Duration) -> Option<bool> {
+    /// Polls until the rollup reports `signature` processed: Some((ok, slot)) or None on timeout.
+    pub async fn poll_processed(&self, signature: &str, limit: Duration) -> Option<(bool, u64)> {
         let deadline = Instant::now() + limit;
         while Instant::now() < deadline {
             if let Ok(result) = self.call("getSignatureStatuses", json!([[signature]])).await {
                 let status = &result["value"][0];
                 if !status.is_null() {
-                    return Some(status["err"].is_null());
+                    return Some((status["err"].is_null(), status["slot"].as_u64().unwrap_or(0)));
                 }
             }
             tokio::time::sleep(Duration::from_millis(2)).await;
@@ -111,7 +111,8 @@ impl Rpc {
     }
 }
 
-type Waiters = Arc<Mutex<HashMap<u64, oneshot::Sender<(Instant, bool)>>>>;
+/// (arrival, succeeded, slot)
+type Waiters = Arc<Mutex<HashMap<u64, oneshot::Sender<(Instant, bool, u64)>>>>;
 type Acks = Arc<Mutex<HashMap<u64, oneshot::Sender<u64>>>>;
 type Sink = futures_util::stream::SplitSink<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, Message>;
 
@@ -148,8 +149,9 @@ impl SignatureSocket {
                 } else if body["method"] == "signatureNotification" {
                     let subscription = body["params"]["subscription"].as_u64().unwrap_or(u64::MAX);
                     let ok = body["params"]["result"]["value"]["err"].is_null();
+                    let slot = body["params"]["result"]["context"]["slot"].as_u64().unwrap_or(0);
                     if let Some(waiter) = waiters.lock().await.remove(&subscription) {
-                        let _ = waiter.send((arrived, ok));
+                        let _ = waiter.send((arrived, ok, slot));
                     }
                 }
             }
@@ -181,11 +183,11 @@ impl SignatureSocket {
 pub struct Watch<'a> {
     socket: &'a SignatureSocket,
     subscription: u64,
-    rx: oneshot::Receiver<(Instant, bool)>,
+    rx: oneshot::Receiver<(Instant, bool, u64)>,
 }
 
 impl Watch<'_> {
-    pub async fn processed(self, limit: Duration) -> Option<(Instant, bool)> {
+    pub async fn processed(self, limit: Duration) -> Option<(Instant, bool, u64)> {
         match tokio::time::timeout(limit, self.rx).await {
             Ok(Ok(result)) => Some(result),
             _ => {

@@ -193,8 +193,8 @@ impl Keeper {
         let watch = socket.watch(&signature).await?;
         self.rpc.send_transaction(&wire).await?;
         match watch.processed(Duration::from_secs(10)).await {
-            Some((_, true)) => Ok(signature),
-            Some((_, false)) => Err(anyhow!("{signature} failed: {}", self.simulate(instructions).await.err().map_or_else(String::new, |e| format!("{e:#}")))),
+            Some((_, true, _)) => Ok(signature),
+            Some((_, false, _)) => Err(anyhow!("{signature} failed: {}", self.simulate(instructions).await.err().map_or_else(String::new, |e| format!("{e:#}")))),
             None => Err(anyhow!("{signature} was not confirmed within 10 s")),
         }
     }

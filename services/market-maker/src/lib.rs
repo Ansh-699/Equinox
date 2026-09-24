@@ -3,6 +3,7 @@
 //! next to the rollup validator (devnet-as is in Singapore).
 
 pub mod candles;
+pub mod feed;
 pub mod keeper;
 pub mod maker;
 pub mod quotes;
