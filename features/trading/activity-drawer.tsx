@@ -33,7 +33,7 @@ export function positionView(seat: TraderSeatView, markPrice: number | null) {
 function PositionsTable({ seat, error, symbol, markPrice, signedIn }: { seat: TraderSeatView | null; error: string | null; symbol: string; markPrice: number | null; signedIn: boolean }) {
   if (!signedIn) return <Empty>Connect a wallet to see your position.</Empty>;
   if (error) return <Empty>{error}</Empty>;
-  if (!seat) return <Empty>No seat in this market yet. Create one and deposit in the Wallet panel to trade.</Empty>;
+  if (!seat) return <Empty>No margin account in this market yet. Press Start trading to open one and deposit.</Empty>;
   const view = positionView(seat, markPrice);
   if (!view) return <Empty>No open position. Available collateral: ${(Number(seat.availableCollateral) / 1e6).toFixed(2)}.</Empty>;
   return (
@@ -61,7 +61,7 @@ function PositionsTable({ seat, error, symbol, markPrice, signedIn }: { seat: Tr
 function TradeHistory({ trades, seatIndex }: { trades: Trade[]; seatIndex: number | null }) {
   const mine = seatIndex === null ? [] : trades.filter((t) => t.makerSeat === seatIndex || t.takerSeat === seatIndex);
   if (seatIndex === null) return <Empty>Sign in to see your fills.</Empty>;
-  if (mine.length === 0) return <Empty>No fills for your seat yet.</Empty>;
+  if (mine.length === 0) return <Empty>No fills yet.</Empty>;
   return (
     <table className="w-full border-collapse">
       <thead className="sticky top-0 bg-[var(--t-bg)]"><tr>

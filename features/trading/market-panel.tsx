@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
-import { V3_MARKETS } from "@/lib/v3-markets";
+import { marketPair, V3_MARKETS } from "@/lib/v3-markets";
+import { MarketIcon } from "@/components/ui/market-icon";
 import { PriceChart } from "./price-chart";
 import type { BookLevel } from "./use-v3-book";
 import { RESOLUTIONS, useCandles } from "./use-candles";
@@ -42,14 +43,17 @@ function MarketPicker({ symbol, onChange }: { symbol: string; onChange: (symbol:
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={`Market: ${symbol}. Change market`}
+        aria-label={`Market: ${marketPair(symbol)} perpetual. Change market`}
         onClick={() => setOpen((v) => !v)}
         className="flex h-9 items-center gap-2 rounded-[6px] px-2 transition-colors hover:bg-[var(--t-surface-3)]"
       >
-        <span className="grid h-6 w-6 place-items-center rounded-full bg-[var(--t-surface-3)] text-[10px] font-bold text-[var(--t-text)]">{symbol.slice(0, 1)}</span>
+        <MarketIcon symbol={symbol} size={28} />
         <span className="flex flex-col items-start leading-none">
-          <span className="text-[16px] font-semibold tracking-tight text-[var(--t-text)]">{symbol}</span>
-          <span className="mt-0.5 text-[11px] text-[var(--t-text-3)]">{current?.name ?? ""} {current?.kind === "pre-ipo" ? "pre-IPO perpetual" : "perpetual"}</span>
+          <span className="flex items-center gap-1.5 text-[16px] font-semibold tracking-tight text-[var(--t-text)]">
+            {marketPair(symbol)}
+            <span className="rounded bg-[var(--t-surface-3)] px-1 py-px text-[9.5px] font-semibold tracking-normal text-[var(--t-text-2)]">PERP</span>
+          </span>
+          <span className="mt-0.5 text-[11px] text-[var(--t-text-3)]">{current?.name ?? ""} {current?.kind === "pre-ipo" ? "pre-IPO perpetual" : "perpetual"} · settles in USDC</span>
         </span>
         <ChevronDown className={`h-4 w-4 text-[var(--t-text-2)] transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={1.75} />
       </button>
@@ -62,9 +66,9 @@ function MarketPicker({ symbol, onChange }: { symbol: string; onChange: (symbol:
                 onClick={() => { onChange(m.symbol); setOpen(false); }}
                 className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-[var(--t-surface-3)]"
               >
-                <span className="grid h-7 w-7 place-items-center rounded-full bg-[var(--t-surface-3)] text-[11px] font-bold">{m.symbol.slice(0, 1)}</span>
+                <MarketIcon symbol={m.symbol} size={28} />
                 <span className="flex flex-1 flex-col">
-                  <span className="text-[13px] font-semibold text-[var(--t-text)]">{m.symbol}</span>
+                  <span className="text-[13px] font-semibold text-[var(--t-text)]">{marketPair(m.symbol)} <span className="text-[10.5px] font-medium text-[var(--t-text-3)]">perp</span></span>
                   <span className="text-[11px] text-[var(--t-text-3)]">{m.name} · {m.oracle.kind === "pyth" ? "Pyth price" : "PreStocks price"} · up to 5×</span>
                 </span>
                 {m.kind === "pre-ipo"

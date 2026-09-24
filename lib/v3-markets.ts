@@ -20,3 +20,16 @@ export const v3MarketFor = (symbol: string): V3Market => V3_MARKETS.find((market
 export const isReporterPriced = (market: V3Market) => market.oracle.kind !== "pyth";
 /** The market-maker service: live transactions, and candles for reporter-priced markets. */
 export const MM_SERVICE_URL = (process.env.NEXT_PUBLIC_MM_STATUS_URL ?? "").replace(/\/v1\/mm\/status$/, "");
+
+/** Self-hosted logos (the issuers' own CDNs redirect and rate-limit). */
+const LOGOS: Record<string, string> = {
+  TSLA: "/logos/tesla.svg",
+  OPENAI: "/logos/openai.png",
+  SPACEX: "/logos/spacex.png",
+  ANTHROPIC: "/logos/anthropic.png",
+};
+/** Base asset of a perp: "ANTHROPIC-PERP" → "ANTHROPIC". */
+export const marketBase = (symbol: string) => symbol.replace(/-PERP$/, "");
+/** Every perp settles in USDC: "ANTHROPIC-PERP" → "ANTHROPIC/USDC". */
+export const marketPair = (symbol: string) => `${marketBase(symbol)}/USDC`;
+export const marketLogo = (symbol: string): string | null => LOGOS[marketBase(symbol)] ?? null;

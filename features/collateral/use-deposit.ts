@@ -25,7 +25,7 @@ export function useDeposit(protocol: EquinoxProtocol | null, report?: (message: 
       setPending(true);
       try {
         await rollupDeposit(protocol, accounts, amount, setNotice);
-        setNotice(`Deposited ${Number(amount) / 1e6} USDC — credited to your seat in the rollup.`);
+        setNotice(`Deposited ${Number(amount) / 1e6} USDC — credited to your margin account in the rollup.`);
       } catch (error) {
         setNotice(`Deposit not completed: ${error instanceof Error ? error.message : String(error)}. Tokens already in the vault stay on your receipt and are credited on the next deposit.`);
       } finally {

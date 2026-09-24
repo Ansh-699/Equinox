@@ -8,7 +8,7 @@ try {
   await connect();
   await page.getByRole("button", { name: "Start trading", exact: true }).click();
   await waitNotice(/Deposited 100 USDC/);
-  step(`seat: ${await page.getByRole("button", { name: /Seat #\d+ active/ }).innerText()}`);
+  step(`seat: ${await page.getByRole("button", { name: /Delegated session live/ }).innerText()}`);
   await page.waitForFunction(() => /Available\s*\$[1-9]/.test(document.querySelector("section.lifecycle-panel")?.textContent ?? ""), null, { timeout: 30_000 });
 
   await page.getByRole("button", { name: "Market", exact: true }).click();

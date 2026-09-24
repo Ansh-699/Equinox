@@ -550,7 +550,7 @@ Pyth update, Privy credentials, and a compatible DLP restore path.
 - Trading key (`lib/trading-key.ts`): one wallet signature derives the in-app key (sha256 of a domain-bound signed message); it signs seat, deposits, orders, cancels and withdrawals silently, and withdrawals forward to the wallet. "Start trading" = faucet → rollup seat → 100 USDC deposit. The market-authority-only V3 session panel is hidden when live wallet trading is configured.
 - Market maker: first a `MarketMaker` DO in `apac-se` (SIN, ~4 ms from devnet-as; p50 ≈ 11 ms send → processed push). Superseded the same day: see below.
 - Browser: rollup transactions go straight to devnet-as (validator MAS1…) with websocket confirmation; the terminal's live-transactions panel shows the bot's and your own times (from India ≈ 80 ms, nearly all network).
-- Live checks against production: `npx tsx scripts/e2e/onboarding.mts` and `npx tsx scripts/e2e/wallet-seat.mts` (fresh keypair injected as a Wallet Standard wallet).
+- Live checks against production: `npx tsx scripts/e2e/onboarding.mts` (fresh keypair injected as a Wallet Standard wallet).
 
 ## Market maker moved to a VM service — 2026-09-24 (later)
 

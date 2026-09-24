@@ -68,7 +68,7 @@ const loadSdk = () => import("@meteora-ag/dynamic-bonding-curve-sdk");
 
 /** The pool fields we read. The SDK's generated type nests them under
  * `poolState` while the decoded account is flat; accept either. */
-interface PoolFields { config: PublicKey; creator: PublicKey; baseMint: PublicKey; sqrtPrice: BN; quoteReserve: BN; isMigrated: number | boolean }
+interface PoolFields { config: PublicKey; creator: PublicKey; baseMint: PublicKey; sqrtPrice: BN; quoteReserve: BN; isMigrated: number | boolean; metrics?: { totalTradingQuoteFee: BN; totalProtocolQuoteFee: BN } }
 async function fetchPool(connection: Connection, pool: PublicKey | string) {
   const sdk = await loadSdk();
   const client = new sdk.DynamicBondingCurveClient(connection, "confirmed");
@@ -144,6 +144,8 @@ export interface PoolView {
   graduated: boolean;
   /** The DAMM v2 pool the liquidity moved to (graduated pools only). */
   dammPool: string | null;
+  /** Trading fees paid on the curve so far (fees are collected in USDC). */
+  feesUsd: number;
 }
 
 export async function readPool(connection: Connection, pool: PublicKey | string): Promise<PoolView> {
@@ -159,6 +161,7 @@ export async function readPool(connection: Connection, pool: PublicKey | string)
     progress: thresholdUsd > 0 ? Math.min(1, raised / thresholdUsd) : 0,
     graduated: Boolean(state.isMigrated),
     dammPool: state.isMigrated && dammConfig ? sdk.deriveDammV2PoolAddress(dammConfig, state.baseMint, QUOTE_MINT).toBase58() : null,
+    feesUsd: state.metrics ? (Number(state.metrics.totalTradingQuoteFee.toString()) + Number(state.metrics.totalProtocolQuoteFee.toString())) / 10 ** QUOTE_DECIMALS : 0,
   };
 }
 

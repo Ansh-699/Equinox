@@ -39,6 +39,26 @@ const INPUT = `tnum h-[34px] w-full rounded-[4px] border border-[var(--t-border-
 const SUFFIX = "pointer-events-none absolute right-[10px] top-1/2 -translate-y-1/2 text-[12px] text-[var(--t-text-3)]";
 const LABEL = "text-[13px] text-[var(--t-text-2)]";
 const ROW = "flex h-[22px] items-center justify-between border-b border-[var(--t-surface-2)] last:border-b-0";
+/** Stops orders the program would refuse, or that are almost certainly a typo,
+ * before they are signed; `warn` is shown but still lets the order through. */
+export function orderGuard(input: { kind: Ticket["kind"]; side: Ticket["side"]; reduceOnly: boolean; price: string; marginUsd: number; markPrice: number | null; availableUsd: number | null; position: bigint | null }): { block: string | null; warn: string | null } {
+  const { kind, side, reduceOnly, price, marginUsd, markPrice, availableUsd, position } = input;
+  const long = side === "long";
+  if (reduceOnly) {
+    if (!position) return { block: "Reduce-only needs an open position", warn: null };
+    if (long ? position > 0n : position < 0n) return { block: `Reduce-only ${long ? "buy" : "sell"} needs a ${long ? "short" : "long"} position`, warn: null };
+  } else if (availableUsd !== null && marginUsd > availableUsd + 1e-6) {
+    return { block: `Needs $${marginUsd.toFixed(2)} margin — deposit more`, warn: null };
+  }
+  if (kind === "limit" && markPrice) {
+    // How far through the market the limit reaches (positive = crosses the book).
+    const through = ((Number(price) - markPrice) / markPrice) * (long ? 1 : -1);
+    if (through > 0.1) return { block: `Limit is ${(through * 100).toFixed(0)}% ${long ? "above" : "below"} the market — use Market or a closer price`, warn: null };
+    if (through > 0.02) return { block: null, warn: `Crosses the book up to ${(through * 100).toFixed(1)}% ${long ? "above" : "below"} the market` };
+  }
+  return { block: null, warn: null };
+}
+
 /** Max slippage presets, in basis points (0.1% … 1%). */
 const SLIPPAGE_BPS = [10, 25, 50, 100] as const;
 const CHIP = `tnum h-[26px] rounded-[4px] border border-[var(--t-border-strong)] bg-[var(--t-surface)] text-[12px] text-[var(--t-text-2)] hover:text-[var(--t-text)] ${FOCUS}`;
@@ -54,6 +74,7 @@ export function OrderTicket({
   availableUsd,
   ctaLabel,
   blocker,
+  warning = null,
   pending,
   footnote,
   onSubmit,
@@ -68,6 +89,7 @@ export function OrderTicket({
   availableUsd: number | null;
   ctaLabel: string;
   blocker: string | null;
+  warning?: string | null;
   pending: boolean;
   footnote: string;
   onSubmit: () => void;
@@ -205,6 +227,7 @@ export function OrderTicket({
         {sized && sized.shares === 0 && <p className="text-[11.5px] text-[var(--t-warn)]">Too small for one share — raise the amount or the multiplier.</p>}
         {insufficient && <p className="text-[11.5px] text-[var(--t-down)]">Needs ${sized!.margin.toFixed(2)} initial margin; you have ${availableUsd!.toFixed(2)}. Deposit more in the Account panel below.</p>}
 
+        {warning && !blocker ? <p className="text-[11.5px] text-[var(--t-warn)]">{warning}</p> : null}
         <button
           type="button"
           onClick={onSubmit}

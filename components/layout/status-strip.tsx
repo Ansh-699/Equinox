@@ -57,8 +57,8 @@ export function ExecutionStatusBanner({
         <Row label="Pyth oracle" level={oracleSafety === "fresh" ? "ok" : oracleSafety === "unknown" ? "warn" : "down"} detail={ORACLE_SAFETY_LABEL[oracleSafety]} />
         <Row label="Order routing" level={display?.orderRoutingDomain ? "ok" : "warn"} detail={display?.orderRoutingDomain === "er" ? "Ephemeral Rollup" : display?.orderRoutingDomain === "l1" ? "Solana L1" : "refused"} />
         {display?.marketDelegated ? (
-          <Row label="V3 bundle" level="ok" detail="27 accounts in the rollup" />
-        ) : v3 ? <Row label="V3 bundle" level={v3.state === "available" ? (v3.completeExecutionState ? "ok" : "warn") : "down"} detail={v3.state === "available" ? `${v3.bookPageCount} pages · ${v3.seatShardCount} seats · ${v3.eventShardCount} events` : v3.state.replace("_", " ")} /> : null}
+          <Row label="Market accounts" level="ok" detail="all 27 delegated to the rollup" />
+        ) : v3 ? <Row label="Market accounts" level={v3.state === "available" ? (v3.completeExecutionState ? "ok" : "warn") : "down"} detail={v3.state === "available" ? `${v3.bookPageCount} book pages · ${v3.seatShardCount} account shards · ${v3.eventShardCount} event logs` : v3.state.replace("_", " ")} /> : null}
         <Row label="L1 commit" level={commit || display ? "ok" : "warn"} detail={commit ? `sequence ${commit}` : display ? `sequence ${display.lastCommittedL1Sequence}` : "unavailable"} />
       </div>
     </section>
@@ -74,8 +74,8 @@ export function ProtocolStatusStrip({ authenticated, v3, delegated = null, oracl
         <span className={oracleOnline ? "text-[var(--t-up)]" : "text-[var(--t-text-2)]"}>{oracleOnline ? (priceSource === "pyth" ? "Pyth price verified" : "Reporter price on-chain") : "Waiting for a verified price"}</span>
       </span>
       <span className="hidden sm:inline">Devnet · worthless test tokens</span>
-      <span className="hidden md:inline">Session: <span className="text-[var(--t-text-2)]">{authenticated ? "authenticated" : "not authenticated"}</span></span>
-      <span className="hidden lg:inline">V3 delegation: <span className="text-[var(--t-text-2)]">{delegated ? "delegated to MagicBlock" : v3.delegationStatus === null ? "unknown" : ["not delegated", "delegated", "undelegating", "restored"][v3.delegationStatus] ?? String(v3.delegationStatus)}</span></span>
+      <span className="hidden md:inline">Wallet: <span className="text-[var(--t-text-2)]">{authenticated ? "signed in" : "signed out"}</span></span>
+      <span className="hidden lg:inline">Rollup session: <span className="text-[var(--t-text-2)]">{delegated ? "live on MagicBlock" : v3.delegationStatus === null ? "checking…" : ["on Solana L1", "live on MagicBlock", "closing", "back on Solana L1"][v3.delegationStatus] ?? String(v3.delegationStatus)}</span></span>
       <div className="ml-auto flex items-center gap-4">
         <a href="https://docs.magicblock.gg/" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-[var(--t-text)]">MagicBlock</a>
         <a href="https://www.pyth.network/" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-[var(--t-text)]">Pyth</a>

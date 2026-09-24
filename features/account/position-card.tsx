@@ -33,7 +33,7 @@ export function PositionCard({ seat, unavailable = false, market = "TSLA-PERP", 
             <span className="text-[14px] font-semibold text-[var(--t-text)]">{market}</span>
             <Badge tone={side === "LONG" ? "up" : side === "SHORT" ? "down" : "muted"}>{side}</Badge>
           </div>
-          <div className="tnum text-[12px] text-[var(--t-text-2)]">{size.toString()} {base} · seat #{seat.index}</div>
+          <div className="tnum text-[12px] text-[var(--t-text-2)]">{size.toString()} {base} · account #{seat.index}</div>
         </div>
         {!compact ? <Link href={`/trade?market=${market}`} className="ml-auto text-[12.5px] font-semibold text-[var(--t-link)] hover:underline">Trade {market} →</Link> : null}
       </div>

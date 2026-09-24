@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Connection, PublicKey } from "@solana/web3.js";
-import { Check, ChevronRight, Loader2, Rocket } from "lucide-react";
+import { Check, Loader2, Plus, Rocket, X, Zap } from "lucide-react";
 import { openWalletDrawer, TopBar } from "@/components/layout/top-bar";
 import { useAppAuth } from "@/components/app-providers";
 import { useTradingKey } from "@/features/wallet/use-trading-key";
@@ -72,6 +72,14 @@ export function LaunchView() {
   const auth = useAppAuth();
   const tradingKey = useTradingKey(auth);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [quickBuy, setQuickBuy] = useState(25);
+  const [createOpen, setCreateOpen] = useState(false);
+  useEffect(() => {
+    if (!createOpen) return;
+    const close = (event: KeyboardEvent) => { if (event.key === "Escape") setCreateOpen(false); };
+    document.addEventListener("keydown", close);
+    return () => document.removeEventListener("keydown", close);
+  }, [createOpen]);
   const [preset, setPreset] = useState<LaunchPreset>(LAUNCH_PRESETS[0]);
   const [stock, setStock] = useState<(typeof STOCKS)[number]>("TSLA");
   const [name, setName] = useState("Tesla Believers");
@@ -127,51 +135,52 @@ export function LaunchView() {
   return (
     <div className="terminal min-h-screen">
       <TopBar active="launch" auth={auth} />
-      <main id="main-content" tabIndex={-1} className="mx-auto max-w-[1180px] px-4 py-6 outline-none">
-        <section className="relative overflow-hidden rounded-[12px] border border-[var(--t-border)] bg-[var(--t-surface)] px-5 py-6 sm:px-7">
-          <div aria-hidden className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-[var(--t-up-soft)] blur-3xl" />
-          <Badge tone="up"><Rocket className="h-3 w-3" /> Launchpad · devnet</Badge>
-          <h1 className="mt-3 text-[26px] font-semibold tracking-tight text-[var(--t-text)] sm:text-[30px]">Launch a stock-themed token</h1>
-          <p className="mt-2 max-w-[62ch] text-[14px] leading-relaxed text-[var(--t-text-2)]">
-            Priced in dollars (test USDC), it trades on a bonding curve until enough is raised, then graduates to a Meteora pool with locked
-            liquidity, and can be listed as an Equinox perp.
-          </p>
-          <ol className="mt-5 grid gap-2 sm:grid-cols-3">
+      <main id="main-content" tabIndex={-1} className="mx-auto max-w-[1600px] px-4 py-5 outline-none">
+        <header className="flex flex-wrap items-center gap-3">
+          <div className="mr-auto">
+            <div className="flex items-center gap-2">
+              <h1 className="text-[24px] font-semibold tracking-tight text-[var(--t-text)]">Pulse</h1>
+              <Badge tone="up"><Rocket className="h-3 w-3" /> Launchpad · devnet</Badge>
+            </div>
+            <p className="text-[12.5px] text-[var(--t-text-3)]">Stock-themed tokens on Meteora bonding curves, priced in USDC, live from the chain.</p>
+          </div>
+          <label className="flex h-9 items-center gap-1.5 rounded-full border border-[var(--t-border)] bg-[var(--t-surface)] px-3 text-[12px] text-[var(--t-text-2)]" title="Amount each ⚡ button buys">
+            <Zap className="h-3.5 w-3.5 text-[var(--t-up)]" aria-hidden /> Quick buy $
+            <input type="number" min={1} step={1} inputMode="numeric" value={quickBuy} onChange={(e) => setQuickBuy(Math.max(1, Math.floor(Number(e.target.value) || 1)))} aria-label="Quick buy amount in USDC" className="tnum w-14 bg-transparent text-[13px] font-semibold text-[var(--t-text)] outline-none" />
+          </label>
+          <button type="button" onClick={() => setCreateOpen(true)} className={`${BUTTON_PRIMARY} h-9 px-4`}><Plus className="h-4 w-4" /> Create launch</button>
+        </header>
+
+        <div className="mt-4">
+          <LaunchMonitor refreshKey={refreshKey} quickBuyUsd={quickBuy} />
+        </div>
+
+        <section aria-label="How launches connect to Equinox perps" className="mt-4 rounded-[10px] border border-[var(--t-border)] bg-[var(--t-surface)] p-4">
+          <h2 className="text-[13.5px] font-semibold text-[var(--t-text)]">From launch to perp</h2>
+          <ol className="mt-2 grid gap-2 text-[12px] sm:grid-cols-2 lg:grid-cols-4">
             {[
-              ["Pick a curve", "How fees and price behave on day one"],
-              ["Name it", "A symbol and the stock it's themed on"],
-              ["Launch & watch it graduate", "Buyers push it up the curve to graduation"],
-            ].map(([title, hint], index) => (
-              <li key={title} className="flex items-center gap-3 rounded-[10px] border border-[var(--t-border)] bg-[var(--t-bg)] px-3 py-2.5">
-                <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[var(--t-up-soft)] text-[12px] font-bold text-[var(--t-up)]">{index + 1}</span>
-                <div className="min-w-0">
-                  <div className="text-[13px] font-semibold text-[var(--t-text)]">{title}</div>
-                  <div className="truncate text-[11.5px] text-[var(--t-text-3)]">{hint}</div>
-                </div>
-                {index < 2 ? <ChevronRight className="ml-auto hidden h-4 w-4 text-[var(--t-text-3)] sm:block" /> : null}
+              ["New pair", "Create mints 1B tokens on a Meteora Dynamic Bonding Curve priced in USDC; each buy moves it up the curve."],
+              ["Final stretch", `Past ${60}% of the USDC it needs, a launch moves here; at 100% anyone can graduate it.`],
+              ["Graduated", "Graduation moves the liquidity into a Meteora DAMM v2 pool, part of it locked for good."],
+              ["Equinox perp", "Listing creates a perp priced from that DAMM v2 pool (per lot of 1,000,000 tokens): our reporter posts the pool price to Solana, and the MagicBlock rollup trades it long or short up to 5×."],
+            ].map(([title, body], index) => (
+              <li key={title} className="rounded-[8px] border border-[var(--t-border)] bg-[var(--t-bg)] p-3">
+                <span className="text-[10.5px] font-semibold text-[var(--t-text-3)]">{index + 1} · {title}</span>
+                <p className="mt-1 leading-snug text-[var(--t-text-2)]">{body}</p>
               </li>
             ))}
           </ol>
-          <details className="mt-4 text-[12.5px] text-[var(--t-text-2)]">
-            <summary className="cursor-pointer font-medium hover:text-[var(--t-text)]">How it works</summary>
-            <p className="mt-2 max-w-[75ch] leading-relaxed text-[var(--t-text-3)]">
-              Launches use Meteora&apos;s Dynamic Bonding Curve (DBC). Most bonding curves are tuned for memecoins and priced in SOL; these are
-              priced in USDC and tuned for equity-like assets: a launch fee that decays over the first hours to blunt opening-day sniping,
-              optional volatility-scaled dynamic fees, and a share of liquidity locked forever when the pool graduates to Meteora DAMM v2.
-              A graduated token can then be listed as an Equinox perp, priced from its DAMM v2 pool.
-            </p>
-          </details>
         </section>
 
-        <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_390px]">
-          <div className="min-w-0">
-            <LaunchMonitor refreshKey={refreshKey} />
-          </div>
-
-          <aside aria-label="Create a launch" className="self-start rounded-[12px] border border-[var(--t-border)] bg-[var(--t-surface)] lg:sticky lg:top-4">
+        {createOpen ? (
+          <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={() => setCreateOpen(false)}>
+          <aside aria-label="Create a launch" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} className="slim-scroll h-full w-full max-w-[420px] overflow-y-auto border-l border-[var(--t-border)] bg-[var(--t-surface)] shadow-2xl">
             <div className="flex items-center justify-between border-b border-[var(--t-border)] px-4 py-3">
               <h2 className="text-[14px] font-semibold text-[var(--t-text)]">Create a launch</h2>
-              <Badge tone="muted">~0.02 SOL rent, covered</Badge>
+              <span className="flex items-center gap-2">
+                <Badge tone="muted">~0.02 SOL rent, covered</Badge>
+                <button type="button" onClick={() => setCreateOpen(false)} aria-label="Close" className="rounded p-1 text-[var(--t-text-2)] hover:bg-[var(--t-surface-3)] hover:text-[var(--t-text)]"><X className="h-4 w-4" /></button>
+              </span>
             </div>
 
             <div className="space-y-5 p-4">
@@ -273,7 +282,8 @@ export function LaunchView() {
               </section>
             </div>
           </aside>
-        </div>
+          </div>
+        ) : null}
       </main>
     </div>
   );

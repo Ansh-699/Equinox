@@ -6,7 +6,8 @@ import Link from "next/link";
 import { TopBar } from "@/components/layout/top-bar";
 import { useAppAuth } from "@/components/app-providers";
 import { publicMarketApiUrl } from "@/lib/demo-config";
-import { V3_MARKETS } from "@/lib/v3-markets";
+import { marketPair, V3_MARKETS } from "@/lib/v3-markets";
+import { MarketIcon } from "@/components/ui/market-icon";
 import { useTradingKey } from "@/features/wallet/use-trading-key";
 import { tradingKeySigner } from "@/lib/trading-key";
 import { claimTestFunds } from "@/lib/faucet-client";
@@ -82,6 +83,19 @@ export function PreIpoView() {
         <p className="mt-1 max-w-[76ch] text-[13px] text-[var(--t-text-2)]">
           Perpetuals on PreStocks pre-IPO tokens, up to 5×, in the MagicBlock rollup. Each market&apos;s price is the PreStocks token&apos;s on-chain price, posted to Solana every few seconds by a bounded reporter (at most 0.5% + 0.1%/s per update), so shorting or leveraging a private company tracks the token PreStocks holders trade.
         </p>
+        <ol aria-label="How a pre-IPO perp is priced and traded" className="mt-4 grid gap-2 text-[12px] sm:grid-cols-2 lg:grid-cols-4">
+          {[
+            ["PreStocks token", "An SPL token per private company (OPENAI, SPACEX, ANTHROPIC) trades on Solana; PreStocks also publishes a reference mark."],
+            ["Bounded reporter", "Our service reads the token's on-chain price each second and posts it to the market's oracle account on Solana, capped at 0.5% + 0.1%/s per update."],
+            ["MagicBlock rollup", "The perp's order book, margin and liquidations run in the rollup, which reads that oracle account; orders fill in milliseconds."],
+            ["USDC settlement", "Collateral sits in the program vault on Solana. PnL settles in USDC; you never hold the PreStocks token itself."],
+          ].map(([title, body], index) => (
+            <li key={title} className="rounded-[8px] border border-[var(--t-border)] bg-[var(--t-surface)] p-3">
+              <span className="text-[10.5px] font-semibold text-[var(--t-text-3)]">{index + 1} · {title}</span>
+              <p className="mt-1 leading-snug text-[var(--t-text-2)]">{body}</p>
+            </li>
+          ))}
+        </ol>
 
         <section aria-label="Pre-IPO perpetuals" className="mt-5 grid gap-3 md:grid-cols-3">
           {PERPS.map((market) => {
@@ -91,8 +105,11 @@ export function PreIpoView() {
             return (
               <div key={market.symbol} className="rounded-[8px] border border-[var(--t-border)] bg-[var(--t-surface)] p-4">
                 <div className="flex items-center gap-2">
-                  {token?.image ? <img src={token.image} alt="" className="h-6 w-6 rounded-full" /> : null}
-                  <span className="text-[14px] font-semibold text-[var(--t-text)]">{market.symbol}</span>
+                  <MarketIcon symbol={market.symbol} size={26} />
+                  <span className="flex flex-col leading-tight">
+                    <span className="text-[14px] font-semibold text-[var(--t-text)]">{marketPair(market.symbol)} <span className="text-[10.5px] font-medium text-[var(--t-text-3)]">perp</span></span>
+                    <span className="text-[11px] text-[var(--t-text-3)]">{market.name} · tracks {token?.symbol ?? market.oracle.token} (PreStocks)</span>
+                  </span>
                   <span className="ml-auto rounded bg-[var(--t-surface-3)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--t-text)]">PRE-IPO</span>
                 </div>
                 <div className="tnum mt-3 text-[22px] font-semibold text-[var(--t-text)]">{status?.lastPrice ? usd(status.lastPrice) : "—"}</div>

@@ -18,7 +18,7 @@ export async function rollupDeposit(protocol: EquinoxProtocol, accounts: Resolve
   const inbox = depositToInboxV3({ core, trader: authority, source, vault, mint, tokenProgram }, amount);
   const result = await protocol.service.executeL1(preview("DepositToInboxV3", inbox), [inbox]);
   recordSignature("DepositToInboxV3", result.signature, "l1");
-  report("Step 2/2 · Crediting your seat in the MagicBlock rollup…");
+  report("Step 2/2 · Crediting your margin account in the MagicBlock rollup…");
   const claim = claimInboxDepositV3({ core, seatShard, eventShards, trader: authority }, accounts.seatIndex);
   const writable = [core, seatShard, ...eventShards].map(String);
   // The rollup clones the receipt from Solana; give it a moment to see the new total.

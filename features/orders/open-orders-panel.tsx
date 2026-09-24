@@ -32,7 +32,7 @@ export function OpenOrdersPanel({ state, onCancel, onReplace, onCancelAll, pendi
 
       {state.kind === "error" ? <p className="form-note negative">{state.message}</p> : null}
 
-      {state.kind === "empty" ? <p className="form-note">No open orders for this seat.</p> : null}
+      {state.kind === "empty" ? <p className="form-note">No open orders in this market.</p> : null}
 
       {state.kind === "ready" ? (
         <>

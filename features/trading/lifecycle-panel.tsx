@@ -1,7 +1,8 @@
 "use client";
 
 import { Spinner } from "@/components/ui/spinner";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { parseSetupStep, SetupProgress } from "@/components/ui/setup-progress";
 
 /** Test collateral has 6 decimals. */
 const COLLATERAL_DECIMALS = 6;
@@ -78,20 +79,15 @@ export function LifecyclePanel({
   seatIndex = null,
   seatLoading = false,
   onSeatAndScratch,
-  seatActionLabel = "Create V3 seat",
+  seatActionLabel = "Open margin account",
   onStartTrading,
   onboarding = null,
   busy = null,
-  onFaucet,
   onDeposit,
   onWithdraw,
   withdrawDisabled,
   withdrawReason,
   rollupLive = false,
-  onInitializeVault,
-  onCancelAll,
-  onCancelOrder,
-  onReplaceOrder,
 }: {
   walletAddress: string | null;
   /** "email · embedded wallet" style label for the Privy login behind the wallet. */
@@ -112,29 +108,48 @@ export function LifecyclePanel({
   onboarding?: string | null;
   /** Set while anything signs or confirms: every action greys out and this label shows. */
   busy?: string | null;
-  onFaucet?: () => void;
   onDeposit: (units: bigint) => void;
   onWithdraw: (units: bigint) => void;
   withdrawDisabled: boolean;
   withdrawReason: string | null;
   /** Set while the market trades in the rollup: seats and deposits wait for settlement on L1. */
   rollupLive?: boolean;
-  onInitializeVault: () => void;
-  onCancelAll: () => void;
-  onCancelOrder: (orderKey: bigint) => void;
-  onReplaceOrder: (orderKey: bigint) => void;
 }) {
   const [amount, setAmount] = useState("100");
-  const [orderKey, setOrderKey] = useState("");
   const units = toCollateralUnits(amount);
-  const parsedOrderKey = (() => { try { return orderKey ? BigInt(orderKey) : null; } catch { return null; } })();
   const lowSol = walletSol !== null && walletSol < 10_000_000n;
-  const status = !walletAddress ? "signed out" : seat ? "trading" : "setup";
+  const status = !walletAddress ? "signed out" : seat ? "session live" : "setup";
+  // The 3-step setup (fund → account → deposit) animates; a finished run holds its check briefly.
+  const setupStep = parseSetupStep(onboarding ?? null);
+  const [setupDone, setSetupDone] = useState(false);
+  const lastStep = useRef<number | null>(null);
+  const stepNumber = setupStep?.step ?? null;
+  useEffect(() => {
+    if (stepNumber !== null) { lastStep.current = stepNumber; return; }
+    if (lastStep.current !== 3 || !seat || seat.availableCollateral <= 0n) { lastStep.current = null; return; }
+    lastStep.current = null;
+    setSetupDone(true);
+    const timer = setTimeout(() => setSetupDone(false), 1_800);
+    return () => clearTimeout(timer);
+  }, [stepNumber, seat]);
+  // What the wallet can actually do with the typed amount: never let a click fail on-chain.
+  const FAUCET_GRANT = 1_000_000_000n; // deposits top up from the devnet faucet (1,000 USDC a day)
+  const depositBlock = seatLoading ? "Checking your margin account…"
+    : units === null || units <= 0n ? "Enter an amount above zero."
+    : walletUsdc !== null && units > walletUsdc + FAUCET_GRANT ? `More than your wallet can fund (${usd(walletUsdc)} + 1,000 test USDC a day).` : null;
+  const withdrawBlock = seatLoading ? "Checking your margin account…"
+    : units === null || units <= 0n ? null
+    : !seat ? "Nothing to withdraw yet: deposit first."
+    : units > seat.availableCollateral ? `You can withdraw up to ${usd(seat.availableCollateral)}; the rest backs open orders or positions.` : null;
 
   return (
     <section className="lifecycle-panel" aria-label="Account">
-      <PanelHead title="Wallet" badge={status} tone={status === "trading" ? "ok" : status === "setup" ? "warn" : "muted"} />
-      {busy ? (
+      <PanelHead title="Wallet" badge={status} tone={status === "session live" ? "ok" : status === "setup" ? "warn" : "muted"} />
+      {setupStep || setupDone ? (
+        <div className="border-b border-[var(--t-border)] bg-[var(--t-surface)]">
+          <SetupProgress step={setupStep?.step ?? 3} label={setupStep?.label ?? ""} done={!setupStep && setupDone} />
+        </div>
+      ) : busy ? (
         <div role="status" className="flex items-center gap-2 border-b border-[var(--t-border)] bg-[var(--t-surface)] px-3 py-2 text-[11.5px] text-[var(--t-text)]">
           <Spinner className="h-3.5 w-3.5 text-[var(--t-up)]" /> {busy}
         </div>
@@ -152,14 +167,13 @@ export function LifecyclePanel({
               <Stat label="USDC" value={usd(walletUsdc)} hint="In your wallet" />
               <Stat label="SOL" value={walletSol === null ? "—" : (Number(walletSol) / 1e9).toFixed(4)} hint="For network fees" tone={lowSol ? "warn" : undefined} />
             </div>
-            {onFaucet ? <button type="button" className={`w-full ${SECONDARY_BTN}`} onClick={onFaucet}>Get test USDC</button> : null}
-            {lowSol ? <p className={`${HINT} text-[var(--t-warn)]`}>This wallet needs a little devnet SOL for fees — “Get test USDC” tops up SOL too.</p> : null}
+            {lowSol ? <p className={`${HINT} text-[var(--t-warn)]`}>This wallet needs a little devnet SOL for fees; Start trading or a deposit tops it up.</p> : null}
 
             {seat ? (
               <div className="space-y-2 pt-0.5">
                 <div className="flex items-center gap-2">
                   <div className="h-px flex-1 bg-[var(--t-border)]" />
-                  <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--t-text-3)]">In the market</span>
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--t-text-3)]">Margin account</span>
                   <div className="h-px flex-1 bg-[var(--t-border)]" />
                 </div>
                 <div className="grid grid-cols-3 gap-2">
@@ -174,11 +188,11 @@ export function LifecyclePanel({
 
         {walletAddress && seatLoading && !seat && !onboarding ? (
           <button type="button" disabled aria-disabled className={`${primaryBtn()} cursor-default opacity-60`}>
-            <span className="inline-flex items-center gap-2"><Spinner /> Checking your seat…</span>
+            <span className="inline-flex items-center gap-2"><Spinner /> Checking your margin account…</span>
           </button>
         ) : walletAddress && seat ? (
           <button type="button" disabled aria-disabled className={`${primaryBtn()} cursor-default opacity-60`}>
-            Seat #{seatIndex ?? "—"} active
+            Delegated session live · account #{seatIndex ?? "—"}
           </button>
         ) : walletAddress && onStartTrading ? (
           <button type="button" className={primaryBtn()} onClick={onStartTrading} disabled={!!onboarding}>
@@ -189,8 +203,8 @@ export function LifecyclePanel({
         ) : null}
         <p className={HINT}>
           {rollupLive
-            ? "Trading runs in the MagicBlock rollup. Your in-app trading account signs every seat, deposit, order and withdrawal — no wallet popups. Collateral settles through the vault on Solana."
-            : "A seat holds your collateral and position in this market. Seats and deposits happen on Solana L1; trading happens once the market is delegated to MagicBlock."}
+            ? "Your session is delegated to the MagicBlock rollup: your in-app trading account signs deposits, orders and withdrawals with no wallet popups, and USDC stays in the vault on Solana."
+            : "Your margin account holds this market's collateral and position. It opens on Solana; trading starts once the market is delegated to the MagicBlock rollup."}
         </p>
 
         <div className="flex flex-col gap-1.5">
@@ -200,30 +214,14 @@ export function LifecyclePanel({
             <span className="pointer-events-none absolute right-[10px] top-1/2 -translate-y-1/2 text-[11px] text-[var(--t-text-3)]">USDC</span>
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <button type="button" className={SECONDARY_BTN} disabled={units === null} onClick={() => units !== null && onDeposit(units)}>Deposit</button>
-            <button type="button" className={SECONDARY_BTN} onClick={() => units !== null && onWithdraw(units)} disabled={withdrawDisabled || units === null} title={withdrawDisabled ? "Withdrawals disabled by market lifecycle state" : undefined}>Withdraw</button>
+            <button type="button" className={SECONDARY_BTN} disabled={!!depositBlock} onClick={() => units !== null && !depositBlock && onDeposit(units)}>Deposit</button>
+            <button type="button" className={SECONDARY_BTN} onClick={() => units !== null && !withdrawBlock && onWithdraw(units)} disabled={withdrawDisabled || units === null || !!withdrawBlock} title={withdrawDisabled ? "Withdrawals are paused for this market right now" : undefined}>Withdraw</button>
           </div>
-          {withdrawReason ? <p className={HINT}>Withdrawals disabled: {withdrawReason}</p> : null}
+          {depositBlock && units !== null ? <p className={`${HINT} text-[var(--t-warn)]`}>{depositBlock}</p> : null}
+          {withdrawBlock && !seatLoading ? <p className={`${HINT} text-[var(--t-warn)]`}>{withdrawBlock}</p> : null}
+          {withdrawReason ? <p className={HINT}>Withdrawals paused: {withdrawReason}</p> : null}
         </div>
 
-        <details className="group rounded-[4px] border border-[var(--t-border)] bg-[var(--t-surface)] px-2.5 py-2 text-[12px]">
-          <summary className="cursor-pointer text-[var(--t-text-2)] hover:text-[var(--t-text)]">Advanced order tools</summary>
-          <div className="mt-2 space-y-2">
-            <div className="grid grid-cols-2 gap-2">
-              <button type="button" className={SECONDARY_BTN} onClick={onSeatAndScratch} disabled={!!seat}>{seat ? `Seat #${seatIndex ?? "—"}` : "Create seat only"}</button>
-              <button type="button" className={SECONDARY_BTN} onClick={onInitializeVault}>Construct vault</button>
-              <button type="button" className={SECONDARY_BTN} onClick={onCancelAll}>Cancel all (session)</button>
-            </div>
-            <label className="flex flex-col gap-1 text-[11.5px] text-[var(--t-text-2)]">Order key (u128, from a fill/order event)
-              <input value={orderKey} onChange={(event) => setOrderKey(event.target.value)} inputMode="numeric" placeholder="0" className={`tnum h-[30px] rounded-[4px] border border-[var(--t-border-strong)] bg-[var(--t-bg)] px-2 text-[12px] text-[var(--t-text)] ${FOCUS}`} />
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              <button type="button" className={SECONDARY_BTN} disabled={parsedOrderKey === null} onClick={() => parsedOrderKey !== null && onCancelOrder(parsedOrderKey)}>Cancel order</button>
-              <button type="button" className={SECONDARY_BTN} disabled={parsedOrderKey === null} onClick={() => parsedOrderKey !== null && onReplaceOrder(parsedOrderKey)}>Replace with ticket</button>
-            </div>
-            <p className={HINT}>Replace uses the current ticket&apos;s side, size, price and type.</p>
-          </div>
-        </details>
       </fieldset>
     </section>
   );
