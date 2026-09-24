@@ -75,7 +75,9 @@ export function ErTxPanel({ marketApiUrl, market }: { marketApiUrl: string | und
     const times = list.flatMap((row) => { const value = row.ok ? pick(row) : null; return value === null ? [] : [value]; }).sort((a, b) => a - b);
     return times.length ? times[Math.floor(times.length / 2)] : null;
   };
-  const total = (row: ErTxSample) => row.ms;
+  // On chain = in a produced rollup block (bot rows); a user's own rows are their measured round trip.
+  const onChain = (row: ErTxSample) => row.blockMs ?? row.ms;
+  const total = onChain;
   const trip = median(bots, total), myTrip = median(mine, total);
   const scale = 100;
 
@@ -89,11 +91,11 @@ export function ErTxPanel({ marketApiUrl, market }: { marketApiUrl: string | und
         <span className="whitespace-nowrap text-[12px] font-medium text-[var(--t-text)]">MagicBlock ER · live</span>
         <span className="tnum ml-auto whitespace-nowrap text-[11px] text-[var(--t-text-3)]" title="Send → the MagicBlock rollup has executed it (not Solana L1 settlement), measured by whoever sent it">{myTrip !== null
           ? <>You p50 <span className="font-medium text-[var(--t-up)]">{myTrip} ms</span></>
-          : <>From you ≈ <span className="font-medium text-[var(--t-up)]">{viewerRtt === null ? "—" : `${viewerRtt + (trip ?? 3)} ms`}</span></>}
-          <span className="ml-2">rollup {trip ?? "—"} ms</span></span>
+          : <>Your order ≈ <span className="font-medium text-[var(--t-up)]">{viewerRtt === null ? "—" : `${viewerRtt + (trip ?? 15)} ms`}</span></>}
+          <span className="ml-2">in a block {trip ?? "—"} ms</span></span>
       </div>
       <div className="tnum flex flex-wrap gap-x-3 border-b border-[var(--t-surface-2)] px-3 py-1 text-[10.5px] text-[var(--t-text-3)]">
-        <span>Rows: bot orders live from Singapore, 2 ms from MagicBlock&apos;s rollup: send → executed by the sequencer. &ldquo;From you&rdquo; = your measured round trip to the rollup + that execution: what your own order takes. Solana L1 settlement follows at each commit (every 30 min).</span>
+        <span>Each row: send → included in a produced MagicBlock rollup block (10 ms blocks), for the market-maker bot in Singapore, 2 ms from the rollup. &ldquo;Your order&rdquo; adds your live measured round trip to the rollup: the end-to-end time your own order takes. Solana L1 settlement follows at each commit (every 30 min).</span>
       </div>
       <div className="slim-scroll h-[212px] overflow-auto">
         {rows.length === 0 ? (
@@ -115,10 +117,10 @@ export function ErTxPanel({ marketApiUrl, market }: { marketApiUrl: string | und
                 </span>
                 <span className="flex items-center gap-1.5">
                   <span className="hidden h-[3px] w-10 overflow-hidden rounded bg-[var(--t-surface-3)] sm:block">
-                    <span className="block h-full rounded bg-[var(--t-up)]" style={{ width: `${Math.min(100, ((row.ms ?? 0) / scale) * 100)}%` }} />
+                    <span className="block h-full rounded bg-[var(--t-up)]" style={{ width: `${Math.min(100, ((onChain(row) ?? 0) / scale) * 100)}%` }} />
                   </span>
                   <span className={`w-[60px] text-right ${row.ok ? "text-[var(--t-text)]" : "text-[var(--t-down)]"}`} title="send → finalized in the rollup, as seen by the sender">
-                    {row.ok && row.ms !== null ? `${row.ms} ms` : "failed"}
+                    {row.ok && onChain(row) !== null ? `${onChain(row)} ms` : "failed"}
                   </span>
                 </span>
               </li>
