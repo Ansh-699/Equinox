@@ -1,20 +1,10 @@
 import { address } from '@solana/kit';
 import { SolanaL1Transport, MagicBlockErTransport } from './chain-transports';
 import { deriveBookPageV3, deriveEventShardV3, deriveSeatShardV3, V3_BOOK_PAGES_PER_SIDE } from './v3-pdas';
-import { fetchAuthoritativeV3Market, type V3MarketAggregate } from './v3-market-state';
+import { fetchAuthoritativeV3Market, v3JsonValue, type V3MarketAggregate } from './v3-market-state';
 
 function json(data: unknown, status = 200): Response {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
-}
-
-function v3JsonValue(value: unknown): unknown {
-  if (typeof value === 'bigint') return value.toString();
-  if (value instanceof Uint8Array) return Array.from(value);
-  if (Array.isArray(value)) return value.map(v3JsonValue);
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, v3JsonValue(entry)]));
-  }
-  return value;
 }
 
 /** Fetches a complete V3 execution bundle from one authoritative domain.

@@ -124,6 +124,84 @@ pub const V3_RISK_CONFIG_VERSION: u8 = 2;
 pub const V3_MAX_ORACLE_AGE_SECONDS: u64 = 10;
 pub const V3_CORE_ORACLE_SESSION_OFFSET: usize = 1686;
 pub const V3_CORE_ORACLE_CONFIDENCE_OFFSET: usize = 1687;
+/// Optional keeper key (all zeroes = none). It may sign funding, liquidation
+/// and commit-only snapshots; everything else stays market-authority-only.
+pub const V3_CORE_KEEPER_OFFSET: usize = 1728;
+
+/// True when `signer` is the market authority or the configured keeper.
+pub fn is_v3_operator(core: &[u8], signer: &[u8; 32]) -> bool {
+    if core.len() < V3_CORE_KEEPER_OFFSET + 32 {
+        return false;
+    }
+    let keeper = &core[V3_CORE_KEEPER_OFFSET..V3_CORE_KEEPER_OFFSET + 32];
+    core[V3_CORE_MARKET_AUTHORITY_OFFSET..V3_CORE_MARKET_AUTHORITY_OFFSET + 32] == signer[..]
+        || (keeper != [0u8; 32] && keeper == signer)
+}
+
+/// Returns an open (unfinished) commit snapshot to idle so trading resumes.
+pub fn abort_v3_snapshot(program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
+    if accounts.len() != 2 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    if !accounts[1].is_signer() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    let signer = accounts[1].address().to_bytes();
+    let core = &mut accounts[0];
+    if !core.owned_by(program_id) || !core.is_writable() {
+        return Err(bundle_error());
+    }
+    let bytes = unsafe { core.borrow_unchecked_mut() };
+    if bytes.len() != V3_MARKET_CORE_SIZE
+        || bytes[0..8] != V3_MARKET_CORE_DISCRIMINATOR
+        || bytes[8..10] != V3_LAYOUT_VERSION.to_le_bytes()
+    {
+        return Err(bundle_error());
+    }
+    if !is_v3_operator(bytes, &signer) {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    if bytes[V3_CORE_COMMIT_PHASE_OFFSET] != V3_COMMIT_PHASE_SNAPSHOT {
+        return Err(StockStreamError::InvalidInstruction.into());
+    }
+    bytes[V3_CORE_COMMIT_PHASE_OFFSET] = V3_COMMIT_PHASE_IDLE;
+    bytes[V3_CORE_SNAPSHOT_CHILD_COUNT_OFFSET..V3_CORE_SNAPSHOT_CHILD_COUNT_OFFSET + 4].fill(0);
+    bytes[V3_CORE_CHILD_RECORDS_OFFSET..V3_CORE_CHILD_RECORDS_OFFSET + V3_CHILD_COUNT * V3_CORE_CHILD_RECORD_SIZE]
+        .fill(0);
+    Ok(())
+}
+
+/// Accounts: `[core (writable), market authority (signer)]`. Runs wherever the
+/// core currently lives (L1 or the rollup).
+pub fn set_v3_keeper(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    keeper: [u8; 32],
+) -> ProgramResult {
+    if accounts.len() != 2 {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    if !accounts[1].is_signer() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    let authority = accounts[1].address().to_bytes();
+    let core = &mut accounts[0];
+    if !core.owned_by(program_id) || !core.is_writable() {
+        return Err(bundle_error());
+    }
+    let bytes = unsafe { core.borrow_unchecked_mut() };
+    if bytes.len() != V3_MARKET_CORE_SIZE
+        || bytes[0..8] != V3_MARKET_CORE_DISCRIMINATOR
+        || bytes[8..10] != V3_LAYOUT_VERSION.to_le_bytes()
+    {
+        return Err(bundle_error());
+    }
+    if bytes[V3_CORE_MARKET_AUTHORITY_OFFSET..V3_CORE_MARKET_AUTHORITY_OFFSET + 32] != authority {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    bytes[V3_CORE_KEEPER_OFFSET..V3_CORE_KEEPER_OFFSET + 32].copy_from_slice(&keeper);
+    Ok(())
+}
 
 /// Validate stored provider-verified data against the execution clock, never
 /// against its own publication time. Closed/restricted modes fail closed.
@@ -1605,8 +1683,7 @@ pub fn update_funding_v3(
     let snapshot_index = optional_snapshot_index(accounts);
     {
         let core = unsafe { accounts[0].borrow_unchecked() };
-        if core[V3_CORE_MARKET_AUTHORITY_OFFSET..V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
-            != signer.address().to_bytes()
+        if !is_v3_operator(&core, &signer.address().to_bytes())
             || (snapshot_index.is_none()
                 && (core[V3_CORE_ORACLE_VALID_OFFSET] != 1
                     || !matches!(core[V3_CORE_MODE_OFFSET], 1..=3)))
@@ -2095,7 +2172,7 @@ pub(crate) fn validate_seat_shard(
     Ok(())
 }
 
-pub(crate) fn read_shard_seat(bytes: &[u8], slot: usize) -> Result<TraderSeat, ProgramError> {
+pub fn read_shard_seat(bytes: &[u8], slot: usize) -> Result<TraderSeat, ProgramError> {
     if slot >= V3_SEATS_PER_SHARD {
         return Err(bundle_error());
     }
@@ -3388,8 +3465,7 @@ pub fn liquidate_v3(
     fresh_v3_execution_time_with_snapshot(program_id, accounts, snapshot_index)?;
     let (mark, funding, config) = {
         let core = unsafe { accounts[0].borrow_unchecked() };
-        if core[V3_CORE_MARKET_AUTHORITY_OFFSET..V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
-            != signer.address().to_bytes()
+        if !is_v3_operator(&core, &signer.address().to_bytes())
             || (snapshot_index.is_none() && core[V3_CORE_ORACLE_VALID_OFFSET] != 1)
         {
             return Err(StockStreamError::InvalidInstruction.into());
@@ -4415,7 +4491,9 @@ pub fn request_withdrawal_v3(
     seat_index: u16,
     amount: u64,
 ) -> ProgramResult {
-    if accounts.len() != 10 || amount == 0 {
+    // Optional 11th account: the magic fee vault, so the core pays for the
+    // seat-shard commit (uncapped) instead of the trader (10 per delegation).
+    if !(accounts.len() == 10 || accounts.len() == 11) || amount == 0 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
     let core_key = validate_event_core(program_id, &accounts[0])?;
@@ -4474,6 +4552,9 @@ pub fn request_withdrawal_v3(
         &payload,
         crate::handlers::event_timestamp(),
     )?;
+    if accounts.len() == 11 {
+        return crate::magicblock::schedule_core_paid_commit(program_id, &accounts[0], &accounts[7], &accounts[10], Some(&accounts[1]));
+    }
     crate::magicblock::schedule_member_commit(&accounts[6], &accounts[7], &accounts[8], &accounts[1])
 }
 

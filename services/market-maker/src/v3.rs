@@ -49,7 +49,7 @@ impl Bundle {
     }
 
     /// Execution metas in program order: the bundle writable, then the signer and the snapshot.
-    fn metas(&self, authority: &Pubkey) -> Vec<AccountMeta> {
+    pub(crate) fn metas(&self, authority: &Pubkey) -> Vec<AccountMeta> {
         let writable = |pubkey: &Pubkey| AccountMeta { pubkey: *pubkey, is_signer: false, is_writable: true };
         std::iter::once(&self.core)
             .chain(&self.book_pages)
@@ -177,4 +177,24 @@ pub fn snapshot(bytes: &[u8]) -> Option<Snapshot> {
         published: u64_at(bytes, SNAPSHOT_PUBLISH_OFFSET),
         open: bytes[SNAPSHOT_STATUS_OFFSET] == 0,
     })
+}
+
+/// Best live bid and ask across book pages (fixed-price leaves; pegged leaves
+/// store an offset, so anything under `min_price` is ignored).
+pub fn best_prices<'a>(pages: impl Iterator<Item = &'a [u8]>, now: u64, min_price: i64) -> (Option<i64>, Option<i64>) {
+    let (mut bid, mut ask) = (None::<i64>, None::<i64>);
+    for page in pages.filter(|page| valid(page, b"STKBK003", BOOK_PAGE_SIZE)) {
+        for node in (0..NODES_PER_PAGE).map(|i| &page[BOOK_PAGE_HEADER + i * NODE_SIZE..BOOK_PAGE_HEADER + (i + 1) * NODE_SIZE]) {
+            let price = u64_at(node, 56) as i64;
+            if node[0] != 2 || u64_at(node, 24) == 0 || u64_at(node, 32) <= now || price < min_price {
+                continue;
+            }
+            if node[1] == 0 {
+                bid = Some(bid.map_or(price, |b| b.max(price)));
+            } else {
+                ask = Some(ask.map_or(price, |a| a.min(price)));
+            }
+        }
+    }
+    (bid, ask)
 }

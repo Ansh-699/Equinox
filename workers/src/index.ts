@@ -217,6 +217,9 @@ function privyVerifier(env: Env): PrivyVerifier {
   };
 }
 
+/** The faucet keeps this much SOL (0.2) for its own fees before giving any away. */
+const FAUCET_KEEPER_SOL_FLOOR = 200_000_000n;
+
 /** Most an operator mint may issue at once: 10M test tokens (6 decimals). */
 const OPERATOR_MINT_MAX = 10_000_000_000_000n;
 
@@ -262,9 +265,12 @@ async function claimFaucet(request: Request, env: Env): Promise<Response> {
   const signing = await resolveKeeperSigning(env);
   if (signing.state !== "signer-ready" || !signing.signer) return json({ error: "faucet signer unavailable" }, 503);
   const l1 = new SolanaL1Transport(env.SOLANA_RPC_URL);
-  const balance = await l1.call<{ value: number }>("getBalance", [wallet, { commitment: "confirmed" }]);
   const keeper = getBase58Decoder().decode(await signing.signer.publicKey());
-  const instructions = await faucetInstructions(keeper, wallet, deployment.collateralMint, BigInt(balance.value) < SOL_TOP_UP_BELOW);
+  const [balance, keeperBalance] = await Promise.all([wallet, keeper].map((key) => l1.call<{ value: number }>("getBalance", [key, { commitment: "confirmed" }])));
+  // A faucet short on SOL still sends the test USDC rather than failing the whole claim.
+  const sendSol = BigInt(balance.value) < SOL_TOP_UP_BELOW && BigInt(keeperBalance.value) > FAUCET_KEEPER_SOL_FLOOR;
+  if (!sendSol && BigInt(balance.value) < SOL_TOP_UP_BELOW) console.warn("faucet keeper is low on SOL; sending USDC only", keeper);
+  const instructions = await faucetInstructions(keeper, wallet, deployment.collateralMint, sendSol);
   const { value } = await l1.latestBlockhash("confirmed");
   const transaction = await signAndSerializeTransaction({ instructions, signer: signing.signer, recentBlockhash: value.blockhash, lastValidBlockHeight: BigInt(value.lastValidBlockHeight) });
   const signature = await l1.sendTransaction(transaction, { preflightCommitment: "confirmed" });
@@ -581,10 +587,9 @@ const worker = {
     return json({ error: "not_found" }, 404);
   },
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
-    // Keep the on-chain Pyth snapshot current for display and risk; orders
-    // still refresh it themselves under the ten-second rule.
-    await refreshSnapshotOnce(env).catch((error: unknown) => console.error("scheduled oracle refresh failed", error));
-    // Keep the market maker's alarm armed if it is meant to be running.
+    // The Pyth snapshot is refreshed by the market-maker service on the VM
+    // (every few seconds while open) and by each order; not here, where the
+    // verify-and-sign work pushed cron runs over the CPU limit.
     if (!env.DB) return;
     const db = env.DB;
     const now = Date.now();

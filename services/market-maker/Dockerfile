@@ -3,6 +3,7 @@
 FROM rust:1-slim-bookworm AS build
 WORKDIR /src
 COPY config/stockstream-deployment.json config/stockstream-deployment.json
+COPY programs/stockstream programs/stockstream
 COPY services/market-maker services/market-maker
 RUN cargo build --release --locked --manifest-path services/market-maker/Cargo.toml
 

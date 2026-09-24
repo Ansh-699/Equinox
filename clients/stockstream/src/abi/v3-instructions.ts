@@ -1,6 +1,6 @@
 import { PublicKey, SystemProgram, TransactionInstruction, type AccountMeta } from "@solana/web3.js";
 import { OPCODE } from "./instructions";
-import { MAGIC_CONTEXT, MAGIC_PROGRAM } from "./constants";
+import { DELEGATION_PROGRAM, MAGIC_CONTEXT, MAGIC_PROGRAM } from "./constants";
 import { checkedSigned, checkedUnsigned, writeSigned, writeUnsigned } from "./encoding";
 import { accountMeta, instruction, publicKey, STOCKSTREAM_PROGRAM_KEY, type AddressInput } from "./transaction";
 import { deriveBookPageV3, deriveEventShardV3, deriveMarketCoreV3, deriveSeatShardV3, deriveOracleSnapshotV3, V3_BOOK_PAGES_PER_SIDE } from "./v3";
@@ -415,14 +415,22 @@ export function deriveWithdrawReceiptV3(core: AddressInput, trader: AddressInput
   return PublicKey.findProgramAddressSync([Buffer.from("withdraw-receipt-v3"), publicKey(core).toBuffer(), publicKey(trader).toBuffer()], STOCKSTREAM_PROGRAM_KEY)[0];
 }
 
-/** Rollup: debits the seat (risk-checked) and schedules its shard commit to L1. Opcode 62. */
-export function requestWithdrawalV3(accounts: { core: AddressInput; seatShard: AddressInput; eventShards: readonly AddressInput[]; trader: AddressInput; oracleSnapshot: AddressInput }, seatIndex: number, amount: bigint | number): TransactionInstruction {
+/** The validator's magic fee vault. Passing it lets the market core pay the
+ * rollup commit, which is not capped at MagicBlock's 10 sponsored commits. */
+export function deriveMagicFeeVault(validator: AddressInput): PublicKey {
+  return PublicKey.findProgramAddressSync([Buffer.from("magic-fee-vault"), publicKey(validator).toBuffer()], publicKey(DELEGATION_PROGRAM))[0];
+}
+
+/** Rollup: debits the seat (risk-checked) and schedules its shard commit to L1. Opcode 62.
+ * With `feeVault` the core pays for that commit (see `deriveMagicFeeVault`). */
+export function requestWithdrawalV3(accounts: { core: AddressInput; seatShard: AddressInput; eventShards: readonly AddressInput[]; trader: AddressInput; oracleSnapshot: AddressInput; feeVault?: AddressInput }, seatIndex: number, amount: bigint | number): TransactionInstruction {
   if (accounts.eventShards.length !== 4) throw new RangeError("exactly four V3 event shards are required");
   return instruction(v3AmountData(OPCODE.requestWithdrawalV3, seatIndex, amount), [
     accountMeta(accounts.core, false, true), accountMeta(accounts.seatShard, false, true),
     ...accounts.eventShards.map((event) => accountMeta(event, false, true)),
     accountMeta(accounts.trader, true, true), accountMeta(MAGIC_CONTEXT, false, true), accountMeta(MAGIC_PROGRAM, false, false),
-    accountMeta(accounts.oracleSnapshot, false, false)]);
+    accountMeta(accounts.oracleSnapshot, false, false),
+    ...(accounts.feeVault ? [accountMeta(accounts.feeVault, false, true)] : [])]);
 }
 
 /** L1: pays out whatever the committed seat requested beyond what was already paid. Opcode 63. */

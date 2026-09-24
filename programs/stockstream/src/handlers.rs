@@ -466,6 +466,10 @@ pub fn dispatch(
         StockStreamInstruction::ClaimWithdrawalV3 { seat_index } => {
             crate::inbox::claim_withdrawal_v3(program_id, accounts, seat_index)
         }
+        StockStreamInstruction::SetV3Keeper { keeper } => {
+            crate::v3::set_v3_keeper(program_id, accounts, keeper)
+        }
+        StockStreamInstruction::AbortV3Snapshot => crate::v3::abort_v3_snapshot(program_id, accounts),
         StockStreamInstruction::DepositCollateralV3 { seat_index, amount } => {
             crate::v3::deposit_collateral_v3(program_id, accounts, seat_index, amount)
         }

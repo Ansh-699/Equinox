@@ -19,6 +19,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Reveal } from "@/components/reveal";
 import { LandingHero, type ActivityRow, type PreviewMarket } from "./landing-hero";
 import styles from "./landing.module.css";
+import { fetchV3Aggregate } from "@/lib/v3-aggregate";
 
 const LIVE_SYMBOL = PERP_MARKETS.find((m) => m.live)?.symbol ?? "TSLA-PERP";
 const HOURLY = RESOLUTIONS.find((r) => r.code === "60") ?? RESOLUTIONS[3];
@@ -48,10 +49,10 @@ export function LandingView() {
 
   // One read of the market's event shards for the Activity preview.
   useEffect(() => {
-    if (!publicMarketApiUrl || !publicV3Core) return;
-    void fetch(`${publicMarketApiUrl.replace(/\/$/, "")}/v1/v3/markets/${publicV3Core}?domain=l1`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: { eventShards?: Parameters<typeof tradesFrom>[0] } | null) => {
+    if (!publicV3Core) return;
+    void fetchV3Aggregate(publicV3Core)
+      .then((data) => data as { eventShards?: Parameters<typeof tradesFrom>[0] } | null)
+      .then((data) => {
         if (!data) return;
         setFills(tradesFrom(data.eventShards).map((t, i) => ({ side: i % 2 ? "short" : "long", role: "Taker", size: t.size, price: t.price, t: t.time * 1000 })));
       })

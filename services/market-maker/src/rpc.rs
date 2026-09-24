@@ -66,6 +66,15 @@ impl Rpc {
         Ok(self.multiple_accounts(std::slice::from_ref(key)).await?.pop().flatten())
     }
 
+    /// One account at "processed": includes transactions whose push we just saw.
+    pub async fn account_processed(&self, key: &Pubkey) -> Result<Option<Vec<u8>>> {
+        let result = self.call("getAccountInfo", json!([b58(key), { "encoding": "base64", "commitment": "processed" }])).await?;
+        match result["value"]["data"][0].as_str() {
+            Some(data) => Ok(Some(B64.decode(data)?)),
+            None => Ok(None),
+        }
+    }
+
     pub async fn latest_blockhash(&self) -> Result<[u8; 32]> {
         let result = self.call("getLatestBlockhash", json!([{ "commitment": "confirmed" }])).await?;
         let text = result["value"]["blockhash"].as_str().ok_or_else(|| anyhow!("getLatestBlockhash: no blockhash"))?;

@@ -3,7 +3,8 @@
 import { useCallback, useState } from "react";
 import { ComputeBudgetProgram, PublicKey } from "@solana/web3.js";
 import { createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction, getAssociatedTokenAddressSync } from "@solana/spl-token";
-import { claimWithdrawalV3, requestWithdrawalV3, withdrawCollateral, withdrawCollateralV3 } from "@/clients/stockstream/src";
+import { claimWithdrawalV3, deriveMagicFeeVault, requestWithdrawalV3, withdrawCollateral, withdrawCollateralV3 } from "@/clients/stockstream/src";
+import deployment from "@/config/stockstream-deployment.json";
 import type { ResolvedCustodyAccounts } from "./custody-accounts";
 import type { TransactionPreview } from "@/lib/execution-boundary";
 import { RpcFailure } from "@/lib/rpc-transport";
@@ -78,7 +79,8 @@ export function useWithdraw(protocol: StockStreamProtocol | null, report?: (mess
         // Step 1: the rollup debits the seat (risk-checked) and commits the shard to Solana.
         setNotice("Step 1/2 · Requesting the withdrawal in the MagicBlock rollup…");
         const request = [ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 }),
-          requestWithdrawalV3({ core: w.core, seatShard, eventShards: w.eventShards, trader: w.authority, oracleSnapshot: w.oracleSnapshot }, accounts.seatIndex, amount)];
+          // The core pays the shard commit through the fee vault: trader-paid commits stop at 10 per delegation.
+          requestWithdrawalV3({ core: w.core, seatShard, eventShards: w.eventShards, trader: w.authority, oracleSnapshot: w.oracleSnapshot, feeVault: deriveMagicFeeVault(deployment.magicBlock.validator) }, accounts.seatIndex, amount)];
         await protocol.service.executeEr(toPreview("RequestWithdrawalV3", request), request, [w.core, seatShard, ...w.eventShards].map(String));
         // The commit usually lands on Solana in < 1 s; wait up to 45 s before signing the payout.
         setNotice("Step 2/2 · Waiting for the rollup commit on Solana…");

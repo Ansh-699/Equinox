@@ -1,4 +1,53 @@
-# StockStream status (2026-09-21, continuation)
+# StockStream status (current: 2026-09-24)
+
+## Current state (2026-09-24)
+
+This section is the live summary. Everything below it is the dated history
+that led here; where an older section calls something "blocked" or "not
+started", this section wins.
+
+**Working on devnet (verified live today):**
+- Trading: V3 TSLA-PERP market delegated to MagicBlock `devnet-as`
+  (validator `MAS1Dt9…`). Popup-free trading key, faucet, rollup seat,
+  deposit (inbox 60/61), market and limit orders, withdrawal to the wallet
+  (outbox 62/63). `npx tsx scripts/e2e/onboarding.mts` passes against
+  production (seat #25, shard 0).
+- Pyth: live verified prices; OverNight session trades, only `Closed`
+  (weekends/holidays) stops orders.
+- Market maker + keeper: one Rust service on the Singapore VM
+  `4.194.209.138` (see `services/market-maker/README.md`). Maker ~40 ms
+  send→processed; ~2 ms of it network.
+- Keeper (same service, key `7JuUhGG…`, named on the core by opcode 64):
+  - commits: every 120 s, all 26 child shards then the core (trading pauses
+    ~1.4 s). Commits are paid by the core through the validator's magic fee
+    vault, so MagicBlock's 10-sponsored-commits-per-delegation cap does not
+    apply. The core's rollup balance pays (100,000 lamports per account
+    commit past 25): top up with `node scripts/v3-topup-core.mjs 1`.
+  - funding: hourly; the program only lets the accumulator rise (longs pay
+    when the book trades above the oracle), capped by elapsed seconds.
+  - liquidation: scans every seat every 3 s with the program's own risk code.
+  - a failed commit closes its snapshot (opcode 65) so trading never stays frozen.
+- Withdrawals pass the fee vault too (11th account), so a seat shard past 10
+  commits still withdraws.
+- Worker CPU: the browser now builds the V3 market aggregate from the rollup
+  (`lib/v3-aggregate.ts`), and the cron no longer refreshes Pyth (the VM
+  does); no `exceededCpu` since.
+
+**Program changes today (all deployed, 286 program tests):** keeper key
+(`SetV3Keeper` 64) accepted for funding, liquidation and commit-only
+snapshots; `AbortV3Snapshot` (65); snapshot records only count for the
+current epoch (stale epoch-28 records had blocked commits); core-paid commits
+through the magic fee vault (member 7 accounts, core 6, withdrawal request 11).
+
+**Open:**
+- Undelegation/restore of the core: the devnet delegation program still
+  rejects `RequestUndelegation` (discriminator 26), re-probed 2026-09-24 with
+  `node scripts/magicblock-dlp-discriminator-repro.mjs`. Not needed for
+  trading, custody or commits; only to take the market out of the rollup.
+- Weekends and US holidays: Pyth reports `Closed` and the program refuses
+  orders (no live price to trade against), by design.
+- Operator balances to watch: faucet keeper `AmHAkH…` (it pays 0.05 SOL per
+  new wallet; below 0.2 SOL it sends USDC only), the core's rollup lamports.
 
 ## Devnet end-to-end lifecycle verified (2026-09-23)
 
@@ -384,7 +433,7 @@ Fresh current-HEAD regression evidence: `cargo test -p stockstream --test v3_bun
   covers abort, decrement-take, and cancel-provide behavior across the paged
   book; the deployed artifact is `034b3088eeaf682c5c4618a2b704706eae177cd128d07a74f8365682bf15c0aa`.
 
-## Known external blockers (not fixable from this codebase alone)
+## Known external blockers (historical, 2026-09-21; see "Current state" above)
 
 1. **Pyth Lazer equity entitlement** -- required for
   any real oracle price, which gates every session-signed trade and the
