@@ -47,6 +47,15 @@ started", this section wins.
   (`lib/v3-aggregate.ts`), and the cron no longer refreshes Pyth (the VM
   does); no `exceededCpu` since.
 
+**Sponsor build (2026-09-24, later): see docs/architecture.md.**
+- Pre-IPO perps (PreStocks): OPENAI-, SPACEX-, ANTHROPIC-PERP, priced by the
+  VM reporter from PreStocks tokens (opcodes 66/67), one-click baskets on
+  /pre-ipo. Tessera removed (the PreStocks bounty excludes other pre-IPO tokens).
+- Meteora DBC launchpad: USD-priced equity curves, monitor, buy/sell,
+  graduation to DAMM v2 (verified on devnet), perp listing via
+  `scripts/list-market.sh … meteora` (needs ~1.3 devnet SOL per market).
+- E2E: preipo (OPENAI, SPACEX), basket, launch, onboarding, deposit all pass.
+
 **Program changes today (all deployed, 287 program tests):** keeper key
 (`SetV3Keeper` 64) accepted for funding, liquidation and commit-only
 snapshots; `AbortV3Snapshot` (65); snapshot records only count for the
