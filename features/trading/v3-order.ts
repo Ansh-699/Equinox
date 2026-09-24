@@ -17,6 +17,15 @@ export interface V3OrderInput {
   quantity: bigint; limitPriceUsd: string; expiresInMinutes: number; oracleClock: bigint;
 }
 
+let lastClientOrderId = 0n;
+/** Unique per order even for several clicks in one millisecond (two identical
+ * orders under one blockhash would otherwise be the same transaction). */
+function nextClientOrderId(): bigint {
+  const now = BigInt(Date.now()) * 1_000n;
+  lastClientOrderId = now > lastClientOrderId ? now : lastClientOrderId + 1n;
+  return lastClientOrderId;
+}
+
 /** A crossing fill needs ~200k compute units, so every V3 order raises the limit. */
 export function buildV3OrderInstructions(input: V3OrderInput): { instructions: TransactionInstruction[]; writableAccounts: string[] } | { error: string } {
   if (input.quantity <= 0n) return { error: "Enter a size above zero." };
@@ -26,7 +35,7 @@ export function buildV3OrderInstructions(input: V3OrderInput): { instructions: T
   const expiresAt = input.oracleClock + BigInt(input.expiresInMinutes > 0 ? input.expiresInMinutes * 60 : GTC_SECONDS);
   const order = placeOrderV3({
     ...execution, seatIndex: input.seatIndex, side: input.side, tree: "fixed", quantity: input.quantity, priceOrOffset: price,
-    expiresAt, clientOrderId: BigInt(Date.now()), postOnly: input.orderType === "post-only",
+    expiresAt, clientOrderId: nextClientOrderId(), postOnly: input.orderType === "post-only",
     immediateOrCancel: input.orderType === "ioc", reduceOnly: input.reduceOnly,
   });
   const writableAccounts = [execution.core, ...execution.bookPages, ...execution.seatShards, ...execution.eventShards].map(String);

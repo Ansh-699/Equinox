@@ -1,10 +1,12 @@
 /** Keeps the L1 oracle snapshot fresh for writes via the market API's
  * permissionless refresh (the program needs a price under 10 seconds old).
  * `er()` additionally waits until MagicBlock serves that snapshot sequence. */
-export interface OracleFreshness { l1(): Promise<void>; er(): Promise<void> }
+export interface OracleFreshness { l1(): Promise<void>; er(): Promise<void>; /** Re-reads the rollup price's age in the background. */ warm(): void }
 
 /** Well inside the program's 10 s window, leaving room for devnet clock drift. */
-export const ER_FAST_PATH_MAX_AGE_S = 4;
+export const ER_FAST_PATH_MAX_AGE_S = 7;
+/** A publish time read this recently is reused: it can only look older than it is. */
+const PUBLISH_READ_REUSE_MS = 1_500;
 /** When a refresh fails, a price this recent still goes to the program's 10 s check. */
 export const ER_FALLBACK_MAX_AGE_S = 8;
 
@@ -19,6 +21,14 @@ export function createOracleFreshness(options: {
   erTimeoutMs?: number;
 }): OracleFreshness {
   const fetcher = options.fetcher ?? ((input, init) => fetch(input, init));
+  const clock = options.now ?? Date.now;
+  let lastRead: { published: bigint | null; at: number } | null = null;
+  const readPublished = async () => {
+    if (lastRead && clock() - lastRead.at < PUBLISH_READ_REUSE_MS) return lastRead.published;
+    const published = await options.readErPublishTime?.().catch(() => null) ?? null;
+    lastRead = { published, at: clock() };
+    return published;
+  };
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const refresh = async (): Promise<bigint> => {
     const response = await fetcher(`${options.marketApiUrl.replace(/\/$/, "")}/v1/oracle/refresh`, { method: "POST" });
@@ -30,13 +40,15 @@ export function createOracleFreshness(options: {
   };
   return {
     l1: async () => { await refresh(); },
+    warm: () => { if (!lastRead || clock() - lastRead.at >= PUBLISH_READ_REUSE_MS / 2) { lastRead = null; void readPublished(); } },
     er: async () => {
       // The market maker keeps the rollup's price a few seconds old at most; only
       // an order that would meet a stale price pays for the refresh.
-      const published = await options.readErPublishTime?.().catch(() => null);
-      const age = published == null ? null : (options.now ?? Date.now)() / 1000 - Number(published);
+      const published = await readPublished();
+      const age = published == null ? null : clock() / 1000 - Number(published);
       if (age !== null && age <= ER_FAST_PATH_MAX_AGE_S) return;
       let sequence: bigint;
+      lastRead = null;
       try {
         sequence = await refresh();
       } catch (error) {

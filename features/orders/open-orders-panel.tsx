@@ -49,7 +49,8 @@ export function OpenOrdersPanel({ state, onCancel, onReplace, onCancelAll, pendi
                   <tr key={order.orderKey.toString()} className="open-orders-row">
                     <td data-label="Side"><span className={order.side === "bid" ? "positive" : "negative"}>{order.side === "bid" ? "Long" : "Short"}</span></td>
                     <td data-label="Tree">{order.tree}</td>
-                    <td data-label="Price">{order.price.toString()}</td>
+                    {/* On-chain prices carry 5 decimals (Pyth exponent -5). */}
+                    <td data-label="Price">${(Number(order.price) / 1e5).toFixed(2)}</td>
                     <td data-label="Qty">{order.quantity.toString()}</td>
                     <td data-label="Filled">{order.filledQuantity.toString()}</td>
                     <td data-label="Flags">{[order.postOnly ? "post-only" : null, order.reduceOnly ? "reduce-only" : null].filter(Boolean).join(", ") || "--"}</td>

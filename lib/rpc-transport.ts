@@ -84,6 +84,18 @@ export class SolanaRpcTransport implements L1Transport {
       throw new RpcFailure('sendTransaction','invalid_signature');
     return {signature};
   }
+  /** Polls until the signature is known: when it was first seen (performance.now) and whether it succeeded.
+   * `stop()` returning true ends the poll early (another watcher already answered). */
+  async pollProcessed(signature: string, stop: () => boolean, timeoutMs = 5_000): Promise<{ at: number; ok: boolean } | null> {
+    const deadline = performance.now() + timeoutMs;
+    while (!stop() && performance.now() < deadline) {
+      const result = await this.request('getSignatureStatuses',[[signature]]).catch(() => null);
+      const status = result ? (object(result).value as unknown[] | undefined)?.[0] : null;
+      if (status) return { at: performance.now(), ok: object(status).err === null };
+      await this.wait(15);
+    }
+    return null;
+  }
   async confirm(signature: string): Promise<'confirmed'|'finalized'> {
     if (!/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(signature)) throw new Error('Invalid signature');
     for (let attempt=0; attempt<this.attempts; attempt++) {
@@ -175,7 +187,8 @@ export class MagicRouterTransport implements RouterBoundary {
       const status = object(await this.rpc.request('getDelegationStatus',[key(account)]));
       if (status.isDelegated !== true) throw new Error('Mixed or undelegated writable account');
       const validator = key(object(status.delegationRecord).authority);
-      this.delegationCache.set(account, { validator, until: Date.now() + 30_000 });
+      // Delegation changes only on an operator action: re-checked every 10 minutes.
+      this.delegationCache.set(account, { validator, until: Date.now() + 600_000 });
       return validator;
     }));
     if (new Set(validators).size !== 1) throw new Error('Mixed validators');
@@ -183,31 +196,50 @@ export class MagicRouterTransport implements RouterBoundary {
     this.viaRollup = !!this.direct && validators[0] === this.direct.validator;
     if (this.viaRollup) {
       // Reused briefly: each transaction still differs (fresh client order ids / amounts).
-      if (!this.blockhash || this.blockhash.until < Date.now()) this.blockhash = { value: (await this.direct!.rpc.latestBlockhash()).blockhash, until: Date.now() + 2_000 };
-      return this.blockhash.value;
+      if (!this.blockhash || this.blockhash.until < Date.now()) await this.refreshBlockhash();
+      return this.blockhash!.value;
     }
     const result = object(await this.rpc.request('getBlockhashForAccounts',[writableAccounts]));
     count(result.lastValidBlockHeight);
     return key(result.blockhash);
   }
-  async submit(serialized: Uint8Array, kind = 'tx'): Promise<{status:'er_accepted';sequence:bigint}> {
+  private async refreshBlockhash() {
+    this.blockhash = { value: (await this.direct!.rpc.latestBlockhash()).blockhash, until: Date.now() + 2_000 };
+  }
+  /** Keeps the blockhash warm between orders so a click never waits for one. */
+  warm(writableAccounts: readonly string[]): void {
+    if (!this.viaRollup) { void this.getAccountAwareBlockhash(writableAccounts).catch(() => undefined); return; }
+    if (this.direct && (!this.blockhash || this.blockhash.until - Date.now() < 1_000)) void this.refreshBlockhash().catch(() => undefined);
+  }
+  async submit(serialized: Uint8Array, kind = 'tx'): Promise<{status:'er_accepted';sequence:bigint;signature?:string}> {
     if (this.viaRollup && this.direct) {
       const signature = firstSignature(serialized);
-      // Subscribed before the clock starts: the time is network + rollup execution, nothing else.
-      const watch = await this.direct.socket.watch(signature).catch(() => null);
+      // The subscription goes out first on the open socket, but the send does not
+      // wait for its acknowledgement: "processed" is whichever answers first, the
+      // push or a status poll (a push can arrive tens of ms after the fact).
+      const watching = this.direct.socket.watch(signature).catch(() => null);
       const startedAt = Date.now();
       const t0 = performance.now();
       await this.direct.rpc.submit(serialized);
-      const processed = watch ? await watch.done : null;
+      let answered = false;
+      const pushed = watching.then((watch) => watch?.done ?? null);
+      const polled = this.direct.rpc.pollProcessed(signature, () => answered);
+      const processed = await new Promise<{ at: number; ok: boolean } | null>((resolve) => {
+        let pending = 2;
+        const settle = (value: { at: number; ok: boolean } | null) => { if (value && !answered) { answered = true; resolve(value); } else if (--pending === 0 && !answered) resolve(null); };
+        void pushed.then(settle, () => settle(null));
+        void polled.then(settle, () => settle(null));
+      });
       if (processed) {
-        recordErTx({ kind, ms: Math.round(processed.at - t0), netMs: watch!.pingMs, ok: processed.ok, at: startedAt, signature });
+        const watch = await Promise.race([watching, Promise.resolve(null)]);
+        recordErTx({ kind, ms: Math.round(processed.at - t0), netMs: watch?.pingMs ?? null, ok: processed.ok, at: startedAt, signature });
         if (!processed.ok) throw new RpcFailure('signatureNotification','transaction_rejected');
-        return {status:'er_accepted',sequence:0n};
+        return {status:'er_accepted',sequence:0n,signature};
       }
       await this.direct.rpc.confirm(signature).then(
-        () => recordErTx({ kind, ms: Date.now() - startedAt, netMs: watch?.pingMs ?? null, ok: true, at: startedAt, signature }),
+        () => recordErTx({ kind, ms: Date.now() - startedAt, netMs: null, ok: true, at: startedAt, signature }),
         (error: unknown) => { recordErTx({ kind, ms: null, netMs: null, ok: false, at: startedAt, signature }); throw error; });
-      return {status:'er_accepted',sequence:0n};
+      return {status:'er_accepted',sequence:0n,signature};
     }
     const startedAt = Date.now();
     const {signature} = await this.rpc.submit(serialized);
