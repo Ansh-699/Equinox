@@ -470,6 +470,12 @@ pub fn dispatch(
             crate::v3::set_v3_keeper(program_id, accounts, keeper)
         }
         StockStreamInstruction::AbortV3Snapshot => crate::v3::abort_v3_snapshot(program_id, accounts),
+        StockStreamInstruction::SetV3PriceReporter { reporter } => {
+            crate::v3::set_v3_price_reporter(program_id, accounts, reporter)
+        }
+        StockStreamInstruction::ReportPriceV3 { price, confidence, publish_timestamp } => {
+            oracle::report_price_v3(program_id, accounts, price, confidence, publish_timestamp)
+        }
         StockStreamInstruction::DepositCollateralV3 { seat_index, amount } => {
             crate::v3::deposit_collateral_v3(program_id, accounts, seat_index, amount)
         }

@@ -85,6 +85,13 @@ pub const SET_V3_KEEPER: u8 = 64;
 /// (children already committed stay on L1; the next full snapshot supersedes them).
 /// Data: `[65]`. Accounts: `[core (writable), authority-or-keeper (signer)]`.
 pub const ABORT_V3_SNAPSHOT: u8 = 65;
+/// Market authority names (or clears) the price reporter of a market that has no
+/// Pyth feed (pre-IPO). Data: `[66, reporter:[u8;32]]`. Accounts: `[core (writable), authority (signer)]`.
+pub const SET_V3_PRICE_REPORTER: u8 = 66;
+/// The market's reporter posts a price into the market's L1 oracle snapshot.
+/// Data: `[67, price:i64, confidence:u64, publish_timestamp:u64]`.
+/// Accounts: `[snapshot (writable), core, reporter (signer)]`.
+pub const REPORT_PRICE_V3: u8 = 67;
 pub const COMMIT_MARKET: u8 = 14;
 pub const COMMIT_AND_UNDELEGATE: u8 = 15;
 /// Reserved: the real external-undelegate callback uses the delegation
@@ -289,6 +296,14 @@ pub enum StockStreamInstruction {
         keeper: [u8; 32],
     },
     AbortV3Snapshot,
+    SetV3PriceReporter {
+        reporter: [u8; 32],
+    },
+    ReportPriceV3 {
+        price: i64,
+        confidence: u64,
+        publish_timestamp: u64,
+    },
     WithdrawCollateralV3 {
         seat_index: u16,
         amount: u64,
@@ -591,6 +606,14 @@ impl StockStreamInstruction {
                 seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
             }),
             Some(ABORT_V3_SNAPSHOT) if data.len() == 1 => Ok(Self::AbortV3Snapshot),
+            Some(SET_V3_PRICE_REPORTER) if data.len() == 33 => Ok(Self::SetV3PriceReporter {
+                reporter: data[1..33].try_into().map_err(|_| ProgramError::InvalidInstructionData)?,
+            }),
+            Some(REPORT_PRICE_V3) if data.len() == 25 => Ok(Self::ReportPriceV3 {
+                price: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)? as i64,
+                confidence: read_u64(data, 9).ok_or(ProgramError::InvalidInstructionData)?,
+                publish_timestamp: read_u64(data, 17).ok_or(ProgramError::InvalidInstructionData)?,
+            }),
             Some(SET_V3_KEEPER) if data.len() == 33 => Ok(Self::SetV3Keeper {
                 keeper: data[1..33].try_into().map_err(|_| ProgramError::InvalidInstructionData)?,
             }),

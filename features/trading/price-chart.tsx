@@ -1,5 +1,6 @@
 "use client";
 
+import { isReporterPriced, v3MarketFor } from "@/lib/v3-markets";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RESOLUTIONS, useCandles, type Candle, type Resolution } from "./use-candles";
 
@@ -47,7 +48,7 @@ export function PriceChart({ marketApiUrl, symbol, live }: { marketApiUrl: strin
       </div>
 
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 px-3 py-[6px] text-[11px]">
-        <span className="text-[var(--t-text-2)]"><span className="font-semibold text-[var(--t-text)]">{symbol}</span> · {resolution.label} · {symbol.replace("-PERP", "")}/USD via Pyth</span>
+        <span className="text-[var(--t-text-2)]"><span className="font-semibold text-[var(--t-text)]">{symbol}</span> · {resolution.label} · {symbol.replace("-PERP", "")}/USD via {priceSource(symbol)}</span>
         <span className="flex items-center gap-2 text-[var(--t-text-3)]">
           {(["o", "h", "l", "c"] as const).map((key) => (
             <span key={key}>{key.toUpperCase()} <span className="tnum text-[var(--t-text)]">{latest ? latest[key].toFixed(2) : "—"}</span></span>
@@ -69,7 +70,7 @@ export function PriceChart({ marketApiUrl, symbol, live }: { marketApiUrl: strin
       <div className="flex h-[30px] shrink-0 items-center justify-between gap-3 border-t border-[var(--t-border)] px-3 text-[11px] text-[var(--t-text-3)]">
         <span className="hidden xl:inline">Scroll to zoom · drag to pan</span>
         <span className="xl:hidden">Ctrl-scroll to zoom · drag to pan</span>
-        <span>{resolution.label} candles · Pyth history + verified live price</span>
+        <span>{resolution.label} candles · {isReporterPriced(v3MarketFor(symbol)) ? "reporter price history" : "Pyth history"} + verified live price</span>
       </div>
     </div>
   );
@@ -245,4 +246,9 @@ function CandleCanvas({ candles, chartType, resolution }: { candles: Candle[]; c
       ) : null}
     </div>
   );
+}
+
+/** Where a market's price comes from, for its chart caption. */
+function priceSource(symbol: string): string {
+  return isReporterPriced(v3MarketFor(symbol)) ? "PreStocks (reporter on-chain)" : "Pyth";
 }

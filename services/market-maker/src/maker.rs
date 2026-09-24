@@ -28,11 +28,39 @@ const RECENT_TXS: usize = 60;
 const COMPUTE_UNITS: u32 = 600_000;
 /// While the market is closed the price is refreshed this rarely, just to notice the reopen.
 const CLOSED_REFRESH_EVERY_MS: u64 = 30_000;
+/// Reporter-priced markets: quote while the price is younger than this (the
+/// reporter posts every few seconds; orders accept up to 10 s).
+const REPORTED_MAX_AGE_S: u64 = 7;
+
+/// One market the service makes: its accounts and where its price comes from.
+#[derive(Clone)]
+pub struct MarketConfig {
+    pub symbol: String,
+    pub bundle: Bundle,
+    /// Priced by this service's reporter (pre-IPO), not by Pyth through the market API.
+    pub reporter_priced: bool,
+    /// The market whose numbers also fill the top-level status fields (TSLA-PERP).
+    pub primary: bool,
+}
+
+/// Per-market slice of the status.
+#[derive(Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketStatus {
+    pub last_price: Option<f64>,
+    pub resting: usize,
+    pub market_open: Option<bool>,
+    pub maker_seat: Option<u16>,
+    pub taker_seat: Option<u16>,
+    pub keeper: Option<crate::keeper::KeeperStatus>,
+    pub reporter: Option<crate::reporter::ReporterStatus>,
+}
 
 /// Same JSON shape the terminal's live-transactions panel already reads.
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ErTx {
+    pub market: String,
     pub kind: &'static str,
     /// Send → the rollup's "processed" push: one network round trip plus the rollup's work.
     pub ms: Option<u64>,
@@ -77,8 +105,16 @@ pub struct Status {
     pub ping_ms: Option<u64>,
     /// Pyth trading status is OPEN; while closed the program refuses orders, so the bot waits.
     pub market_open: Option<bool>,
-    /// Funding, liquidation and commit jobs (absent when no keeper key is configured).
+    /// Funding, liquidation and commit jobs of the primary market (absent without a keeper key).
     pub keeper: Option<crate::keeper::KeeperStatus>,
+    /// Every market this service makes, by symbol.
+    pub markets: std::collections::BTreeMap<String, MarketStatus>,
+}
+
+impl Status {
+    pub fn market(&mut self, symbol: &str) -> &mut MarketStatus {
+        self.markets.entry(symbol.to_string()).or_default()
+    }
 }
 
 struct Bot {
@@ -91,6 +127,7 @@ pub struct Maker {
     rpc_url: String,
     http: reqwest::Client,
     market_api: Option<String>,
+    market: MarketConfig,
     bundle: Bundle,
     maker: Bot,
     taker: Bot,
@@ -108,7 +145,8 @@ pub fn now_ms() -> u64 {
 }
 
 impl Maker {
-    pub async fn new(rpc_url: &str, market_api: Option<String>, bundle: Bundle, maker: Keypair, taker: Keypair, region: Option<String>) -> Result<Self> {
+    pub async fn new(rpc_url: &str, market_api: Option<String>, market: MarketConfig, maker: Keypair, taker: Keypair, status: Arc<Mutex<Status>>) -> Result<Self> {
+        let bundle = market.bundle.clone();
         let rpc = Rpc::new(rpc_url)?;
         let positions: Vec<_> = rpc
             .multiple_accounts(&bundle.seat_shards)
@@ -119,15 +157,23 @@ impl Maker {
             .flat_map(|shard| seat_positions(&shard))
             .collect();
         let seat_of = |key: &Keypair| {
-            positions.iter().find(|p| p.trader == key.pubkey()).map(|p| p.index).ok_or_else(|| anyhow!("bot {} has no seat in this market", b58(&key.pubkey())))
+            positions.iter().find(|p| p.trader == key.pubkey()).map(|p| p.index).ok_or_else(|| anyhow!("bot {} has no seat in {}", b58(&key.pubkey()), market.symbol))
         };
         let (maker_seat, taker_seat) = (seat_of(&maker)?, seat_of(&taker)?);
-        let status = Status { running: true, maker: Some(b58(&maker.pubkey())), taker: Some(b58(&taker.pubkey())), colo: region, ..Status::default() };
+        {
+            let mut status = status.lock().await;
+            status.running = true;
+            status.maker = Some(b58(&maker.pubkey()));
+            status.taker = Some(b58(&taker.pubkey()));
+            let slice = status.market(&market.symbol);
+            (slice.maker_seat, slice.taker_seat) = (Some(maker_seat), Some(taker_seat));
+        }
         Ok(Self {
             rpc,
             rpc_url: rpc_url.to_string(),
             http: reqwest::Client::builder().timeout(Duration::from_secs(20)).build()?,
             market_api,
+            market,
             bundle,
             maker: Bot { key: maker, seat: maker_seat },
             taker: Bot { key: taker, seat: taker_seat },
@@ -135,7 +181,7 @@ impl Maker {
             client_order_id: Mutex::new(now_ms() * 1_000),
             next_take_ms: Mutex::new(0),
             last_closed_refresh_ms: Mutex::new(0),
-            status: Arc::new(Mutex::new(status)),
+            status,
             paused: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
     }
@@ -206,6 +252,7 @@ impl Maker {
         let processed = tokio::select! { p = pushed => p, p = polled => p };
         let ms = processed.map(|(arrived, _)| arrived.saturating_duration_since(started).as_millis() as u64);
         Some(ErTx {
+            market: self.market.symbol.clone(),
             kind,
             ms,
             net_ms,
@@ -233,7 +280,7 @@ impl Maker {
 
     async fn tick(&self) -> Result<()> {
         let ping = self.rpc.ping().await.ok();
-        if let Some(ping) = ping {
+        if let Some(ping) = ping.filter(|_| self.market.primary) {
             let mut status = self.status.lock().await;
             status.ping_ms = Some(status.ping_ms.map_or(ping, |p| (p * 4 + ping) / 5));
         }
@@ -244,8 +291,19 @@ impl Maker {
         let (index, published) = (snapshot.price, snapshot.published);
         let now = now_ms();
         let now_s = now / 1_000;
-        self.status.lock().await.market_open = Some(snapshot.open);
-        if !snapshot.open {
+        {
+            let mut status = self.status.lock().await;
+            status.market(&self.market.symbol).market_open = Some(snapshot.open);
+            if self.market.primary {
+                status.market_open = Some(snapshot.open);
+            }
+        }
+        if self.market.reporter_priced {
+            // The reporter keeps this price fresh; never ask the Pyth refresh route.
+            if now_s.saturating_sub(published) > REPORTED_MAX_AGE_S {
+                return Ok(());
+            }
+        } else if !snapshot.open {
             // Outside US trading hours every order would be refused: send nothing, and
             // only occasionally ask for a fresh price so the reopen is noticed.
             let mut last = self.last_closed_refresh_ms.lock().await;
@@ -255,7 +313,7 @@ impl Maker {
             }
             return Ok(());
         }
-        if now_s.saturating_sub(published) > MAX_SNAPSHOT_AGE_S {
+        if !self.market.reporter_priced && now_s.saturating_sub(published) > MAX_SNAPSHOT_AGE_S {
             // Permissionless refresh through the market API; quote once the rollup has the new price.
             return self.refresh_oracle().await;
         }
@@ -327,14 +385,19 @@ impl Maker {
         let mut sent: Vec<ErTx> = sent.into_iter().flatten().collect();
         sent.sort_by_key(|tx| std::cmp::Reverse(tx.at));
 
+        let resting_now = resting.iter().filter(|o| o.expires_at > now_s).count();
         let mut status = self.status.lock().await;
-        status.last_price = Some(index as f64 / 1e5);
-        status.resting = resting.iter().filter(|o| o.expires_at > now_s).count();
+        let slice = status.market(&self.market.symbol);
+        (slice.last_price, slice.resting) = (Some(index as f64 / 1e5), resting_now);
+        if self.market.primary {
+            (status.last_price, status.resting) = (Some(index as f64 / 1e5), resting_now);
+        }
         status.quotes += quotes;
         status.replaced += replaced;
         status.cancelled += cancelled;
         status.takes += takes;
         sent.extend(std::mem::take(&mut status.recent));
+        sent.sort_by_key(|tx| std::cmp::Reverse(tx.at));
         sent.truncate(RECENT_TXS);
         status.recent = sent;
         Ok(())

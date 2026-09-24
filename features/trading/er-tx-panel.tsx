@@ -16,7 +16,7 @@ const LABEL: Record<string, string> = { quote: "Quote", replace: "Requote", canc
 
 /** Live MagicBlock rollup transactions: the market maker's (from the Worker)
  * and this browser's own, each with its measured submit → confirmed time. */
-export function ErTxPanel({ marketApiUrl }: { marketApiUrl: string | undefined }) {
+export function ErTxPanel({ marketApiUrl, market }: { marketApiUrl: string | undefined; market?: string }) {
   const [bots, setBots] = useState<ErTxSample[]>([]);
   const [bot, setBot] = useState<{ colo: string | null; pingMs: number | null; marketOpen: boolean | null; offline: boolean } | null>(null);
   const mine = useSyncExternalStore(onErTx, myErTxs, () => EMPTY);
@@ -29,14 +29,15 @@ export function ErTxPanel({ marketApiUrl }: { marketApiUrl: string | undefined }
       .then((response) => response.json())
       .then((status: { recent?: ErTxSample[]; colo?: string | null; pingMs?: number | null; marketOpen?: boolean | null } | null) => {
         if (stopped) return;
-        setBots(status?.recent ?? []);
+        // The service makes several markets: show this one's (rows without a market are TSLA's, from older builds).
+        setBots((status?.recent ?? []).filter((row) => !market || (row.market ?? "TSLA-PERP") === market));
         setBot({ colo: status?.colo ?? null, pingMs: status?.pingMs ?? null, marketOpen: status?.marketOpen ?? null, offline: !status?.recent });
       })
       .catch(() => undefined);
     void poll();
     const interval = setInterval(poll, POLL_MS);
     return () => { stopped = true; clearInterval(interval); };
-  }, [marketApiUrl]);
+  }, [marketApiUrl, market]);
 
   const rows = [...mine, ...bots].sort((a, b) => b.at - a.at).slice(0, 40);
   const median = (list: readonly ErTxSample[], pick: (row: ErTxSample) => number | null) => {

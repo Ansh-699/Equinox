@@ -41,8 +41,15 @@ pub enum QuoteAction {
     Cancel(u128),
 }
 
+/// Share-count scale (percent) that rests about the same dollar depth as TSLA
+/// (~$376) at any price: 100 for TSLA-priced shares, down to 10 for dear ones.
+pub fn size_scale(index: i64) -> u64 {
+    (37_600_000i128 * 100 / i128::from(index.max(1))).clamp(10, 100) as u64
+}
+
 /// Post-only ladder around `index`, shifted against inventory so the maker mean-reverts.
 pub fn ladder(index: i64, inventory: i128, rng: &mut impl Rng) -> Vec<Quote> {
+    let scale = size_scale(index);
     let index = i128::from(index);
     let skew = index * inventory / 400_000;
     LADDER_BPS
@@ -50,7 +57,8 @@ pub fn ladder(index: i64, inventory: i128, rng: &mut impl Rng) -> Vec<Quote> {
         .enumerate()
         .flat_map(|(rung, bps)| {
             let offset = index * bps / 10_000;
-            let quantity = 2 + rung as u64 * 3 + rng.gen_range(0..4u64); // deeper rungs rest more size
+            let quantity = ((2 + rung as u64 * 3 + rng.gen_range(0..4u64)) * scale + 50) / 100; // deeper rungs rest more size
+            let quantity = quantity.max(1);
             [Side::Bid, Side::Ask].map(|side| Quote {
                 side,
                 rung,
@@ -136,6 +144,16 @@ mod tests {
     }
     fn as_resting(quotes: &[Quote]) -> Vec<RestingOrder> {
         quotes.iter().enumerate().map(|(i, q)| RestingOrder { key: i as u128 + 1, side: q.side, price: q.price, quantity: q.quantity, expires_at: NOW + 60 }).collect()
+    }
+
+    #[test]
+    fn dear_shares_rest_about_the_same_dollar_depth() {
+        assert_eq!(size_scale(37_600_000), 100);
+        let openai = 137_974_000; // $1,379.74
+        assert_eq!(size_scale(openai), 27);
+        let depth = |index: i64| ladder(index, 0, &mut fixed()).iter().map(|q| q.quantity as i128 * i128::from(index)).sum::<i128>();
+        let (tsla, dear) = (depth(37_600_000), depth(openai));
+        assert!((dear - tsla).abs() * 10 < tsla, "within 10%: {tsla} vs {dear}");
     }
 
     #[test]

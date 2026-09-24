@@ -23,5 +23,62 @@
   },
   "status": "devnet-lifecycle-verified",
   "writeEnabled": false,
-  "lookupTable": "51c66aXvU4Kt9wvgXFR71uMGr7oamLfgvDNyF82t6z7a"
+  "lookupTable": "51c66aXvU4Kt9wvgXFR71uMGr7oamLfgvDNyF82t6z7a",
+  "markets": [
+    {
+      "symbol": "TSLA-PERP",
+      "name": "Tesla",
+      "kind": "equity",
+      "core": "9Vea9MVZCzYFKNHaHMPET9fuXXjfof8mA2F75pbBDJyV",
+      "oracleSnapshot": "7g5Wz9NfxRzNJbQPvFFf8b8yf8JjRB6W4LnzwxzPi8JE",
+      "lookupTable": "51c66aXvU4Kt9wvgXFR71uMGr7oamLfgvDNyF82t6z7a",
+      "oracle": {
+        "kind": "pyth",
+        "symbol": "Equity.US.TSLA/USD",
+        "feedId": 1435
+      }
+    },
+    {
+      "symbol": "OPENAI-PERP",
+      "name": "OpenAI",
+      "kind": "pre-ipo",
+      "core": "2QtGrh5xcTTndFTxUD7hEShSQdfAhyT8Z4nPGyTF9VSj",
+      "oracleSnapshot": "HeyhqZ97zVPFVwWYG12F1qbDLyfsDLWhs3KhQxWJmgzj",
+      "lookupTable": "BXLJezEz63LbLd3UNcQsq8UrW9JwHmxjtvAGzeQVd3SB",
+      "oracle": {
+        "kind": "prestocks",
+        "token": "OPENAI",
+        "mint": "PreweJYECqtQwBtpxHL171nL2K6umo692gTm7Q3rpgF",
+        "feedId": 4000000001
+      }
+    },
+    {
+      "symbol": "SPACEX-PERP",
+      "name": "SpaceX",
+      "kind": "pre-ipo",
+      "core": "EgTMHNhRkqZYtQoGvhej5WJhoYympbPKEffWeqfdJwWJ",
+      "oracleSnapshot": "2PqWAy9aPJaU9iKWMkVHGCrQmJjKL7SXWeeYx38WwMMp",
+      "lookupTable": "1pcJQtjNt9gsNwNJGPXS5YZEyv3MGtcC2FyeLLCk4Nq",
+      "oracle": {
+        "kind": "prestocks",
+        "token": "SPACEX",
+        "mint": "PreANxuXjsy2pvisWWMNB6YaJNzr7681wJJr2rHsfTh",
+        "feedId": 4000000002
+      }
+    },
+    {
+      "symbol": "ANTHROPIC-PERP",
+      "name": "Anthropic",
+      "kind": "pre-ipo",
+      "core": "5Z4DPNgmqkkS4zyCtMHPjPhoKuzX8KLtbkZtxd6YRv6x",
+      "oracleSnapshot": "6FEtyijnU6QPGT6GW2sCfiVMUGjorENFGedACKT342D8",
+      "lookupTable": "5mJWSVSdhq4JkbiRTDrQ8ehrzYWJYvAwzjaJ5HrEnwu8",
+      "oracle": {
+        "kind": "prestocks",
+        "token": "ANTHROPIC",
+        "mint": "Pren1FvFX6J3E4kXhJuCiAD5aDmGEb7qJRncwA8Lkhw",
+        "feedId": 4000000003
+      }
+    }
+  ]
 }

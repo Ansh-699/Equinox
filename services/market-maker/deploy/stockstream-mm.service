@@ -17,6 +17,8 @@ ProtectHome=true
 PrivateTmp=true
 PrivateDevices=true
 ReadOnlyPaths=/etc/stockstream
+# Candle history of reporter-priced markets (/var/lib/stockstream).
+StateDirectory=stockstream
 
 [Install]
 WantedBy=multi-user.target
