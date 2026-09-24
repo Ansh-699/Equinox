@@ -7,18 +7,6 @@
    stay in step. */
 @custom-variant dark (&:is(.dark *));
 
-.brand-mark {
-  display: inline-block;
-  flex: none;
-  border-radius: 50%;
-  background: url("/brand/equinox-light.png") center / 146% no-repeat;
-}
-
-.dark .brand-mark,
-.brand-mark-on-dark {
-  background-image: url("/brand/equinox-dark.png");
-}
-
 @theme inline {
   --font-sans: var(--font-ui);
   --font-mono: var(--font-data);
@@ -454,5 +442,3 @@ input[type="number"] {
 /* Connected wallet: a quiet chip, not a call to action. */
 .wallet-button.wallet-chip { background: var(--t-surface); border-color: var(--t-border-strong); color: var(--t-text); font-weight: 500; }
 .wallet-button.wallet-chip:hover { background: var(--t-surface-3); }
-.account-pill { gap: 10px; padding: 0 10px 0 12px; }
-.account-pill-active { border-color: var(--t-text); box-shadow: inset 0 0 0 1px var(--t-text); }

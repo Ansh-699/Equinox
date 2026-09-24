@@ -61,7 +61,7 @@ test("switching the active wallet clears an authorized session immediately", asy
 
   // The session belonged to wallet A -- switching to wallet B must show "no
   // session" immediately, not the old wallet's authorized session.
-  const sessionStatus = page.getByTestId("session-status");
+  const sessionStatus = page.locator(".session-panel", { hasText: "Trading session" }).locator(".panel-title span");
   await expect(sessionStatus).toHaveText("none");
 
   // And trading with the new wallet must go through a fresh authorization,

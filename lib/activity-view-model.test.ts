@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toActivityRow, ACTIVITY_DETAIL_UNAVAILABLE, humanizeEventKind, matchesActivityFilter } from "./activity-view-model";
+import { toActivityRow, ACTIVITY_DETAIL_UNAVAILABLE } from "./activity-view-model";
 
 describe("toActivityRow", () => {
   it("carries the fine-grained decoded kind name through as 'detail' when present", () => {
@@ -17,25 +17,5 @@ describe("toActivityRow", () => {
   it("is honest about missing detail even when payload exists but has no kind field", () => {
     const row = toActivityRow({ id: "3", kind: "fill", observedAt: 300, payload: {} });
     expect(row.detail).toBe(ACTIVITY_DETAIL_UNAVAILABLE);
-  });
-});
-
-describe("humanizeEventKind", () => {
-  it("splits a decoded PascalCase kind into a sentence", () => {
-    expect(humanizeEventKind("OrderPartiallyFilled")).toBe("Order partially filled");
-    expect(humanizeEventKind("MarketPaused")).toBe("Market paused");
-  });
-
-  it("leaves the honest placeholders untouched", () => {
-    expect(humanizeEventKind(ACTIVITY_DETAIL_UNAVAILABLE)).toBe(ACTIVITY_DETAIL_UNAVAILABLE);
-    expect(humanizeEventKind("Unknown(999)")).toBe("Unknown(999)");
-  });
-});
-
-describe("matchesActivityFilter", () => {
-  it("matches every category for 'all' and only the mapped ones otherwise", () => {
-    expect(matchesActivityFilter("oracle", "all")).toBe(true);
-    expect(matchesActivityFilter("fill", "trades")).toBe(true);
-    expect(matchesActivityFilter("book", "trades")).toBe(false);
   });
 });

@@ -10,10 +10,7 @@ const plexMono = IBM_Plex_Mono({ variable: "--font-plex-mono", weight: ["400", "
 export const metadata: Metadata = {
   title: "Equinox",
   description: "Perpetual futures on US stocks: matched in a MagicBlock Ephemeral Rollup, priced by Pyth, settled on Solana.",
-  icons: {
-    icon: "/equinox-favicon.png",
-    apple: "/equinox-favicon.png",
-  },
+  icons: { icon: "/equinox-favicon.png", apple: "/equinox-favicon.png" }
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
