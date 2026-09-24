@@ -38,7 +38,7 @@ const NAV = [
 const ICON_LINK = "hidden h-8 w-8 items-center justify-center rounded text-[var(--t-text-2)] transition-colors hover:bg-[var(--t-surface-3)] hover:text-[var(--t-text)] sm:inline-flex";
 
 /** Terminal top bar (SlipStream TerminalNav): identity and sections on the
- * left; utilities, theme and wallet on the right. 52px, flat. */
+ * left; utilities, theme and wallet on the right. */
 export function TopBar({ active, auth }: { active: ActiveSection; auth: AppAuth }) {
   // Sign in / Choose wallet / address+Log out are mutually exclusive: activating
   // one unmounts it. Move focus to whichever replaces it so keyboard users are
@@ -61,15 +61,15 @@ export function TopBar({ active, auth }: { active: ActiveSection; auth: AppAuth 
   }, [branch]);
 
   return (
-    <header className="relative flex h-[52px] shrink-0 items-center border-b border-[var(--t-border)] bg-[var(--t-bg)] px-4">
+    <header className="relative flex h-[60px] shrink-0 items-center border-b border-[var(--t-border)] bg-[var(--t-bg)] px-4 sm:h-[68px] sm:px-6">
       <a href="#main-content" className="skip-link">Skip to main content</a>
-      <Link href="/" className="flex items-center gap-2.5" aria-label="StockStream home">
-        <img src="/favicon.svg" alt="" className="h-6 w-6 rounded" />
-        <span className="text-[15px] font-semibold tracking-tight text-[var(--t-text)]">StockStream</span>
+      <Link href="/" className="flex shrink-0 items-center gap-2.5" aria-label="StockStream home">
+        <img src="/favicon.svg" alt="" className="h-7 w-7 rounded sm:h-8 sm:w-8" />
+        <span className="text-[19px] font-semibold tracking-[-0.035em] text-[var(--t-text)] sm:text-[25px]">StockStream</span>
       </Link>
-      <span className="ml-3 hidden rounded bg-[var(--t-surface-3)] px-2 py-0.5 text-[10px] font-medium text-[var(--t-text-2)] sm:inline">Devnet</span>
+      <span className="ml-3 hidden rounded bg-[var(--t-surface-3)] px-2 py-0.5 text-[10px] font-medium text-[var(--t-text-2)] xl:inline">Devnet</span>
 
-      <nav aria-label="Primary navigation" className="ml-6 hidden h-full items-stretch gap-5 md:flex">
+      <nav aria-label="Primary navigation" className="slim-scroll ml-6 hidden h-full min-w-0 flex-1 items-stretch gap-5 overflow-x-auto md:flex">
         {NAV.map((item) => (
           <Link
             key={item.id}
@@ -86,7 +86,7 @@ export function TopBar({ active, auth }: { active: ActiveSection; auth: AppAuth 
         ))}
       </nav>
 
-      <div className="ml-auto flex items-center gap-1">
+      <div className="ml-auto flex shrink-0 items-center gap-1">
         <a href={`https://explorer.solana.com/address/${DEMO_PROGRAM_ID}?cluster=devnet`} target="_blank" rel="noopener noreferrer" className={ICON_LINK} aria-label="Program on Solana Explorer" title="Program on Explorer">
           <Compass className="h-4 w-4" strokeWidth={1.75} />
         </a>
@@ -96,13 +96,13 @@ export function TopBar({ active, auth }: { active: ActiveSection; auth: AppAuth 
         <ThemeToggle />
         <div className="ml-2 flex items-center gap-2">
           {auth.walletAddress ? (
-            <button ref={setPrimaryActionRef} className="wallet-button wallet-chip" onClick={() => setDrawer(true)} aria-label={`Account ${auth.walletAddress.slice(0, 4)}...${auth.walletAddress.slice(-4)}`}>
+            <button ref={setPrimaryActionRef} className="wallet-button wallet-chip topbar-wallet" onClick={() => setDrawer(true)} aria-label={`Account ${auth.walletAddress.slice(0, 4)}...${auth.walletAddress.slice(-4)}`}>
               {walletIcon ? <img src={walletIcon} alt="" className="h-[18px] w-[18px] rounded-[5px]" /> : <WalletCards size={15} />}
               <span className="font-mono">{auth.walletAddress.slice(0, 4)}...{auth.walletAddress.slice(-4)}</span>
               <ChevronDown size={14} className="opacity-60" />
             </button>
           ) : (
-            <button ref={setPrimaryActionRef} className="wallet-button" onClick={() => setDrawer(true)}>
+            <button ref={setPrimaryActionRef} className="wallet-button topbar-wallet" onClick={() => setDrawer(true)}>
               <WalletCards size={15} />
               {auth.wallets.length > 1 ? `Choose wallet (${auth.wallets.length})` : auth.wallets.length === 1 ? "Finish sign-in" : "Connect wallet"}
             </button>

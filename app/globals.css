@@ -366,6 +366,8 @@ input[type="number"] {
 .shell > :not(header) { max-width: 1480px; margin-left: auto; margin-right: auto; padding-left: 20px; padding-right: 20px; }
 .wallet-button, .lifecycle-action, .quiet-action { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid var(--t-up-3); background: var(--t-up-3); color: var(--t-on-fill); padding: 6px 12px; height: 32px; border-radius: 6px; font-weight: 600; font-size: 12.5px; text-decoration: none; white-space: nowrap; }
 .wallet-button:hover, .lifecycle-action:hover { background: var(--t-up-2); }
+.topbar-wallet { height: 36px; padding: 0 14px; border-color: var(--t-border-strong); background: var(--t-bg); color: var(--t-text); font-weight: 500; }
+.topbar-wallet:hover { background: var(--t-surface-3); }
 .quiet-action, .quiet-action:hover { background: var(--t-surface); border-color: var(--t-border-strong); color: var(--t-text); }
 .quiet-action:hover { background: var(--t-surface-3); }
 .demo-banner { display: flex; gap: 10px; align-items: baseline; margin: 12px 0 0; padding: 10px 14px; border: 1px solid var(--t-border); border-radius: 6px; background: var(--t-surface); color: var(--t-text-2); font-size: 12px; }

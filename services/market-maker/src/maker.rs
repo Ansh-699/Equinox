@@ -75,6 +75,8 @@ pub struct ErTx {
     /// Send → the market update carrying this transaction reached subscribers
     /// (what everyone watching the book sees).
     pub visible_ms: Option<u64>,
+    /// Send → the rollup produced the block containing it (the next slot started).
+    pub block_ms: Option<u64>,
     pub ok: bool,
     pub at: u64,
     pub signature: String,
@@ -142,6 +144,7 @@ pub struct Maker {
     /// Set by the keeper while a commit snapshot freezes trading.
     pub paused: Arc<std::sync::atomic::AtomicBool>,
     feed: Arc<crate::feed::SlotFeed>,
+    slots: Arc<crate::feed::SlotFeed>,
     /// Every completed transaction, streamed to browsers.
     live: tokio::sync::broadcast::Sender<ErTx>,
 }
@@ -191,6 +194,7 @@ impl Maker {
             status,
             paused: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             feed,
+            slots: crate::feed::SlotFeed::spawn_slots(rpc_url),
             live,
         })
     }
@@ -265,6 +269,11 @@ impl Maker {
             Some((_, true, slot)) if slot > 0 => self.feed.visible(slot, started, Duration::from_secs(1)).await.map(|at| at.saturating_duration_since(started).as_millis() as u64),
             _ => None,
         };
+        // On chain: the block holding this slot is produced once the next slot starts.
+        let block_ms = match processed {
+            Some((_, true, slot)) if slot > 0 => self.slots.visible(slot + 1, started, Duration::from_secs(1)).await.map(|at| at.saturating_duration_since(started).as_millis() as u64),
+            _ => None,
+        };
         let tx = ErTx {
             market: self.market.symbol.clone(),
             kind,
@@ -273,6 +282,7 @@ impl Maker {
             er_ms: ms.zip(net_ms).map(|(total, network)| total.saturating_sub(network)),
             send_ms,
             visible_ms,
+            block_ms,
             ok: processed.is_some_and(|(_, ok, _)| ok),
             at,
             signature,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { openWalletDrawer, TopBar } from "@/components/layout/top-bar";
 import { ExecutionStatusBanner, ProtocolStatusStrip } from "@/components/layout/status-strip";
 import { useAppAuth } from "@/components/app-providers";
@@ -60,6 +60,9 @@ interface MarketEvent { kind: string; sequence?: number; payload: { kind?: strin
 export function TradingTerminal() {
   const auth = useAppAuth();
   const [ticket, setTicket] = useState<Ticket>(DEFAULT_TICKET);
+  const pickBookPrice = useCallback((price: number) => {
+    setTicket((current) => ({ ...current, kind: "limit", price: price.toFixed(2) }));
+  }, []);
   // Wallet orders never block the button: several can be in flight at once.
   const [ordersInFlight, setOrdersInFlight] = useState(0);
   const orderPending = ordersInFlight > 0;
@@ -535,7 +538,7 @@ export function TradingTerminal() {
 
         {/* Depth. */}
         <div className="tk-col order-3 flex h-[560px] w-full shrink-0 flex-col xl:order-none xl:h-auto xl:w-[320px]">
-          <OrderBookDisplay book={book} symbol={marketSymbol} marketClosed={marketClosed} onPickPrice={(price) => setTicket((t) => ({ ...t, kind: "limit", price: price.toFixed(2) }))} />
+          <OrderBookDisplay book={book} symbol={marketSymbol} marketClosed={marketClosed} onPickPrice={pickBookPrice} />
         </div>
 
         {/* Entry, wallet, and system truth. */}

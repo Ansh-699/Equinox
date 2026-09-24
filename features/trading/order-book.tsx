@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown, ArrowUp } from "lucide-react";
 import type { V3Book } from "./use-v3-book";
 import { Spinner } from "@/components/ui/spinner";
 
@@ -45,7 +46,6 @@ export function OrderBookDisplay({ book, symbol, onPickPrice, marketClosed = fal
     const buyPct = bidTotal + askTotal > 0 ? (bidTotal / (bidTotal + askTotal)) * 100 : 50;
     return { askRows, bidRows, maxCum: Math.max(askTotal, bidTotal, 0.0001), mid, spread, buyPct };
   }, [bids, asks]);
-  const levelStamps = useLevelStamps(askRows, bidRows);
   const empty = bids.length === 0 && asks.length === 0;
   const sellPct = 100 - buyPct;
 
@@ -98,11 +98,11 @@ export function OrderBookDisplay({ book, symbol, onPickPrice, marketClosed = fal
             ) : (
               <>
                 <div className="slim-scroll flex min-h-0 flex-1 flex-col-reverse overflow-y-auto">
-                  {askRows.map((l) => <Row key={`a-${l.price}`} {...l} maxCum={maxCum} side="ask" stamp={levelStamps.get(`a:${l.price}`) ?? 0} onPick={onPickPrice} />)}
+                  {askRows.map((l, slot) => <Row key={`a-${slot}`} {...l} pct={Math.min(100, (l.total / maxCum) * 100)} side="ask" onPick={onPickPrice} />)}
                 </div>
                 <MidRow mid={mid} spread={spread} />
                 <div className="slim-scroll flex min-h-0 flex-1 flex-col justify-start overflow-y-auto">
-                  {bidRows.map((l) => <Row key={`b-${l.price}`} {...l} maxCum={maxCum} side="bid" stamp={levelStamps.get(`b:${l.price}`) ?? 0} onPick={onPickPrice} />)}
+                  {bidRows.map((l, slot) => <Row key={`b-${slot}`} {...l} pct={Math.min(100, (l.total / maxCum) * 100)} side="bid" onPick={onPickPrice} />)}
                 </div>
               </>
             )}
@@ -150,59 +150,52 @@ export function OrderBookDisplay({ book, symbol, onPickPrice, marketClosed = fal
   );
 }
 
-function useFlash<T>(deps: T, tint: string, durationMs = 420, flashOnFirst = false) {
-  const ref = useRef<HTMLDivElement>(null);
-  const prev = useRef<string | null>(null);
-  const sig = JSON.stringify(deps);
+const BOOK_EASE = "cubic-bezier(0.16, 1, 0.3, 1)";
+
+function tintNumber(element: HTMLElement | null, direction: "up" | "down", duration = 180) {
+  if (!element || typeof element.animate !== "function") return;
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+  element.getAnimations().forEach((animation) => animation.cancel());
+  element.animate(
+    [{ color: direction === "up" ? "var(--t-up)" : "var(--t-down)" }, { color: getComputedStyle(element).color }],
+    { duration, easing: BOOK_EASE }
+  );
+}
+
+function useNumericTint(value: number, display: string) {
+  const element = useRef<HTMLSpanElement>(null);
+  const previous = useRef({ value, display });
   useEffect(() => {
-    const first = prev.current === null;
-    const changed = first ? flashOnFirst : prev.current !== sig;
-    prev.current = sig;
-    if (!changed) return;
-    const el = ref.current;
-    if (!el || typeof el.animate !== "function") return;
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
-    el.animate(
-      [{ backgroundColor: tint }, { backgroundColor: "transparent" }],
-      { duration: durationMs, easing: "cubic-bezier(0.22, 1, 0.36, 1)" }
-    );
-    // flashOnFirst only matters on the first run by construction.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sig, tint, durationMs]);
-  return ref;
+    const before = previous.current;
+    previous.current = { value, display };
+    if (display !== before.display) tintNumber(element.current, value > before.value ? "up" : "down");
+  }, [value, display]);
+  return element;
 }
 
 function MidRow({ mid, spread }: { mid: number | null; spread: number | null }) {
   const [shown, setShown] = useState<"up" | "down" | null>(null);
   const prevMid = useRef<number | null>(null);
+  const priceRef = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     const p = prevMid.current;
     prevMid.current = mid;
     if (p === null || mid === null || mid === p) return;
-    setShown(mid > p ? "up" : "down");
+    const direction = mid > p ? "up" : "down";
+    setShown(direction);
+    tintNumber(priceRef.current, direction, 200);
+    const timer = window.setTimeout(() => setShown(null), 200);
+    return () => window.clearTimeout(timer);
   }, [mid]);
-  const flashRef = useFlash(
-    [mid, spread],
-    shown === "down" ? "rgba(239,68,68,0.26)" : "rgba(34,197,94,0.26)",
-    560
-  );
 
   return (
     <div className="relative h-[34px] shrink-0 flex items-baseline gap-2 px-3 border-y border-[var(--t-border)]">
-      <div ref={flashRef} aria-hidden className="absolute inset-0 pointer-events-none" />
-      <span className="relative text-[15px] font-bold tnum text-[var(--t-text)] leading-[34px]">
+      <span ref={priceRef} className="relative text-[15px] font-bold tnum text-[var(--t-text)] leading-[34px]">
         {mid !== null ? mid.toFixed(2) : "—"}
       </span>
-      {shown && mid !== null && (
-        <span
-          aria-hidden
-          className={`text-[11px] leading-[34px] ${
-            shown === "up" ? "text-[var(--t-up)]" : "text-[var(--t-down)]"
-          }`}
-        >
-          {shown === "up" ? "▲" : "▼"}
-        </span>
-      )}
+      <span aria-hidden className={`inline-flex w-3 shrink-0 self-center ${shown === "up" ? "text-[var(--t-up)]" : "text-[var(--t-down)]"} ${shown && mid !== null ? "opacity-100" : "opacity-0"}`}>
+        {shown === "down" ? <ArrowDown size={12} strokeWidth={2} /> : <ArrowUp size={12} strokeWidth={2} />}
+      </span>
       <span className="text-[11px] text-[var(--t-text-3)]">mid</span>
       <span className="ml-auto text-[11px] text-[var(--t-text-2)] tnum">
         {spread !== null ? `spread ${spread.toFixed(2)}` : ""}
@@ -211,67 +204,36 @@ function MidRow({ mid, spread }: { mid: number | null; spread: number | null }) 
   );
 }
 
-function useLevelStamps(
-  askRows: { price: number; size: number }[],
-  bidRows: { price: number; size: number }[]
-): Map<string, number> {
-  const [stamps, setStamps] = useState<Map<string, number>>(() => new Map());
-  const prevSizes = useRef<Map<string, number> | null>(null);
-  const seq = useRef(0);
-
-  useEffect(() => {
-    const now = new Map<string, number>();
-    for (const l of askRows) now.set(`a:${l.price}`, l.size);
-    for (const l of bidRows) now.set(`b:${l.price}`, l.size);
-    const prev = prevSizes.current;
-    prevSizes.current = now;
-    if (prev === null) return;
-
-    let any = false;
-    for (const [k, size] of now) {
-      const before = prev.get(k);
-      if (before === undefined || before !== size) { any = true; break; }
-    }
-    if (!any) return;
-
-    const stamp = (seq.current += 1);
-    setStamps((prevStamps) => {
-      const next = new Map<string, number>();
-      for (const [k, size] of now) {
-        const before = prev.get(k);
-        next.set(k, before === undefined || before !== size ? stamp : prevStamps.get(k) ?? 0);
-      }
-      return next;
-    });
-  }, [askRows, bidRows]);
-
-  return stamps;
-}
-
-function Row({
+const Row = memo(function Row({
   price,
   size,
   total,
-  maxCum,
+  pct,
   side,
-  stamp,
   onPick,
 }: {
   price: number;
   size: number;
   total: number;
-  maxCum: number;
+  pct: number;
   side: "bid" | "ask";
-  stamp: number;
   onPick?: (price: number) => void;
 }) {
-  const pct = Math.min(100, (total / maxCum) * 100);
-  const flashRef = useFlash(
-    [stamp],
-    side === "bid" ? "rgba(34,197,94,0.30)" : "rgba(239,68,68,0.30)",
-    520,
-    stamp > 0
-  );
+  const priceText = price.toFixed(2);
+  const sizeText = fmtAmt(size);
+  const totalText = fmtAmt(total);
+  const priceRef = useNumericTint(price, priceText);
+  const sizeRef = useNumericTint(size, sizeText);
+  const totalRef = useNumericTint(total, totalText);
+  const previousTotal = useRef(total);
+  const depthRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const depthChanged = previousTotal.current !== total;
+    previousTotal.current = total;
+    if (!depthChanged || !depthRef.current || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    depthRef.current.getAnimations().forEach((animation) => animation.cancel());
+    depthRef.current.animate([{ opacity: 0.8 }, { opacity: 1 }], { duration: 160, easing: BOOK_EASE });
+  }, [total]);
   return (
     <div
       className={`relative grid h-5 shrink-0 grid-cols-3 items-center px-3 text-[11.5px] ${onPick ? "cursor-pointer hover:bg-[var(--t-surface-3)]" : ""}`}
@@ -279,22 +241,22 @@ function Row({
       title={onPick ? "Use this price" : undefined}
     >
       <div
+        ref={depthRef}
         aria-hidden
-        className="absolute inset-y-0 right-0 motion-safe:transition-[width] motion-safe:duration-[260ms] motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]"
+        className="absolute inset-y-0 right-0 motion-safe:transition-[width] motion-safe:duration-[160ms] motion-safe:ease-[cubic-bezier(0.16,1,0.3,1)]"
         style={{
           width: `${pct}%`,
           backgroundColor: side === "bid" ? "rgba(34,197,94,0.10)" : "rgba(239,68,68,0.10)",
         }}
       />
-      <div ref={flashRef} aria-hidden className="absolute inset-0 pointer-events-none" />
-      <span className={`relative tnum ${side === "bid" ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
-        {price.toFixed(2)}
+      <span ref={priceRef} className={`relative tnum ${side === "bid" ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
+        {priceText}
       </span>
-      <span className="relative text-right tnum text-[var(--t-text)]">{fmtAmt(size)}</span>
-      <span className="relative text-right tnum text-[var(--t-text-2)]">{fmtAmt(total)}</span>
+      <span ref={sizeRef} className="relative text-right tnum text-[var(--t-text)]">{sizeText}</span>
+      <span ref={totalRef} className="relative text-right tnum text-[var(--t-text-2)]">{totalText}</span>
     </div>
   );
-}
+});
 
 function fmtAmt(n: number): string {
   return n.toLocaleString("en-US", { maximumFractionDigits: 0 });

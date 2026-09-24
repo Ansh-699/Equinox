@@ -24,6 +24,16 @@ pub struct SlotFeed {
 impl SlotFeed {
     /// Subscribes (and resubscribes after any drop) to `account` on the rollup.
     pub fn spawn(rpc_url: &str, account: Pubkey) -> Arc<Self> {
+        Self::spawn_with(rpc_url, json!({ "jsonrpc": "2.0", "id": 1, "method": "accountSubscribe", "params": [b58(&account), { "encoding": "base64", "commitment": "processed" }] }))
+    }
+
+    /// The rollup's slot clock: each new slot as it starts. Slot S+1 starting
+    /// means the block for slot S has been produced.
+    pub fn spawn_slots(rpc_url: &str) -> Arc<Self> {
+        Self::spawn_with(rpc_url, json!({ "jsonrpc": "2.0", "id": 1, "method": "slotSubscribe" }))
+    }
+
+    fn spawn_with(rpc_url: &str, subscribe: Value) -> Arc<Self> {
         let feed = Arc::new(Self::default());
         let ws_url = rpc_url.replacen("https://", "wss://", 1).replacen("http://", "ws://", 1);
         let task = feed.clone();
@@ -31,13 +41,14 @@ impl SlotFeed {
             loop {
                 if let Ok((stream, _)) = tokio_tungstenite::connect_async_with_config(ws_url.as_str(), None, true).await {
                     let (mut sink, mut source) = stream.split();
-                    let subscribe = json!({ "jsonrpc": "2.0", "id": 1, "method": "accountSubscribe", "params": [b58(&account), { "encoding": "base64", "commitment": "processed" }] });
                     if sink.send(Message::Text(subscribe.to_string().into())).await.is_ok() {
                         while let Some(Ok(message)) = source.next().await {
                             let Message::Text(text) = message else { continue };
                             let arrived = Instant::now();
                             let Ok(body) = serde_json::from_str::<Value>(&text) else { continue };
-                            if let Some(slot) = body["params"]["result"]["context"]["slot"].as_u64() {
+                            // accountNotification: result.context.slot; slotNotification: result.slot.
+                            let result = &body["params"]["result"];
+                            if let Some(slot) = result["context"]["slot"].as_u64().or_else(|| result["slot"].as_u64()) {
                                 task.record(arrived, slot).await;
                             }
                         }
