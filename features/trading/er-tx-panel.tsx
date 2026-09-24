@@ -5,7 +5,9 @@ import deployment from "@/config/stockstream-deployment.json";
 import { myErTxs, onErTx, type ErTxSample } from "@/lib/er-latency";
 import { Spinner } from "@/components/ui/spinner";
 
-const POLL_MS = 1_000;
+/** Header facts and a backfill; the rows themselves arrive over the live stream. */
+const POLL_MS = 5_000;
+const MAX_ROWS = 60;
 /** The market-maker VM's own HTTPS status URL (services/market-maker). Polled directly so a
  * tab left open does not spend Worker requests; the Worker's proxy is the fallback. */
 const MM_STATUS_URL = process.env.NEXT_PUBLIC_MM_STATUS_URL || undefined;
@@ -20,6 +22,23 @@ export function ErTxPanel({ marketApiUrl, market }: { marketApiUrl: string | und
   const [bots, setBots] = useState<ErTxSample[]>([]);
   const [bot, setBot] = useState<{ colo: string | null; pingMs: number | null; marketOpen: boolean | null; offline: boolean } | null>(null);
   const mine = useSyncExternalStore(onErTx, myErTxs, () => EMPTY);
+  // This viewer's own round trip to the rollup (median of the last 5), measured live.
+  const [viewerRtt, setViewerRtt] = useState<number | null>(null);
+  useEffect(() => {
+    const samples: number[] = [];
+    let stopped = false;
+    const ping = async () => {
+      const started = performance.now();
+      const ok = await fetch(deployment.magicBlock.rpc, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getHealth" }) }).then((r) => r.ok).catch(() => false);
+      if (!ok || stopped) return;
+      samples.push(performance.now() - started);
+      if (samples.length > 5) samples.shift();
+      setViewerRtt(Math.round([...samples].sort((a, b) => a - b)[Math.floor(samples.length / 2)]));
+    };
+    void ping();
+    const timer = setInterval(() => void ping(), 3_000);
+    return () => { stopped = true; clearInterval(timer); };
+  }, []);
 
   useEffect(() => {
     if (!marketApiUrl && !MM_STATUS_URL) return;
@@ -30,13 +49,25 @@ export function ErTxPanel({ marketApiUrl, market }: { marketApiUrl: string | und
       .then((status: { recent?: ErTxSample[]; colo?: string | null; pingMs?: number | null; marketOpen?: boolean | null } | null) => {
         if (stopped) return;
         // The service makes several markets: show this one's (rows without a market are TSLA's, from older builds).
-        setBots((status?.recent ?? []).filter((row) => !market || (row.market ?? "TSLA-PERP") === market));
+        // Backfill without dropping rows the stream already delivered.
+        const polled = (status?.recent ?? []).filter((row) => !market || (row.market ?? "TSLA-PERP") === market);
+        setBots((current) => {
+          const known = new Set(current.map((row) => row.signature));
+          return [...current, ...polled.filter((row) => !known.has(row.signature))].sort((a, b) => b.at - a.at).slice(0, MAX_ROWS);
+        });
         setBot({ colo: status?.colo ?? null, pingMs: status?.pingMs ?? null, marketOpen: status?.marketOpen ?? null, offline: !status?.recent });
       })
       .catch(() => undefined);
     void poll();
     const interval = setInterval(poll, POLL_MS);
-    return () => { stopped = true; clearInterval(interval); };
+    // Live: each bot transaction arrives the moment the service sees it confirmed (server-sent events).
+    const stream = MM_STATUS_URL ? new EventSource(MM_STATUS_URL.replace(/\/v1\/mm\/status$/, "/v1/mm/stream")) : null;
+    stream?.addEventListener("tx", (event) => {
+      const row = JSON.parse((event as MessageEvent<string>).data) as ErTxSample;
+      if (market && (row.market ?? "TSLA-PERP") !== market) return;
+      setBots((current) => (current.some((r) => r.signature === row.signature) ? current : [row, ...current].slice(0, MAX_ROWS)));
+    });
+    return () => { stopped = true; clearInterval(interval); stream?.close(); };
   }, [marketApiUrl, market]);
 
   const rows = [...mine, ...bots].sort((a, b) => b.at - a.at).slice(0, 40);
@@ -55,11 +86,14 @@ export function ErTxPanel({ marketApiUrl, market }: { marketApiUrl: string | und
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--t-up)] opacity-60" />
           <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--t-up)]" />
         </span>
-        <span className="text-[12px] font-medium text-[var(--t-text)]">MagicBlock ER · live txns</span>
-        <span className="tnum ml-auto text-[11px] text-[var(--t-text-3)]" title="Send → the MagicBlock rollup has executed it (not Solana L1 settlement), measured by whoever sent it">{myTrip !== null ? <>You p50 <span className="font-medium text-[var(--t-up)]">{myTrip} ms</span></> : <>Bot p50 <span className="font-medium text-[var(--t-up)]">{trip ?? "—"} ms</span></>}</span>
+        <span className="whitespace-nowrap text-[12px] font-medium text-[var(--t-text)]">MagicBlock ER · live</span>
+        <span className="tnum ml-auto whitespace-nowrap text-[11px] text-[var(--t-text-3)]" title="Send → the MagicBlock rollup has executed it (not Solana L1 settlement), measured by whoever sent it">{myTrip !== null
+          ? <>You p50 <span className="font-medium text-[var(--t-up)]">{myTrip} ms</span></>
+          : <>From you ≈ <span className="font-medium text-[var(--t-up)]">{viewerRtt === null ? "—" : `${viewerRtt + (trip ?? 3)} ms`}</span></>}
+          <span className="ml-2">rollup {trip ?? "—"} ms</span></span>
       </div>
       <div className="tnum flex flex-wrap gap-x-3 border-b border-[var(--t-surface-2)] px-3 py-1 text-[10.5px] text-[var(--t-text-3)]">
-        <span>Rollup confirmation time, as seen by the sender: send → MagicBlock&apos;s sequencer (Singapore) has executed it. Not Solana L1: the rollup settles to Solana at each commit (every 30 min). The bot runs {bot?.pingMs ?? "—"} ms from the rollup ({bot?.colo ?? "…"}); {myTrip !== null ? "your rows add your internet distance" : "a user's time adds their internet distance"}.</span>
+        <span>Rows: bot orders live from Singapore, 2 ms from MagicBlock&apos;s rollup: send → executed by the sequencer. &ldquo;From you&rdquo; = your measured round trip to the rollup + that execution: what your own order takes. Solana L1 settlement follows at each commit (every 30 min).</span>
       </div>
       <div className="slim-scroll h-[212px] overflow-auto">
         {rows.length === 0 ? (

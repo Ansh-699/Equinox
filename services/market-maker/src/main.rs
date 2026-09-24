@@ -21,6 +21,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use axum::extract::{Path, Query};
+use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::{http::header, response::IntoResponse, routing::get, Json, Router};
 use stockstream_market_maker::candles::PriceHistory;
 use serde_json::Value;
@@ -83,6 +84,8 @@ async fn main() -> Result<()> {
     let tick = Duration::from_millis(env("MM_TICK_MS").and_then(|v| v.parse().ok()).unwrap_or(400));
 
     let state = Arc::new(Mutex::new(Status { colo: env("MM_REGION"), ..Status::default() }));
+    // Every completed transaction, as it completes, for the browsers' live panel.
+    let (live, _) = tokio::sync::broadcast::channel::<stockstream_market_maker::maker::ErTx>(512);
     let l1_url = env("SOLANA_RPC_URL").unwrap_or_else(|| "https://api.devnet.solana.com".into());
     let send_url = env("SOLANA_SEND_URL").unwrap_or_else(|| "https://api.devnet.solana.com".into());
     let mut reporters = 0u64;
@@ -92,7 +95,7 @@ async fn main() -> Result<()> {
     let history = Arc::new(PriceHistory::open(Some(std::path::PathBuf::from(env("MM_DATA_DIR").unwrap_or_else(|| "/var/lib/stockstream".into())).join("candles"))));
     for (market, token) in markets {
         // A market whose bots have no seat yet still gets its reporter and keeper.
-        let maker = match Maker::new(&rpc_url, market_api.clone(), market.clone(), keypair("MM_MAKER_KEYPAIR")?, keypair("MM_TAKER_KEYPAIR")?, state.clone()).await {
+        let maker = match Maker::new(&rpc_url, market_api.clone(), market.clone(), keypair("MM_MAKER_KEYPAIR")?, keypair("MM_TAKER_KEYPAIR")?, state.clone(), live.clone()).await {
             Ok(maker) => {
                 let maker = Arc::new(maker);
                 let (maker_seat, taker_seat) = maker.seats();
@@ -123,6 +126,25 @@ async fn main() -> Result<()> {
         .route("/v1/mm/status", get({ let state = state.clone(); move || status(state.clone()) }))
         .route("/status", get({ let state = state.clone(); move || status(state.clone()) }))
         .route("/healthz", get(|| async { "ok" }))
+        // Server-sent events: one `tx` event per completed transaction, the moment it completes.
+        .route("/v1/mm/stream", get({
+            let live = live.clone();
+            move || {
+                let receiver = live.subscribe();
+                async move {
+                    let events = futures_util::stream::unfold(receiver, |mut receiver| async move {
+                        loop {
+                            match receiver.recv().await {
+                                Ok(tx) => return Some((Ok::<_, std::convert::Infallible>(Event::default().event("tx").json_data(&tx).unwrap_or_default()), receiver)),
+                                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                                Err(_) => return None,
+                            }
+                        }
+                    });
+                    ([(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*"), (header::CACHE_CONTROL, "no-store")], Sse::new(events).keep_alive(KeepAlive::default()))
+                }
+            }
+        }))
         // Candles for reporter-priced markets, in the market API's shape.
         .route("/v1/markets/{symbol}/candles", get({
             let history = history.clone();

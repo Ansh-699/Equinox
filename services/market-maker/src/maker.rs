@@ -72,6 +72,9 @@ pub struct ErTx {
     pub er_ms: Option<u64>,
     /// How long the sendTransaction HTTP call took to return.
     pub send_ms: Option<u64>,
+    /// Send → the market update carrying this transaction reached subscribers
+    /// (what everyone watching the book sees).
+    pub visible_ms: Option<u64>,
     pub ok: bool,
     pub at: u64,
     pub signature: String,
@@ -138,6 +141,9 @@ pub struct Maker {
     pub status: Arc<Mutex<Status>>,
     /// Set by the keeper while a commit snapshot freezes trading.
     pub paused: Arc<std::sync::atomic::AtomicBool>,
+    feed: Arc<crate::feed::SlotFeed>,
+    /// Every completed transaction, streamed to browsers.
+    live: tokio::sync::broadcast::Sender<ErTx>,
 }
 
 pub fn now_ms() -> u64 {
@@ -145,7 +151,7 @@ pub fn now_ms() -> u64 {
 }
 
 impl Maker {
-    pub async fn new(rpc_url: &str, market_api: Option<String>, market: MarketConfig, maker: Keypair, taker: Keypair, status: Arc<Mutex<Status>>) -> Result<Self> {
+    pub async fn new(rpc_url: &str, market_api: Option<String>, market: MarketConfig, maker: Keypair, taker: Keypair, status: Arc<Mutex<Status>>, live: tokio::sync::broadcast::Sender<ErTx>) -> Result<Self> {
         let bundle = market.bundle.clone();
         let rpc = Rpc::new(rpc_url)?;
         let positions: Vec<_> = rpc
@@ -168,6 +174,7 @@ impl Maker {
             let slice = status.market(&market.symbol);
             (slice.maker_seat, slice.taker_seat) = (Some(maker_seat), Some(taker_seat));
         }
+        let feed = crate::feed::SlotFeed::spawn(rpc_url, bundle.core);
         Ok(Self {
             rpc,
             rpc_url: rpc_url.to_string(),
@@ -183,6 +190,8 @@ impl Maker {
             last_closed_refresh_ms: Mutex::new(0),
             status,
             paused: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            feed,
+            live,
         })
     }
 
@@ -248,23 +257,31 @@ impl Maker {
                 None => std::future::pending().await,
             }
         };
-        let polled = async { self.rpc.poll_processed(&signature, Duration::from_secs(3)).await.map(|ok| (Instant::now(), ok)) };
+        let polled = async { self.rpc.poll_processed(&signature, Duration::from_secs(3)).await.map(|(ok, slot)| (Instant::now(), ok, slot)) };
         let processed = tokio::select! { p = pushed => p, p = polled => p };
-        let ms = processed.map(|(arrived, _)| arrived.saturating_duration_since(started).as_millis() as u64);
-        Some(ErTx {
+        let ms = processed.map(|(arrived, _, _)| arrived.saturating_duration_since(started).as_millis() as u64);
+        // Visible to everyone: the first market update for this slot pushed to subscribers.
+        let visible_ms = match processed {
+            Some((_, true, slot)) if slot > 0 => self.feed.visible(slot, started, Duration::from_secs(1)).await.map(|at| at.saturating_duration_since(started).as_millis() as u64),
+            _ => None,
+        };
+        let tx = ErTx {
             market: self.market.symbol.clone(),
             kind,
             ms,
             net_ms,
             er_ms: ms.zip(net_ms).map(|(total, network)| total.saturating_sub(network)),
             send_ms,
-            ok: processed.is_some_and(|(_, ok)| ok),
+            visible_ms,
+            ok: processed.is_some_and(|(_, ok, _)| ok),
             at,
             signature,
             side: detail.map(|d| d.0.label()),
             price: detail.map(|d| d.1 as f64 / 1e5),
             quantity: detail.map(|d| d.2),
-        })
+        };
+        let _ = self.live.send(tx.clone()); // streamed to browsers as it happens
+        Some(tx)
     }
 
     async fn refresh_oracle(&self) -> Result<()> {

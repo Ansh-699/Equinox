@@ -512,7 +512,7 @@ export function TradingTerminal() {
             <MarketPanel marketSymbol={marketSymbol} marketApiUrl={candlesApiUrl} live={live} />
           </div>
           <ActivityDrawer
-            aside={<ErTxPanel marketApiUrl={marketApiUrl} market={v3.symbol} />}
+            aside={<ErTxPanel key={v3.symbol} marketApiUrl={marketApiUrl} market={v3.symbol} />}
             loading={seatLoading}
             signedIn={!!trader}
             seat={seat}
