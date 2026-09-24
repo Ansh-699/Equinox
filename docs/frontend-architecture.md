@@ -110,7 +110,4 @@ and the explicit-choice paths. The Playwright suite lives under
   "what," in its own doc comment.
 - Accessibility posture and what was actually verified vs. not:
   `docs/accessibility.md`.
-- What's blocked on the canonical ABI and exactly why:
-  `docs/abi-handoff-checklist.md`.
-- Going from this branch's mocked E2E suite to a real Devnet session:
-  `docs/live-devnet-runbook.md`.
+- Current deployed behavior and evidence: `docs/status/current.md`.

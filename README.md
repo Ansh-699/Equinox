@@ -112,7 +112,7 @@ The [frontend](app/README.md), [Worker](workers/README.md), [market-maker](servi
 4. Watch the book, activity, and positions as the rollup processes the order. The keeper later commits the market state to L1.
 5. Use the account controls to withdraw test collateral to the connected wallet.
 
-The exact prompts depend on the active wallet and whether its trading key is already authorized. The [live runbook](docs/live-devnet-runbook.md) covers the transaction-level procedure.
+The exact prompts depend on the active wallet and whether its trading key is already authorized. The [current status](docs/status/current.md) records the verified devnet flow and its transaction evidence.
 
 For a pre-IPO basket, visit [`/pre-ipo`](https://equinox.ansht.workers.dev/pre-ipo), review its planned legs and margin, then submit. For a token launch, visit [`/launch`](https://equinox.ansht.workers.dev/launch) and choose a curve preset. A launch needs a separate operator listing before it becomes a perp.
 
@@ -164,7 +164,7 @@ npm run test:browser    # Playwright browser suite
 npm run check:secrets   # scan tracked files and bundles for secret patterns
 ```
 
-The Rust program has its own Cargo commands in the [program guide](programs/equinox/README.md); the Worker has its own package scripts. For a live devnet procedure and evidence, use the [runbook](docs/live-devnet-runbook.md) and the dated [status snapshot](docs/status/current.md).
+The Rust program has its own Cargo commands in the [program guide](programs/equinox/README.md); the Worker has its own package scripts. For current devnet behavior and evidence, use the dated [status snapshot](docs/status/current.md).
 
 ## Current limits
 

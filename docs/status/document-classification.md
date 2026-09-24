@@ -34,9 +34,7 @@ specifications above.
 | Document | Scope |
 |---|---|
 | `devnet-configuration.md` | Devnet accounts, endpoints, and environment setup |
-| `live-devnet-runbook.md` | Resumable live Devnet lifecycle procedure |
 | `pyth-ops.md` | Pyth catalog, entitlement, and incident procedure |
-| `abi-handoff-checklist.md` | ABI handoff and rebase checklist |
 | `accessibility.md` | Frontend accessibility verification |
 
 ## Historical, research, or superseded design records
