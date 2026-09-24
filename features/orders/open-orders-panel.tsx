@@ -1,6 +1,8 @@
 "use client";
 
 import type { OpenOrdersViewState } from "@/lib/open-orders";
+import { useNewKeys } from "@/lib/use-new-keys";
+import { marketPair } from "@/lib/v3-markets";
 
 export interface OpenOrdersPanelProps {
   state: OpenOrdersViewState;
@@ -8,65 +10,58 @@ export interface OpenOrdersPanelProps {
   onReplace: (orderKey: bigint) => void;
   onCancelAll: () => void;
   pending: boolean;
+  symbol?: string;
 }
 
-/** Open-orders UI shell: every state the underlying adapter can report
- * (loading/unavailable/error/empty/ready+stale) gets a distinct, honest
- * rendering -- there is no "loading forever" or silently-blank table.
- * Cancel/Replace/Cancel-all call straight into the same session-signed
- * action functions the manual order-key form already uses
- * (features/sessions/use-session-order.ts). When the V3 aggregate is not
- * configured, the selected fallback adapter reports that honestly instead of
- * fabricating rows. */
-export function OpenOrdersPanel({ state, onCancel, onReplace, onCancelAll, pending }: OpenOrdersPanelProps) {
+const usd = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const until = (unix: bigint) => {
+  const s = Number(unix) - Math.floor(Date.now() / 1000);
+  return s <= 0 ? "expiring" : s < 3600 ? `${Math.ceil(s / 60)}m left` : s < 86_400 ? `${Math.floor(s / 3600)}h left` : `${Math.floor(s / 86_400)}d left`;
+};
+
+/** Open orders as equal-height glass cards, newest on top; every adapter state
+ * (loading, unavailable, error, empty, ready/stale) renders distinctly. */
+export function OpenOrdersPanel({ state, onCancel, onReplace, onCancelAll, pending, symbol }: OpenOrdersPanelProps) {
+  const orders = state.kind === "ready" ? [...state.orders].sort((a, b) => (b.orderKey > a.orderKey ? 1 : -1)) : [];
+  const fresh = useNewKeys(orders.map((order) => order.orderKey.toString()));
+  if (state.kind !== "ready") {
+    const text = state.kind === "loading" ? "Loading open orders…" : state.kind === "unavailable" ? state.reason : state.kind === "error" ? state.message : "No open orders in this market.";
+    return <p className={`flex h-full items-center justify-center px-4 text-center text-[12px] ${state.kind === "error" ? "text-[var(--t-down)]" : "text-[var(--t-text-2)]"}`}>{text}</p>;
+  }
   return (
-    <section className="open-orders-panel">
-      <div className="panel-title">
-        <h2>Open orders</h2>
-        <span>{state.kind === "ready" && state.stale ? "stale" : state.kind}</span>
+    <section aria-label="Open orders" className="space-y-1.5 p-2">
+      <div className="flex items-center gap-2 px-1 text-[11px] text-[var(--t-text-3)]">
+        <span><span className="tnum font-semibold text-[var(--t-text)]">{orders.length}</span> open {orders.length === 1 ? "order" : "orders"}</span>
+        {state.stale ? <span className="text-[var(--t-warn)]">· last refresh failed, showing the last read</span> : null}
+        <button type="button" disabled={pending} onClick={onCancelAll} className="ml-auto rounded-full border border-[var(--t-border)] px-2.5 py-0.5 text-[11px] text-[var(--t-text-2)] hover:text-[var(--t-down)] disabled:opacity-50">Cancel all</button>
       </div>
-
-      {state.kind === "loading" ? <p className="form-note">Loading open orders…</p> : null}
-
-      {state.kind === "unavailable" ? <p className="form-note">{state.reason}</p> : null}
-
-      {state.kind === "error" ? <p className="form-note negative">{state.message}</p> : null}
-
-      {state.kind === "empty" ? <p className="form-note">No open orders in this market.</p> : null}
-
-      {state.kind === "ready" ? (
-        <>
-          {state.stale ? <p className="form-note negative">Showing the last successfully loaded orders -- the most recent refresh failed.</p> : null}
-          <div className="open-orders-table-wrap">
-            <table className="activity-table open-orders-table">
-              <thead>
-                <tr>
-                  <th>Side</th><th>Tree</th><th>Price</th><th>Qty</th><th>Filled</th><th>Flags</th><th>Expires</th><th aria-hidden="true"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {state.orders.map((order) => (
-                  <tr key={order.orderKey.toString()} className="open-orders-row">
-                    <td data-label="Side"><span className={order.side === "bid" ? "positive" : "negative"}>{order.side === "bid" ? "Long" : "Short"}</span></td>
-                    <td data-label="Tree">{order.tree}</td>
-                    {/* On-chain prices carry 5 decimals (Pyth exponent -5). */}
-                    <td data-label="Price">${(Number(order.price) / 1e5).toFixed(2)}</td>
-                    <td data-label="Qty">{order.quantity.toString()}</td>
-                    <td data-label="Filled">{order.filledQuantity.toString()}</td>
-                    <td data-label="Flags">{[order.postOnly ? "post-only" : null, order.reduceOnly ? "reduce-only" : null].filter(Boolean).join(", ") || "--"}</td>
-                    <td data-label="Expires">{order.expiresAt ? new Date(Number(order.expiresAt) * 1000).toLocaleString() : "GTC"}</td>
-                    <td data-label="Actions" className="open-orders-actions">
-                      <button disabled={pending} onClick={() => onReplace(order.orderKey)}>Replace</button>
-                      <button disabled={pending} onClick={() => onCancel(order.orderKey)}>Cancel</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <button disabled={pending} onClick={onCancelAll}>Cancel all</button>
-        </>
-      ) : null}
+      {orders.map((order) => {
+        const key = order.orderKey.toString();
+        const long = order.side === "bid";
+        // On-chain prices carry 5 decimals (Pyth exponent -5).
+        const price = Number(order.price) / 1e5;
+        const qty = Number(order.quantity);
+        const filled = Number(order.filledQuantity);
+        return (
+          <article key={key} className={`glass-card relative h-[50px] overflow-hidden py-1.5 pl-3.5 pr-2 ${fresh.has(key) ? "card-enter" : ""}`}>
+            <span aria-hidden className={`absolute inset-y-0 left-0 w-[3px] ${long ? "bg-[var(--t-up)]" : "bg-[var(--t-down)]"}`} />
+            <div className="flex items-center gap-1.5 text-[12px]">
+              <span className={`font-semibold ${long ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>{long ? "Buy" : "Sell"}</span>
+              <span className="truncate text-[var(--t-text)]">{symbol ? marketPair(symbol) : ""}</span>
+              <span className="truncate text-[10.5px] text-[var(--t-text-3)]">{order.tree === "fixed" ? "Limit" : "Pegged"}{order.postOnly ? " · post-only" : ""}{order.reduceOnly ? " · reduce-only" : ""} · {order.expiresAt ? until(order.expiresAt) : "GTC"}</span>
+              <span className="ml-auto flex shrink-0 items-center gap-1">
+                <button type="button" disabled={pending} onClick={() => onReplace(order.orderKey)} title="Replace with the ticket's side, size and price" className="h-6 rounded-full border border-[var(--t-border)] px-2 text-[11px] text-[var(--t-text-2)] hover:text-[var(--t-text)] disabled:opacity-50">Replace</button>
+                <button type="button" disabled={pending} onClick={() => onCancel(order.orderKey)} className="h-6 rounded-full bg-[var(--t-down-soft)] px-2.5 text-[11px] font-semibold text-[var(--t-down)] hover:brightness-95 disabled:opacity-50">Cancel</button>
+              </span>
+            </div>
+            <div className="tnum flex gap-4 text-[11.5px]">
+              <span><span className="text-[var(--t-text-3)]">Price</span> {price.toFixed(2)}</span>
+              <span><span className="text-[var(--t-text-3)]">Size</span> {qty}{filled ? ` · ${filled} filled` : ""}</span>
+              <span><span className="text-[var(--t-text-3)]">Value</span> {usd(price * qty)}</span>
+            </div>
+          </article>
+        );
+      })}
     </section>
   );
 }

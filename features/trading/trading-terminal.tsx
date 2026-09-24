@@ -327,20 +327,26 @@ export function TradingTerminal() {
   }
 
   /** Main-wallet V3 order: routed to MagicBlock ER while the market is delegated, else L1. */
-  async function placeV3Order() {
-    if (!protocol || !trader || !v3.core || !v3.oracleSnapshot || !sized) return;
+  /** One V3 order: the ticket's by default, or `spec` (a position close). */
+  async function placeV3Order(spec?: { side: "long" | "short"; quantity: bigint; orderType: "ioc" | "limit" | "post-only"; reduceOnly: boolean; limitPriceUsd: string; label: string }) {
+    if (!protocol || !trader || !v3.core || !v3.oracleSnapshot) return;
+    if (!spec && !sized) return;
     if (!seat) { setNotice("Press Start trading first: it opens your margin account and deposits collateral."); return; }
     if (!marketClock) { setNotice("Waiting for the verified price before placing an order."); return; }
+    const order = spec ?? {
+      side: ticket.side, quantity, orderType: orderTypeFor(ticket), reduceOnly: ticket.reduceOnly, limitPriceUsd: sized!.limitPriceUsd,
+      label: `${ticket.side === "long" ? "Buy" : "Sell"} ${quantity} ${tickerName}${orderTypeFor(ticket) === "ioc" ? "" : ` @ ${Number(sized!.limitPriceUsd).toFixed(2)}`}`,
+    };
     const built = buildV3OrderInstructions({
       core: v3.core, wallet: trader, oracleSnapshot: v3.oracleSnapshot, seatIndex,
-      side: ticket.side === "long" ? "bid" : "ask", orderType: orderTypeFor(ticket), reduceOnly: ticket.reduceOnly, quantity,
-      limitPriceUsd: sized.limitPriceUsd, expiresInMinutes: Number(ticket.expiresInMinutes) || 0, oracleClock: marketClock.lastVerifiedOracleTimestamp,
+      side: order.side === "long" ? "bid" : "ask", orderType: order.orderType, reduceOnly: order.reduceOnly, quantity: order.quantity,
+      limitPriceUsd: order.limitPriceUsd, expiresInMinutes: spec ? 0 : Number(ticket.expiresInMinutes) || 0, oracleClock: marketClock.lastVerifiedOracleTimestamp,
     });
     if ("error" in built) { setNotice(built.error); return; }
-    const [, order] = built.instructions;
-    const preview: TransactionPreview = { instruction: "PlaceOrder", programId: order.programId.toBase58(), accounts: order.keys.map((meta) => ({ address: meta.pubkey.toBase58(), signer: meta.isSigner, writable: meta.isWritable })), status: "constructed" };
+    const [, placeIx] = built.instructions;
+    const preview: TransactionPreview = { instruction: "PlaceOrder", programId: placeIx.programId.toBase58(), accounts: placeIx.keys.map((meta) => ({ address: meta.pubkey.toBase58(), signer: meta.isSigner, writable: meta.isWritable })), status: "constructed" };
     setOrdersInFlight((n) => n + 1);
-    const what = `${ticket.side === "long" ? "Buy" : "Sell"} ${quantity} TSLA${orderTypeFor(ticket) === "ioc" ? "" : ` @ ${Number(sized.limitPriceUsd).toFixed(2)}`}`;
+    const what = order.label;
     const clicked = performance.now();
     const toastId = txToasts.push({ ok: true, pending: true, title: `${what} · sending…` });
     try {
@@ -364,6 +370,28 @@ export function TradingTerminal() {
       txToasts.settle(toastId, { ok: false, title: `${what} · not placed`, detail: message });
     } finally {
       setOrdersInFlight((n) => n - 1);
+    }
+  }
+
+  /** Market-close all or half of the position: a reduce-only IOC on the other
+   * side, allowed to fill up to 1% through the mark. */
+  const [closing, setClosing] = useState(false);
+  async function closePosition(fraction: 1 | 0.5) {
+    const base = seat ? seat.basePosition : 0n;
+    if (!base || markPrice === null) return;
+    const size = base < 0n ? -base : base;
+    const qty = fraction === 1 ? size : size / 2n;
+    if (qty <= 0n) return;
+    const side = base > 0n ? "short" : "long";
+    setClosing(true);
+    try {
+      await placeV3Order({
+        side, quantity: qty, orderType: "ioc", reduceOnly: true,
+        limitPriceUsd: (markPrice * (side === "short" ? 0.99 : 1.01)).toFixed(2),
+        label: `Close ${fraction === 1 ? "" : "half · "}${qty} ${tickerName}`,
+      });
+    } finally {
+      setClosing(false);
     }
   }
 
@@ -527,8 +555,12 @@ export function TradingTerminal() {
             symbol={marketSymbol}
             markPrice={markPrice}
             trades={book.trades}
+            initialMarginBps={marketConfig.initialMarginBps}
+            onClosePosition={walletTrading && !publicDemoReadOnly ? (fraction) => void closePosition(fraction) : undefined}
+            closing={closing}
             openOrders={
               <OpenOrdersPanel
+                symbol={marketSymbol}
                 state={liveOpenOrders}
                 pending={sessionOrder.pending}
                 onCancel={onCancelOrder}

@@ -5,6 +5,8 @@ import { ChevronDown } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import type { TraderSeatView } from "@/lib/positions";
 import { PRICE_SCALE, type Trade } from "./use-v3-book";
+import { MarketIcon } from "@/components/ui/market-icon";
+import { marketPair } from "@/lib/v3-markets";
 
 type Tab = "positions" | "orders" | "history";
 const TABS: { id: Tab; label: string }[] = [
@@ -30,31 +32,62 @@ export function positionView(seat: TraderSeatView, markPrice: number | null) {
   return { side: base > 0 ? "Long" : "Short", size: Math.abs(base), entry, pnl };
 }
 
-function PositionsTable({ seat, error, symbol, markPrice, signedIn }: { seat: TraderSeatView | null; error: string | null; symbol: string; markPrice: number | null; signedIn: boolean }) {
+/** An inline "label value" pair for a card's figures row. */
+function Stat({ label, children }: { label: string; children: ReactNode }) {
+  return <span className="whitespace-nowrap"><span className="text-[var(--t-text-3)]">{label}</span> <span className="tnum text-[var(--t-text)]">{children}</span></span>;
+}
+
+const usd = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** Positions as glass cards (Hyperliquid's columns): size and value, entry
+ * and mark, PnL with return on the initial margin, collateral and health,
+ * and a one-click reduce-only market close (all, or half). */
+function PositionsPanel({ seat, error, symbol, markPrice, signedIn, initialMarginBps, onClose, closing }: {
+  seat: TraderSeatView | null; error: string | null; symbol: string; markPrice: number | null; signedIn: boolean;
+  initialMarginBps: number; onClose?: (fraction: 1 | 0.5) => void; closing: boolean;
+}) {
   if (!signedIn) return <Empty>Connect a wallet to see your position.</Empty>;
   if (error) return <Empty>{error}</Empty>;
   if (!seat) return <Empty>No margin account in this market yet. Press Start trading to open one and deposit.</Empty>;
   const view = positionView(seat, markPrice);
-  if (!view) return <Empty>No open position. Available collateral: ${(Number(seat.availableCollateral) / 1e6).toFixed(2)}.</Empty>;
+  const collateral = (Number(seat.availableCollateral) + Number(seat.reservedMargin)) / 1e6;
+  if (!view) return <Empty>No open position · {usd(collateral)} collateral ready to trade.</Empty>;
+  const long = view.side === "Long";
+  const value = markPrice === null ? null : view.size * markPrice;
+  const margin = (view.size * view.entry * initialMarginBps) / 10_000;
+  const roe = view.pnl === null || margin <= 0 ? null : (view.pnl / margin) * 100;
+  const leverage = value !== null && collateral > 0 ? value / collateral : null;
+  const pnlTone = view.pnl === null ? "" : view.pnl >= 0 ? "text-[var(--t-up)]" : "text-[var(--t-down)]";
+  const health = seat.liquidationState === "healthy" ? "text-[var(--t-up)]" : seat.liquidationState === "warning" ? "text-[var(--t-warn)]" : "text-[var(--t-down)]";
   return (
-    <table className="w-full border-collapse">
-      <thead className="sticky top-0 bg-[var(--t-bg)]"><tr>
-        <th className={TH}>Market</th><th className={TH}>Side</th><th className={`${TH} text-right`}>Size</th><th className={`${TH} text-right`}>Entry</th>
-        <th className={`${TH} text-right`}>Mark</th><th className={`${TH} text-right`}>uPnL</th><th className={`${TH} text-right`}>Reserved</th><th className={`${TH} text-right`}>Health</th>
-      </tr></thead>
-      <tbody>
-        <tr className="border-t border-[var(--t-surface-2)]">
-          <td className={`${TD} font-medium`}>{symbol}</td>
-          <td className={`${TD} ${view.side === "Long" ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>{view.side}</td>
-          <td className={`${TD} text-right`}>{view.size}</td>
-          <td className={`${TD} text-right`}>{view.entry.toFixed(2)}</td>
-          <td className={`${TD} text-right`}>{markPrice === null ? "—" : markPrice.toFixed(2)}</td>
-          <td className={`${TD} text-right ${view.pnl === null ? "" : view.pnl >= 0 ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>{view.pnl === null ? "—" : `${view.pnl >= 0 ? "+" : "−"}$${Math.abs(view.pnl).toFixed(2)}`}</td>
-          <td className={`${TD} text-right`}>${(Number(seat.reservedMargin) / 1e6).toFixed(2)}</td>
-          <td className={`${TD} text-right ${seat.liquidationState === "healthy" ? "text-[var(--t-up)]" : seat.liquidationState === "warning" ? "text-[var(--t-warn)]" : "text-[var(--t-down)]"}`}>{seat.liquidationState}</td>
-        </tr>
-      </tbody>
-    </table>
+    <div className="p-2">
+      <article className="glass-card card-enter relative overflow-hidden py-2 pl-3.5 pr-2.5">
+        <span aria-hidden className={`absolute inset-y-0 left-0 w-[3px] ${long ? "bg-[var(--t-up)]" : "bg-[var(--t-down)]"}`} />
+        <div className="flex items-center gap-2">
+          <MarketIcon symbol={symbol} size={24} />
+          <span className="truncate text-[13px] font-semibold text-[var(--t-text)]">{marketPair(symbol)}</span>
+          <span className={`rounded px-1.5 py-px text-[10.5px] font-semibold ${long ? "bg-[var(--t-up-soft)] text-[var(--t-up)]" : "bg-[var(--t-down-soft)] text-[var(--t-down)]"}`}>{view.side} {view.size}</span>
+          {leverage !== null ? <span className="tnum hidden text-[11px] text-[var(--t-text-3)] sm:inline" title="Position value ÷ collateral">{leverage.toFixed(1)}×</span> : null}
+          <span className={`tnum ml-auto whitespace-nowrap text-[13px] font-semibold ${pnlTone}`} title="Unrealized PnL at the mark (return on initial margin)">
+            {view.pnl === null ? "—" : `${view.pnl >= 0 ? "+" : "−"}${usd(Math.abs(view.pnl))}`}
+            {roe === null ? null : <span className="ml-1 text-[11px] font-medium">({roe >= 0 ? "+" : ""}{roe.toFixed(1)}%)</span>}
+          </span>
+          {onClose ? (
+            <span className="flex shrink-0 items-center gap-1">
+              <button type="button" disabled={closing || view.size < 2} onClick={() => onClose(0.5)} title={view.size < 2 ? "A 1-share position closes whole" : "Market-close half, reduce-only"} className="h-6 rounded-full border border-[var(--t-border)] px-2.5 text-[11px] text-[var(--t-text-2)] hover:text-[var(--t-text)] disabled:opacity-40">50%</button>
+              <button type="button" disabled={closing} onClick={() => onClose(1)} title="Market-close the whole position, reduce-only" className={`h-6 rounded-full px-3 text-[11px] font-semibold text-[var(--t-on-fill)] disabled:opacity-50 ${long ? "bg-[var(--t-down-3)] hover:bg-[var(--t-down-2)]" : "bg-[var(--t-up-3)] hover:bg-[var(--t-up-2)]"}`}>{closing ? "Closing…" : "Close"}</button>
+            </span>
+          ) : null}
+        </div>
+        <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 pl-8 text-[11.5px]">
+          <Stat label="Value">{value === null ? "—" : usd(value)}</Stat>
+          <Stat label="Entry">{view.entry.toFixed(2)}</Stat>
+          <Stat label="Mark">{markPrice === null ? "—" : markPrice.toFixed(2)}</Stat>
+          <Stat label="Collateral">{usd(collateral)}</Stat>
+          <Stat label="Health"><span className={health}>{seat.liquidationState}</span></Stat>
+        </div>
+      </article>
+    </div>
   );
 }
 
@@ -85,8 +118,12 @@ function TradeHistory({ trades, seatIndex }: { trades: Trade[]; seatIndex: numbe
 
 /** The activity drawer under the chart (SlipStream ActivityDrawer). Collapsed
  * it is only its tab strip, so the chart can take the whole column. */
-export function ActivityDrawer({ seat, seatError, seatIndex, symbol, markPrice, trades, openOrders, aside, loading = false, signedIn = true }: {
+export function ActivityDrawer({ seat, seatError, seatIndex, symbol, markPrice, trades, openOrders, aside, loading = false, signedIn = true, initialMarginBps, onClosePosition, closing = false }: {
   seat: TraderSeatView | null; seatError: string | null; seatIndex: number | null; symbol: string; markPrice: number | null; trades: Trade[]; openOrders: ReactNode;
+  initialMarginBps: number;
+  /** Reduce-only market close of the whole position, or half. */
+  onClosePosition?: (fraction: 1 | 0.5) => void;
+  closing?: boolean;
   /** Right-hand third (the live rollup transaction feed). */
   aside?: ReactNode;
   /** The trader's seat has not been read yet. */
@@ -111,8 +148,8 @@ export function ActivityDrawer({ seat, seatError, seatIndex, symbol, markPrice, 
         </button>
       </div>
       {/* Open orders stays mounted (hidden) so its state and actions survive tab switches. */}
-      <div id="activity-panel" role="tabpanel" className={`slim-scroll h-[120px] overflow-auto ${open ? "" : "hidden"}`}>
-        {tab === "positions" && (loading ? <Loading what="your position" /> : <PositionsTable seat={seat} error={seatError} symbol={symbol} markPrice={markPrice} signedIn={signedIn} />)}
+      <div id="activity-panel" role="tabpanel" className={`slim-scroll h-[132px] overflow-auto ${open ? "" : "hidden"}`}>
+        {tab === "positions" && (loading ? <Loading what="your position" /> : <PositionsPanel seat={seat} error={seatError} symbol={symbol} markPrice={markPrice} signedIn={signedIn} initialMarginBps={initialMarginBps} onClose={onClosePosition} closing={closing} />)}
         <div className={tab === "orders" ? "" : "hidden"}>{openOrders}</div>
         {tab === "history" && (loading ? <Loading what="your fills" /> : <TradeHistory trades={trades} seatIndex={seatIndex} />)}
       </div>

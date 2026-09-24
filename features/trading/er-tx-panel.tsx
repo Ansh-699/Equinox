@@ -3,6 +3,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import deployment from "@/config/equinox-deployment.json";
 import { myErTxs, onErTx, type ErTxSample } from "@/lib/er-latency";
+import { useNewKeys } from "@/lib/use-new-keys";
 import { Spinner } from "@/components/ui/spinner";
 
 /** Header facts and a backfill; the rows themselves arrive over the live stream. */
@@ -71,6 +72,7 @@ export function ErTxPanel({ marketApiUrl, market }: { marketApiUrl: string | und
   }, [marketApiUrl, market]);
 
   const rows = [...mine, ...bots].sort((a, b) => b.at - a.at).slice(0, 40);
+  const fresh = useNewKeys(rows.map((row) => row.signature));
   const median = (list: readonly ErTxSample[], pick: (row: ErTxSample) => number | null) => {
     const times = list.flatMap((row) => { const value = row.ok ? pick(row) : null; return value === null ? [] : [value]; }).sort((a, b) => a - b);
     return times.length ? times[Math.floor(times.length / 2)] : null;
@@ -94,15 +96,15 @@ export function ErTxPanel({ marketApiUrl, market }: { marketApiUrl: string | und
           : <>Your order ≈ <span className="tnum font-medium text-[var(--t-up)]">{viewerRtt === null ? "—" : `${viewerRtt + (trip ?? 15)} ms`}</span></>}
           <span className="ml-2">in a block <span className="tnum">{trip ?? "—"} ms</span></span></span>
       </div>
-      <div className="slim-scroll h-[120px] overflow-auto">
+      <div className="slim-scroll h-[132px] overflow-auto">
         {rows.length === 0 ? (
           <div className="flex h-full items-center justify-center gap-2 px-4 text-center text-[12px] text-[var(--t-text-2)]">
             {bot?.offline ? "Market maker offline — no bot transactions to show." : bot?.marketOpen === false ? "US market closed — the bot is idle until the session reopens." : <><Spinner /> Waiting for rollup transactions…</>}
           </div>
         ) : (
-          <ul className="divide-y divide-[var(--t-surface-2)]">
+          <ul className="space-y-1 p-1.5">
             {rows.map((row) => (
-              <li key={row.signature} className={`grid grid-cols-[52px_1fr_auto] items-center gap-2 px-3 py-[5px] text-[11.5px] ${row.mine ? "bg-[var(--t-surface-2)]" : ""}`}>
+              <li key={row.signature} className={`glass-card grid h-[28px] grid-cols-[52px_1fr_auto] items-center gap-2 px-2.5 text-[11.5px] ${row.mine ? "ring-1 ring-[var(--t-accent)]/40" : ""} ${fresh.has(row.signature) ? "card-enter" : ""}`}>
                 <a href={rollupExplorer(row.signature)} target="_blank" rel="noreferrer" className="tnum truncate text-[var(--t-text-3)] hover:text-[var(--t-text)]">
                   {new Date(row.at).toLocaleTimeString([], { hour12: false, minute: "2-digit", second: "2-digit" })}
                 </a>
