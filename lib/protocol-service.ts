@@ -43,14 +43,17 @@ export class StockStreamProtocolService {
     return executeL1(preview, this.transport.wallet, this.transport.l1, bytes, fresh);
   }
 
-  async executeEr(preview: TransactionPreview, instructions: readonly TransactionInstruction[], writableAccounts: readonly string[]): Promise<{ preview: TransactionPreview; sequence: bigint }> {
+  /** `oracle: "best-effort"` for writes that must not depend on a live price
+   * (withdrawals): refresh when possible, never fail because it could not. */
+  async executeEr(preview: TransactionPreview, instructions: readonly TransactionInstruction[], writableAccounts: readonly string[], options: { oracle?: "required" | "best-effort" } = {}): Promise<{ preview: TransactionPreview; sequence: bigint }> {
+    const refresh = () => options.oracle === "best-effort" ? this.transport.freshOracle?.er().catch(() => undefined) : this.transport.freshOracle?.er();
     // Blockhash and price freshness in parallel: both are rollup round trips.
-    const [blockhash] = await Promise.all([this.transport.er.getAccountAwareBlockhash(writableAccounts), this.transport.freshOracle?.er()]);
+    const [blockhash] = await Promise.all([this.transport.er.getAccountAwareBlockhash(writableAccounts), refresh()]);
     const bytes = await this.transport.encode(instructions, blockhash);
     const signingStarted = Date.now();
     const signed = await this.transport.wallet.signTransaction(bytes);
     // A slow wallet prompt can outlast the price: the rollup must see one under 10 seconds old.
-    if (Date.now() - signingStarted > 2_000) await this.transport.freshOracle?.er();
+    if (Date.now() - signingStarted > 2_000) await refresh();
     return submitEr(preview, this.transport.er, signed);
   }
 }

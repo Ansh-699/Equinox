@@ -29,11 +29,17 @@ started", this section wins.
   - a failed commit closes its snapshot (opcode 65) so trading never stays frozen.
 - Withdrawals pass the fee vault too (11th account), so a seat shard past 10
   commits still withdraws.
+- Withdrawals never wait for a live price (program + frontend): with a live
+  Pyth price they use it; with none (weekend, holiday, outage) a flat seat
+  withdraws freely and a seat with a position is checked at the last verified
+  price moved 25% against it (`withdrawal_mark_price`,
+  `V3_STALE_WITHDRAWAL_STRESS_BPS`). Tested in
+  `v3_bundle::withdrawals_never_wait_for_a_live_price`.
 - Worker CPU: the browser now builds the V3 market aggregate from the rollup
   (`lib/v3-aggregate.ts`), and the cron no longer refreshes Pyth (the VM
   does); no `exceededCpu` since.
 
-**Program changes today (all deployed, 286 program tests):** keeper key
+**Program changes today (all deployed, 287 program tests):** keeper key
 (`SetV3Keeper` 64) accepted for funding, liquidation and commit-only
 snapshots; `AbortV3Snapshot` (65); snapshot records only count for the
 current epoch (stale epoch-28 records had blocked commits); core-paid commits
@@ -45,7 +51,10 @@ through the magic fee vault (member 7 accounts, core 6, withdrawal request 11).
   `node scripts/magicblock-dlp-discriminator-repro.mjs`. Not needed for
   trading, custody or commits; only to take the market out of the rollup.
 - Weekends and US holidays: Pyth reports `Closed` and the program refuses
-  orders (no live price to trade against), by design.
+  new orders (no live price to trade against), by design. Withdrawals still work.
+- No L1 escape hatch yet: if the MagicBlock rollup were down for good, step 1
+  of a withdrawal (in the rollup) could not run. The vault's USDC stays safe on
+  Solana; a designed emergency exit is proposed, not built.
 - Operator balances to watch: faucet keeper `AmHAkH…` (it pays 0.05 SOL per
   new wallet; below 0.2 SOL it sends USDC only), the core's rollup lamports.
 

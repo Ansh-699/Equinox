@@ -1979,3 +1979,55 @@ fn v3_seat_creation_accepts_l1_and_rollup_cores_but_not_undelegating() {
         );
     }
 }
+
+/// A 10-account withdrawal-shaped list: core ... snapshot at index 9.
+fn withdrawal_price_accounts(snapshot_core: Address, status: u8, publish: u64) -> (Vec<TestAccount>, TestAccount) {
+    use stockstream::oracle_snapshot as snap;
+    let mut accounts = bundle();
+    unsafe {
+        let core = accounts[0].view.borrow_unchecked_mut();
+        core[246..250].copy_from_slice(&1435u32.to_le_bytes());
+        core[250] = 2;
+        core[251..255].copy_from_slice(&(-5i32).to_le_bytes());
+    }
+    let mut snapshot = account(Address::new_from_array([91; 32]), snap::ORACLE_SNAPSHOT_SIZE, false);
+    snapshot.set_readonly();
+    unsafe {
+        let bytes = snapshot.view.borrow_unchecked_mut();
+        snap::initialize(bytes, &snapshot_core, 1435, 2, -5).unwrap();
+        bytes[snap::OFFSET_PRICE..snap::OFFSET_PRICE + 8].copy_from_slice(&100_000i64.to_le_bytes());
+        bytes[snap::OFFSET_PUBLISH_TIMESTAMP..snap::OFFSET_PUBLISH_TIMESTAMP + 8].copy_from_slice(&publish.to_le_bytes());
+        bytes[snap::OFFSET_SEQUENCE..snap::OFFSET_SEQUENCE + 8].copy_from_slice(&7u64.to_le_bytes());
+        bytes[snap::OFFSET_TRADING_STATUS] = status;
+        bytes[snap::OFFSET_AUTHENTICATED] = 1;
+    }
+    (accounts, snapshot)
+}
+
+#[test]
+fn withdrawals_never_wait_for_a_live_price() {
+    use stockstream::oracle_snapshot::{STATUS_CLOSED, STATUS_OPEN};
+    use stockstream::v3::withdrawal_mark_price;
+    let now = stockstream::handlers::OFF_CHAIN_TEST_NOW as u64;
+    let call = |accounts: &[TestAccount], snapshot: &TestAccount, base: i128| {
+        let mut list: Vec<AccountView> = views(&accounts[..9]);
+        list.push(snapshot.view.clone());
+        withdrawal_mark_price(&ID, &list, base)
+    };
+    let core = *bundle()[0].view.address();
+
+    // Live, open price: used as is.
+    let (accounts, snapshot) = withdrawal_price_accounts(core, STATUS_OPEN, now);
+    assert_eq!(call(&accounts, &snapshot, 5).unwrap(), 100_000);
+
+    // Weekend (closed, a day old): a flat seat withdraws; its value does not depend on the price.
+    let (accounts, snapshot) = withdrawal_price_accounts(core, STATUS_CLOSED, now - 86_400);
+    assert_eq!(call(&accounts, &snapshot, 0).unwrap(), 1);
+    // With a position, the last verified price is stressed 25% against it.
+    assert_eq!(call(&accounts, &snapshot, 5).unwrap(), 75_000);
+    assert_eq!(call(&accounts, &snapshot, -5).unwrap(), 125_000);
+
+    // A snapshot of another market is never trusted for a position.
+    let (accounts, forged) = withdrawal_price_accounts(Address::new_from_array([3; 32]), STATUS_CLOSED, now - 86_400);
+    assert!(call(&accounts, &forged, 5).is_err());
+}
