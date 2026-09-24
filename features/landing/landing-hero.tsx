@@ -79,7 +79,7 @@ function MarketsScreen({ markets }: { markets: PreviewMarket[] }) {
 }
 
 function PlChart() {
-  const rnd = seededRng("stockstream-pl");
+  const rnd = seededRng("equinox-pl");
   const W = 730;
   const H = 190;
   let v = 145;
@@ -241,7 +241,7 @@ export function LandingHero({ demo, markets, activity, realActivity }: { demo: P
         <div className={`${styles.heroItem} ${styles.d0}`}>
           <span className={styles.wordmark}>
             <img src="/favicon.svg" alt="" width={30} height={30} className={styles.logoImg} />
-            STOCKSTREAM
+            EQUINOX
           </span>
         </div>
 
@@ -293,7 +293,7 @@ export function LandingHero({ demo, markets, activity, realActivity }: { demo: P
           <div className={demoStyles.appBar}>
             <span className={demoStyles.appLogo}>
               <img src="/favicon.svg" alt="" width={18} height={18} className={styles.logoImg} />
-              STOCKSTREAM
+              EQUINOX
             </span>
             <span className={demoStyles.appNav}>
               {TABS.map((t) => <span key={t.id} data-active={activeTab === t.id}>{t.label}</span>)}

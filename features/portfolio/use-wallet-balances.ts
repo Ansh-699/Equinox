@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { SolanaRpcTransport } from "@/lib/rpc-transport";
 
 const POLL_INTERVAL_MS = 5_000;
-const REFRESH_EVENT = "stockstream:refresh-balances";
+const REFRESH_EVENT = "equinox:refresh-balances";
 
 export interface WalletBalances {
   solLamports: bigint | null;

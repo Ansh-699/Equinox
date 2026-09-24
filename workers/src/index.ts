@@ -4,7 +4,7 @@ import { runOracleRefresh } from "./oracle-runner";
 import { fetchCandles, parseCandleQuery } from "./candles";
 import { signAndSerializeTransaction } from "./transactions";
 import { CLAIM_INTERVAL_MS, FAUCET_TOKENS, faucetInstructions, SOL_TOP_UP_BELOW, verifyFaucetSignature } from "./faucet";
-import deployment from "../../config/stockstream-deployment.json";
+import deployment from "../../config/equinox-deployment.json";
 import { MarketStream } from "./market-stream";
 import type { MarketDefinition, MarketEvent } from "./types";
 import { DeadLetterRepository, ExecutionStatusRepository, IndexerRepository, ProtocolRepository, type IndexedWrite } from './repositories';
@@ -21,7 +21,7 @@ import { deriveTradingSessionAddress, verifyPrivyToken, verifyTradingSession, ty
 import { LocalKeypairSigner } from './signer';
 import { relaySessionTransaction, validateSessionTransaction } from './session-relayer';
 import { ProtocolKeeperOrchestrator, type OrchestratorRunSummary } from './keeper-orchestrator';
-import { STOCKSTREAM_PROGRAM_ID } from '../../clients/stockstream/src/constants';
+import { EQUINOX_PROGRAM_ID } from '../../clients/equinox/src/constants';
 import { handleV3MarketRoute } from './v3-routes';
 import { fetchPreIpoTokens } from './pre-ipo';
 import { listLaunches, registerLaunch } from './launches';
@@ -448,7 +448,7 @@ const worker = {
       // is independent of, and never a substitute for, the per-user Privy
       // check below -- it proves "a legitimate backend", not "which user".
       if (!env.RELAYER_SERVICE_TOKEN) return json({ error: "relayer_service_unconfigured" }, 503);
-      if (request.headers.get("x-stockstream-relayer-service-token") !== env.RELAYER_SERVICE_TOKEN) {
+      if (request.headers.get("x-equinox-relayer-service-token") !== env.RELAYER_SERVICE_TOKEN) {
         return json({ error: "unauthorized" }, 401);
       }
       // Per-user Privy auth: a fresh access token for the specific wallet
@@ -502,7 +502,7 @@ const worker = {
       // opcode/seatIndex/actionNonce below are extracted from the real,
       // cryptographically-signed instruction bytes -- not client claims.
       const shapeCheck = await validateSessionTransaction(
-        { transactionBase64: body.transactionBase64, expectedProgramAddress: STOCKSTREAM_PROGRAM_ID, sessionSignerAddress: body.sessionSignerAddress, expectedMarket: body.expectedMarket, ownerWallet: body.ownerWallet, recentBlockhashValid: async (blockhash) => (await transport.isBlockhashValid(blockhash, "confirmed")).value },
+        { transactionBase64: body.transactionBase64, expectedProgramAddress: EQUINOX_PROGRAM_ID, sessionSignerAddress: body.sessionSignerAddress, expectedMarket: body.expectedMarket, ownerWallet: body.ownerWallet, recentBlockhashValid: async (blockhash) => (await transport.isBlockhashValid(blockhash, "confirmed")).value },
         relayerAddress,
       );
       if (!shapeCheck.ok) return json({ error: shapeCheck.reason }, 400);
@@ -531,16 +531,16 @@ const worker = {
       const v3Core = decodeV3Core(marketBytes);
       let v3Seat: import('./v3-market-state').V3SeatPositionState | null = null;
       if (v3Core) {
-        if (marketAccount.value.owner !== STOCKSTREAM_PROGRAM_ID) return json({ error: "market_wrong_owner" }, 403);
+        if (marketAccount.value.owner !== EQUINOX_PROGRAM_ID) return json({ error: "market_wrong_owner" }, 403);
         const seatShardAddress = await deriveSeatShardV3(body.expectedMarket, Math.floor(shapeCheck.seatIndex / 32));
         const seatShardAccount = await transport.account(seatShardAddress).catch(() => null);
-        if (!seatShardAccount?.value?.data || seatShardAccount.value.owner !== STOCKSTREAM_PROGRAM_ID) return json({ error: "seat_shard_not_found" }, 404);
+        if (!seatShardAccount?.value?.data || seatShardAccount.value.owner !== EQUINOX_PROGRAM_ID) return json({ error: "seat_shard_not_found" }, 404);
         const seatShard = decodeV3SeatShard(Uint8Array.from(atob(seatShardAccount.value.data[0]), (c) => c.charCodeAt(0)));
         v3Seat = seatShard?.positions.find((position) => position.slot === shapeCheck.seatIndex % 32) ?? null;
       }
 
       const sessionAddress = await deriveTradingSessionAddress(
-        body.ownerWallet, body.expectedMarket, shapeCheck.seatIndex, body.sessionSignerAddress, STOCKSTREAM_PROGRAM_ID,
+        body.ownerWallet, body.expectedMarket, shapeCheck.seatIndex, body.sessionSignerAddress, EQUINOX_PROGRAM_ID,
       );
       const sessionAccount = await transport.account(sessionAddress).catch(() => null);
       const sessionBytes = sessionAccount?.value?.data ? Uint8Array.from(atob(sessionAccount.value.data[0]), (c) => c.charCodeAt(0)) : null;
@@ -553,7 +553,7 @@ const worker = {
         sessionSignerAddress: body.sessionSignerAddress,
         seatIndex: shapeCheck.seatIndex,
         marketPda: body.expectedMarket,
-        programId: STOCKSTREAM_PROGRAM_ID,
+        programId: EQUINOX_PROGRAM_ID,
         actionNonce: shapeCheck.actionNonce,
         opcode: shapeCheck.opcode,
         placeOrderFlags: shapeCheck.placeOrderFlags,
@@ -567,7 +567,7 @@ const worker = {
       const outcome = await relaySessionTransaction(
         {
           transactionBase64: body.transactionBase64,
-          expectedProgramAddress: STOCKSTREAM_PROGRAM_ID,
+          expectedProgramAddress: EQUINOX_PROGRAM_ID,
           sessionSignerAddress: body.sessionSignerAddress,
         },
         relayerSigner,

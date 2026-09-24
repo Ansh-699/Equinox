@@ -15,8 +15,8 @@ import {
 } from "@solana/web3.js";
 import { getOrCreateAssociatedTokenAccount, mintTo, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { loadPythKeeperConfig, PythKeeper } from "../lib/server/pyth-keeper";
-import { createV3TraderSeat, depositCollateralV3, placeOrderV3, reconcileVaultV3, withdrawCollateralV3, type V3ExecutionAccounts } from "../clients/stockstream/src/abi/v3-instructions";
-import deployment from "../config/stockstream-deployment.json";
+import { createV3TraderSeat, depositCollateralV3, placeOrderV3, reconcileVaultV3, withdrawCollateralV3, type V3ExecutionAccounts } from "../clients/equinox/src/abi/v3-instructions";
+import deployment from "../config/equinox-deployment.json";
 
 const L1 = new Connection(process.env.SOLANA_RPC_URL ?? "https://api.devnet.solana.com", "confirmed");
 const ER = new Connection(deployment.magicBlock.rpc, "confirmed");
@@ -92,7 +92,7 @@ async function refreshSnapshot() {
     keeper = new PythKeeper(loadPythKeeperConfig({
       ...process.env, PYTH_PRO_FEED_ID: String(deployment.oracle.feedId), PYTH_PRO_MIN_CHANNEL: deployment.oracle.channel,
       PYTH_PRO_ENDPOINTS: process.env.PYTH_PRO_ENDPOINTS ?? [0, 1, 2].map((i) => `wss://pyth-lazer-${i}.dourolabs.app/v1/stream`).join(","),
-      STOCKSTREAM_MARKET_ADDRESS: core.toBase58(), KEEPER_PUBLIC_KEY: maker.publicKey.toBase58(),
+      EQUINOX_MARKET_ADDRESS: core.toBase58(), KEEPER_PUBLIC_KEY: maker.publicKey.toBase58(),
       PYTH_PROGRAM_ADDRESS: PYTH_PROGRAM.toBase58(), PYTH_STORAGE_ADDRESS: PYTH_STORAGE.toBase58(), PYTH_TREASURY_ADDRESS: treasury.toBase58(),
     }));
     (keeper as unknown as { treasury: PublicKey }).treasury = treasury;

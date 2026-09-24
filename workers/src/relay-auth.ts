@@ -56,8 +56,8 @@ const TRADER_SEAT_SIZE = 256;
 const TRADING_SESSION_SIZE = 256;
 const TRADING_SESSION_SEED = new TextEncoder().encode("trading_session");
 
-/** `SESSION_ACTION_*` bits, mirrored from `programs/stockstream/src/session.rs`
- * and `clients/stockstream/src/abi/sessions.ts` -- never hand-guessed. */
+/** `SESSION_ACTION_*` bits, mirrored from `programs/equinox/src/session.rs`
+ * and `clients/equinox/src/abi/sessions.ts` -- never hand-guessed. */
 export const SESSION_ACTION = {
   place: 1 << 0,
   cancel: 1 << 1,
@@ -120,7 +120,7 @@ export interface VerifyTradingSessionInput {
   sessionBytes: Uint8Array | null;
   /** The on-chain `owner` field of the fetched session account, as RPC
    * reports it -- `null` when the account doesn't exist. Must be the
-   * StockStream program; nothing else could have written this layout at
+   * Equinox program; nothing else could have written this layout at
    * this exact derived address regardless of its byte contents. */
   sessionAccountOwner: string | null;
   ownerWallet: string;

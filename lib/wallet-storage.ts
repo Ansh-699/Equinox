@@ -2,7 +2,7 @@
  * never Privy tokens. localStorage is per-browser, per-viewer convenience
  * only: it is never treated as authoritative (the selection is always
  * re-validated against the currently discovered wallet list before use). */
-const STORAGE_KEY = "stockstream:selectedWallet";
+const STORAGE_KEY = "equinox:selectedWallet";
 
 export function readStoredWallet(): string | null {
   try {

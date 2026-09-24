@@ -18,9 +18,9 @@ const money = (n: number) => (n >= 1 ? n.toLocaleString("en-US", { style: "curre
 interface Launch { pool: string; baseMint: string; symbol: string; name: string; preset: string; createdAt: number }
 type Row = Launch & { view: PoolView | null };
 
-/** Every StockStream launch, live from the chain: curve progress to graduation,
+/** Every Equinox launch, live from the chain: curve progress to graduation,
  * buy/sell on the curve and graduation to DAMM v2, all signed by the trading
- * account; a graduated token shows its StockStream perp once listed. */
+ * account; a graduated token shows its Equinox perp once listed. */
 export function LaunchMonitor({ refreshKey }: { refreshKey: number }) {
   const auth = useAppAuth();
   const tradingKey = useTradingKey(auth);
@@ -75,8 +75,8 @@ export function LaunchMonitor({ refreshKey }: { refreshKey: number }) {
   return (
     <section aria-label="Launches" className="mx-auto max-w-[1180px] px-4 pb-10">
       <div className="flex items-baseline justify-between">
-        <h2 className="text-[15px] font-semibold text-[var(--t-text)]">StockStream launches · live from the chain</h2>
-        <span className="text-[11.5px] text-[var(--t-text-3)]">Curve → DAMM v2 at graduation → StockStream perp</span>
+        <h2 className="text-[15px] font-semibold text-[var(--t-text)]">Equinox launches · live from the chain</h2>
+        <span className="text-[11.5px] text-[var(--t-text-3)]">Curve → DAMM v2 at graduation → Equinox perp</span>
       </div>
       {!rows ? <p className="mt-3 text-[12px] text-[var(--t-text-2)]">Loading launches…</p> : null}
       {rows?.length === 0 ? <p className="mt-3 text-[12px] text-[var(--t-text-2)]">No launches yet: create the first one above.</p> : null}

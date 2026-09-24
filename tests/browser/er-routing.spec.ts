@@ -15,7 +15,7 @@ async function login(page: Page) {
   // finishes its own async POST /api/auth/session -- authorizeSession()
   // needs the LATTER, or it can race a still-null `protocol` on a cold
   // (not-yet-warmed) dev server and silently no-op.
-  await expect(page.getByRole("region", { name: "StockStream status" }).getByText("authenticated", { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("region", { name: "Equinox status" }).getByText("authenticated", { exact: true })).toBeVisible({ timeout: 10_000 });
 }
 
 async function authorizeSession(page: Page) {

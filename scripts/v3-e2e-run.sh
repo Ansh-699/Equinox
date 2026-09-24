@@ -9,7 +9,7 @@ cd "$(dirname "$0")/.."
 name="${1:?state name required}"
 set -a; . ./.env.local; set +a
 export SOLANA_RPC_URL="${SOLANA_RPC_URL:-$(grep -E '^SOLANA_RPC_URL=' workers/.dev.vars | cut -d= -f2- | tr -d '"')}"
-STATE_DIR="${STOCKSTREAM_STATE_DIR:-$HOME/.local/state/stockstream}"; mkdir -p "$STATE_DIR"
+STATE_DIR="${EQUINOX_STATE_DIR:-$HOME/.local/state/stockstream}"; mkdir -p "$STATE_DIR"
 export V3_LIFECYCLE_STATE_PATH="$STATE_DIR/$name-state.json" V3_EXCHANGE_KEY_PATH="$STATE_DIR/$name-exchange.json" V3_TAKER_KEY_PATH="$STATE_DIR/$name-taker.json"
 export V3_ORACLE_FEED_ID=1435 V3_ORACLE_SYMBOL=Equity.US.TSLA/USD V3_ORACLE_CHANNEL=fixed_rate@50ms V3_ORACLE_EXPONENT=-5
 

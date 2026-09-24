@@ -1,6 +1,6 @@
 /** Concrete JSON-RPC adapters used by the indexer and, as of Priority 8, the
  * keeper transaction-submission path. They deliberately return raw RPC
- * values: decoding StockStream account/event bytes remains a protocol
+ * values: decoding Equinox account/event bytes remains a protocol
  * concern in the indexer/reconciliation layer, not a trust decision made by
  * a transport. */
 import { retryDelay } from './backoff';
@@ -240,8 +240,8 @@ export class SolanaL1Transport extends TransactionTransport {
   }
 }
 
-/** The delegation-status byte offset within a StockStream market
- * account's raw data, matching `programs/stockstream/src/state.rs`'s
+/** The delegation-status byte offset within a Equinox market
+ * account's raw data, matching `programs/equinox/src/state.rs`'s
  * `RESERVED_DELEGATION_STATUS` field within `reserved_upgrade`
  * (`offset_of!(MarketStateHeader, reserved_upgrade) + RESERVED_DELEGATION_STATUS`
  * = 327 + 2). Kept here (not decoded generically) because Magic Router

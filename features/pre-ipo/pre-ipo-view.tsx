@@ -12,7 +12,7 @@ import { tradingKeySigner } from "@/lib/trading-key";
 import { claimTestFunds } from "@/lib/faucet-client";
 import { SolanaRpcTransport } from "@/lib/rpc-transport";
 import { deriveCollateralTokenAccount } from "@/lib/token-accounts";
-import deployment from "@/config/stockstream-deployment.json";
+import deployment from "@/config/equinox-deployment.json";
 import { rollupExplorer } from "@/features/trading/er-tx-panel";
 import { BASKETS, planBasket, tradeBasket, type LegPlan, type LegResult } from "./basket";
 
@@ -45,7 +45,7 @@ export function premium(token: Pick<PreIpoToken, "markPrice" | "tokenPrice">): n
   return token.tokenPrice === null || token.markPrice <= 0 ? null : ((token.tokenPrice - token.markPrice) / token.markPrice) * 100;
 }
 
-/** PreStocks pre-IPO companies: leveraged perps on StockStream (priced on-chain
+/** PreStocks pre-IPO companies: leveraged perps on Equinox (priced on-chain
  * from PreStocks), one-click baskets, and every PreStocks token with its
  * premium or discount to the company mark. */
 export function PreIpoView() {

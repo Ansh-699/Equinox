@@ -13,25 +13,25 @@ const config = {
 
 describe("resolveCustodyAccounts", () => {
   it("retains the legacy custody tuple when V3 is not configured", () => {
-    const previous = process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS;
-    delete process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS;
+    const previous = process.env.NEXT_PUBLIC_EQUINOX_V3_CORE_ADDRESS;
+    delete process.env.NEXT_PUBLIC_EQUINOX_V3_CORE_ADDRESS;
     try {
       expect(resolveCustodyAccounts(WALLET, MARKET, config)?.v3).toBeUndefined();
     } finally {
-      if (previous === undefined) delete process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS;
-      else process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS = previous;
+      if (previous === undefined) delete process.env.NEXT_PUBLIC_EQUINOX_V3_CORE_ADDRESS;
+      else process.env.NEXT_PUBLIC_EQUINOX_V3_CORE_ADDRESS = previous;
     }
   });
 
   it("derives V3 deposit and withdrawal bundles from the configured core", () => {
-    const previous = process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS;
-    const previousMint = process.env.NEXT_PUBLIC_STOCKSTREAM_COLLATERAL_MINT;
-    const previousToken = process.env.NEXT_PUBLIC_STOCKSTREAM_TOKEN_PROGRAM;
-    const previousAuthority = process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT_AUTHORITY;
-    process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS = CORE;
-    process.env.NEXT_PUBLIC_STOCKSTREAM_COLLATERAL_MINT = MARKET;
-    process.env.NEXT_PUBLIC_STOCKSTREAM_TOKEN_PROGRAM = MARKET;
-    process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT_AUTHORITY = MARKET;
+    const previous = process.env.NEXT_PUBLIC_EQUINOX_V3_CORE_ADDRESS;
+    const previousMint = process.env.NEXT_PUBLIC_EQUINOX_COLLATERAL_MINT;
+    const previousToken = process.env.NEXT_PUBLIC_EQUINOX_TOKEN_PROGRAM;
+    const previousAuthority = process.env.NEXT_PUBLIC_EQUINOX_VAULT_AUTHORITY;
+    process.env.NEXT_PUBLIC_EQUINOX_V3_CORE_ADDRESS = CORE;
+    process.env.NEXT_PUBLIC_EQUINOX_COLLATERAL_MINT = MARKET;
+    process.env.NEXT_PUBLIC_EQUINOX_TOKEN_PROGRAM = MARKET;
+    process.env.NEXT_PUBLIC_EQUINOX_VAULT_AUTHORITY = MARKET;
     try {
       const resolved = resolveCustodyAccounts(WALLET, MARKET, config);
       expect(resolved?.v3?.deposit.core).toBe(CORE);
@@ -42,14 +42,14 @@ describe("resolveCustodyAccounts", () => {
       expect(resolved?.v3?.withdraw.eventShards).toHaveLength(4);
       expect(resolved?.v3?.withdraw.session).toBeUndefined();
     } finally {
-      if (previous === undefined) delete process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS;
-      else process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS = previous;
-      if (previousMint === undefined) delete process.env.NEXT_PUBLIC_STOCKSTREAM_COLLATERAL_MINT;
-      else process.env.NEXT_PUBLIC_STOCKSTREAM_COLLATERAL_MINT = previousMint;
-      if (previousToken === undefined) delete process.env.NEXT_PUBLIC_STOCKSTREAM_TOKEN_PROGRAM;
-      else process.env.NEXT_PUBLIC_STOCKSTREAM_TOKEN_PROGRAM = previousToken;
-      if (previousAuthority === undefined) delete process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT_AUTHORITY;
-      else process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT_AUTHORITY = previousAuthority;
+      if (previous === undefined) delete process.env.NEXT_PUBLIC_EQUINOX_V3_CORE_ADDRESS;
+      else process.env.NEXT_PUBLIC_EQUINOX_V3_CORE_ADDRESS = previous;
+      if (previousMint === undefined) delete process.env.NEXT_PUBLIC_EQUINOX_COLLATERAL_MINT;
+      else process.env.NEXT_PUBLIC_EQUINOX_COLLATERAL_MINT = previousMint;
+      if (previousToken === undefined) delete process.env.NEXT_PUBLIC_EQUINOX_TOKEN_PROGRAM;
+      else process.env.NEXT_PUBLIC_EQUINOX_TOKEN_PROGRAM = previousToken;
+      if (previousAuthority === undefined) delete process.env.NEXT_PUBLIC_EQUINOX_VAULT_AUTHORITY;
+      else process.env.NEXT_PUBLIC_EQUINOX_VAULT_AUTHORITY = previousAuthority;
     }
   });
 });

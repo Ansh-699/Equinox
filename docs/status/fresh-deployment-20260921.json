@@ -34,7 +34,7 @@
     "accountCountExplanation": "1 exchange + 1 instrument + 27 V3 execution accounts",
     "allOwnedByProgram": true,
     "activation": "verified: active after opcode-22 metadata configuration",
-    "checkpoint": "/tmp/stockstream-fresh-v3-state-20260921.json"
+    "checkpoint": "/tmp/equinox-fresh-v3-state-20260921.json"
   },
   "protocolSemanticsChanged": false,
   "liveTrading": "blocked",

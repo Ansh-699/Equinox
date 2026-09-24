@@ -6,13 +6,13 @@ import type { MagicRouterTransport, SolanaL1Transport } from "./chain-transports
  * source of truth every keeper input source in this module must defer to
  * over any D1/Worker projection (Priority 8, Section 4: "never let a stale
  * Worker projection override onchain"). This is a second, independent
- * decoder from `clients/stockstream/src::decodeMarketState`, not a reuse of
+ * decoder from `clients/equinox/src::decodeMarketState`, not a reuse of
  * it: that module depends on `@solana/web3.js`, which is not (and should
  * not become) a `workers/` dependency now that `workers/` uses
  * `@solana/kit` -- the same reasoning `private-sessions.ts`'s
  * `decodeTraderSeatProjection` already applied to `TraderSeat`. Field
  * offsets are cross-checked against
- * `programs/stockstream/tests/account_settlement.rs::worker_market_state_reader_offsets_match_the_rust_header_layout`
+ * `programs/equinox/tests/account_settlement.rs::worker_market_state_reader_offsets_match_the_rust_header_layout`
  * via `core::mem::offset_of!` (the header is `#[repr(C, packed(1))]`, so
  * hand-counted contiguous offsets are safe here -- unlike `TraderSeat`,
  * which is `packed(8)`).

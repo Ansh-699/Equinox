@@ -40,7 +40,7 @@ export function decodeV3Position(value: unknown, seatIndex: number): TraderSeatV
  * (lib/positions.ts) -- no dedicated backend route exists for this yet
  * (workers/src/private-sessions.ts's decoder is built but never wired to
  * an HTTP/WS route), so this reads the same market account
- * useStockStreamProtocol's transport already fetches for L1 actions. */
+ * useEquinoxProtocol's transport already fetches for L1 actions. */
 /** In V3 mode with `trader` set, the seat is the wallet's own (or the first
  * free slot, reported as `seatIndex` with no seat); signed out shows none. */
 export function usePosition(rpc: SolanaRpcTransport | null, marketAddress: string | null, seatIndex: number, v3?: { marketApiUrl?: string; core?: string; trader?: string | null }) {

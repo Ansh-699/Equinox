@@ -1,14 +1,14 @@
 //! Configuration (environment):
 //! - `MM_MAKER_KEYPAIR`, `MM_TAKER_KEYPAIR`: paths to solana-keygen JSON files (required)
 //! - `MAGICBLOCK_RPC_URL`: rollup RPC (default: the deployment's `magicBlock.rpc`)
-//! - `MARKET_API_URL`: StockStream Worker, used for the permissionless Pyth refresh
+//! - `MARKET_API_URL`: Equinox Worker, used for the permissionless Pyth refresh
 //! - `MM_STATUS_ADDR`: status server bind address (default `0.0.0.0:8080`)
 //! - `MM_REGION`: label shown in the terminal (e.g. `SGP1`)
 //! - `MM_TICK_MS`: pause between ticks (default 400)
 //! - `MM_KEEPER_KEYPAIR`: the core's keeper key (opcode 64); enables funding,
 //!   liquidation and commits. `MM_COMMIT_EVERY_S` (default 120) and
 //!   `MM_FUNDING_EVERY_S` (default 3600) pace them.
-//! - `STOCKSTREAM_DEPLOYMENT`: deployment JSON path (default: the one compiled in);
+//! - `EQUINOX_DEPLOYMENT`: deployment JSON path (default: the one compiled in);
 //!   its `markets` list names every market (the first is primary). Markets with
 //!   `oracle.kind = "prestocks"` (a PreStocks token) or `"meteora"` (a graduated
 //!   DAMM v2 pool, priced per `lot` tokens) get a price reporter (the keeper key reports).
@@ -23,16 +23,16 @@ use anyhow::{anyhow, Context, Result};
 use axum::extract::{Path, Query};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::{http::header, response::IntoResponse, routing::get, Json, Router};
-use stockstream_market_maker::candles::PriceHistory;
+use equinox_market_maker::candles::PriceHistory;
 use serde_json::Value;
-use stockstream_market_maker::keeper::Keeper;
-use stockstream_market_maker::maker::{Maker, MarketConfig, Status};
-use stockstream_market_maker::reporter::{PriceSource, Reporter};
-use stockstream_market_maker::solana::{b58, pubkey, Keypair};
-use stockstream_market_maker::v3::Bundle;
+use equinox_market_maker::keeper::Keeper;
+use equinox_market_maker::maker::{Maker, MarketConfig, Status};
+use equinox_market_maker::reporter::{PriceSource, Reporter};
+use equinox_market_maker::solana::{b58, pubkey, Keypair};
+use equinox_market_maker::v3::Bundle;
 use tokio::sync::Mutex;
 
-const BUILT_IN_DEPLOYMENT: &str = include_str!("../../../config/stockstream-deployment.json");
+const BUILT_IN_DEPLOYMENT: &str = include_str!("../../../config/equinox-deployment.json");
 const DEFAULT_MARKET_API: &str = "https://stockstream-market-api.ansht.workers.dev";
 
 fn env(name: &str) -> Option<String> {
@@ -53,7 +53,7 @@ async fn status(state: Arc<Mutex<Status>>) -> impl IntoResponse {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into())).init();
 
-    let deployment: Value = serde_json::from_str(&match env("STOCKSTREAM_DEPLOYMENT") {
+    let deployment: Value = serde_json::from_str(&match env("EQUINOX_DEPLOYMENT") {
         Some(path) => std::fs::read_to_string(path)?,
         None => BUILT_IN_DEPLOYMENT.to_string(),
     })?;
@@ -85,13 +85,13 @@ async fn main() -> Result<()> {
 
     let state = Arc::new(Mutex::new(Status { colo: env("MM_REGION"), ..Status::default() }));
     // Every completed transaction, as it completes, for the browsers' live panel.
-    let (live, _) = tokio::sync::broadcast::channel::<stockstream_market_maker::maker::ErTx>(512);
+    let (live, _) = tokio::sync::broadcast::channel::<equinox_market_maker::maker::ErTx>(512);
     let l1_url = env("SOLANA_RPC_URL").unwrap_or_else(|| "https://api.devnet.solana.com".into());
     let send_url = env("SOLANA_SEND_URL").unwrap_or_else(|| "https://api.devnet.solana.com".into());
     let mut reporters = 0u64;
     let seconds = |name: &str, default: u64| Duration::from_secs(env(name).and_then(|v| v.parse().ok()).unwrap_or(default));
     let mut jobs: Vec<std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>> = Vec::new();
-    let prestocks = Arc::new(stockstream_market_maker::reporter::PreStocksFeed::default());
+    let prestocks = Arc::new(equinox_market_maker::reporter::PreStocksFeed::default());
     let history = Arc::new(PriceHistory::open(Some(std::path::PathBuf::from(env("MM_DATA_DIR").unwrap_or_else(|| "/var/lib/stockstream".into())).join("candles"))));
     for (market, token) in markets {
         // A market whose bots have no seat yet still gets its reporter and keeper.

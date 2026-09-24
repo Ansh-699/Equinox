@@ -18,18 +18,18 @@ from `TraderSeat` -- derived as:
 ["trading_session", owner, market, seat_index_le, session_signer]
 ```
 
-under the StockStream program ID (`session::derive_trading_session` in Rust,
+under the Equinox program ID (`session::derive_trading_session` in Rust,
 `deriveTradingSession` in TypeScript; the two are verified byte-for-byte
 identical for the same inputs in
-`programs/stockstream/tests/trading_session.rs` and
-`clients/stockstream/src/index.test.ts`). 256 bytes, `#[repr(C, packed(1))]`
+`programs/equinox/tests/trading_session.rs` and
+`clients/equinox/src/index.test.ts`). 256 bytes, `#[repr(C, packed(1))]`
 with a compile-time size assertion. `AuthorizeTradingSession` creates it via
 a real `CreateAccount` System Program CPI signed with the PDA's own derived
 seeds (a PDA cannot sign a top-level client transaction, so the client
 cannot pre-create it the way it could a keypair account).
 
 Every session-authorized trading handler validates, before trusting any
-policy field: exact account length, StockStream ownership, the PDA itself,
+policy field: exact account length, Equinox ownership, the PDA itself,
 the discriminator/version, `target_program` (the executing `program_id`),
 `owner`, `market`, `session_signer`, and `trader_seat_index` -- see
 `session::validated_session_account`.
@@ -74,7 +74,7 @@ session.next_expected_nonce = checked_add(session.next_expected_nonce, 1)
   succeeded, and a Solana instruction that returns `Err` reverts every
   account write it made -- there is no manual rollback path to get wrong.
 - Repeated, lower, and future/skipped nonces are all rejected
-  (`StockStreamError::SessionNonceReplay`).
+  (`EquinoxError::SessionNonceReplay`).
 - The nonce is bound to one session PDA, which is itself bound to one
   `(owner, market, seat, session_signer)` tuple; a nonce value from one
   session has no meaning to another session's account (a different account

@@ -10,8 +10,8 @@
     "preExistingUntracked": [".deepseek/"]
   },
   "checks": [
-    {"command": "npm run check:stockstream-abi", "result": "pass", "evidence": "ABI-OK"},
-    {"command": "cargo test -p stockstream --test magicblock --test v3_bundle", "result": "pass", "counts": {"magicblock": 30, "v3_bundle": 9}},
+    {"command": "npm run check:equinox-abi", "result": "pass", "evidence": "ABI-OK"},
+    {"command": "cargo test -p equinox --test magicblock --test v3_bundle", "result": "pass", "counts": {"magicblock": 30, "v3_bundle": 9}},
     {"command": "npm test -- --run", "result": "pass", "counts": {"files": 29, "tests": 190}},
     {"command": "npm --prefix workers test -- --run", "result": "pass", "counts": {"files": 33, "tests": 338}},
     {"command": "npx tsc --noEmit", "result": "pass"}

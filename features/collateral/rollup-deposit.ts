@@ -1,7 +1,7 @@
-import { claimInboxDepositV3, depositToInboxV3 } from "@/clients/stockstream/src";
+import { claimInboxDepositV3, depositToInboxV3 } from "@/clients/equinox/src";
 import type { TransactionPreview } from "@/lib/execution-boundary";
 import { recordSignature } from "@/lib/last-signature";
-import type { StockStreamProtocol } from "@/features/wallet/use-stockstream-protocol";
+import type { EquinoxProtocol } from "@/features/wallet/use-equinox-protocol";
 import type { ResolvedCustodyAccounts } from "./custody-accounts";
 
 const preview = (name: string, ix: ReturnType<typeof depositToInboxV3>): TransactionPreview => ({
@@ -11,7 +11,7 @@ const preview = (name: string, ix: ReturnType<typeof depositToInboxV3>): Transac
 
 /** Deposit into a delegated market: the USDC goes to the vault on Solana
  * (inbox receipt), then the rollup credits the seat. `report` narrates each step. */
-export async function rollupDeposit(protocol: StockStreamProtocol, accounts: ResolvedCustodyAccounts, amount: bigint, report: (message: string) => void = () => undefined) {
+export async function rollupDeposit(protocol: EquinoxProtocol, accounts: ResolvedCustodyAccounts, amount: bigint, report: (message: string) => void = () => undefined) {
   if (!accounts.v3) throw new Error("not a V3 market");
   const { core, seatShard, eventShards, authority, source, vault, mint, tokenProgram } = accounts.v3.deposit;
   report("Step 1/2 · Depositing into the vault on Solana…");

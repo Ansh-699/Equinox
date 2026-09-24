@@ -7,8 +7,8 @@ that it is not currently reproducible.
 ## What was reported
 
 Earlier in this branch's history, `next build` reliably crashed (native core
-dump) in this sandbox, on both `stockstream/core-auth-sprint` and
-`stockstream/frontend-product`. `next dev` was unaffected.
+dump) in this sandbox, on both `equinox/core-auth-sprint` and
+`equinox/frontend-product`. `next dev` was unaffected.
 
 ## What was checked
 
@@ -25,11 +25,11 @@ dump) in this sandbox, on both `stockstream/core-auth-sprint` and
 
 ## What was verified (4 independent clean builds)
 
-1. `stockstream-frontend` worktree, existing `node_modules`, `.next` removed
+1. `equinox-frontend` worktree, existing `node_modules`, `.next` removed
    first: `next build` succeeded.
 2. Repeated on the same worktree: succeeded again (ruling out a one-off
    cache artifact).
-3. `stockstream` (root/protocol) worktree, existing `node_modules`, `.next`
+3. `equinox` (root/protocol) worktree, existing `node_modules`, `.next`
    removed: `next build` succeeded.
 4. **A genuinely disposable worktree with a from-scratch `npm ci`** (not
    reusing any existing `node_modules`): `next build` succeeded.
@@ -39,7 +39,7 @@ Then, against that clean build's `.next` output:
 - `next start` boots and serves.
 - `/`, `/portfolio`, `/activity`, `/settings`, `/diagnostics`, `/api/health`
   all return `200`.
-- The served HTML contains real rendered content ("StockStream", "Devnet"),
+- The served HTML contains real rendered content ("Equinox", "Devnet"),
   not an error page.
 - `scripts/secret-scan.sh` run against the real `.next/static` output:
   clean.

@@ -144,7 +144,7 @@ function fakeSocketFor(servers: MockLazerServer[], sockets: FakeSocket[]): PythW
 
 /** Builds a real signed Solana-format message body: magic + 92-byte payload
  * header + 53-byte five-property payload + signature + pubkey, matching
- * `programs/stockstream/src/handlers.rs::parse_verified_oracle`'s offsets
+ * `programs/equinox/src/handlers.rs::parse_verified_oracle`'s offsets
  * (header 102 bytes, payload 53, five property tags in order). */
 function solanaMessageBytes(price: bigint, timestampUs: bigint, feedId: number): Uint8Array {
   const out = new Uint8Array(102 + 53);

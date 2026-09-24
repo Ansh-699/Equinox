@@ -1,9 +1,9 @@
-import type { CustodyAccounts, V3DepositAccounts, V3WithdrawAccounts } from "@/clients/stockstream/src";
+import type { CustodyAccounts, V3DepositAccounts, V3WithdrawAccounts } from "@/clients/equinox/src";
 import type { PerpMarketConfig } from "@/lib/markets";
 import { deriveCollateralTokenAccount } from "@/lib/token-accounts";
-import { deriveV3ExecutionAccounts } from "@/clients/stockstream/src";
+import { deriveV3ExecutionAccounts } from "@/clients/equinox/src";
 import { PublicKey } from "@solana/web3.js";
-import deployment from "@/config/stockstream-deployment.json";
+import deployment from "@/config/equinox-deployment.json";
 import type { V3Market } from "@/lib/v3-markets";
 
 const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
@@ -19,13 +19,13 @@ export type ResolvedCustodyAccounts = CustodyAccounts & {
  * no duplicate PDA/ATA derivation scattered across pages. */
 export function resolveCustodyAccounts(walletAddress: string | null, marketAddress: string | null, marketConfig: PerpMarketConfig, seatIndex = 0, market?: V3Market): ResolvedCustodyAccounts | null {
   if (!walletAddress || !marketAddress) return null;
-  const v3Core = market?.core ?? process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS;
+  const v3Core = market?.core ?? process.env.NEXT_PUBLIC_EQUINOX_V3_CORE_ADDRESS;
   // Every manifest market shares the collateral mint; its core derives vault and authority.
   const manifestMarket = !!v3Core && (!!market || v3Core === deployment.core);
-  const mint = process.env.NEXT_PUBLIC_STOCKSTREAM_COLLATERAL_MINT ?? (manifestMarket ? deployment.collateralMint ?? undefined : undefined);
-  const tokenProgram = process.env.NEXT_PUBLIC_STOCKSTREAM_TOKEN_PROGRAM ?? (manifestMarket ? TOKEN_PROGRAM : undefined);
-  const vault = process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT ?? (manifestMarket ? coreSeedAddress("vault", v3Core) : marketConfig.vaultPda);
-  const vaultAuthority = process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT_AUTHORITY ?? (manifestMarket ? coreSeedAddress("vault-authority", v3Core) : undefined);
+  const mint = process.env.NEXT_PUBLIC_EQUINOX_COLLATERAL_MINT ?? (manifestMarket ? deployment.collateralMint ?? undefined : undefined);
+  const tokenProgram = process.env.NEXT_PUBLIC_EQUINOX_TOKEN_PROGRAM ?? (manifestMarket ? TOKEN_PROGRAM : undefined);
+  const vault = process.env.NEXT_PUBLIC_EQUINOX_VAULT ?? (manifestMarket ? coreSeedAddress("vault", v3Core) : marketConfig.vaultPda);
+  const vaultAuthority = process.env.NEXT_PUBLIC_EQUINOX_VAULT_AUTHORITY ?? (manifestMarket ? coreSeedAddress("vault-authority", v3Core) : undefined);
   if (!mint || !tokenProgram || !vault || !vaultAuthority) return null;
   const sourceOrDestination = deriveCollateralTokenAccount(walletAddress, mint, tokenProgram);
   const legacy = { market: marketAddress, authority: walletAddress, seatIndex, sourceOrDestination, mint, tokenProgram, vault, vaultAuthority } satisfies CustodyAccounts;

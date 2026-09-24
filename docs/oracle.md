@@ -79,7 +79,7 @@ Now `53` (with a compile-time-documented byte breakdown in
 
 ## Testing
 
-`programs/stockstream/tests/pyth_oracle.rs` covers missing/wrong Ed25519
+`programs/equinox/tests/pyth_oracle.rs` covers missing/wrong Ed25519
 instruction, wrong instruction/signature index, wrong Pyth
 program/storage/treasury, wrong feed/channel, unsupported exponent, invalid
 price, excess confidence, stale/duplicate/future timestamp rejection, the

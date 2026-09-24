@@ -4,20 +4,20 @@ import { useState } from "react";
 import { TopBar } from "@/components/layout/top-bar";
 import { useAppAuth } from "@/components/app-providers";
 import { WalletSelector } from "@/features/wallet/wallet-selector";
-import { useStockStreamProtocol } from "@/features/wallet/use-stockstream-protocol";
+import { useEquinoxProtocol } from "@/features/wallet/use-equinox-protocol";
 import { useTradingSession } from "@/features/sessions/use-trading-session";
 import { useExecutionStatus } from "@/features/magicblock/use-execution-status";
 import { marketForSymbol } from "@/lib/markets";
 
-const marketApiUrl = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_API_URL;
-const RELAYER_ADDRESS = process.env.NEXT_PUBLIC_STOCKSTREAM_RELAYER_ADDRESS;
+const marketApiUrl = process.env.NEXT_PUBLIC_EQUINOX_MARKET_API_URL;
+const RELAYER_ADDRESS = process.env.NEXT_PUBLIC_EQUINOX_RELAYER_ADDRESS;
 
 export function SettingsView() {
   const auth = useAppAuth();
-  const marketSymbol = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_SYMBOL ?? "AAPL-PERP";
+  const marketSymbol = process.env.NEXT_PUBLIC_EQUINOX_MARKET_SYMBOL ?? "AAPL-PERP";
   const marketConfig = marketForSymbol(marketSymbol);
-  const marketAddress = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_ADDRESS ?? marketConfig.marketPda;
-  const protocol = useStockStreamProtocol(auth.authenticated ? marketAddress : null);
+  const marketAddress = process.env.NEXT_PUBLIC_EQUINOX_MARKET_ADDRESS ?? marketConfig.marketPda;
+  const protocol = useEquinoxProtocol(auth.authenticated ? marketAddress : null);
   const session = useTradingSession(protocol, auth.walletAddress, marketAddress, 0);
   const executionStatus = useExecutionStatus(marketApiUrl, marketSymbol);
   const [notice, setNotice] = useState<string | null>(null);

@@ -13,7 +13,7 @@ export default defineConfig({
         ENVIRONMENT: 'development', E2E_TEST_MODE: '1',
         RELAYER_SERVICE_TOKEN: 'test-only-relayer-service-token',
         RELAYER_KEYPAIR_JSON: JSON.stringify(Array.from({ length: 64 }, (_, i) => (i * 7 + 1) % 256)),
-        SOLANA_RPC_URL: 'https://stockstream.test/rpc-unused-in-this-test',
+        SOLANA_RPC_URL: 'https://equinox.test/rpc-unused-in-this-test',
       },
     },
   })],

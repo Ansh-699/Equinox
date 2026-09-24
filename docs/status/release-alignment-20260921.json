@@ -1,8 +1,8 @@
 {
   "asOf": "2026-09-21T07:20:05Z",
-  "repository": "Ansh-699/StockStream",
-  "branch": "stockstream/takeover-ee3c5f6",
-  "upstream": "origin/stockstream/takeover-ee3c5f6",
+  "repository": "Ansh-699/Equinox",
+  "branch": "equinox/takeover-ee3c5f6",
+  "upstream": "origin/equinox/takeover-ee3c5f6",
   "head": "811353b4e155243e1e7d7c367770103d2c54d819",
   "ee3c5f6Ancestor": true,
   "workingTreeTrackedClean": true,
@@ -26,7 +26,7 @@
   },
   "artifacts": {
     "local": {
-      "path": "target/deploy/stockstream.so",
+      "path": "target/deploy/equinox.so",
       "sha256": "69b7fb51b8562d6e41f946c4e5f106294cba4de58b62620020010c5dcd4ba4d0",
       "sourceCheckpoint": "5fcb8ef8f4d7511450fb0d685372ea957831614f"
     },

@@ -1,7 +1,7 @@
 import type { MarketEvent, MarketEventKind } from "./types";
 
-/** Priority 7: real decoding of the complete, versioned, binary StockStream
- * event ABI (`programs/stockstream/src/events.rs`) out of a transaction's
+/** Priority 7: real decoding of the complete, versioned, binary Equinox
+ * event ABI (`programs/equinox/src/events.rs`) out of a transaction's
  * own program logs. `chain-transports.ts` deliberately returns raw RPC
  * results (a transport is not a trust decision); this is that trust
  * decision -- the only place raw `getTransaction`/log bytes become the
@@ -16,7 +16,7 @@ import type { MarketEvent, MarketEventKind } from "./types";
  * format (`SS:<Kind> market=... seq=...`, `pinocchio_log`-based `Program
  * log:` lines); the program no longer emits that format at all, so this
  * decoder is the only one the live ingestion path may use. Layout mirrored
- * byte-for-byte from `events.rs` and `clients/stockstream/src/index.ts`. */
+ * byte-for-byte from `events.rs` and `clients/equinox/src/index.ts`. */
 
 const EVENT_DATA_PREFIX = "Program data: ";
 const EVENT_HEADER_SIZE = 52;
@@ -58,7 +58,7 @@ function bucketKind(discriminator: number): MarketEventKind {
   return "health";
 }
 
-export interface DecodedStockStreamEvent {
+export interface DecodedEquinoxEvent {
   discriminator: number;
   kind: string;
   abiVersion: number;
@@ -100,7 +100,7 @@ function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function decodeEventLogLine(line: string): DecodedStockStreamEvent | null {
+function decodeEventLogLine(line: string): DecodedEquinoxEvent | null {
   if (!line.startsWith(EVENT_DATA_PREFIX)) return null;
   const bytes = base64ToBytes(line.slice(EVENT_DATA_PREFIX.length).trim());
   if (!bytes || bytes.length !== EVENT_SIZE) return null;
@@ -120,7 +120,7 @@ function decodeEventLogLine(line: string): DecodedStockStreamEvent | null {
 }
 
 /**
- * Decodes every recognized StockStream event out of a raw list of program
+ * Decodes every recognized Equinox event out of a raw list of program
  * log lines (shared by both entry points below: a `getTransaction`
  * result's `meta.logMessages`, and a live `logsNotification`'s
  * `value.logs`, which are the exact same strings on the wire). A line that

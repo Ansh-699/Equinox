@@ -38,7 +38,7 @@ const TRADER_SEAT_SIZE = 256;
 const MAX_TRADER_SEATS = 128;
 
 /** `TraderSeat` field byte offsets *relative to the seat's own start*,
- * verified against `programs/stockstream/src/state.rs::TraderSeat` via
+ * verified against `programs/equinox/src/state.rs::TraderSeat` via
  * `core::mem::offset_of!` (it is `#[repr(C, packed(8))]`, not tightly
  * packed -- hand-computing these from field sizes alone gives wrong
  * values once an `i128` field forces 8-byte alignment padding). */
@@ -89,7 +89,7 @@ function readI128(bytes: Uint8Array, offset: number): bigint {
  * `TraderSeat` field this session's spec calls for except equity/
  * unrealized PnL, which are deliberately *not* computed here: that math
  * already exists once, authoritatively, in
- * `programs/stockstream/src/risk.rs::equity`/`unrealized_pnl`, and
+ * `programs/equinox/src/risk.rs::equity`/`unrealized_pnl`, and
  * reimplementing it a second time in TypeScript risks the two silently
  * diverging. A caller with the market's current oracle price can compute
  * them from these raw fields using the same formulas risk.rs documents.
@@ -275,7 +275,7 @@ export class SeatOwnershipMismatch extends Error {
  * index in its first two bytes (`payload_seat`/`payload_seat_amount`/
  * `payload_order`/`payload_position`/`payload_funding`/
  * `payload_liquidation`/`payload_session`) -- see
- * `clients/stockstream/src/index.ts`'s matching decoders, the source of
+ * `clients/equinox/src/index.ts`'s matching decoders, the source of
  * truth for every payload layout this function relies on. */
 const SINGLE_SEAT_AT_OFFSET_ZERO = new Set([
   200, 201, // TraderSeatCreated, TraderSeatClosed
@@ -294,7 +294,7 @@ function decodeBase64(data: string): Uint8Array {
 }
 
 /**
- * Every trader seat a decoded StockStream event pertains to (a fill
+ * Every trader seat a decoded Equinox event pertains to (a fill
  * touches two: maker and taker), or an empty array for a market-level
  * event with no single owning seat, or one carrying `NO_SEAT` (0xffff).
  * `payload` is the event's own base64-encoded 48-byte payload, exactly as

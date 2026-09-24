@@ -1,6 +1,6 @@
-# StockStream Market Registry
+# Equinox Market Registry
 
-StockStream derives each instrument and perpetual market from stable identifiers.
+Equinox derives each instrument and perpetual market from stable identifiers.
 The program registry uses `instrument` plus a 32-byte instrument ID for the
 instrument PDA, and `perp-market` plus the instrument PDA for the market PDA.
 Each market then owns its order-book account, vault configuration, oracle

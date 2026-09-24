@@ -112,7 +112,7 @@ export function WalletSelectionProvider({ children }: { children: React.ReactNod
     connectWith: identity.connectWith,
     logout: async () => {
       const csrf = readCsrfToken();
-      await fetch("/api/auth/logout", { method: "POST", credentials: "include", headers: csrf ? { "x-stockstream-csrf": csrf } : {} });
+      await fetch("/api/auth/logout", { method: "POST", credentials: "include", headers: csrf ? { "x-equinox-csrf": csrf } : {} });
       await identity.logout();
       clearSelection();
     },

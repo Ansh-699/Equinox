@@ -17,7 +17,7 @@ import { Connection, Keypair, PublicKey, SystemProgram, Transaction, Transaction
 import { createMint } from "@solana/spl-token";
 
 const RPC = process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com";
-const PROGRAM = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? DEFAULT_PROGRAM_ID);
+const PROGRAM = new PublicKey(process.env.EQUINOX_PROGRAM_ID ?? DEFAULT_PROGRAM_ID);
 const STATE_PATH = process.env.V3_LIFECYCLE_STATE_PATH ?? "/tmp/opencode/v3-lifecycle-state.json";
 const DELEGATION_STATE_PATH = process.env.V3_DELEGATION_STATE_PATH ?? "/tmp/opencode/v3-delegation-state.json";
 const SHARDED_COMMIT_STATE_PATH = process.env.V3_SHARDED_COMMIT_STATE_PATH ?? "/tmp/opencode/v3-sharded-commit-state.json";
@@ -78,7 +78,7 @@ function exchangeKeypair() {
   return keypair;
 }
 function assertFresh(state) {
-  if (PROGRAM.toBase58() === OLD_PROGRAM) throw new Error("refusing old StockStream program");
+  if (PROGRAM.toBase58() === OLD_PROGRAM) throw new Error("refusing old Equinox program");
   if ([PRESERVED_AAPL_CORE, FRESH_AAPL_CORE, PRESERVED_V2_MARKET].includes(state.market)
     || [PRESERVED_AAPL_CORE, FRESH_AAPL_CORE, PRESERVED_V2_MARKET].includes(state.core)) {
     throw new Error("refusing preserved AAPL/V2 market or core");
@@ -125,7 +125,7 @@ function updateInstrumentIx(exchange, instrument, payer, instrumentId) {
   return new TransactionInstruction({ programId: PROGRAM, keys: [ro(exchange), wr(instrument), sg(payer.publicKey)], data: Buffer.concat([Buffer.from([22]), data]) });
 }
 // Canonical exchange-config encoding, mirroring
-// `clients/stockstream/src/abi/exchange-config-instructions.ts`. This runner is
+// `clients/equinox/src/abi/exchange-config-instructions.ts`. This runner is
 // plain ESM, so the bytes are written directly; every transaction is simulated
 // before it is sent, so a malformed mask fails closed rather than landing.
 const EXCHANGE_FIELD = {
@@ -166,7 +166,7 @@ async function ensureV3Account(label, parent, target, kind, index, size, payer) 
   for (;;) {
     const existing = await connection.getAccountInfo(target, "confirmed");
     if (existing?.owner.equals(PROGRAM) && existing.data.length === size) return;
-    if (existing?.owner.equals(PROGRAM)) throw new Error(`${label}: existing StockStream account has size ${existing.data.length}, expected ${size}; refusing to recreate or overwrite it`);
+    if (existing?.owner.equals(PROGRAM)) throw new Error(`${label}: existing Equinox account has size ${existing.data.length}, expected ${size}; refusing to recreate or overwrite it`);
     if (existing && !existing.owner.equals(SystemProgram.programId) && !existing.owner.equals(PROGRAM)) throw new Error(`${label}: target occupied by foreign owner`);
     await send(`${label} create/resume`, [ix(46, [ro(parent), wr(target), wsg(payer.publicKey), ro(SystemProgram.programId)], [kind, index])], [payer]);
   }

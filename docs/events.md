@@ -1,10 +1,10 @@
-# StockStream event ABI
+# Equinox event ABI
 
 Status: **program-side encoding/emission is unit tested and SBF compiled; not SBF-runtime or live verified.** Indexer-side decoding (TypeScript client SDK + Worker ingestion) is unit and Workers-runtime tested against golden vectors, not against a live cluster.
 
 ## Wire format
 
-Every StockStream event is exactly one `sol_log_data` syscall call (`programs/stockstream/src/events.rs`), carrying a fixed `EVENT_SIZE = 100` bytes: a 52-byte header followed by a fixed 48-byte payload whose layout depends on the header's discriminator.
+Every Equinox event is exactly one `sol_log_data` syscall call (`programs/equinox/src/events.rs`), carrying a fixed `EVENT_SIZE = 100` bytes: a 52-byte header followed by a fixed 48-byte payload whose layout depends on the header's discriminator.
 
 ```
 offset  size  field
@@ -19,11 +19,11 @@ offset  size  field
 
 On the wire, this surfaces as a single `Program data: <base64>` line in `meta.logMessages`/a live `logsNotification`, decoded verbatim in `sol_log_data`'s Rust-native `&[&[u8]]` calling convention (this program only ever passes one field). This replaced an earlier, Priority-4-only, text-based `SS:<Kind> market=... seq=...` format (`Program log:` lines via `pinocchio_log`) -- the program no longer emits that format in any form.
 
-Off the SBF target (`target_os != "solana"`), `log_bytes()` is a `core::hint::black_box` no-op, matching every other CPI/syscall boundary in this program (see `docs/magicblock.md`). This is why every Rust-side event test (`programs/stockstream/tests/events.rs`) exercises `encode_event`/the payload builders directly -- the exact bytes that would be passed to the syscall -- rather than the syscall firing.
+Off the SBF target (`target_os != "solana"`), `log_bytes()` is a `core::hint::black_box` no-op, matching every other CPI/syscall boundary in this program (see `docs/magicblock.md`). This is why every Rust-side event test (`programs/equinox/tests/events.rs`) exercises `encode_event`/the payload builders directly -- the exact bytes that would be passed to the syscall -- rather than the syscall firing.
 
 ## Sequence semantics
 
-`global_event_sequence` is the market's own **last used** sequence, not the next available one: every non-fill event advances it via `next_event_sequence`'s increment-then-assign. A fill inside `plan_seat_results` assigns its own sequence as `global_event_sequence + 1 + fill_index` for exactly this reason -- an earlier version used `+ fill_index` (0-indexed, treating the field as "next available"), which silently collided with whatever event had most recently advanced the same counter (a trailing `OrderPlaced`, a custody event). Fixed this session; see the `add complete versioned StockStream event ABI` and `wire OrderPlaced event and fix a real fill-sequence collision bug` commits, and the regression test `a_resting_orders_placed_event_never_collides_with_a_later_crossing_fills_sequence`.
+`global_event_sequence` is the market's own **last used** sequence, not the next available one: every non-fill event advances it via `next_event_sequence`'s increment-then-assign. A fill inside `plan_seat_results` assigns its own sequence as `global_event_sequence + 1 + fill_index` for exactly this reason -- an earlier version used `+ fill_index` (0-indexed, treating the field as "next available"), which silently collided with whatever event had most recently advanced the same counter (a trailing `OrderPlaced`, a custody event). Fixed this session; see the `add complete versioned Equinox event ABI` and `wire OrderPlaced event and fix a real fill-sequence collision bug` commits, and the regression test `a_resting_orders_placed_event_never_collides_with_a_later_crossing_fills_sequence`.
 
 The program-log record and the in-account `FillEvent` ring buffer record for the same fill always share one sequence number (`apply_scratch_results` reuses `value.sequence` from the ring buffer entry when emitting `OrderFilled`/`OrderPartiallyFilled`) -- they refer to the exact same logical fill, never two independently-numbered records of it.
 
@@ -66,11 +66,11 @@ Documented explicitly in `events.rs`/`handlers.rs`/`magicblock.rs`, not silently
 
 13 fixed 48-byte payload builders in `events.rs`, each documented with its exact byte offsets in its own doc comment: `payload_empty`, `payload_seat`, `payload_seat_amount`, `payload_order`, `payload_fill`, `payload_position`, `payload_funding`, `payload_liquidation`, `payload_oracle`, `payload_delegation`, `payload_session`, `payload_registry`, `payload_reconciliation`. `NO_SEAT = u16::MAX` is the sentinel for a market-level (non-seat-specific) event using a seat-shaped payload.
 
-The TypeScript client SDK (`clients/stockstream/src/index.ts`) mirrors every payload byte-for-byte (`decodeStockStreamEvent` + one `decode*Payload` function per shape); the Worker's ingestion-path decoder (`workers/src/event-decoder.ts`) reimplements the same envelope decode (Workers-runtime-compatible, no Node `Buffer`) and buckets every discriminator into the pre-existing, coarser `MarketEventKind` taxonomy (`book`/`fill`/`funding`/`custody`/`oracle`/`health`) so downstream indexer/stream code needs no changes. An unrecognized discriminator is preserved as `Unknown(<n>)` by both decoders rather than dropped, so a future ABI addition doesn't silently blind an older indexer.
+The TypeScript client SDK (`clients/equinox/src/index.ts`) mirrors every payload byte-for-byte (`decodeEquinoxEvent` + one `decode*Payload` function per shape); the Worker's ingestion-path decoder (`workers/src/event-decoder.ts`) reimplements the same envelope decode (Workers-runtime-compatible, no Node `Buffer`) and buckets every discriminator into the pre-existing, coarser `MarketEventKind` taxonomy (`book`/`fill`/`funding`/`custody`/`oracle`/`health`) so downstream indexer/stream code needs no changes. An unrecognized discriminator is preserved as `Unknown(<n>)` by both decoders rather than dropped, so a future ABI addition doesn't silently blind an older indexer.
 
 ## Testing
 
-- `programs/stockstream/tests/events.rs`: header/payload byte-layout golden vectors, discriminator uniqueness across all 61 kinds, sequence/market distinguishability, and per-newly-wired-kind golden vectors.
-- `clients/stockstream/src/index.test.ts`: matching TypeScript golden vectors for the same discriminators/payloads.
+- `programs/equinox/tests/events.rs`: header/payload byte-layout golden vectors, discriminator uniqueness across all 61 kinds, sequence/market distinguishability, and per-newly-wired-kind golden vectors.
+- `clients/equinox/src/index.test.ts`: matching TypeScript golden vectors for the same discriminators/payloads.
 - `workers/src/event-decoder.test.ts`: binary decode via a real mock JSON-RPC HTTP handler, bucket-kind mapping, unrecognized-discriminator preservation, failed-transaction log discarding.
-- `programs/stockstream/tests/account_settlement.rs`: handler-level (not just codec-level) coverage -- `Liquidate` and `CancelAll` invoked through `process_instruction`, a dedicated fill-sequence-collision regression test, and an event-sequence-overflow-at-`u64::MAX` rejection test.
+- `programs/equinox/tests/account_settlement.rs`: handler-level (not just codec-level) coverage -- `Liquidate` and `CancelAll` invoked through `process_instruction`, a dedicated fill-sequence-collision regression test, and an event-sequence-overflow-at-`u64::MAX` rejection test.

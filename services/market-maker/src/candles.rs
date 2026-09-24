@@ -142,7 +142,7 @@ mod tests {
 
     #[tokio::test]
     async fn observations_build_minutes_and_survive_a_restart() {
-        let dir = std::env::temp_dir().join(format!("stockstream-candles-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("equinox-candles-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let history = PriceHistory::open(Some(dir.clone()));
         for (at, price) in [(0, 10.0), (30, 12.0), (59, 11.0), (61, 13.0)] {

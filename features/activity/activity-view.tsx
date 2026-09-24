@@ -8,11 +8,11 @@ import { describeExecutionStatus } from "@/lib/execution-status";
 import { toActivityRow } from "@/lib/activity-view-model";
 import { useMarketEvents } from "./use-market-events";
 
-const marketApiUrl = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_API_URL;
+const marketApiUrl = process.env.NEXT_PUBLIC_EQUINOX_MARKET_API_URL;
 
 export function ActivityView() {
   const auth = useAppAuth();
-  const marketSymbol = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_SYMBOL ?? "AAPL-PERP";
+  const marketSymbol = process.env.NEXT_PUBLIC_EQUINOX_MARKET_SYMBOL ?? "AAPL-PERP";
   const executionStatus = useExecutionStatus(marketApiUrl, marketSymbol);
   const lastSignature = useLastSignature();
   const { events, status, gapCount, duplicateCount, lastGapAt } = useMarketEvents(marketApiUrl, marketSymbol);

@@ -3,7 +3,7 @@
  * Resumable V3 shard commit runner.
  * MagicBlock's deployed scheduler accepts each bounded child as a one-account
  * intent, but rejects the complete 27-account intent as 0xa0000002. The core
- * sequence is advanced by StockStream across these calls and is committed last.
+ * sequence is advanced by Equinox across these calls and is committed last.
  */
 import fs from "node:fs";
 import { ComputeBudgetProgram, Keypair, PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
@@ -13,7 +13,7 @@ import { validateCheckpoint, validateV3CommitEpoch, validateV3CoreBytes } from "
 const LIFECYCLE_STATE_PATH = process.env.V3_LIFECYCLE_STATE_PATH ?? "/tmp/opencode/v3-lifecycle-state.json";
 const state = JSON.parse(fs.readFileSync(LIFECYCLE_STATE_PATH, "utf8"));
 const authority = Keypair.fromSecretKey(new Uint8Array(JSON.parse(fs.readFileSync(`${process.env.HOME}/.config/solana/id.json`, "utf8"))));
-const PROGRAM = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? DEFAULT_PROGRAM_ID);
+const PROGRAM = new PublicKey(process.env.EQUINOX_PROGRAM_ID ?? DEFAULT_PROGRAM_ID);
 const MAGIC_CONTEXT = new PublicKey("MagicContext1111111111111111111111111111111");
 const MAGIC_PROGRAM = new PublicKey("Magic11111111111111111111111111111111111111");
 const ENDPOINT = `${DEFAULT_MAGIC_ER_RPC}/`;

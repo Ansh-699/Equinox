@@ -15,7 +15,7 @@ legacy SPL Token program. It is testnet USDC with no financial value; custody
 still requires a successful on-chain CPI journey before being marked verified.
 
 The MagicBlock docs list the same validator identity for Asia devnet and the
-Router `getIdentity` response. `commit_interval_ms` remains StockStream's
+Router `getIdentity` response. `commit_interval_ms` remains Equinox's
 30,000 ms setting.
 
 Pyth Pro's current Solana contract is
@@ -26,6 +26,6 @@ verified separately through the authenticated Pyth Pro catalog. The checked-in
 fixtures intentionally do not mark any feed live.
 
 Deployment remains blocked until the program keypair corresponding to the
-pinned StockStream program ID is available. The wallet keypair is funding and
+pinned Equinox program ID is available. The wallet keypair is funding and
 upgrade authority material; using it as the program keypair would deploy a
-different program address and fail StockStream's program-ID check.
+different program address and fail Equinox's program-ID check.

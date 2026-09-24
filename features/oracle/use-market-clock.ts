@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { decodeOracleSnapshotV3 } from "@/clients/stockstream/src";
+import { decodeOracleSnapshotV3 } from "@/clients/equinox/src";
 import type { SolanaRpcTransport } from "@/lib/rpc-transport";
 
 const POLL_INTERVAL_MS = 10_000;

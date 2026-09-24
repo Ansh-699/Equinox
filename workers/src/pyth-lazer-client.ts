@@ -20,7 +20,7 @@
  *   envelopes; `streamUpdated` carries `parsed` and a `solana` field
  *   `{ encoding: "hex", data }` holding the full signed Solana-format
  *   message (leading `SOLANA_FORMAT_MAGIC` 2182742457) exactly what
- *   `programs/stockstream/src/handlers.rs::parse_verified_oracle` and the
+ *   `programs/equinox/src/handlers.rs::parse_verified_oracle` and the
  *   Pyth CPI verifier consume.
  * - `sdk/rust/protocol/src/api.rs`: `ignore_invalid_feeds` is
  *   serde-camelCase `ignoreInvalidFeeds` with alias `ignoreInvalidFeedIds`

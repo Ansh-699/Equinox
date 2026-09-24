@@ -1,8 +1,8 @@
 import { Connection, Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import BN from "bn.js";
-import deployment from "@/config/stockstream-deployment.json";
+import deployment from "@/config/equinox-deployment.json";
 
-/** Launches are priced in dollars: the quote token is StockStream's test USDC
+/** Launches are priced in dollars: the quote token is Equinox's test USDC
  * (the same collateral the perps use), not SOL. Equity is priced in USD. */
 export const QUOTE_MINT = new PublicKey(deployment.collateralMint);
 export const QUOTE_DECIMALS = 6;

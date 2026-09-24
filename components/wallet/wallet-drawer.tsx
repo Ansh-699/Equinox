@@ -9,12 +9,12 @@ import { WalletSelector } from "@/features/wallet/wallet-selector";
 import { refreshWalletBalances, useWalletBalances } from "@/features/portfolio/use-wallet-balances";
 import { loadTradingKey } from "@/lib/trading-key";
 import { useExecutionStatus } from "@/features/magicblock/use-execution-status";
-import { deriveV3ExecutionAccounts } from "@/clients/stockstream/src";
+import { deriveV3ExecutionAccounts } from "@/clients/equinox/src";
 import { deriveCollateralTokenAccount } from "@/lib/token-accounts";
 import { publicMarketApiUrl } from "@/lib/demo-config";
 import { claimTestFunds } from "@/lib/faucet-client";
 import { SolanaRpcTransport } from "@/lib/rpc-transport";
-import deployment from "@/config/stockstream-deployment.json";
+import deployment from "@/config/equinox-deployment.json";
 import { decodeV3SeatShard } from "../../workers/src/v3-market-state";
 
 const L1_RPC = process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://api.devnet.solana.com";

@@ -22,7 +22,7 @@ program, and the instructions sysvar. The treasury and storage are not in the
 This checkpoint adds an authenticated, L1-owned `OracleSnapshotV3` layout and
 an `UpdateOracleSnapshotV3` instruction (opcode 58). Pyth verification uses
 the same Ed25519/instructions-sysvar checks and Pyth `verify_message` CPI as
-the canonical path, then writes only the StockStream snapshot. The snapshot
+the canonical path, then writes only the Equinox snapshot. The snapshot
 is intended to be passed read-only to ER execution; no Pyth account is
 delegated or writable in the execution bundle.
 
@@ -67,7 +67,7 @@ market authority; a valid Pyth message from an arbitrary payer is rejected.
 
 The snapshot account and any execution-path read-through require a new program
 deployment and fresh market accounts; the currently deployed program is not
-mutated. The local writer accepts a read-only core owned either by StockStream
+mutated. The local writer accepts a read-only core owned either by Equinox
 or the canonical MagicBlock delegation program, so an L1 snapshot refresh is
 source-compatible with a delegated core. That ownership path is not yet live
 verified. Until a new deployment and ER read-through simulation prove this

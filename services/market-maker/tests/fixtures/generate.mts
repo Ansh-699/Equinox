@@ -2,7 +2,7 @@
 // Run from the repo root: npx tsx services/market-maker/tests/fixtures/generate.mts
 import fs from "node:fs";
 import { ComputeBudgetProgram, Keypair, Transaction } from "@solana/web3.js";
-import { cancelOrderV3, deriveV3ExecutionAccounts, placeOrderV3, replaceOrderV3 } from "../../../../clients/stockstream/src";
+import { cancelOrderV3, deriveV3ExecutionAccounts, placeOrderV3, replaceOrderV3 } from "../../../../clients/equinox/src";
 
 const seed = Uint8Array.from({ length: 32 }, (_, i) => i + 1);
 const authority = Keypair.fromSeed(seed);

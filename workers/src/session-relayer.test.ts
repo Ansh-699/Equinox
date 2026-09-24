@@ -123,7 +123,7 @@ describe("validateSessionTransaction", () => {
     if (!result.ok) expect(result.reason).toMatch(/opcode/);
   });
 
-  it("rejects an instruction targeting a program other than StockStream", async () => {
+  it("rejects an instruction targeting a program other than Equinox", async () => {
     const relayer = new DeterministicTestSigner("relayer");
     const relayerAddress = getBase58Decoder().decode(await relayer.publicKey());
     const sessionSigner = new DeterministicTestSigner("session-key");

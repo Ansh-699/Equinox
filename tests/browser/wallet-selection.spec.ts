@@ -77,7 +77,7 @@ test("a persisted wallet selection restores after reload, but only if still conn
   await expect(radios).toHaveCount(2, { timeout: 10_000 });
   await radios.nth(1).click();
   await expect(radios.nth(1)).toHaveAttribute("aria-checked", "true");
-  const selectedAddress = await page.evaluate(() => window.__stockstreamE2E?.walletAddresses?.[1]);
+  const selectedAddress = await page.evaluate(() => window.__equinoxE2E?.walletAddresses?.[1]);
 
   await page.reload();
   await signIn(page);

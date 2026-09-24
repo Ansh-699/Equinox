@@ -1,5 +1,5 @@
 /**
- * Priority 8: the six concrete, durable StockStream keeper jobs. Every job
+ * Priority 8: the six concrete, durable Equinox keeper jobs. Every job
  * shares one execution shape (`runKeeperAction` below): acquire a
  * per-market durable lease with a fencing token
  * (`ProtocolRepository.acquire`), generate a deterministic idempotency key,

@@ -1,8 +1,8 @@
-# StockStream hackathon submission package
+# Equinox hackathon submission package
 
 ## Product
 
-StockStream is a Solana tokenized-stock perpetuals exchange prototype for
+Equinox is a Solana tokenized-stock perpetuals exchange prototype for
 deterministic, risk-checked execution. Its V3 design uses paged order books,
 sharded seats/events, session authorization, and an explicit L1/MagicBlock
 execution boundary. The demo deliberately separates verified Devnet reads
@@ -10,7 +10,7 @@ from local deterministic trading fixtures.
 
 ## Demo links
 
-- GitHub: https://github.com/Ansh-699/StockStream/tree/stockstream/takeover-ee3c5f6
+- GitHub: https://github.com/Ansh-699/Equinox/tree/equinox/takeover-ee3c5f6
 - Live read-only Worker: https://stockstream-market-api.ansht.workers.dev/health
 - Live read-only markets: https://stockstream-market-api.ansht.workers.dev/v1/markets
 - Frontend diagnostics: `/diagnostics` in the deployed frontend

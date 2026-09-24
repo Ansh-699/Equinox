@@ -1,5 +1,5 @@
 import type { TransactionInstruction } from "@solana/web3.js";
-import { cancelAll, cancelOrder, createTraderSeat, depositCollateral, initializeSettlementScratch, placeOrder, withdrawCollateral, type CustodyAccounts, type InstructionAccounts, type PlaceOrderParams } from "../clients/stockstream/src";
+import { cancelAll, cancelOrder, createTraderSeat, depositCollateral, initializeSettlementScratch, placeOrder, withdrawCollateral, type CustodyAccounts, type InstructionAccounts, type PlaceOrderParams } from "../clients/equinox/src";
 import type { L1Transport, RouterBoundary, TransactionPreview, WalletBoundary } from "./execution-boundary";
 import { executeL1, submitEr } from "./execution-boundary";
 import type { OracleFreshness } from "./oracle-freshness";
@@ -20,7 +20,7 @@ export interface ProtocolTransport {
   freshOracle?: OracleFreshness;
 }
 
-export class StockStreamProtocolService {
+export class EquinoxProtocolService {
   constructor(private readonly transport: ProtocolTransport) {}
 
   buildSeatAndScratch(context: ProtocolBuildContext): TransactionInstruction[] {

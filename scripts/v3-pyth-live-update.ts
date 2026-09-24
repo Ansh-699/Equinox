@@ -9,7 +9,7 @@ import {
   Transaction,
 } from "@solana/web3.js";
 import { loadPythKeeperConfig, PythKeeper } from "../lib/server/pyth-keeper";
-import deployment from "../config/stockstream-deployment.json";
+import deployment from "../config/equinox-deployment.json";
 
 const RPC = process.env.SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
 const PROGRAM = deployment.programId;
@@ -41,7 +41,7 @@ const config = loadPythKeeperConfig({
   PYTH_PRO_FEED_ID: String(EXPECTED.feedId),
   PYTH_PRO_MIN_CHANNEL: EXPECTED.channel,
   PYTH_PRO_ENDPOINTS: endpoints,
-  STOCKSTREAM_MARKET_ADDRESS: CORE,
+  EQUINOX_MARKET_ADDRESS: CORE,
   KEEPER_PUBLIC_KEY: payer.publicKey.toBase58(),
   PYTH_PROGRAM_ADDRESS: PYTH_PROGRAM,
   PYTH_STORAGE_ADDRESS: PYTH_STORAGE,

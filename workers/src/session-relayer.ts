@@ -15,7 +15,7 @@ import type { SolanaL1Transport, MagicRouterTransport } from "./chain-transports
 
 /**
  * Session-key relayer (Priority 8, Section 15): the browser signs a
- * StockStream instruction with its client-held session key (never the main
+ * Equinox instruction with its client-held session key (never the main
  * wallet, and the session key never leaves the browser), builds the
  * transaction with the Worker's own keeper address as fee payer, and sends
  * the partially-signed wire transaction here. This module independently
@@ -163,7 +163,7 @@ function extractOrderIntent(opcode: number, data: Uint8Array): RelayOrderIntent 
  * and still unsigned, the session signer's signature is a real,
  * cryptographically valid Ed25519 signature over this exact message (not
  * merely present), and the transaction carries exactly one non-compute-
- * budget instruction, targeting the caller-supplied canonical StockStream
+ * budget instruction, targeting the caller-supplied canonical Equinox
  * program address with an opcode in `SESSION_ALLOWED_OPCODES`. On success,
  * also returns the opcode/seatIndex/actionNonce/flags extracted directly
  * from that instruction's own bytes -- never from caller-asserted fields --

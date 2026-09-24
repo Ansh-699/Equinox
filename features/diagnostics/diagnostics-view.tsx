@@ -2,31 +2,31 @@
 
 import { TopBar } from "@/components/layout/top-bar";
 import { useAppAuth } from "@/components/app-providers";
-import { useStockStreamProtocol } from "@/features/wallet/use-stockstream-protocol";
+import { useEquinoxProtocol } from "@/features/wallet/use-equinox-protocol";
 import { useTradingSession } from "@/features/sessions/use-trading-session";
 import { useExecutionStatus } from "@/features/magicblock/use-execution-status";
 import { useLastSignature } from "@/lib/use-last-signature";
 import { marketForSymbol } from "@/lib/markets";
-import { STOCKSTREAM_PROGRAM_ID } from "@/clients/stockstream/src/constants";
+import { EQUINOX_PROGRAM_ID } from "@/clients/equinox/src/constants";
 import { DEMO_DEPLOYED_ARTIFACT_SHA256, DEMO_LOCAL_ARTIFACT_SHA256, DEMO_ORACLE_SNAPSHOT, DEMO_PROGRAM_ID, publicMarketApiUrl, publicV3Core } from "@/lib/demo-config";
 import { useEffect, useMemo, useState } from "react";
-import { decodeV3MarketCore, type V3MarketCoreView } from "@/clients/stockstream/src/abi/v3";
+import { decodeV3MarketCore, type V3MarketCoreView } from "@/clients/equinox/src/abi/v3";
 import { SolanaRpcTransport } from "@/lib/rpc-transport";
 import { useMarketClock } from "@/features/oracle/use-market-clock";
-import deployment from "@/config/stockstream-deployment.json";
+import deployment from "@/config/equinox-deployment.json";
 
 const DELEGATION_STATUS = ["not delegated", "delegated", "undelegating", "restored"];
-const writesEnabled = process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_STOCKSTREAM_DEMO_READ_ONLY === "false";
+const writesEnabled = process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_EQUINOX_DEMO_READ_ONLY === "false";
 
 const marketApiUrl = publicMarketApiUrl;
-const RELAYER_ADDRESS = process.env.NEXT_PUBLIC_STOCKSTREAM_RELAYER_ADDRESS;
+const RELAYER_ADDRESS = process.env.NEXT_PUBLIC_EQUINOX_RELAYER_ADDRESS;
 
 export function DiagnosticsView() {
   const auth = useAppAuth();
-  const marketSymbol = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_SYMBOL ?? "AAPL-PERP";
+  const marketSymbol = process.env.NEXT_PUBLIC_EQUINOX_MARKET_SYMBOL ?? "AAPL-PERP";
   const marketConfig = marketForSymbol(marketSymbol);
-  const marketAddress = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_ADDRESS ?? (publicV3Core ? marketConfig.marketPda : null);
-  const protocol = useStockStreamProtocol(auth.authenticated ? marketAddress : null);
+  const marketAddress = process.env.NEXT_PUBLIC_EQUINOX_MARKET_ADDRESS ?? (publicV3Core ? marketConfig.marketPda : null);
+  const protocol = useEquinoxProtocol(auth.authenticated ? marketAddress : null);
   const session = useTradingSession(protocol, auth.walletAddress, marketAddress, 0);
   const executionStatus = useExecutionStatus(marketApiUrl, marketSymbol);
   const lastSignature = useLastSignature();
@@ -63,7 +63,7 @@ export function DiagnosticsView() {
         <div className="panel-title"><h2>Diagnostics</h2><span>Devnet</span></div>
         <p className="form-note">Public deployment facts, read live from Devnet, MagicBlock and the market API.</p>
         <dl className="session-detail">
-          <dt>Program ID</dt><dd>{DEMO_PROGRAM_ID || STOCKSTREAM_PROGRAM_ID}</dd>
+          <dt>Program ID</dt><dd>{DEMO_PROGRAM_ID || EQUINOX_PROGRAM_ID}</dd>
           <dt>Configured V3 core</dt><dd>{publicV3Core}</dd>
           <dt>Artifact alignment</dt><dd className={DEMO_LOCAL_ARTIFACT_SHA256 === DEMO_DEPLOYED_ARTIFACT_SHA256 ? undefined : "negative"}>{DEMO_LOCAL_ARTIFACT_SHA256 === DEMO_DEPLOYED_ARTIFACT_SHA256 ? "matched" : "mismatch"} · local {DEMO_LOCAL_ARTIFACT_SHA256.slice(0, 12)}… · deployed {DEMO_DEPLOYED_ARTIFACT_SHA256.slice(0, 12)}…</dd>
           <dt>Pyth TSLA/USD snapshot</dt><dd className={clock?.oracle ? undefined : "negative"}>{clock?.oracle

@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { PrivyClient } from "@privy-io/node";
 
-export const SESSION_COOKIE = "stockstream_session";
+export const SESSION_COOKIE = "equinox_session";
 const SESSION_TTL_MS = 60 * 60 * 1000;
 
 export interface ApplicationSession {

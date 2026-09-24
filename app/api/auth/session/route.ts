@@ -34,7 +34,7 @@ export async function POST(request: Request) {
       httpOnly: true, secure: true, sameSite: "lax",
       path: "/", expires: new Date(result.session.expiresAt)
     });
-    response.cookies.set("stockstream_csrf", csrf, { httpOnly: false, secure: true, sameSite: "lax", path: "/", expires: new Date(result.session.expiresAt) });
+    response.cookies.set("equinox_csrf", csrf, { httpOnly: false, secure: true, sameSite: "lax", path: "/", expires: new Date(result.session.expiresAt) });
     return response;
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Authentication failed" }, { status: 401 });

@@ -6,7 +6,7 @@ import { Connection, Keypair, PublicKey, VersionedTransaction } from "@solana/we
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { createKeyPairFromPrivateKeyBytes, signBytes } from "@solana/kit";
 
-export const SITE = process.env.SITE ?? "https://stockstream.ansht.workers.dev/trade";
+export const SITE = process.env.SITE ?? "https://equinox.ansht.workers.dev/trade";
 const L1 = new Connection("https://api.devnet.solana.com", "confirmed");
 const MINT = new PublicKey("GLgZYwSXmDTktcX9Hpizak7AjPJjd5QdwrRDkYc5oRtC");
 

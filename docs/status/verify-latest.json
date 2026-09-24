@@ -16,7 +16,7 @@
     "secretScan": true
   },
   "artifact": {
-    "path": "target/deploy/stockstream.so",
+    "path": "target/deploy/equinox.so",
     "sha256": "1c1bb230d94520ead90e31cb1eb40d8c42d0c2b6391a8355a3457c5de51e05de"
   }
 }

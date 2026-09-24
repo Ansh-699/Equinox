@@ -70,7 +70,7 @@ export function getSolanaWalletsSnapshot(): SolanaWalletOption[] {
 }
 export const getServerSolanaWalletsSnapshot = () => NO_WALLETS;
 
-const REMEMBERED = "stockstream:wallet";
+const REMEMBERED = "equinox:wallet";
 /** The wallet the user last picked, for a silent reconnect on the next visit. */
 export function rememberedWallet(): string | null {
   try { return localStorage.getItem(REMEMBERED); } catch { return null; }

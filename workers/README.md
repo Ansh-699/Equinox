@@ -1,4 +1,4 @@
-# StockStream Market API
+# Equinox Market API
 
 Cloudflare Workers holds no wallet keys and has no authority to settle, liquidate,
 or move user funds. It indexes verified Solana/MagicBlock/Meteora events into D1

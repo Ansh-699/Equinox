@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { deriveV3ExecutionAccounts } from "@/clients/stockstream/src";
-import deployment from "@/config/stockstream-deployment.json";
+import { deriveV3ExecutionAccounts } from "@/clients/equinox/src";
+import deployment from "@/config/equinox-deployment.json";
 import { annotateBookTrees, decodeV3BookPage, decodeV3EventShard, decodeV3SeatShard, type V3BookPageState } from "../../workers/src/v3-market-state";
 
 export interface BookLevel { price: number; size: number }
@@ -29,7 +29,7 @@ interface RawAggregate {
 
 /** V3 prices use the oracle's raw scale (TSLA exponent −5). */
 export const PRICE_SCALE = 1e5;
-const FILL_KINDS = new Set([203, 204]); // OrderPartiallyFilled, OrderFilled (programs/stockstream/src/events.rs)
+const FILL_KINDS = new Set([203, 204]); // OrderPartiallyFilled, OrderFilled (programs/equinox/src/events.rs)
 
 /** Resting leaves → price levels. Oracle-pegged orders price at index + offset (capped by their limit). */
 export function levelsFrom(nodes: readonly RawNode[], bid: boolean, oracleRaw: bigint, nowSec: bigint): BookLevel[] {

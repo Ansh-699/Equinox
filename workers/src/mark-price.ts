@@ -1,6 +1,6 @@
 /**
  * Worker-side projection of the program's deterministic executable mark
- * price (`programs/stockstream/src/mark.rs`). This is a PARITY PORT, not an
+ * price (`programs/equinox/src/mark.rs`). This is a PARITY PORT, not an
  * independent policy: the exact same rules and integer arithmetic, applied
  * to the same market-account bytes the program reads, so a UI showing the
  * mark always shows the number the program itself computes.

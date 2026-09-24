@@ -63,7 +63,7 @@ function signatureBytesOf(decoded: Transaction, address: string): Uint8Array {
   throw new Error(`no signature for ${address}`);
 }
 
-describe("StockStream transaction construction (@solana/kit)", () => {
+describe("Equinox transaction construction (@solana/kit)", () => {
   it("diagnostic round-trip", async () => {
     const signer = new DeterministicTestSigner("diag");
     const addr = base58.decode(await signer.publicKey());

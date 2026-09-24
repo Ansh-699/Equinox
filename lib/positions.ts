@@ -2,7 +2,7 @@
  * Frontend-owned TraderSeat decoder. Trader seats are not their own
  * accounts -- they live embedded in the market account at
  * `MarketStateView.traderSeatOffset + seatIndex * TRADER_SEAT_SIZE`
- * (`programs/stockstream/src::TraderSeat`, `#[repr(C, packed(8))]`).
+ * (`programs/equinox/src::TraderSeat`, `#[repr(C, packed(8))]`).
  *
  * These field offsets are not re-derived here: they are ported verbatim
  * from `workers/src/private-sessions.ts::SEAT_FIELD_OFFSETS`, which
@@ -15,7 +15,7 @@
  *
  * Deliberately NOT computed here: equity and unrealized PnL. Those need
  * the current oracle mark price and the exact formula in
- * `programs/stockstream/src/risk.rs::equity`/`unrealized_pnl`; duplicating
+ * `programs/equinox/src/risk.rs::equity`/`unrealized_pnl`; duplicating
  * that math in the frontend without shared parity vectors would be
  * exactly the "authoritative risk calculation hidden in a UI component"
  * the frontend spec forbids. Only raw, directly-read account fields are

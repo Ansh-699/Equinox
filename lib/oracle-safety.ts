@@ -1,7 +1,7 @@
 /**
  * Oracle safety UI state machine, built ONLY from already-verified typed
  * fields: `MarketStateView.oracleValid`/`lastVerifiedOracleTimestamp`
- * (byte-offset-verified account header fields, clients/stockstream/src/
+ * (byte-offset-verified account header fields, clients/equinox/src/
  * index.ts::decodeMarketState) and market-event KIND NAMES (the 2-byte
  * discriminator decoded and verified against events.rs by
  * workers/src/event-decoder.ts's EVENT_KIND_NAMES table).

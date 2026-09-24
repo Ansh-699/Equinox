@@ -13,7 +13,7 @@ test("loads the real Devnet terminal without exposing server credentials", async
   await expect(page.locator(".status-strip").filter({ hasText: "V3 bundle" }).getByText("unavailable", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
   const html = await page.content();
-  for (const secret of ["PRIVY_APP_SECRET", "PYTH_PRO_API_KEY", "KEEPER_KEYPAIR_JSON", "STOCKSTREAM_RELAYER_TOKEN"]) {
+  for (const secret of ["PRIVY_APP_SECRET", "PYTH_PRO_API_KEY", "KEEPER_KEYPAIR_JSON", "EQUINOX_RELAYER_TOKEN"]) {
     expect(html).not.toContain(secret);
   }
   expect(pageErrors).toEqual([]);

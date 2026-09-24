@@ -1,4 +1,4 @@
-# StockStream market maker
+# Equinox market maker
 
 An always-on devnet quoting bot for the V3 TSLA-PERP book inside the MagicBlock
 rollup. It replaced the Cloudflare Durable Object, which hit Durable Object
@@ -27,8 +27,8 @@ The smallest VM is enough: 1 vCPU and 1 GB RAM.
 ## Build and test
 
 ```bash
-cargo test                                   # quote logic + byte parity with clients/stockstream
-cargo build --release                        # target/release/stockstream-market-maker
+cargo test                                   # quote logic + byte parity with clients/equinox
+cargo build --release                        # target/release/equinox-market-maker
 # or, from the repository root:
 docker build -f services/market-maker/Dockerfile -t stockstream-mm .
 ```
@@ -41,12 +41,12 @@ after an ABI change with
 
 ```bash
 # 1. Binary and a service user
-sudo install -m 755 target/release/stockstream-market-maker /usr/local/bin/
+sudo install -m 755 target/release/equinox-market-maker /usr/local/bin/
 sudo useradd --system --no-create-home stockstream
 
 # 2. Keys (the bots' own keypairs; never the market authority) and config
-sudo install -d -m 750 -o root -g stockstream /etc/stockstream
-sudo install -m 640 -o root -g stockstream mm-maker.json mm-taker.json /etc/stockstream/
+sudo install -d -m 750 -o root -g equinox /etc/stockstream
+sudo install -m 640 -o root -g equinox mm-maker.json mm-taker.json /etc/stockstream/
 sudo install -m 600 deploy/mm.env.example /etc/stockstream/mm.env   # then edit MM_REGION etc.
 
 # 3. Service
@@ -93,11 +93,11 @@ Worker would spend Worker requests (about 86k/day for one open tab).
 | `MM_KEEPER_KEYPAIR` | unset | the core's keeper key; turns on commits, funding and liquidation (see Keeper) |
 | `MM_COMMIT_EVERY_S`, `MM_FUNDING_EVERY_S` | `120`, `3600` | keeper pacing |
 | `MAGICBLOCK_RPC_URL` | deployment `magicBlock.rpc` | rollup RPC and websocket |
-| `MARKET_API_URL` | the StockStream Worker | permissionless Pyth snapshot refresh when the rollup price is older than 6 s |
+| `MARKET_API_URL` | the Equinox Worker | permissionless Pyth snapshot refresh when the rollup price is older than 6 s |
 | `MM_STATUS_ADDR` | `0.0.0.0:8080` | status server (`/v1/mm/status`, `/healthz`) |
 | `MM_REGION` | unset | label shown in the terminal |
 | `MM_TICK_MS` | `400` | pause between ticks |
-| `STOCKSTREAM_DEPLOYMENT` | compiled-in `config/stockstream-deployment.json` | another market |
+| `EQUINOX_DEPLOYMENT` | compiled-in `config/equinox-deployment.json` | another market |
 
 Stopping the service is safe: quotes expire on their own within 60 s.
 
@@ -124,7 +124,7 @@ SOL for rollup fees.
 - **Funding** every `MM_FUNDING_EVERY_S`: moves the accumulator by the book's
   premium over the oracle (the program only lets it rise and caps the step).
 - **Liquidation** every 3 s: re-scores every seat with the program's own risk
-  code (the `stockstream` crate is a path dependency) and liquidates the ones
+  code (the `equinox` crate is a path dependency) and liquidates the ones
   under maintenance margin.
 
 The status JSON gains a `keeper` object (commits, last sequence, pause length,

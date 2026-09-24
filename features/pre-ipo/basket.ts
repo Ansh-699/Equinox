@@ -1,11 +1,11 @@
-import { createV3TraderSeat, decodeOracleSnapshotV3, deriveV3ExecutionAccounts } from "@/clients/stockstream/src";
+import { createV3TraderSeat, decodeOracleSnapshotV3, deriveV3ExecutionAccounts } from "@/clients/equinox/src";
 import type { ActiveWalletSigner } from "@/components/wallet-signer-context";
 import { resolveCustodyAccounts } from "@/features/collateral/custody-accounts";
 import { rollupDeposit } from "@/features/collateral/rollup-deposit";
 import { firstFreeSeat } from "@/features/trading/rollup-seat";
 import type { SeatPosition } from "@/features/trading/use-v3-book";
 import { buildV3OrderInstructions } from "@/features/trading/v3-order";
-import { createStockStreamProtocol } from "@/features/wallet/use-stockstream-protocol";
+import { createEquinoxProtocol } from "@/features/wallet/use-equinox-protocol";
 import type { TransactionPreview } from "@/lib/execution-boundary";
 import { marketForSymbol } from "@/lib/markets";
 import { fetchV3Aggregate } from "@/lib/v3-aggregate";
@@ -51,7 +51,7 @@ export async function planBasket(basket: Basket, notionalUsd: number, leverage: 
 async function tradeLeg(plan: LegPlan, side: "long" | "short", leverage: number, signer: ActiveWalletSigner, report: (message: string) => void): Promise<LegResult> {
   const { market, quantity } = plan;
   const wallet = signer.address!;
-  const protocol = createStockStreamProtocol(signer, market.core, market);
+  const protocol = createEquinoxProtocol(signer, market.core, market);
   if (!protocol) throw new Error("no signer");
   const execution = deriveV3ExecutionAccounts(market.core, wallet);
   const writable = [market.core, ...execution.bookPages, ...execution.seatShards, ...execution.eventShards].map(String);

@@ -16,28 +16,28 @@ Research date: 2026-09-15. Source: [Backpack Exchange documentation](https://doc
 
 ## Useful Product Behavior
 
-StockStream should make session state, shortened sessions, holidays, available
+Equinox should make session state, shortened sessions, holidays, available
 collateral, reserved collateral, and authoritative sequence numbers explicit.
 Its atomic instruction can follow the same clear -> match -> settle ordering.
 Client acknowledgements should remain distinct from ER acceptance and L1
 commitment. Snapshot plus delta streams should use absolute reconcilable state
 for balances, orders, and positions.
 
-## What StockStream Must Not Copy
+## What Equinox Must Not Copy
 
-Backpack is not StockStream's oracle, onchain specification, account-layout
+Backpack is not Equinox's oracle, onchain specification, account-layout
 guide, liquidation-price authority, Pyth substitute, or MagicBlock substitute.
-Its proprietary implementation must not be copied. StockStream is a USDC-
+Its proprietary implementation must not be copied. Equinox is a USDC-
 settled perpetual CLOB, not an RFQ venue, and tokenized-stock spot behavior
 must not replace the AAPL-PERP risk path.
 
 ## Differences
 
 Backpack separates RFQ and spot-stock execution and may defer broker settlement.
-StockStream performs bounded matching and settlement atomically inside a Solana
-instruction. Backpack's command stream is an offchain engine concern; StockStream
+Equinox performs bounded matching and settlement atomically inside a Solana
+instruction. Backpack's command stream is an offchain engine concern; Equinox
 must prove account ownership, PDA derivation, byte layouts, and rollback. ER
-acceptance is also distinct from StockStream's later L1 commitment.
+acceptance is also distinct from Equinox's later L1 commitment.
 
 ## Concrete Implications
 

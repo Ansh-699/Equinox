@@ -12,7 +12,7 @@ import { DEFAULT_PROGRAM_ID } from "./deployment-manifest.mjs";
 
 const RPC = "https://api.devnet.solana.com";
 const conn = new Connection(RPC, "confirmed");
-const PROGRAM_ID = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? DEFAULT_PROGRAM_ID);
+const PROGRAM_ID = new PublicKey(process.env.EQUINOX_PROGRAM_ID ?? DEFAULT_PROGRAM_ID);
 const DELEGATION_PROGRAM = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh";
 const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const BPF_LOADER = "BPFLoaderUpgradeab1e11111111111111111111111";

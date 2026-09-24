@@ -9,7 +9,7 @@ import type { AppAuth } from "@/components/app-providers";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { DEMO_PROGRAM_ID } from "@/lib/demo-config";
 
-const OPEN_WALLET_EVENT = "stockstream:open-wallet";
+const OPEN_WALLET_EVENT = "equinox:open-wallet";
 /** Opens the wallet drawer from anywhere (e.g. "Sign in to trade"). */
 export function openWalletDrawer() {
   window.dispatchEvent(new Event(OPEN_WALLET_EVENT));
@@ -63,9 +63,9 @@ export function TopBar({ active, auth }: { active: ActiveSection; auth: AppAuth 
   return (
     <header className="relative flex h-[60px] shrink-0 items-center border-b border-[var(--t-border)] bg-[var(--t-bg)] px-4 sm:h-[68px] sm:px-6">
       <a href="#main-content" className="skip-link">Skip to main content</a>
-      <Link href="/" className="flex shrink-0 items-center gap-2.5" aria-label="StockStream home">
+      <Link href="/" className="flex shrink-0 items-center gap-2.5" aria-label="Equinox home">
         <img src="/favicon.svg" alt="" className="h-7 w-7 rounded sm:h-8 sm:w-8" />
-        <span className="text-[19px] font-semibold tracking-[-0.035em] text-[var(--t-text)] sm:text-[25px]">StockStream</span>
+        <span className="text-[19px] font-semibold tracking-[-0.035em] text-[var(--t-text)] sm:text-[25px]">Equinox</span>
       </Link>
       <span className="ml-3 hidden rounded bg-[var(--t-surface-3)] px-2 py-0.5 text-[10px] font-medium text-[var(--t-text-2)] xl:inline">Devnet</span>
 

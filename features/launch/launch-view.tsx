@@ -99,7 +99,7 @@ export function LaunchView() {
             </div>
             <h1 className="mt-2 text-[24px] font-semibold tracking-tight text-[var(--t-text)]">Launch a stock-themed token with an equity-tuned curve</h1>
             <p className="mt-2 max-w-[70ch] text-[13px] leading-relaxed text-[var(--t-text-2)]">
-              Most bonding curves are tuned for memecoins and priced in SOL. These are priced in dollars (test USDC) and tuned for equity-like assets: decaying launch fees against opening-day sniping, volatility-scaled dynamic fees, and permanently locked liquidity when the pool graduates to Meteora DAMM v2. A graduated token can then be listed as a StockStream perp, priced from its DAMM v2 pool.
+              Most bonding curves are tuned for memecoins and priced in SOL. These are priced in dollars (test USDC) and tuned for equity-like assets: decaying launch fees against opening-day sniping, volatility-scaled dynamic fees, and permanently locked liquidity when the pool graduates to Meteora DAMM v2. A graduated token can then be listed as a Equinox perp, priced from its DAMM v2 pool.
             </p>
           </div>
 

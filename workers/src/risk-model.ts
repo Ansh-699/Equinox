@@ -1,6 +1,6 @@
 /**
  * Port of the exact liquidation-health formula in
- * `programs/stockstream/src/risk.rs` (`equity`, `unrealized_pnl`,
+ * `programs/equinox/src/risk.rs` (`equity`, `unrealized_pnl`,
  * `notional`, `fee`/`maintenance_margin`, `is_liquidatable`) -- used only to
  * decide which candidates are worth *building a liquidation transaction
  * for*. The on-chain program re-derives and re-checks the same condition

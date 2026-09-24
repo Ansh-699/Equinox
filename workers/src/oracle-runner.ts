@@ -1,4 +1,4 @@
-import deployment from "../../config/stockstream-deployment.json";
+import deployment from "../../config/equinox-deployment.json";
 import { SolanaL1Transport } from "./chain-transports";
 import { resolveKeeperSigning } from "./keeper-signer";
 import { fetchPythSolanaMessage, refreshOracleSnapshot, type RefreshResult } from "./oracle-refresh";

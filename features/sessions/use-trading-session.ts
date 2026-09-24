@@ -1,14 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { authorizeTradingSession, authorizeTradingSessionV3, deriveV3ExecutionAccounts, revokeTradingSession, revokeTradingSessionV3 } from "@/clients/stockstream/src";
-import { decodeV3MarketCore } from "@/clients/stockstream/src/abi/v3";
+import { authorizeTradingSession, authorizeTradingSessionV3, deriveV3ExecutionAccounts, revokeTradingSession, revokeTradingSessionV3 } from "@/clients/equinox/src";
+import { decodeV3MarketCore } from "@/clients/equinox/src/abi/v3";
 import { createSession, destroySession, hasSessionKey, lookupSession, type SessionStatus } from "@/lib/session-trading";
-import type { TradingSessionView } from "@/clients/stockstream/src";
+import type { TradingSessionView } from "@/clients/equinox/src";
 import type { TransactionPreview } from "@/lib/execution-boundary";
 import { RpcFailure } from "@/lib/rpc-transport";
 import { recordSignature } from "@/lib/last-signature";
-import type { StockStreamProtocol } from "@/features/wallet/use-stockstream-protocol";
+import type { EquinoxProtocol } from "@/features/wallet/use-equinox-protocol";
 
 function toSessionStatus(sessionPda: string, sessionSignerAddress: string, ownerWallet: string, marketPda: string, seatIndex: number, readback: TradingSessionView, v3Core: string | null): SessionStatus {
   const address = (value: { toBase58(): string } | string): string => typeof value === "string" ? value : value.toBase58();
@@ -61,11 +61,11 @@ function describeError(error: unknown, fallback: string): string {
 /** Owns the one-main-wallet-prompt session lifecycle: authorize (with
  * authoritative on-chain readback before trading is ever enabled) and
  * revoke (which also destroys the in-memory session key immediately). */
-export function useTradingSession(protocol: StockStreamProtocol | null, ownerWallet: string | null, marketPda: string | null, seatIndex = 0) {
+export function useTradingSession(protocol: EquinoxProtocol | null, ownerWallet: string | null, marketPda: string | null, seatIndex = 0) {
   const [rawStatus, setStatus] = useState<SessionStatus | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const v3Core = process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS ?? null;
+  const v3Core = process.env.NEXT_PUBLIC_EQUINOX_V3_CORE_ADDRESS ?? null;
 
   // A session belongs to whichever wallet authorized it -- switching the
   // active wallet must disable it immediately, not just until the next

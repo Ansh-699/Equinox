@@ -14,7 +14,7 @@ const NO_SIGNER: ActiveWalletSigner = {
 
 /**
  * The active main wallet's signer, injected by AppProviders. Exists so
- * features/wallet/use-stockstream-protocol.ts never calls
+ * features/wallet/use-equinox-protocol.ts never calls
  * @privy-io/react-auth/solana's useSignTransaction/useWallets directly:
  * those hooks throw when called outside a real PrivyProvider, which used
  * to crash the whole trading terminal whenever NEXT_PUBLIC_PRIVY_APP_ID

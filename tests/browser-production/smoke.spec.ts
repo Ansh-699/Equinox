@@ -35,7 +35,7 @@ test("diagnostics remains available as a public read-only demo panel in producti
 test("no server secret names appear in the production HTML or shipped scripts", async ({ page }) => {
   await page.goto("/");
   const html = await page.content();
-  for (const secret of ["PRIVY_APP_SECRET", "PYTH_PRO_API_KEY", "KEEPER_KEYPAIR_JSON", "STOCKSTREAM_RELAYER_TOKEN"]) {
+  for (const secret of ["PRIVY_APP_SECRET", "PYTH_PRO_API_KEY", "KEEPER_KEYPAIR_JSON", "EQUINOX_RELAYER_TOKEN"]) {
     expect(html).not.toContain(secret);
   }
 });

@@ -1,7 +1,7 @@
 // Live check: Meteora launchpad. Fresh wallet → /launch → quick-graduate
 // preset → launch (signed by the trading account) → the pool shows in the
 // monitor → buy $100 on the curve → progress moves.
-// Run: SITE=https://stockstream.ansht.workers.dev/launch npx tsx scripts/e2e/launch.mts
+// Run: SITE=https://equinox.ansht.workers.dev/launch npx tsx scripts/e2e/launch.mts
 import { launch } from "./harness.mts";
 
 const { page, prompts, step, connect, close } = await launch();

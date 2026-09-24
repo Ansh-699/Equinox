@@ -12,7 +12,7 @@
  *   PRIVY_APP_ID or NEXT_PUBLIC_PRIVY_APP_ID, PRIVY_APP_SECRET
  *
  * Additional --submit values (all public except service token):
- *   STOCKSTREAM_RELAYER_URL, STOCKSTREAM_RELAYER_TOKEN,
+ *   EQUINOX_RELAYER_URL, EQUINOX_RELAYER_TOKEN,
  *   RELAY_TRANSACTION_BASE64, RELAY_SESSION_SIGNER,
  *   RELAY_EXPECTED_MARKET
  *
@@ -57,8 +57,8 @@ if (!submit) {
   process.exit(0);
 }
 
-const url = process.env.STOCKSTREAM_RELAYER_URL;
-const serviceToken = process.env.STOCKSTREAM_RELAYER_TOKEN;
+const url = process.env.EQUINOX_RELAYER_URL;
+const serviceToken = process.env.EQUINOX_RELAYER_TOKEN;
 const transactionBase64 = process.env.RELAY_TRANSACTION_BASE64;
 const sessionSignerAddress = process.env.RELAY_SESSION_SIGNER;
 const expectedMarket = process.env.RELAY_EXPECTED_MARKET;
@@ -79,7 +79,7 @@ const relay = () => fetch(new URL("/v1/relay/session", url), {
   headers: {
     authorization: `Bearer ${token}`,
     "content-type": "application/json",
-    "x-stockstream-relayer-service-token": serviceToken,
+    "x-equinox-relayer-service-token": serviceToken,
   },
   body: relayBody(),
 });

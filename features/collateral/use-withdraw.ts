@@ -3,17 +3,17 @@
 import { useCallback, useState } from "react";
 import { ComputeBudgetProgram, PublicKey } from "@solana/web3.js";
 import { createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction, getAssociatedTokenAddressSync } from "@solana/spl-token";
-import { claimWithdrawalV3, deriveMagicFeeVault, requestWithdrawalV3, withdrawCollateral, withdrawCollateralV3 } from "@/clients/stockstream/src";
-import deployment from "@/config/stockstream-deployment.json";
+import { claimWithdrawalV3, deriveMagicFeeVault, requestWithdrawalV3, withdrawCollateral, withdrawCollateralV3 } from "@/clients/equinox/src";
+import deployment from "@/config/equinox-deployment.json";
 import type { ResolvedCustodyAccounts } from "./custody-accounts";
 import type { TransactionPreview } from "@/lib/execution-boundary";
 import { RpcFailure } from "@/lib/rpc-transport";
 import { refreshWalletBalances } from "@/features/portfolio/use-wallet-balances";
 import { recordSignature } from "@/lib/last-signature";
-import type { StockStreamProtocol } from "@/features/wallet/use-stockstream-protocol";
+import type { EquinoxProtocol } from "@/features/wallet/use-equinox-protocol";
 import type { ExecutionDisplayState } from "@/lib/execution-status";
 import { decodeTraderSeat, type TraderSeatView } from "@/lib/positions";
-import { decodeV3SeatShard } from "@/clients/stockstream/src/abi/v3";
+import { decodeV3SeatShard } from "@/clients/equinox/src/abi/v3";
 
 export interface WithdrawGate {
   allowed: boolean;
@@ -41,7 +41,7 @@ export function evaluateWithdrawGate(execution: ExecutionDisplayState | null, re
   return { allowed: true };
 }
 
-export function useWithdraw(protocol: StockStreamProtocol | null, report?: (message: string) => void) {
+export function useWithdraw(protocol: EquinoxProtocol | null, report?: (message: string) => void) {
   const [pending, setPending] = useState(false);
   const [notice, setNoticeState] = useState<string | null>(null);
   // Mirrors every status into the caller's single status line.

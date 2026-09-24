@@ -24,8 +24,8 @@ and the Asia ER endpoint. It exists at
 `8L7ccCxTBZaLsMMdhAod5fFnpdEWGSDPW4y1td7y3y8N`, with 144-byte data. L1 reports
 the delegation owner while ER reports the MagicBlock oracle-program owner, so
 ER-side oracle data is present. This is evidence of an available price-feed
-account, not evidence that StockStream can safely consume it: the account does
-not carry StockStream's channel, market-session, trading-status, sequence, and
+account, not evidence that Equinox can safely consume it: the account does
+not carry Equinox's channel, market-session, trading-status, sequence, and
 authenticated-snapshot fields. The latest samples report verification level
 `Full`, exponent `5`, and confidence `0`. The exponent was later resolved as
 MagicBlock's decimal-place convention (`stored = -catalog`, proven from
@@ -43,7 +43,7 @@ the change is an open MagicBlock support question.
 An ER WebSocket subscription also observed three successive updates at slots
 612399707, 612399727, and 612399748. This proves the MagicBlock feed account is
 live and refreshing; it still does not prove L1 `OracleSnapshotV3` read-through
-or StockStream-compatible metadata validation.
+or Equinox-compatible metadata validation.
 
 The result is reproducible with the read-only command:
 
@@ -51,7 +51,7 @@ The result is reproducible with the read-only command:
 npm run probe:er-compatibility
 ```
 
-The probe derives the PDA from `config/stockstream-deployment.json`, performs
+The probe derives the PDA from `config/equinox-deployment.json`, performs
 only `getAccountInfo` calls, and closes after observing three ER WebSocket
 notifications. It exits without a signer, transaction builder, or mutation
 path.
@@ -81,7 +81,7 @@ MagicBlock validator's L1-to-ER snapshot propagation latency.
 Before a fresh market is created, the integration harness must prove:
 
 1. L1 snapshot sequence, price, and timestamp advance.
-2. The snapshot remains owned by StockStream on L1.
+2. The snapshot remains owned by Equinox on L1.
 3. ER reads the same sequence and price within ten seconds.
 4. Stale, future, wrong-feed, wrong-channel, wrong-exponent, invalid-confidence,
    and non-open-session snapshots fail in ER.

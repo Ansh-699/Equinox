@@ -3,7 +3,7 @@ import type { MarketState } from "./market-state";
 /**
  * Concrete funding-input source (Priority 8, Section 7).
  *
- * `programs/stockstream/src/handlers.rs::update_funding` does not compute a
+ * `programs/equinox/src/handlers.rs::update_funding` does not compute a
  * funding rate on-chain at all -- it only accepts a keeper-submitted
  * `(accumulator, timestamp)` pair and rejects anything that isn't
  * monotonically non-decreasing (`docs/risk.md`/`handlers.rs` verified). The

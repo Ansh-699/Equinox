@@ -52,7 +52,7 @@ describe("DeterministicTestSigner", () => {
 
   it("produces a real, independently verifiable Ed25519 signature", async () => {
     const signer = new DeterministicTestSigner("verify-test");
-    const message = new TextEncoder().encode("stockstream keeper transaction");
+    const message = new TextEncoder().encode("equinox keeper transaction");
     const signature = await signer.sign(message);
     expect(signature.length).toBe(64);
     const publicKey = await signer.publicKey();

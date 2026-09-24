@@ -26,7 +26,7 @@ test("session key generates a valid Solana address and stays memory-only", async
 
 test("signs with the stored key and verifies against the public key", async () => {
   const key = await generateSessionKey();
-  const message = new TextEncoder().encode("stockstream session action");
+  const message = new TextEncoder().encode("equinox session action");
   const signature = await signWithSessionKey(key.address, message);
   expect(signature).toHaveLength(64);
   const { getBase58Encoder: encoder } = await import("@solana/kit");

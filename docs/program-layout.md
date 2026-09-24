@@ -42,7 +42,7 @@ enum); see `docs/custody.md` for the integration defect that caused and the
 fix (`l1_withdrawals_allowed()` is now the single source of truth).
 
 **Update:** the market account now also emits a complete versioned binary
-event log (`programs/stockstream/src/events.rs`) alongside its state --
+event log (`programs/equinox/src/events.rs`) alongside its state --
 see `docs/events.md` for the wire format, sequence semantics, and which
 of the 61 event kinds are wired into which handlers. `TraderSeat`'s exact
 field offsets (used by the Worker's private-projection decoder,

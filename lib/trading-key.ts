@@ -14,7 +14,7 @@ import type { ActiveWalletSigner } from "@/components/wallet-signer-context";
  * deployment would use Privy embedded wallets or scoped session keys.
  */
 export const tradingKeyMessage = (wallet: string) =>
-  `StockStream trading key v1\n\nSign to unlock your in-app trading account on stockstream (Solana devnet).\nOnly sign this on the StockStream site.\n\nWallet: ${wallet}`;
+  `Equinox trading key v1\n\nSign to unlock your in-app trading account on equinox (Solana devnet).\nOnly sign this on the Equinox site.\n\nWallet: ${wallet}`;
 
 const storageKey = (wallet: string) => `stockstream:trading-key:${wallet}`;
 

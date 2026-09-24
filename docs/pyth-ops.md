@@ -17,7 +17,7 @@ This checklist is the runbook for closing that gap.
 - [ ] For any browser subscription, mint a short-lived JWT from the key via
   `POST /auth/token` and pass it through the WebSocket subprotocol list:
   marker `pyth-lazer-auth` immediately followed by the token (browsers
-  cannot set WS headers). StockStream's current architecture consumes Pyth
+  cannot set WS headers). Equinox's current architecture consumes Pyth
   server-side (Worker keeper → signed payload → on-chain), so the JWT path
   is only needed if a direct browser feed is ever added.
 
@@ -175,7 +175,7 @@ closed session — this is a known capability gap, not a solved feature.
 ## 5b. Equity-market calendar limitations (operational handling still required)
 
 Pyth session/status fields are authoritative **when present**, but
-StockStream still needs operational handling for: exchange holidays, early
+Equinox still needs operational handling for: exchange holidays, early
 closes, feed carry-forward, daylight-saving transitions, corporate
 actions, and feed retirement. The Worker market-session/holiday keeper
 (`sessionTransitionFor`) works from *configured* calendars — it must

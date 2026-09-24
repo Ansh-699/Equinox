@@ -4,8 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-VERIFY_LOG_DIR="${VERIFY_LOG_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/stockstream-verify.XXXXXX")}"
-VERIFY_SUMMARY_PATH="${VERIFY_SUMMARY_PATH:-/tmp/stockstream-verify-summary.json}"
+VERIFY_LOG_DIR="${VERIFY_LOG_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/equinox-verify.XXXXXX")}"
+VERIFY_SUMMARY_PATH="${VERIFY_SUMMARY_PATH:-/tmp/equinox-verify-summary.json}"
 
 run_logged() {
   local name="$1"
@@ -24,13 +24,13 @@ step "Rust workspace tests"
 run_logged rust-tests env NO_DNA=1 cargo test --workspace
 
 step "SBF build and artifact identity"
-run_logged sbf-build bash -c 'NO_DNA=1 cargo build-sbf --manifest-path programs/stockstream/Cargo.toml --features bpf-entrypoint && python3 scripts/verify-sbf-artifact.py target/deploy/stockstream.so'
+run_logged sbf-build bash -c 'NO_DNA=1 cargo build-sbf --manifest-path programs/equinox/Cargo.toml --features bpf-entrypoint && python3 scripts/verify-sbf-artifact.py target/deploy/equinox.so'
 
 step "Rust runtime tests against the built SBF artifact"
-run_logged rust-runtime-tests env NO_DNA=1 cargo test -p stockstream --features runtime-tests
+run_logged rust-runtime-tests env NO_DNA=1 cargo test -p equinox --features runtime-tests
 
 step "ABI parity"
-run_logged abi npm run check:stockstream-abi
+run_logged abi npm run check:equinox-abi
 
 step "V3 revision-2 layout fixture parity (Rust writer vs committed TS fixture)"
 run_logged v3-layout-fixture npm run check:v3-layout-fixture

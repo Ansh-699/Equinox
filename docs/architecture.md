@@ -1,6 +1,6 @@
-# StockStream architecture (devnet, 2026-09-24)
+# Equinox architecture (devnet, 2026-09-24)
 
-StockStream is an on-chain exchange for equity-like assets on Solana:
+Equinox is an on-chain exchange for equity-like assets on Solana:
 
 1. **Trade stocks**: TSLA-PERP, a perpetual priced by Pyth.
 2. **Trade pre-IPO companies**: OPENAI-, SPACEX- and ANTHROPIC-PERP, priced
@@ -9,7 +9,7 @@ StockStream is an on-chain exchange for equity-like assets on Solana:
    dollars; a launch that graduates to a DAMM v2 pool can be listed as a
    perp priced from that pool.
 
-Everything runs on Solana devnet with test USDC. Live: https://stockstream.ansht.workers.dev
+Everything runs on Solana devnet with test USDC. Live: https://equinox.ansht.workers.dev
 
 ```text
                          Browser (Next.js on Cloudflare, vinext)
@@ -19,7 +19,7 @@ Everything runs on Solana devnet with test USDC. Live: https://stockstream.ansht
         v  (~110-130 ms from India)                 v
  +------------------------------+          +--------------------------------+
  | MagicBlock Ephemeral Rollup  |<-commit--| Solana devnet (L1)             |
- | devnet-as (Singapore)        |  30 min  | StockStream program (V3)       |
+ | devnet-as (Singapore)        |  30 min  | Equinox program (V3)       |
  | 4 delegated markets x 27 acc |          |  vaults, inbox/outbox receipts,|
  | order books, seats, events   |--clone-->|  oracle snapshots (L1-owned)   |
  +------------------------------+          | Meteora DBC / DAMM v2 pools    |
@@ -36,7 +36,7 @@ Everything runs on Solana devnet with test USDC. Live: https://stockstream.ansht
 
 ## Components
 
-### On-chain program (`programs/stockstream`, pinocchio, V3 layout)
+### On-chain program (`programs/equinox`, pinocchio, V3 layout)
 
 Each market is a **core** plus 26 child accounts: 18 book pages (a paged
 PATRICIA tree per side), 4 seat shards (128 seats) and 4 event shards. The
@@ -65,7 +65,7 @@ Risk rules that matter for users:
   market core pays through the validator's magic fee vault (keeper commits and
   withdrawal requests pass it).
 
-### Markets (deployment manifest `config/stockstream-deployment.json` → `markets`)
+### Markets (deployment manifest `config/equinox-deployment.json` → `markets`)
 
 | Market | Price source | Core |
 |---|---|---|

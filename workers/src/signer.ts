@@ -121,7 +121,7 @@ abstract class WebCryptoEd25519Signer implements Signer {
  * guessable. */
 export class DeterministicTestSigner extends WebCryptoEd25519Signer {
   protected async loadSeed(): Promise<Uint8Array> {
-    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`stockstream-test-signer:${this.keyId}`));
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`equinox-test-signer:${this.keyId}`));
     return new Uint8Array(digest);
   }
 }

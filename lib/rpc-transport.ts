@@ -2,8 +2,8 @@ import { recordErTx } from './er-latency';
 import { firstSignature, type ErSocket } from './er-socket';
 import { PublicKey } from '@solana/web3.js';
 import { Buffer } from 'buffer';
-import { decodeMarketState, decodeTradingSession, type TradingSessionView } from '../clients/stockstream/src';
-import { STOCKSTREAM_PROGRAM_ID } from '../clients/stockstream/src/constants';
+import { decodeMarketState, decodeTradingSession, type TradingSessionView } from '../clients/equinox/src';
+import { EQUINOX_PROGRAM_ID } from '../clients/equinox/src/constants';
 import type { L1Transport, RouterBoundary } from './execution-boundary';
 
 type Fetch = typeof fetch;
@@ -117,7 +117,7 @@ export class SolanaRpcTransport implements L1Transport {
   async market(address: string, commitment: 'confirmed'|'finalized' = 'confirmed') {
     const response = object(await this.request('getAccountInfo',[key(address),{encoding:'base64',commitment}]));
     const value = object(response.value);
-    if (value.owner !== STOCKSTREAM_PROGRAM_ID || value.executable !== false || !Array.isArray(value.data) || value.data[1] !== 'base64' || typeof value.data[0] !== 'string')
+    if (value.owner !== EQUINOX_PROGRAM_ID || value.executable !== false || !Array.isArray(value.data) || value.data[1] !== 'base64' || typeof value.data[0] !== 'string')
       throw new RpcFailure('getAccountInfo','invalid_market_owner_or_data');
     const bytes = Buffer.from(value.data[0], 'base64');
     const state = decodeMarketState(bytes);
@@ -137,19 +137,19 @@ export class SolanaRpcTransport implements L1Transport {
     const value = response.value;
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RpcFailure('getAccountInfo','account_not_found');
     const record = object(value);
-    if (record.owner !== STOCKSTREAM_PROGRAM_ID || record.executable !== false || !Array.isArray(record.data) || record.data[1] !== 'base64' || typeof record.data[0] !== 'string')
+    if (record.owner !== EQUINOX_PROGRAM_ID || record.executable !== false || !Array.isArray(record.data) || record.data[1] !== 'base64' || typeof record.data[0] !== 'string')
       throw new RpcFailure('getAccountInfo','invalid_program_owner_or_data');
     return Buffer.from(record.data[0], 'base64');
   }
   /** Reads back an AuthorizeTradingSession/RevokeTradingSession result.
    * Returns null if the PDA has never been created (not yet authorized),
-   * and throws if an account exists but is not a StockStream-owned
+   * and throws if an account exists but is not a Equinox-owned
    * TradingSession -- the caller must never treat that as "not authorized". */
   async tradingSession(address: string, commitment: 'confirmed'|'finalized' = 'confirmed'): Promise<TradingSessionView | null> {
     const response = object(await this.request('getAccountInfo',[key(address),{encoding:'base64',commitment}]));
     if (response.value === null) return null;
     const value = object(response.value);
-    if (value.owner !== STOCKSTREAM_PROGRAM_ID || value.executable !== false || !Array.isArray(value.data) || value.data[1] !== 'base64' || typeof value.data[0] !== 'string')
+    if (value.owner !== EQUINOX_PROGRAM_ID || value.executable !== false || !Array.isArray(value.data) || value.data[1] !== 'base64' || typeof value.data[0] !== 'string')
       throw new RpcFailure('getAccountInfo','invalid_session_owner_or_data');
     return decodeTradingSession(Buffer.from(value.data[0], 'base64'));
   }

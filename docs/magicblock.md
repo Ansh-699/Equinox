@@ -1,12 +1,12 @@
 # MagicBlock
 
-Only the market account is delegated today: StockStream's hot state (arenas,
+Only the market account is delegated today: Equinox's hot state (arenas,
 seats, funding, event ring) lives in one PDA (`state::MARKET_ACCOUNT_SIZE`).
 Vaults, deposits, withdrawals, the exchange/instrument registry and durable
 authorities remain L1-only. The delegation-time automatic commit frequency is
 30,000 ms, encoded into the `Delegate` instruction's `commit_frequency_ms`
 field (program constant `magicblock::COMMIT_INTERVAL_MS` in
-`programs/stockstream/src/magicblock.rs`) — see § Commit policy for why this
+`programs/equinox/src/magicblock.rs`) — see § Commit policy for why this
 is a delegation argument, not a keeper knob.
 
 **Settlement scratch and the hot cluster (RESOLVED, 2026-09-17 — Priority 10
@@ -14,7 +14,7 @@ exit requirement).** The matcher writes per-seat settlement scratch PDAs
 (`["settlement", market, seat_index_le]`, `docs/settlement-scratch.md`) as
 writable accounts inside `PlaceOrder`/`ReplaceOrder`, and session-signed
 trading additionally writes the `TradingSession` PDA (nonce/notional
-consumption, `programs/stockstream/src/handlers.rs::authorize_trading_actor`).
+consumption, `programs/equinox/src/handlers.rs::authorize_trading_actor`).
 On the ER, **every writable account in a transaction must live in the same
 execution domain**: an ER transaction cannot write the delegated market
 account and an L1-resident, non-delegated writable account together (the ER
@@ -36,7 +36,7 @@ member is delegated by the same Delegation-Program `Delegate` CPI the market
 uses (`dlp_api` `DelegateArgs` with the member's own borsh seeds payload: 3
 seeds for scratch `["settlement", market, seat_le]`, 5 seeds for session
 `["trading_session", owner, market, seat_le, session_signer]`; buffer PDA
-`["buffer", member]` under StockStream, record/metadata PDAs derived from the
+`["buffer", member]` under Equinox, record/metadata PDAs derived from the
 member's address under the delegation program — verified byte-for-byte
 against `dlp_api`'s own borsh serialization in `tests/magicblock.rs`).
 `delegate_cluster_member` (opcode 41) requires the market to be already
@@ -103,12 +103,12 @@ byte-exactly (scratch Empty or closed per policy; session fields intact).
 
 ## Real CPI implementation
 
-`programs/stockstream/src/magicblock.rs` implements actual cross-program
+`programs/equinox/src/magicblock.rs` implements actual cross-program
 invocations, not local byte markers:
 
 - `delegate_market`: creates the delegate buffer PDA, copies the market's
   (updated) state into it, zeroes and reassigns the market PDA
-  (StockStream -> System Program -> Delegation Program), then invokes the
+  (Equinox -> System Program -> Delegation Program), then invokes the
   Delegation Program's real `Delegate` instruction (discriminator `0`,
   7-account layout).
 - `commit_market` / `commit_and_undelegate_market`: invoke the Magic
@@ -122,12 +122,12 @@ invocations, not local byte markers:
 Program IDs, PDA seed tags and the callback discriminator are taken directly
 from `magicblock-delegation-program-api` (`dlp_api`, `=3.1.0`) and
 `magicblock-magic-program-api` (`=0.10.1`), which are real dependencies of
-the `stockstream` crate (`default-features = false`: only their consts/PDA
+the `equinox` crate (`default-features = false`: only their consts/PDA
 helpers/args types are used, never their `AccountInfo`/`std`-based CPI
-helpers, since StockStream is `no_std` with no heap allocator). The exact
+helpers, since Equinox is `no_std` with no heap allocator). The exact
 wire bytes are hand-encoded into fixed-size arrays for that reason, and are
 verified byte-for-byte against those crates' own `borsh`/`bincode`
-serialization in `programs/stockstream/tests/magicblock.rs` (golden
+serialization in `programs/equinox/tests/magicblock.rs` (golden
 vectors), plus against the delegation program's own
 `processor/fast/{delegate,undelegate}.rs` source (fetched from
 `magicblock-labs/delegation-program` during implementation) for account
@@ -145,7 +145,7 @@ than `NotDelegated`/`Restored`.
 
 ## Source references and licenses
 
-Real, shipped dependencies of the `stockstream` crate:
+Real, shipped dependencies of the `equinox` crate:
 
 | Crate | Version | License | Used for |
 | --- | --- | --- | --- |
@@ -154,9 +154,9 @@ Real, shipped dependencies of the `stockstream` crate:
 
 Both are pulled with `default-features = false`: only their `consts`/`pda`/`args` modules are used (pure data, no heap allocation); their `AccountInfo`-based CPI helpers are never linked (see "Real CPI implementation" above for why).
 
-Additionally consulted, but **not a dependency and not copied into this repository**: the `magicblock-labs/delegation-program` GitHub repository's `src/processor/fast/{delegate,undelegate}.rs` source, read during implementation to ground the account order, signer/writable flags and the external-undelegate callback's account/data contract in the actual on-chain processor rather than guessing. That repository is licensed **Business Source License 1.1** (converts to MIT on 2027-12-01), a source-available but not OSI-open license restricting production use of *that* codebase specifically. StockStream contains no code copied or derived from it — only independently-written Pinocchio 0.11.2 code that implements the same wire protocol, using facts (account order, discriminator values, PDA seeds) that are also independently confirmed by the MIT-licensed `dlp_api`/`magic-program-api` crates above and by the `ephemeral-rollups-sdk` (`=0.17.0`, MIT) client SDK. Reading a BSL-licensed program's source to interoperate with its public
+Additionally consulted, but **not a dependency and not copied into this repository**: the `magicblock-labs/delegation-program` GitHub repository's `src/processor/fast/{delegate,undelegate}.rs` source, read during implementation to ground the account order, signer/writable flags and the external-undelegate callback's account/data contract in the actual on-chain processor rather than guessing. That repository is licensed **Business Source License 1.1** (converts to MIT on 2027-12-01), a source-available but not OSI-open license restricting production use of *that* codebase specifically. Equinox contains no code copied or derived from it — only independently-written Pinocchio 0.11.2 code that implements the same wire protocol, using facts (account order, discriminator values, PDA seeds) that are also independently confirmed by the MIT-licensed `dlp_api`/`magic-program-api` crates above and by the `ephemeral-rollups-sdk` (`=0.17.0`, MIT) client SDK. Reading a BSL-licensed program's source to interoperate with its public
 instruction interface is a technical provenance question that was reviewed
-deliberately: StockStream does not copy or link the BSL-licensed processor
+deliberately: Equinox does not copy or link the BSL-licensed processor
 implementation. Its interoperable instruction encoding is independently
 implemented using the published MIT-licensed API crates (`dlp_api`,
 `magic-program-api`) and verified against observable protocol behavior.
@@ -176,7 +176,7 @@ test file, was never wired into any route, component, or worker, and was
 removed rather than retained as documented dead code because
 architecturally-impossible transaction builders invite future misuse. The
 real, invocable client path is
-`clients/stockstream/src/index.ts::delegateMarket` /
+`clients/equinox/src/index.ts::delegateMarket` /
 `commitMarket` / `commitAndUndelegate`.
 - Per-seat settlement scratch PDAs are validated `Empty` before delegating,
   committing, or undelegating, but are not themselves delegated in this
@@ -194,7 +194,7 @@ real, invocable client path is
   commit/undelegate handlers must check it instead of (or in addition to)
   `market_authority`. Until that lands, live ER operation must delegate
   this responsibility to the market authority key itself, which conflicts
-  with the Worker signer model. See `docs/stockstream-roadmap.md` (Priority
+  with the Worker signer model. See `docs/equinox-roadmap.md` (Priority
   10 / 14d).
 - `pinocchio::cpi::invoke_signed` is a no-op off the `solana`/`bpf` target,
   so a host `cargo test` run cannot observe the delegation/Magic programs
@@ -214,7 +214,7 @@ with `reconciliation_error` reachable from any state on a conflicting or
 regressed sequence) for **display purposes only** -- it answers "what
 should the UI currently show for this market's ER/L1 status," never "is a
 withdrawal actually safe." That question is answered entirely on-chain by
-`DelegationStatus`/`l1_withdrawals_allowed()` in `programs/stockstream/src/state.rs`,
+`DelegationStatus`/`l1_withdrawals_allowed()` in `programs/equinox/src/state.rs`,
 which this Worker-side model cannot weaken or bypass even if it were wrong.
 It exists so the indexer/UI never displays ER-accepted state as if it were
 L1-committed truth, and never silently advances past a sequence that
@@ -282,7 +282,7 @@ and must not be hardcoded into any protocol assumption -- measured latencies
    additionally be counted in the deposit settlement at undelegation: the
    docs state an app "may pay both."
 
-At StockStream's default 30,000 ms cadence: 120 commits/hour, 2,880/day,
+At Equinox's default 30,000 ms cadence: 120 commits/hour, 2,880/day,
 ~0.288 SOL/day/market in live fees from commit 26 onward, plus a
 comparable deposit-side charge at undelegation -- roughly 0.57 SOL/day/market
 for a full day at 30s cadence. This makes a universal fixed 30s policy

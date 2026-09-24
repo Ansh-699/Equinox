@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Complete MagicBlock economics for the StockStream delegated hot cluster,
+"""Complete MagicBlock economics for the Equinox delegated hot cluster,
 from the ACTUAL implementation (`magicblock.rs`) and the delegation program's
 own pinned constants (dlp_api 3.1.0: COMMIT_FEE_LAMPORTS=100_000,
 SESSION_FEE_LAMPORTS=300_000) plus the documented live-fee behavior

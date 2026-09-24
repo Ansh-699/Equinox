@@ -1,16 +1,16 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { depositCollateral, depositCollateralV3 } from "@/clients/stockstream/src";
+import { depositCollateral, depositCollateralV3 } from "@/clients/equinox/src";
 import { rollupDeposit } from "./rollup-deposit";
 import type { ResolvedCustodyAccounts } from "./custody-accounts";
 import type { TransactionPreview } from "@/lib/execution-boundary";
 import { RpcFailure } from "@/lib/rpc-transport";
 import { refreshWalletBalances } from "@/features/portfolio/use-wallet-balances";
 import { recordSignature } from "@/lib/last-signature";
-import type { StockStreamProtocol } from "@/features/wallet/use-stockstream-protocol";
+import type { EquinoxProtocol } from "@/features/wallet/use-equinox-protocol";
 
-export function useDeposit(protocol: StockStreamProtocol | null, report?: (message: string) => void) {
+export function useDeposit(protocol: EquinoxProtocol | null, report?: (message: string) => void) {
   const [pending, setPending] = useState(false);
   const [notice, setNoticeState] = useState<string | null>(null);
   // Mirrors every status into the caller's single status line.

@@ -3,7 +3,7 @@ import type { ApplicationSession } from "./session";
 import { cleanupExpiredSessions, lookupSession, persistSession, revokeSession, touchSession, type SessionDatabase } from "./d1-session-store";
 
 type BoundD1 = SessionDatabase;
-const globalKey = "__STOCKSTREAM_D1__";
+const globalKey = "__EQUINOX_D1__";
 const developmentRows = new Map<string, ApplicationSession>();
 const developmentRateLimits = new Map<string, { count: number; expiresAt: number }>();
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");

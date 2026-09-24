@@ -6,7 +6,7 @@
 import fs from "node:fs";
 import { Connection, Keypair, PublicKey, Transaction, type TransactionInstruction } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import { createV3TraderSeat, depositCollateralV3 } from "../clients/stockstream/src";
+import { createV3TraderSeat, depositCollateralV3 } from "../clients/equinox/src";
 
 const STATE_DIR = `${process.env.HOME}/.local/state/stockstream`;
 const state = JSON.parse(fs.readFileSync(`${STATE_DIR}/${process.argv[2] ?? ""}-state.json`, "utf8"));

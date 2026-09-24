@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { PublicKey } from "@solana/web3.js";
-import { StockStreamProtocolService } from "./protocol-service";
+import { EquinoxProtocolService } from "./protocol-service";
 
 const key = new PublicKey(new Uint8Array(32));
-const service = new StockStreamProtocolService({
+const service = new EquinoxProtocolService({
   encode: async (instructions) => Uint8Array.from([instructions.length]),
   wallet: { signTransaction: async (bytes) => bytes },
   l1: { simulate: async () => ({ units: 1 }), submit: async () => ({ signature: "mock" }), confirm: async () => "confirmed" },

@@ -36,7 +36,7 @@ import {
   type Instruction,
   type Transaction,
 } from "@solana/kit";
-import { authorizeTradingSession, deriveTradingSession, revokeTradingSession } from "../clients/stockstream/src/index";
+import { authorizeTradingSession, deriveTradingSession, revokeTradingSession } from "../clients/equinox/src/index";
 import {
   clearSessionKey,
   generateSessionKey,
@@ -240,7 +240,7 @@ export async function submitToRelayer(input: SubmitToRelayerInput): Promise<Rela
   const response = await fetch("/api/relay/session", {
     method: "POST",
     credentials: "include",
-    headers: { "content-type": "application/json", "x-stockstream-csrf": input.csrfToken },
+    headers: { "content-type": "application/json", "x-equinox-csrf": input.csrfToken },
     body: JSON.stringify({
       privyAccessToken: input.privyAccessToken,
       ownerWallet: input.ownerWallet,

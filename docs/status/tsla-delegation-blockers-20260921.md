@@ -6,7 +6,7 @@ No transaction was submitted during this review.
 
 ## Validator and risk storage overlap
 
-`programs/stockstream/src/v3.rs` defines the 32-byte validator at offset
+`programs/equinox/src/v3.rs` defines the 32-byte validator at offset
 214, occupying bytes 214–245. Initial margin, maintenance margin,
 liquidation fee, maker fee, taker fee, and maximum leverage occupy bytes
 218–231. `delegate_v3_account` in `magicblock.rs` writes the validator
@@ -34,7 +34,7 @@ No protocol source, deployment, or account migration was performed here.
 
 ## L1 custody ordering
 
-`deposit_collateral_v3` requires the core to be StockStream-owned and
+`deposit_collateral_v3` requires the core to be Equinox-owned and
 explicitly rejects Delegated or Undelegating status. Thus the proposed
 delegate → L1 deposit sequence is unsupported by the current source.
 Seat/custody preparation and test collateral funding must be reviewed

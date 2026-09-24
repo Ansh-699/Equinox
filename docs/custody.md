@@ -302,18 +302,18 @@ list. Ten kinds: `VaultInitialized`, `CollateralDeposited`,
 `BadDebtRecorded`, `BadDebtResolved`, `VaultSurplusDetected`,
 `VaultDeficitDetected`, `ReconciliationRestored`.
 
-`clients/stockstream/src/index.ts` decodes these with `decodeCustodyEvent`
+`clients/equinox/src/index.ts` decodes these with `decodeCustodyEvent`
 (a regex over `meta.logMessages`, not an Anchor-style CPI event), and
 provides typed builders for every new instruction
 (`transferToInsuranceFund`, `withdrawProtocolFees`, `withdrawInsuranceFunds`,
 `recordBadDebt`, `resolveBadDebt`, `reconcileVault`), plus `decodeInstruction`
 entries for opcodes 34-39. Golden vectors for account order and instruction
-data live in `clients/stockstream/src/index.test.ts`.
+data live in `clients/equinox/src/index.test.ts`.
 
 ## Testing
 
-`programs/stockstream/tests/custody.rs` (10 tests) and
-`programs/stockstream/tests/account_settlement.rs::crossing_fill_credits_the_protocol_fee_ledger`
+`programs/equinox/tests/custody.rs` (10 tests) and
+`programs/equinox/tests/account_settlement.rs::crossing_fill_credits_the_protocol_fee_ledger`
 (1 test) cover: vault initialization (config storage, duplicate-init
 rejection, wrong-authority rejection with every other account otherwise
 valid), deposit (credit, non-owner rejection, insufficient-balance

@@ -1,10 +1,10 @@
 {
   "asOf": "2026-09-21",
-  "title": "StockStream V3 MagicBlock commit and undelegation support bundle",
+  "title": "Equinox V3 MagicBlock commit and undelegation support bundle",
   "network": "devnet",
   "core": "47Mx7SZvt7EY6NydsA5krgrqvcDDR1H5BG5xTPDSnhso",
-  "stockstreamProgram": "H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET",
-  "deployedStockstreamUpgrade": {
+  "equinoxProgram": "H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET",
+  "deployedEquinoxUpgrade": {
     "signature": "4La3hXgViTtJ3uFrnRHZXmdwbGyDWitQXJj4Czfg2T69hqXBg1wiHQZtcfsLAyhR9DtFjU5htt9ZXN7cTk2xc9MS",
     "slot": 501407453,
     "upgradeAuthority": "none",
@@ -65,7 +65,7 @@
       "ScheduleCommit ERR: intent is too large to ever fit into transaction",
       "Program Magic11111111111111111111111111111111111111 failed: custom program error: 0xa0000002"
     ],
-    "interpretation": "The StockStream CPI reaches the deployed Magic Program; the validator rejects the scheduled intent before accepting it because the resulting base-layer intent cannot fit in a transaction."
+    "interpretation": "The Equinox CPI reaches the deployed Magic Program; the validator rejects the scheduled intent before accepting it because the resulting base-layer intent cannot fit in a transaction."
   },
   "preservedSignatures": {
     "firstChildCommit": { "signature": "2sCg9GVs4QLB9VdFCnThsskdswG71fAQFZJdEWef1Z76Zj3mDpAZdNSxMYn4GFcLAUecicLvbf3xAaRuoGcFuNeG", "finalizedErSlot": 597348833 },
@@ -76,7 +76,7 @@
   "requestedRecoveryAction": [
     "Confirm and deploy the validator DLP wire contract that recognizes the vendored RequestUndelegation discriminator 26, or provide the exact deployed discriminator/account schema.",
     "Retry the already-pending core undelegation callback for the preserved core and child bundle only after that wire contract is confirmed.",
-    "Return the full callback simulation logs and finalized signature/slot so StockStream can verify same-epoch restoration and reconciled withdrawal readiness."
+    "Return the full callback simulation logs and finalized signature/slot so Equinox can verify same-epoch restoration and reconciled withdrawal readiness."
   ],
   "latestReadOnlyProbe": {
     "command": "node scripts/magicblock-dlp-discriminator-repro.mjs",

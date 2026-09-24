@@ -6,18 +6,18 @@ import { ExecutionStatusBanner, ProtocolStatusStrip } from "@/components/layout/
 import { useAppAuth } from "@/components/app-providers";
 import { isSessionUsable } from "@/lib/session-trading";
 import { ComputeBudgetProgram } from "@solana/web3.js";
-import { cancelAllV3, cancelOrderV3, createTraderSeat, createV3TraderSeat, deriveV3ExecutionAccounts, initializeSettlementScratch, initializeVault, previewPlaceOrder } from "@/clients/stockstream/src";
+import { cancelAllV3, cancelOrderV3, createTraderSeat, createV3TraderSeat, deriveV3ExecutionAccounts, initializeSettlementScratch, initializeVault, previewPlaceOrder } from "@/clients/equinox/src";
 import { marketForSymbol } from "@/lib/markets";
 import { useWithdraw, evaluateWithdrawGate } from "@/features/collateral/use-withdraw";
 import { useDeposit } from "@/features/collateral/use-deposit";
 import { resolveCustodyAccounts } from "@/features/collateral/custody-accounts";
-import { useStockStreamProtocol } from "@/features/wallet/use-stockstream-protocol";
+import { useEquinoxProtocol } from "@/features/wallet/use-equinox-protocol";
 import { useTradingKey } from "@/features/wallet/use-trading-key";
 import { useTradingSession } from "@/features/sessions/use-trading-session";
 import { useSessionOrder } from "@/features/sessions/use-session-order";
 import { SessionPolicyPanel } from "@/features/sessions/session-policy-panel";
 import type { SessionActionResult } from "@/lib/session-relay-status";
-import type { OrderTree } from "@/clients/stockstream/src";
+import type { OrderTree } from "@/clients/equinox/src";
 import { useExecutionStatus } from "@/features/magicblock/use-execution-status";
 import { useV3MarketState } from "@/features/magicblock/use-v3-market-state";
 import { usePosition } from "@/features/positions/use-position";
@@ -53,7 +53,7 @@ const marketApiUrl = publicMarketApiUrl;
 const ONBOARDING_DEPOSIT = 100_000_000n; // 100 test USDC
 /** Pre-IPO shares trade in the hundreds to thousands of dollars: 500 test USDC buys at least one at 5×. */
 const PRE_IPO_ONBOARDING_DEPOSIT = 500_000_000n;
-const publicDemoReadOnly = process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_STOCKSTREAM_DEMO_READ_ONLY !== "false";
+const publicDemoReadOnly = process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_EQUINOX_DEMO_READ_ONLY !== "false";
 
 interface MarketEvent { kind: string; sequence?: number; payload: { kind?: string } }
 
@@ -71,7 +71,7 @@ export function TradingTerminal() {
   const [faucetPending, setFaucetPending] = useState(false);
   const [notice, setNotice] = useState("Orders run in the MagicBlock rollup against an on-chain verified price, with USDC custody in the vault on Solana.");
   const [sessionActionReason, setSessionActionReason] = useState<SessionActionResult["reason"]>(null);
-  const [marketSymbol, setMarketSymbol] = useState(process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_SYMBOL ?? PRIMARY_MARKET.symbol);
+  const [marketSymbol, setMarketSymbol] = useState(process.env.NEXT_PUBLIC_EQUINOX_MARKET_SYMBOL ?? PRIMARY_MARKET.symbol);
   const [latestLifecycleEventKind, setLatestLifecycleEventKind] = useState<string | null>(null);
   const lifecycleEventRef = useRef<{ sequence: number; kind: string } | null>(null);
   const [nowUnixSeconds, setNowUnixSeconds] = useState(0);
@@ -105,7 +105,7 @@ export function TradingTerminal() {
   const traderAuth = tradingKey.signer
     ? { privyAuthenticated: false, getAccessToken: async () => null, signMessage: (_address: string, bytes: Uint8Array) => tradingKey.signer!.signMessage(bytes) }
     : auth;
-  const protocol = useStockStreamProtocol(auth.authenticated ? marketAddress : null, tradingKey.signer, v3);
+  const protocol = useEquinoxProtocol(auth.authenticated ? marketAddress : null, tradingKey.signer, v3);
   // V3: each wallet uses its own seat (or the first free one), never seat 0 by default.
   const position = usePosition(protocol?.rpc ?? null, marketAddress, 0, { marketApiUrl, core: v3.core, ...(v3.core ? { trader: trader ?? null } : {}) });
   const l1SeatIndex = position.seatIndex ?? 0;
@@ -138,7 +138,7 @@ export function TradingTerminal() {
   });
   const withdraw = useWithdraw(protocol, setNotice);
   // The main wallet's own signer, for collateral left in a seat the wallet itself owns.
-  const walletProtocol = useStockStreamProtocol(auth.authenticated ? marketAddress : null, undefined, v3);
+  const walletProtocol = useEquinoxProtocol(auth.authenticated ? marketAddress : null, undefined, v3);
   const walletWithdraw = useWithdraw(walletProtocol, setNotice);
   const deposit = useDeposit(protocol, setNotice);
   const withdrawGate = evaluateWithdrawGate(executionStatus, position.reconciliationStatus);
@@ -262,7 +262,7 @@ export function TradingTerminal() {
         return true;
       }
       const seat = createTraderSeat({ market: marketAddress, authority: trader }, 0);
-      const scratchAddress = process.env.NEXT_PUBLIC_STOCKSTREAM_SETTLEMENT_SCRATCH_ADDRESS ?? marketConfig.scratchPda(0);
+      const scratchAddress = process.env.NEXT_PUBLIC_EQUINOX_SETTLEMENT_SCRATCH_ADDRESS ?? marketConfig.scratchPda(0);
       const scratch = scratchAddress ? initializeSettlementScratch({ market: marketAddress, authority: trader, settlementScratch: scratchAddress }, 0) : null;
       setNotice(`Constructed ${scratch ? "CreateTraderSeat + InitializeSettlementScratch" : "CreateTraderSeat"} (${seat.keys.length + (scratch?.keys.length ?? 0)} account metas). V2 lifecycle writes remain preview-only.`);
       return false;
@@ -271,10 +271,10 @@ export function TradingTerminal() {
 
   function constructVault() {
     if (!auth.walletAddress || !marketAddress) { setNotice("Configure the market address and sign in before initializing custody."); return; }
-    const mint = process.env.NEXT_PUBLIC_STOCKSTREAM_COLLATERAL_MINT;
-    const tokenProgram = process.env.NEXT_PUBLIC_STOCKSTREAM_TOKEN_PROGRAM;
-    const vault = process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT ?? marketConfig.vaultPda;
-    const vaultAuthority = process.env.NEXT_PUBLIC_STOCKSTREAM_VAULT_AUTHORITY;
+    const mint = process.env.NEXT_PUBLIC_EQUINOX_COLLATERAL_MINT;
+    const tokenProgram = process.env.NEXT_PUBLIC_EQUINOX_TOKEN_PROGRAM;
+    const vault = process.env.NEXT_PUBLIC_EQUINOX_VAULT ?? marketConfig.vaultPda;
+    const vaultAuthority = process.env.NEXT_PUBLIC_EQUINOX_VAULT_AUTHORITY;
     if (!mint || !tokenProgram || !vault || !vaultAuthority) { setNotice("Vault initialization blocked: explicit collateral deployment configuration is missing."); return; }
     const ix = initializeVault({ market: marketAddress, authority: auth.walletAddress, mint, tokenProgram, vault, vaultAuthority });
     setNotice(`Constructed InitializeVault with ${ix.keys.length} accounts. Token CPI runtime remains unavailable in this environment.`);
@@ -282,7 +282,7 @@ export function TradingTerminal() {
 
   /** Legacy (V2) session orders price in the 1e6 book scale. */
   const sessionOrderFields = () => ({
-    settlementScratch: process.env.NEXT_PUBLIC_STOCKSTREAM_SETTLEMENT_SCRATCH_ADDRESS ?? marketConfig.scratchPda(0),
+    settlementScratch: process.env.NEXT_PUBLIC_EQUINOX_SETTLEMENT_SCRATCH_ADDRESS ?? marketConfig.scratchPda(0),
     side: (ticket.side === "long" ? "bid" : "ask") as "bid" | "ask",
     tree: "fixed" as OrderTree,
     postOnly: orderTypeFor(ticket) === "post-only",

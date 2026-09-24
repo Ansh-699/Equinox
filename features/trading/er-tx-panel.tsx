@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
-import deployment from "@/config/stockstream-deployment.json";
+import deployment from "@/config/equinox-deployment.json";
 import { myErTxs, onErTx, type ErTxSample } from "@/lib/er-latency";
 import { Spinner } from "@/components/ui/spinner";
 

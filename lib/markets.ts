@@ -1,6 +1,6 @@
 import { PublicKey } from "@solana/web3.js";
-import { STOCKSTREAM_PROGRAM_KEY } from "../clients/stockstream/src";
-import deployment from "../config/stockstream-deployment.json";
+import { EQUINOX_PROGRAM_KEY } from "../clients/equinox/src";
+import deployment from "../config/equinox-deployment.json";
 
 export type MarketSessionPolicy = "regular" | "extended" | "close-only";
 export interface StockInstrument {
@@ -35,16 +35,16 @@ function seedId(symbol: string): Uint8Array {
 // No Node Buffer: this module loads in the browser before any polyfill (the landing page).
 const utf8 = (text: string) => new TextEncoder().encode(text);
 
-export function deriveInstrumentPda(instrumentId: string, program = STOCKSTREAM_PROGRAM_KEY): PublicKey {
+export function deriveInstrumentPda(instrumentId: string, program = EQUINOX_PROGRAM_KEY): PublicKey {
   return PublicKey.findProgramAddressSync([utf8("instrument"), seedId(instrumentId)], program)[0];
 }
-export function derivePerpMarketPda(instrumentPda: PublicKey, program = STOCKSTREAM_PROGRAM_KEY): PublicKey {
+export function derivePerpMarketPda(instrumentPda: PublicKey, program = EQUINOX_PROGRAM_KEY): PublicKey {
   return PublicKey.findProgramAddressSync([utf8("perp-market"), instrumentPda.toBytes()], program)[0];
 }
-export function deriveVaultPda(market: PublicKey, program = STOCKSTREAM_PROGRAM_KEY): PublicKey {
+export function deriveVaultPda(market: PublicKey, program = EQUINOX_PROGRAM_KEY): PublicKey {
   return PublicKey.findProgramAddressSync([utf8("vault"), market.toBytes()], program)[0];
 }
-export function deriveScratchPda(market: PublicKey, seatIndex: number, program = STOCKSTREAM_PROGRAM_KEY): PublicKey {
+export function deriveScratchPda(market: PublicKey, seatIndex: number, program = EQUINOX_PROGRAM_KEY): PublicKey {
   const seat = Uint8Array.of(seatIndex & 0xff, seatIndex >> 8); // u16 LE
   return PublicKey.findProgramAddressSync([utf8("settlement"), market.toBytes(), seat], program)[0];
 }
@@ -72,6 +72,6 @@ export const PERP_MARKETS = STOCK_INSTRUMENTS as readonly PerpMarketConfig[];
 export const MARKET_BY_SYMBOL = new Map(PERP_MARKETS.map((market) => [market.symbol, market]));
 export function marketForSymbol(symbol: string): PerpMarketConfig {
   const market = MARKET_BY_SYMBOL.get(symbol.toUpperCase());
-  if (!market) throw new Error(`Unknown StockStream market: ${symbol}`);
+  if (!market) throw new Error(`Unknown Equinox market: ${symbol}`);
   return market;
 }

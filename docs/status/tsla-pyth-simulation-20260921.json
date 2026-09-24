@@ -75,7 +75,7 @@
     ],
     "usdcDelta": 0,
     "pythVerifyMessageSucceeded": true,
-    "stockStreamConsumeOracleUpdateV3Succeeded": true
+    "equinoxConsumeOracleUpdateV3Succeeded": true
   },
   "diagnosticAttempt": {
     "submitted": false,
