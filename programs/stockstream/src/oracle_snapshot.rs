@@ -178,9 +178,12 @@ pub fn write_verified(
         .copy_from_slice(&publish_timestamp.to_le_bytes());
     bytes[OFFSET_SEQUENCE..OFFSET_SEQUENCE + 8].copy_from_slice(&sequence.to_le_bytes());
     bytes[OFFSET_SESSION] = session;
+    // Pyth MarketSession: Regular 0, PreMarket 1, PostMarket 2, OverNight 3,
+    // Closed 4. Overnight equity trading has live prices, so it trades like
+    // the extended sessions; only Closed (weekends, holidays) stops orders.
     bytes[OFFSET_TRADING_STATUS] = match session {
-        0..=2 => STATUS_OPEN,
-        3..=4 => STATUS_CLOSED,
+        0..=3 => STATUS_OPEN,
+        4 => STATUS_CLOSED,
         _ => unreachable!(),
     };
     bytes[OFFSET_AUTHENTICATED] = 1;
@@ -218,6 +221,17 @@ mod tests {
         for status in [STATUS_RESTRICTED, STATUS_CLOSED] {
             bytes[OFFSET_TRADING_STATUS] = status;
             assert!(validate_for_core(&bytes, &core, 1435, 2, -5, 1_005).is_err());
+        }
+    }
+
+    #[test]
+    fn overnight_trades_and_only_closed_stops_orders() {
+        let core = Address::new_from_array([7; 32]);
+        for (session, open) in [(0u8, true), (1, true), (2, true), (3, true), (4, false)] {
+            let mut bytes = [0u8; ORACLE_SNAPSHOT_SIZE];
+            write_verified(&mut bytes, &core, 1435, 2, -5, 36982565, 10, 1_000, session, 1_005).unwrap();
+            assert_eq!(bytes[OFFSET_TRADING_STATUS] == STATUS_OPEN, open, "session {session}");
+            assert_eq!(validate_for_core(&bytes, &core, 1435, 2, -5, 1_005).is_ok(), open, "session {session}");
         }
     }
 

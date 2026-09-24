@@ -26,7 +26,9 @@ function BookSkeleton() {
 
 /** Order book (SlipStream ladder) over the live V3 book pages: Book/Trades
  * tabs, cumulative depth bars, mid/spread and buy/sell pressure. */
-export function OrderBookDisplay({ book, symbol, onPickPrice }: { book: V3Book; symbol: string; onPickPrice?: (price: number) => void }) {
+const CLOSED_HINT = "TSLA trades in the US session (pre-market 4:00 ET through after-hours 20:00 ET). The program refuses orders while Pyth reports the market closed; quotes return when it reopens.";
+
+export function OrderBookDisplay({ book, symbol, onPickPrice, marketClosed = false }: { book: V3Book; symbol: string; onPickPrice?: (price: number) => void; marketClosed?: boolean }) {
   const { bids, asks, trades, status, updatedAt, domain } = book;
   const [tab, setTab] = useState<"book" | "trades">("book");
 
@@ -81,10 +83,12 @@ export function OrderBookDisplay({ book, symbol, onPickPrice }: { book: V3Book; 
             ) : empty ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-1 px-4 text-center">
                 <span className="text-[12px] text-[var(--t-text)]">
-                  {status === "loading" ? "Loading the book…" : status === "unavailable" ? "Can't reach the order book" : status === "stale" ? "Book not updating" : "No resting orders"}
+                  {status === "loading" ? "Loading the book…" : status === "unavailable" ? "Can't reach the order book" : status === "stale" ? "Book not updating" : marketClosed ? "Market closed" : "No resting orders"}
                 </span>
                 <span className="max-w-[34ch] text-[11px] leading-relaxed text-[var(--t-text-2)]">
-                  {status === "unavailable"
+                  {marketClosed && status !== "unavailable"
+                    ? CLOSED_HINT
+                    : status === "unavailable"
                     ? "Neither the rollup nor the base layer answered."
                     : status === "empty"
                       ? domain === "er" ? "The book decoded cleanly but nobody is quoting." : "Orders match in the MagicBlock rollup; the book fills once the market is delegated."

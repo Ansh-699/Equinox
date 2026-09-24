@@ -32,7 +32,6 @@ import { asMarketDefinition, asMarketEvent, isAuthorized, json } from './route-i
 export { fetchV3MarketSnapshot } from './v3-routes';
 
 export { MarketStream };
-export { MarketMaker } from './market-maker';
 
 /** Must equal lib/auth/e2e-test-mode.ts::E2E_TEST_TOKEN exactly -- a fixed,
  * public, non-secret string forwarded as-is by
@@ -275,8 +274,15 @@ async function claimFaucet(request: Request, env: Env): Promise<Response> {
   return json({ signature, tokens: FAUCET_TOKENS.toString(), sol: BigInt(balance.value) < SOL_TOP_UP_BELOW });
 }
 
-// Pinned to Southeast Asia, next to the MagicBlock devnet-as validator (Singapore): every quote is a round trip.
-const marketMakerStub = (env: Env) => env.MARKET_MAKER.get(env.MARKET_MAKER.idFromName("TSLA-PERP-sg"), { locationHint: "apac-se" });
+/** The market maker runs as its own service (services/market-maker) on a VM
+ * next to the rollup; its status is proxied here so the terminal keeps one origin. */
+async function marketMakerStatus(env: Env): Promise<Response> {
+  if (!env.MM_STATUS_URL) return json({ running: false, error: "market maker backend not configured" }, 503);
+  const upstream = await fetch(env.MM_STATUS_URL, { signal: AbortSignal.timeout(3_000) }).catch(() => null);
+  if (!upstream?.ok) return json({ running: false, error: "market maker backend unreachable" }, 502);
+  const response = new Response(upstream.body, { headers: { "content-type": "application/json", "cache-control": "no-store" } });
+  return response;
+}
 
 const PUBLIC_POST_ROUTES = new Set(["/v1/oracle/refresh", "/v1/faucet"]);
 let inflightRefresh: Promise<RefreshResult> | null = null;
@@ -318,15 +324,7 @@ const worker = {
     }
     if (request.method === "POST" && url.pathname === "/v1/faucet") return claimFaucet(request, env);
     if (request.method === "POST" && url.pathname === "/v1/operator/mint") return operatorMint(request, env);
-    // Market-maker bot: status is public; start/stop are operator-only.
-    if (parts[0] === "v1" && parts[1] === "mm" && parts.length === 3 && env.MARKET_MAKER) {
-      const action = parts[2];
-      if (request.method === "GET" && action === "status") return marketMakerStub(env).fetch("https://mm/status");
-      if (request.method === "POST" && (action === "start" || action === "stop")) {
-        if (!isAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
-        return marketMakerStub(env).fetch(`https://mm/${action}`);
-      }
-    }
+    if (request.method === "GET" && url.pathname === "/v1/mm/status") return marketMakerStatus(env);
 
     if (request.method === "POST" && url.pathname === "/v1/oracle/refresh") {
       const result = await refreshSnapshotOnce(env);
@@ -587,7 +585,6 @@ const worker = {
     // still refresh it themselves under the ten-second rule.
     await refreshSnapshotOnce(env).catch((error: unknown) => console.error("scheduled oracle refresh failed", error));
     // Keep the market maker's alarm armed if it is meant to be running.
-    if (env.MARKET_MAKER) await marketMakerStub(env).fetch("https://mm/ensure").catch(() => undefined);
     if (!env.DB) return;
     const db = env.DB;
     const now = Date.now();

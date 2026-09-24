@@ -1,0 +1,5 @@
+# Only the market-maker image is built from this context.
+*
+!config/stockstream-deployment.json
+!services/market-maker
+services/market-maker/target

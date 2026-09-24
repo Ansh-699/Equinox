@@ -6,6 +6,9 @@ import { myErTxs, onErTx, type ErTxSample } from "@/lib/er-latency";
 import { Spinner } from "@/components/ui/spinner";
 
 const POLL_MS = 1_000;
+/** The market-maker VM's own HTTPS status URL (services/market-maker). Polled directly so a
+ * tab left open does not spend Worker requests; the Worker's proxy is the fallback. */
+const MM_STATUS_URL = process.env.NEXT_PUBLIC_MM_STATUS_URL || undefined;
 const EMPTY: readonly ErTxSample[] = [];
 const explorer = (signature: string) =>
   `https://explorer.solana.com/tx/${signature}?cluster=custom&customUrl=${encodeURIComponent(deployment.magicBlock.rpc)}`;
@@ -15,18 +18,19 @@ const LABEL: Record<string, string> = { quote: "Quote", replace: "Requote", canc
  * and this browser's own, each with its measured submit → confirmed time. */
 export function ErTxPanel({ marketApiUrl }: { marketApiUrl: string | undefined }) {
   const [bots, setBots] = useState<ErTxSample[]>([]);
-  const [bot, setBot] = useState<{ colo: string | null; pingMs: number | null } | null>(null);
+  const [bot, setBot] = useState<{ colo: string | null; pingMs: number | null; marketOpen: boolean | null; offline: boolean } | null>(null);
   const mine = useSyncExternalStore(onErTx, myErTxs, () => EMPTY);
 
   useEffect(() => {
-    if (!marketApiUrl) return;
+    if (!marketApiUrl && !MM_STATUS_URL) return;
     let stopped = false;
-    const poll = () => fetch(`${marketApiUrl.replace(/\/$/, "")}/v1/mm/status`)
-      .then((response) => (response.ok ? response.json() : null))
-      .then((status: { recent?: ErTxSample[]; colo?: string | null; pingMs?: number | null } | null) => {
-        if (stopped || !status?.recent) return;
-        setBots(status.recent);
-        setBot({ colo: status.colo ?? null, pingMs: status.pingMs ?? null });
+    const url = MM_STATUS_URL ?? `${(marketApiUrl ?? "").replace(/\/$/, "")}/v1/mm/status`;
+    const poll = () => fetch(url)
+      .then((response) => response.json())
+      .then((status: { recent?: ErTxSample[]; colo?: string | null; pingMs?: number | null; marketOpen?: boolean | null } | null) => {
+        if (stopped) return;
+        setBots(status?.recent ?? []);
+        setBot({ colo: status?.colo ?? null, pingMs: status?.pingMs ?? null, marketOpen: status?.marketOpen ?? null, offline: !status?.recent });
       })
       .catch(() => undefined);
     void poll();
@@ -60,7 +64,9 @@ export function ErTxPanel({ marketApiUrl }: { marketApiUrl: string | undefined }
       </div>
       <div className="slim-scroll h-[212px] overflow-auto">
         {rows.length === 0 ? (
-          <div className="flex h-full items-center justify-center gap-2 px-4 text-center text-[12px] text-[var(--t-text-2)]"><Spinner /> Waiting for rollup transactions…</div>
+          <div className="flex h-full items-center justify-center gap-2 px-4 text-center text-[12px] text-[var(--t-text-2)]">
+            {bot?.offline ? "Market maker offline — no bot transactions to show." : bot?.marketOpen === false ? "US market closed — the bot is idle until the session reopens." : <><Spinner /> Waiting for rollup transactions…</>}
+          </div>
         ) : (
           <ul className="divide-y divide-[var(--t-surface-2)]">
             {rows.map((row) => (

@@ -11,6 +11,9 @@ import { signAndSerializeTransaction } from "./transactions";
 import type { Signer } from "./signer";
 
 export const FRESH_SECONDS = 3;
+const REFRESH_ATTEMPTS = 3;
+const RETRY_DELAY_MS = 1_200;
+const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const ED25519_PROGRAM = "Ed25519SigVerify111111111111111111111111111";
 const PYTH_PROGRAM = "pytd2yyk641x7ak7mkaasSJVXh6YYZnC7wTmtgAyxPt";
 const PYTH_STORAGE = "3rdJbqfnagQ4yx9HXJViD4zc4xpiSqmFsKpPuSCQVyQL";
@@ -30,6 +33,8 @@ export interface RefreshDeps {
   latestBlockhash(): Promise<{ blockhash: string; lastValidBlockHeight: bigint }>;
   send(transactionBase64: string): Promise<string>;
   confirm(signature: string, lastValidBlockHeight: bigint): Promise<"confirmed" | "failed" | "expired" | "timeout">;
+  /** Injected in tests; defaults to a real timer. */
+  sleep?(ms: number): Promise<void>;
 }
 
 export type RefreshResult =
@@ -94,27 +99,40 @@ export async function refreshOracleSnapshot(market: RefreshMarket, deps: Refresh
   if (!storage || storage.length < 72) return { status: "failed", reason: "Pyth storage account unavailable" };
   const treasury = getBase58Decoder().decode(storage.slice(40, 72));
   const payer = getBase58Decoder().decode(await deps.signer.publicKey());
-  const message = await deps.fetchSignedMessage(market.feedId, market.channel);
-  const { blockhash, lastValidBlockHeight } = await deps.latestBlockhash();
-  const transaction = await signAndSerializeTransaction({
-    // No compute-budget prefix: the Ed25519 instruction must stay at index 0.
-    instructions: [ed25519Instruction(message, 1), snapshotUpdateInstruction(market, payer, treasury, message, 0)],
-    signer: deps.signer, recentBlockhash: blockhash, lastValidBlockHeight, computeUnitLimit: null,
-  });
-  let signature: string;
-  try {
-    signature = await deps.send(transaction);
-  } catch (error) {
-    // A concurrent refresh may have landed a same-or-newer price first.
+  let failure: RefreshResult = { status: "failed", reason: "snapshot update not attempted", payer };
+  // Devnet's clock trails wall time by 1-2 s and the program refuses a price
+  // more than 2 s ahead of it, so a brand-new Pyth price is sometimes rejected:
+  // wait for the chain to catch up and retry with a newer signed price.
+  for (let attempt = 0; attempt < REFRESH_ATTEMPTS; attempt += 1) {
+    if (attempt > 0) {
+      await (deps.sleep ?? defaultSleep)(RETRY_DELAY_MS);
+      const current = await currentSnapshot(deps, market);
+      if (isFresh(current)) return summary("fresh", current); // a concurrent refresh landed
+    }
+    const message = await deps.fetchSignedMessage(market.feedId, market.channel);
+    const { blockhash, lastValidBlockHeight } = await deps.latestBlockhash();
+    const transaction = await signAndSerializeTransaction({
+      // No compute-budget prefix: the Ed25519 instruction must stay at index 0.
+      instructions: [ed25519Instruction(message, 1), snapshotUpdateInstruction(market, payer, treasury, message, 0)],
+      signer: deps.signer, recentBlockhash: blockhash, lastValidBlockHeight, computeUnitLimit: null,
+    });
+    let signature: string;
+    try {
+      signature = await deps.send(transaction);
+    } catch (error) {
+      // A concurrent refresh may have landed a same-or-newer price first.
+      const after = await currentSnapshot(deps, market);
+      if (isFresh(after)) return summary("fresh", after);
+      failure = { status: "failed", reason: error instanceof Error ? error.message : String(error), payer };
+      continue;
+    }
+    const outcome = await deps.confirm(signature, lastValidBlockHeight);
     const after = await currentSnapshot(deps, market);
+    if (outcome === "confirmed" && after) return summary("refreshed", after, signature);
     if (isFresh(after)) return summary("fresh", after);
-    return { status: "failed", reason: error instanceof Error ? error.message : String(error), payer };
+    failure = { status: "failed", reason: `snapshot update ${outcome}`, payer };
   }
-  const outcome = await deps.confirm(signature, lastValidBlockHeight);
-  const after = await currentSnapshot(deps, market);
-  if (outcome === "confirmed" && after) return summary("refreshed", after, signature);
-  if (isFresh(after)) return summary("fresh", after);
-  return { status: "failed", reason: `snapshot update ${outcome}`, payer };
+  return failure;
 }
 
 const PYTH_HTTP_ENDPOINTS = [0, 1, 2].map((index) => `https://pyth-lazer-${index}.dourolabs.app/v1/latest_price`);

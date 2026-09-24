@@ -29,4 +29,13 @@ describe("createOracleFreshness", () => {
     await old.er();
     expect(refreshes).toBe(1);
   });
+
+  it("uses a still-recent rollup price when the refresh itself fails", async () => {
+    const failing = (async () => new Response(JSON.stringify({ status: "failed", reason: "snapshot update failed" }), { status: 503 })) as typeof fetch;
+    const recent = createOracleFreshness({ marketApiUrl: "https://api.test", fetcher: failing, readErSequence: async () => 5n, readErPublishTime: async () => 1_000n, now: () => 1_006_000 });
+    await expect(recent.er()).resolves.toBeUndefined();
+    const old = createOracleFreshness({ marketApiUrl: "https://api.test", fetcher: failing, readErSequence: async () => 5n, readErPublishTime: async () => 1_000n, now: () => 1_009_500 });
+    await expect(old.er()).rejects.toThrow(/Could not refresh/);
+  });
 });
+

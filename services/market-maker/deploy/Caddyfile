@@ -1,0 +1,5 @@
+# /etc/caddy/Caddyfile -- HTTPS for the status endpoint the terminal polls.
+# No domain needed: <ip-with-dashes>.sslip.io resolves to the VM, e.g. 203-0-113-5.sslip.io
+203-0-113-5.sslip.io {
+	reverse_proxy 127.0.0.1:8080
+}
