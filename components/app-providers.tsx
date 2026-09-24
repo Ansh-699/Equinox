@@ -1,13 +1,13 @@
 "use client";
 
 import "@/lib/browser-polyfills";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import type { Wallet, WalletAccount } from "@wallet-standard/base";
+import { useMemo, useState } from "react";
 import { PrivyProvider, useLogin, useLoginWithSiws, useLogout, usePrivy, useWallets } from "@privy-io/react-auth";
 import { useSignTransaction, useWallets as useSolanaWallets } from "@privy-io/react-auth/solana";
 import { PrivyWalletSigner } from "@/lib/privy-signing";
-import { connectWallet, disconnectWallet, rememberWallet, rememberedWallet, getServerSolanaWalletsSnapshot, getSolanaWalletsSnapshot, signMessageWith, signTransactionWith, subscribeSolanaWallets, toBase64 } from "@/lib/standard-wallets";
-import { PrivyIdentityContext, disabledIdentity, type PrivyIdentity } from "@/components/privy-identity-context";
+import { signMessageWith, signTransactionWith, toBase64 } from "@/lib/standard-wallets";
+import { PrivyIdentityContext, type PrivyIdentity } from "@/components/privy-identity-context";
+import { DirectWalletBridge, useStandardWallet } from "@/components/standard-wallet-bridge";
 import { WalletSelectionProvider } from "@/components/wallet-selection-context";
 import { TestAuthProvider, isE2eTestMode } from "@/components/test-auth-provider";
 
@@ -37,14 +37,13 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
 
   // No PrivyProvider is mounted on this branch, so nothing downstream may
   // call an @privy-io/react-auth/solana hook (they throw without a
-  // provider ancestor) -- disabledIdentity has an empty wallet list, so
-  // WalletSelectionProvider's own logic naturally yields "not authenticated,
-  // no wallet" without ever touching Privy.
+  // provider ancestor). Browser wallets still connect directly through the
+  // Wallet Standard, so a build without a Privy app id stays usable.
   if (!appId) {
     return (
-      <PrivyIdentityContext.Provider value={disabledIdentity}>
+      <DirectWalletBridge>
         <WalletSelectionProvider>{children}</WalletSelectionProvider>
-      </PrivyIdentityContext.Provider>
+      </DirectWalletBridge>
     );
   }
 
@@ -88,25 +87,11 @@ function PrivyIdentityBridge({ children }: { children: React.ReactNode }) {
   const { wallets: rootWallets } = useWallets();
   const [authError, setAuthError] = useState<string | null>(null);
   const { generateSiwsMessage, loginWithSiws } = useLoginWithSiws();
-  const installed = useSyncExternalStore(subscribeSolanaWallets, getSolanaWalletsSnapshot, getServerSolanaWalletsSnapshot);
-  // The one browser wallet the user picked in the wallet drawer (Wallet
-  // Standard). It trades directly; Privy SIWS links it when that login method
-  // is enabled, but connecting never depends on it.
-  const [standard, setStandard] = useState<{ wallet: Wallet; account: WalletAccount } | null>(null);
+  const { installed, standard, connect, disconnect } = useStandardWallet();
   const embedded = useMemo(
     () => (authenticated ? solanaWallets.filter((wallet) => rootWallets.find((root) => root.address === wallet.address)?.walletClientType === "privy") : []),
     [authenticated, solanaWallets, rootWallets],
   );
-
-  // Returning visitors: reconnect silently to the wallet they last chose.
-  useEffect(() => {
-    const name = rememberedWallet();
-    const option = name ? installed.find((candidate) => candidate.name === name) : undefined;
-    if (!option || standard) return;
-    let cancelled = false;
-    connectWallet(option.wallet, true).then((account) => { if (!cancelled) setStandard({ wallet: option.wallet, account }); }).catch(() => rememberWallet(null));
-    return () => { cancelled = true; };
-  }, [installed, standard]);
 
   const identity = useMemo<PrivyIdentity>(() => ({
     ready,
@@ -122,19 +107,14 @@ function PrivyIdentityBridge({ children }: { children: React.ReactNode }) {
     login,
     walletOptions: installed.map(({ name, icon }) => ({ name, icon })),
     connectWith: async (walletName) => {
-      const option = installed.find((candidate) => candidate.name === walletName);
-      if (!option) throw new Error(`${walletName} is not installed`);
       setAuthError(null);
-      if (standard && standard.wallet !== option.wallet) await disconnectWallet(standard.wallet);
-      const account = await connectWallet(option.wallet);
-      setStandard({ wallet: option.wallet, account });
-      rememberWallet(walletName);
+      const { wallet, account } = await connect(walletName);
       // Best effort: link the wallet to a Privy identity. Fails (harmlessly)
       // while Solana wallet login is disabled in the Privy dashboard.
       if (!authenticated) {
         try {
           const message = await generateSiwsMessage({ address: account.address });
-          const signature = await signMessageWith(option.wallet, account, new TextEncoder().encode(message));
+          const signature = await signMessageWith(wallet, account, new TextEncoder().encode(message));
           await loginWithSiws({ signature: toBase64(signature), message, walletClientType: walletName.toLowerCase(), connectorType: "injected" });
         } catch (error) {
           setAuthError(`Privy sign-in skipped: ${error instanceof Error ? error.message : String(error)}`);
@@ -146,9 +126,7 @@ function PrivyIdentityBridge({ children }: { children: React.ReactNode }) {
       return signMessageWith(standard.wallet, standard.account, bytes);
     },
     logout: async () => {
-      if (standard) await disconnectWallet(standard.wallet);
-      setStandard(null);
-      rememberWallet(null);
+      await disconnect();
       if (authenticated) await privyLogout();
     },
     getAccessToken: async () => { try { return await getAccessToken(); } catch { return null; } },
@@ -159,7 +137,7 @@ function PrivyIdentityBridge({ children }: { children: React.ReactNode }) {
       const signer = new PrivyWalletSigner(signSolanaTransaction, wallet, "solana:devnet");
       return signer.signTransaction(bytes);
     },
-  }), [ready, authenticated, user?.id, user?.email?.address, user?.google?.email, installed, standard, embedded, generateSiwsMessage, loginWithSiws, authError, login, privyLogout, getAccessToken, signSolanaTransaction]);
+  }), [ready, authenticated, user?.id, user?.email?.address, user?.google?.email, installed, standard, connect, disconnect, embedded, generateSiwsMessage, loginWithSiws, authError, login, privyLogout, getAccessToken, signSolanaTransaction]);
 
   return <PrivyIdentityContext.Provider value={identity}>{children}</PrivyIdentityContext.Provider>;
 }
