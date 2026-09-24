@@ -33,7 +33,7 @@ export function ActivityFeed({ events, filter = "all", limit = 30, emptyText = "
   const rows = events.map(toActivityRow).filter((row) => matchesActivityFilter(row.category, filter)).slice(0, limit);
   if (rows.length === 0) return <p className="px-1 py-6 text-center text-[12.5px] text-[var(--t-text-2)]">{emptyText}</p>;
   return (
-    <ol className="divide-y divide-[var(--t-border)]">
+    <ol data-testid="activity-feed" className="divide-y divide-[var(--t-border)]">
       {rows.map((row) => {
         const meta = CATEGORY[row.category] ?? { icon: HeartPulse, label: row.category, color: "var(--t-text-2)" };
         const Icon = meta.icon;
