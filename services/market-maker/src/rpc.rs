@@ -88,6 +88,21 @@ impl Rpc {
         result.as_str().map(str::to_string).ok_or_else(|| anyhow!("sendTransaction: no signature"))
     }
 
+    /// Polls until the rollup reports `signature` processed: Some(ok) or None on timeout.
+    pub async fn poll_processed(&self, signature: &str, limit: Duration) -> Option<bool> {
+        let deadline = Instant::now() + limit;
+        while Instant::now() < deadline {
+            if let Ok(result) = self.call("getSignatureStatuses", json!([[signature]])).await {
+                let status = &result["value"][0];
+                if !status.is_null() {
+                    return Some(status["err"].is_null());
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+        None
+    }
+
     /// Plain network round trip to the RPC node.
     pub async fn ping(&self) -> Result<u64> {
         let started = Instant::now();
@@ -113,7 +128,9 @@ pub struct SignatureSocket {
 impl SignatureSocket {
     pub async fn connect(rpc_url: &str) -> Result<Arc<Self>> {
         let ws_url = rpc_url.replacen("https://", "wss://", 1).replacen("http://", "ws://", 1);
-        let (stream, _) = tokio_tungstenite::connect_async(ws_url.as_str()).await.context("rollup websocket")?;
+        // TCP_NODELAY: back-to-back subscribe frames otherwise wait ~40 ms for the
+        // server's delayed ACK (Nagle), which held every "processed" push that long.
+        let (stream, _) = tokio_tungstenite::connect_async_with_config(ws_url.as_str(), None, true).await.context("rollup websocket")?;
         let (sink, mut source) = stream.split();
         let acks: Acks = Arc::default();
         let waiters: Waiters = Arc::default();

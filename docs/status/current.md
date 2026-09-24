@@ -35,6 +35,14 @@ started", this section wins.
   price moved 25% against it (`withdrawal_mark_price`,
   `V3_STALE_WITHDRAWAL_STRESS_BPS`). Tested in
   `v3_bundle::withdrawals_never_wait_for_a_live_price`.
+- Deposits: the Deposit button takes the same path as Start trading. The only
+  wallet prompt is the one-time trading-key signature (remembered per
+  device); faucet (if short), seat (if missing), vault deposit and rollup
+  credit are signed by the trading key. `npx tsx scripts/e2e/deposit.mts`
+  checks one prompt across two deposits.
+- Bot latency: "processed" is the first of the websocket push or an HTTP
+  status poll; pushes after a quiet spell arrived ~40 ms late, so the panel
+  showed 40 ms for transactions the rollup had processed in 2-15 ms.
 - Worker CPU: the browser now builds the V3 market aggregate from the rollup
   (`lib/v3-aggregate.ts`), and the cron no longer refreshes Pyth (the VM
   does); no `exceededCpu` since.
