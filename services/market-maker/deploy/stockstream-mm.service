@@ -1,0 +1,22 @@
+# /etc/systemd/system/stockstream-mm.service
+[Unit]
+Description=StockStream market maker (MagicBlock rollup)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=stockstream
+EnvironmentFile=/etc/stockstream/mm.env
+ExecStart=/usr/local/bin/stockstream-market-maker
+Restart=always
+RestartSec=2
+# Hardening: the process only needs the network and its two key files.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadOnlyPaths=/etc/stockstream
+
+[Install]
+WantedBy=multi-user.target

@@ -414,6 +414,8 @@ export function TradingTerminal() {
   }, [autoStart, protocol, tradingKey.signer]);
 
 
+  // Pyth reports the US session closed: the program refuses every order until it reopens.
+  const marketClosed = marketClock?.oracle ? !marketClock.oracle.tradingOpen : false;
   // Anything signing or confirming right now: its label greys out every other action.
   const busy = onboarding
     ?? (tradingKey.unlocking ? "Waiting for your wallet signature…" : null)
@@ -422,7 +424,7 @@ export function TradingTerminal() {
     ?? (orderPending || sessionOrder.pending ? "Placing your order in the rollup…" : null)
     ?? (cancelPending ? "Cancelling in the rollup…" : null)
     ?? (faucetPending ? "Sending test funds…" : null);
-  const blocker = busy && !orderPending ? busy : !auth.authenticated
+  const blocker = busy && !orderPending ? busy : marketClosed && auth.authenticated ? "Market closed — US session only" : !auth.authenticated
     ? null
     : !sized
       ? ticket.kind === "limit" && !(Number(ticket.price) > 0) ? "Enter a limit price" : markPrice === null ? "Waiting for the verified price" : "Enter an amount"
@@ -482,7 +484,7 @@ export function TradingTerminal() {
 
         {/* Depth. */}
         <div className="tk-col order-3 flex h-[560px] w-full shrink-0 flex-col xl:order-none xl:h-auto xl:w-[320px]">
-          <OrderBookDisplay book={book} symbol={marketSymbol} onPickPrice={(price) => setTicket((t) => ({ ...t, kind: "limit", price: price.toFixed(2) }))} />
+          <OrderBookDisplay book={book} symbol={marketSymbol} marketClosed={marketClosed} onPickPrice={(price) => setTicket((t) => ({ ...t, kind: "limit", price: price.toFixed(2) }))} />
         </div>
 
         {/* Entry, wallet, and system truth. */}

@@ -463,7 +463,7 @@ Pyth update, Privy credentials, and a compatible DLP restore path.
 
 - Program upgraded (sha 3e901121…): a `Restored` + idle + reconciled core can be delegated again, and its commit sequence continues from `last_committed + 1` (was: one delegation per market ever). Unit-tested in `magicblock::delegation_status_tests`.
 - Worker: one-minute cron refreshes the TSLA Pyth snapshot (keeper jobs stay opt-in via `KEEPER_ORCHESTRATION=on`); `POST /v1/operator/mint` (ingestion bearer) mints test collateral; `GET /v1/pre-ipo` proxies PreStocks + Tessera.
-- Market maker: superseded by the Worker's MarketMaker Durable Object (see the 2026-09-24 section). Delegation: `scripts/v3-delegate-market.sh` (market authority, local only).
+- Market maker: now `services/market-maker` (see the 2026-09-24 sections). Delegation: `scripts/v3-delegate-market.sh` (market authority, local only).
 - Terminal book reads the rollup directly (websocket `accountSubscribe` on book/seat/event shards, 1 s fallback poll) — no Worker in the path.
 - New tabs: Launch (Meteora DBC createConfigAndPool, three equity-tuned presets, simulated OK on devnet) and Pre-IPO (PreStocks/Tessera marks vs token price).
 - Wallet: Disconnect everywhere; a connected-but-unauthenticated wallet gets "Finish sign-in" + "Disconnect"; Privy account shown in the wallet panel and System Status.
@@ -473,7 +473,18 @@ Pyth update, Privy credentials, and a compatible DLP restore path.
 
 - Program (sha c53cb603…): deposit inbox (60 deposit on L1, 61 claim in the rollup) and withdrawal outbox (62 request in the rollup: risk-checked debit + seat-shard commit to L1; 63 claim on L1, paid once per request to the trader's own USDC account). Runtime-tested; deployed.
 - Trading key (`lib/trading-key.ts`): one wallet signature derives the in-app key (sha256 of a domain-bound signed message); it signs seat, deposits, orders, cancels and withdrawals silently, and withdrawals forward to the wallet. "Start trading" = faucet → rollup seat → 100 USDC deposit. The market-authority-only V3 session panel is hidden when live wallet trading is configured.
-- Market maker: `MarketMaker` DO created with `locationHint: "apac-se"` (runs in SIN, ~4 ms from devnet-as). Every ~0.5 s it replaces only drifted rungs (ReplaceOrder), re-sizes two rungs, and a taker crosses with 1–2 lots. Latency = send → `signatureSubscribe` processed push: p50 ≈ 11 ms from SIN. Status: `GET /v1/mm/status`.
+- Market maker: first a `MarketMaker` DO in `apac-se` (SIN, ~4 ms from devnet-as; p50 ≈ 11 ms send → processed push). Superseded the same day: see below.
 - Browser: rollup transactions go straight to devnet-as (validator MAS1…) with websocket confirmation; the terminal's live-transactions panel shows the bot's and your own times (from India ≈ 80 ms, nearly all network).
 - Live checks against production: `npx tsx scripts/e2e/onboarding.mts` and `npx tsx scripts/e2e/wallet-seat.mts` (fresh keypair injected as a Wallet Standard wallet).
 
+## Market maker moved to a VM service — 2026-09-24 (later)
+
+- The `MarketMaker` Durable Object hit Durable Object request limits (a tick every ~0.5 s). It is deleted (Worker migration `v3`), and the bot keys were removed from the Worker's secrets.
+- `services/market-maker`: a standalone Rust service (tokio) for a VM, ideally in Singapore next to devnet-as. It does what the DO did: incremental ReplaceOrder quoting, size jitter, taker fills, send → `signatureSubscribe` latency, and a permissionless Pyth refresh through the Worker. It also pauses while Pyth reports the US session closed; the program refuses orders then (`InvalidAccountData` from snapshot validation).
+- Instruction bytes and PDAs are tested against fixtures generated from `clients/stockstream`; the signed transaction is compared with web3.js's. Deploy notes (systemd, Docker, Caddy/sslip.io HTTPS) are in `services/market-maker/README.md`.
+- Status: the terminal polls `NEXT_PUBLIC_MM_STATUS_URL` (the VM over HTTPS) directly; the Worker's `GET /v1/mm/status` proxies to `MM_STATUS_URL` as a fallback and returns 503 while neither is configured.
+- Terminal: when Pyth reports the market closed, the order button reads "Market closed", the empty book explains US session hours, and the transactions panel says the bot is idle.
+
+- Deployed: Azure VM `104.41.137.253` (eastus, shared with other projects). The systemd unit `stockstream-mm` listens on `127.0.0.1:8787`; its only public surface is the nginx site `stockstream-mm` at `https://104-41-137-253.sslip.io/v1/mm/status` (Let's Encrypt webroot certificate, auto-renewing). The frontend sets `NEXT_PUBLIC_MM_STATUS_URL`, and the Worker's `MM_STATUS_URL` points at the same URL. East US is ~220 ms from devnet-as; a Singapore VM would bring bot latency to ~10 ms.
+- Overnight trading (user decision, 2026-09-24): V3 treats Pyth `OverNight` (session 3, live Blue Ocean prices 8 PM–4 AM ET) as OPEN; only `Closed` (4: weekends, holidays) stops orders. Program upgraded (sha 8c67f038…); the legacy V2 mapping is unchanged. Unit test: `oracle_snapshot::overnight_trades_and_only_closed_stops_orders`.
+- Oracle refresh: devnet's clock trails wall time by 1–2 s and the program rejects prices >2 s ahead of it, so the Worker now retries a rejected update (3 attempts, 1.2 s apart). A failed refresh no longer blocks an order when the rollup price is ≤8 s old; the program's 10 s check still decides.

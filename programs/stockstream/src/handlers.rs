@@ -1978,8 +1978,9 @@ fn consume_oracle_update_v3(
             ..crate::v3::V3_CORE_ORACLE_CONFIDENCE_OFFSET + 8]
             .copy_from_slice(&(verified.confidence as u64).to_le_bytes());
         core[crate::v3::V3_CORE_MODE_OFFSET] = match verified.session {
-            0 | 1 | 2 => MarketMode::Open as u8,
-            3 | 4 => MarketMode::CloseOnly as u8,
+            // V3: overnight trades like the extended sessions (see oracle_snapshot.rs).
+            0..=3 => MarketMode::Open as u8,
+            4 => MarketMode::CloseOnly as u8,
             _ => return Err(custom(StockStreamError::OracleUnavailable)),
         };
     }
@@ -2000,8 +2001,9 @@ fn consume_oracle_update_v3(
     )?;
     if previous_mode
         != match verified.session {
-            0 | 1 | 2 => MarketMode::Open as u8,
-            3 | 4 => MarketMode::CloseOnly as u8,
+            // V3: overnight trades like the extended sessions (see oracle_snapshot.rs).
+            0..=3 => MarketMode::Open as u8,
+            4 => MarketMode::CloseOnly as u8,
             _ => return Err(custom(StockStreamError::OracleUnavailable)),
         }
     {

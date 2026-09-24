@@ -72,3 +72,23 @@ test("a failed send with a still-stale snapshot is reported, not hidden", async 
   const d = deps({ snapshots: [snapshotBytes(NOW - 30, 5n)], send: async () => { throw new Error("insufficient funds"); } });
   expect(await refreshOracleSnapshot(market, d)).toMatchObject({ status: "failed", reason: "insufficient funds", payer: expect.any(String) });
 });
+
+test("an update the chain rejects (its clock trails the Pyth price) is retried with a newer price", async () => {
+  const outcomes = ["failed", "confirmed"] as const;
+  let confirms = 0;
+  const waits: number[] = [];
+  const d = deps({
+    snapshots: [snapshotBytes(NOW - 30, 5n), snapshotBytes(NOW - 30, 5n), snapshotBytes(NOW - 30, 5n), snapshotBytes(NOW, 6n)],
+    confirm: async () => outcomes[confirms++],
+    sleep: async (ms) => { waits.push(ms); },
+  });
+  expect(await refreshOracleSnapshot(market, d)).toMatchObject({ status: "refreshed", sequence: "6" });
+  expect(d.sent).toHaveLength(2);
+  expect(waits).toEqual([1_200]);
+});
+
+test("gives up after three rejected attempts and reports why", async () => {
+  const d = deps({ snapshots: [snapshotBytes(NOW - 30, 5n)], confirm: async () => "failed", sleep: async () => undefined });
+  expect(await refreshOracleSnapshot(market, d)).toMatchObject({ status: "failed", reason: "snapshot update failed" });
+  expect(d.sent).toHaveLength(3);
+});
