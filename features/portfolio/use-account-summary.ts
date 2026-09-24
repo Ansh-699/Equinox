@@ -27,9 +27,11 @@ export interface AccountSeat {
 
 /** The wallet's seat in the live v3 market, read from whichever chain holds
  * it (the MagicBlock rollup while delegated, Solana L1 otherwise).
- * undefined = still loading, null = no seat. */
-export function useSeat(wallet: string | null, delegated: boolean, enabled: boolean): AccountSeat | null | undefined {
+ * seat: undefined = not read yet, null = no seat. `unavailable` is set
+ * while the last read failed, so callers can say so instead of spinning. */
+export function useSeat(wallet: string | null, delegated: boolean, enabled: boolean): { seat: AccountSeat | null | undefined; unavailable: boolean } {
   const [seat, setSeat] = useState<AccountSeat | null | undefined>(undefined);
+  const [unavailable, setUnavailable] = useState(false);
   useEffect(() => {
     if (!wallet || !enabled || !deployment.core) return;
     let stopped = false;
@@ -39,7 +41,9 @@ export function useSeat(wallet: string | null, delegated: boolean, enabled: bool
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getMultipleAccounts", params: [shards, { encoding: "base64", commitment: "confirmed" }] }),
       }).then((r) => r.json()).catch(() => null) as { result?: { value: ({ data: [string] } | null)[] } } | null;
-      if (stopped || !response?.result) return;
+      if (stopped) return;
+      setUnavailable(!response?.result);
+      if (!response?.result) return;
       const positions = response.result.value.flatMap((account) => (account ? decodeV3SeatShard(Uint8Array.from(atob(account.data[0]), (c) => c.charCodeAt(0)))?.positions ?? [] : []));
       const own = positions.find((p) => p.trader === wallet);
       setSeat(own ? {
@@ -55,13 +59,15 @@ export function useSeat(wallet: string | null, delegated: boolean, enabled: bool
     const timer = setInterval(() => void load(), SEAT_POLL_MS);
     return () => { stopped = true; clearInterval(timer); };
   }, [wallet, delegated, enabled]);
-  return wallet && enabled ? seat : undefined;
+  return wallet && enabled ? { seat, unavailable } : { seat: undefined, unavailable: false };
 }
 
 export interface AccountSummary {
   wallet: { address: string; sol: bigint | null; usdc: bigint | null } | null;
   trading: { address: string; sol: bigint | null; usdc: bigint | null } | null;
   seat: AccountSeat | null | undefined;
+  /** The last seat read failed (RPC down); `seat` may be stale or undefined. */
+  seatUnavailable: boolean;
   delegated: boolean;
   /** null while the market's execution status has not been read. */
   execution: ReturnType<typeof useExecutionStatus>;
@@ -90,7 +96,7 @@ export function useAccountSummary(walletAddress: string | null, enabled = true):
   const tradingBalances = useWalletBalances(active && trading ? rpc : null, trading, tradingAta);
   const execution = useExecutionStatus(active ? publicMarketApiUrl : undefined, ACCOUNT_MARKET);
   const delegated = execution?.marketDelegated ?? false;
-  const seat = useSeat(trading ?? walletAddress, delegated, active);
+  const { seat, unavailable: seatUnavailable } = useSeat(trading ?? walletAddress, delegated, active);
 
   const totalUsdc = walletBalances.collateralTokenBalance === null
     ? null
@@ -102,6 +108,7 @@ export function useAccountSummary(walletAddress: string | null, enabled = true):
     wallet: walletAddress ? { address: walletAddress, sol: walletBalances.solLamports, usdc: walletBalances.collateralTokenBalance } : null,
     trading: trading ? { address: trading, sol: tradingBalances.solLamports, usdc: tradingBalances.collateralTokenBalance } : null,
     seat,
+    seatUnavailable,
     delegated,
     execution,
     totalUsdc,

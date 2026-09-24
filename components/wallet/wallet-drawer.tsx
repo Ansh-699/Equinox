@@ -175,7 +175,7 @@ export function WalletDrawer({ auth, open, onClose, summary }: { auth: AppAuth; 
                   <SegmentedTabs className="mt-5" label="Account sections" tabs={TABS} value={tab} onChange={chooseTab} />
                   <div role="tabpanel" aria-label={TABS.find((t) => t.id === tab)?.label} className="mt-4">
                     {tab === "overview" ? <AccountOverview summary={summary} /> : null}
-                    {tab === "positions" ? <PositionCard seat={summary.seat} compact /> : null}
+                    {tab === "positions" ? <PositionCard seat={summary.seat} unavailable={summary.seatUnavailable} compact /> : null}
                     {tab === "activity" ? <DrawerActivity /> : null}
                     {tab === "settings" ? (
                       <div className="space-y-4">

@@ -76,6 +76,7 @@ export function PortfolioView() {
   }
 
   const seat = summary.seat;
+  const seatLoading = seat === undefined && !summary.seatUnavailable;
   return (
     <div className="terminal min-h-screen">
       <TopBar active="portfolio" auth={auth} />
@@ -100,15 +101,15 @@ export function PortfolioView() {
               <Card>
                 <BalanceHero summary={summary} size="lg" />
                 <div className="mt-5 grid grid-cols-2 gap-2 md:grid-cols-4">
-                  <StatTile label="Available to trade" value={formatUsdUnits(seat?.available)} tone="up" loading={seat === undefined} hint="Free vault collateral" />
-                  <StatTile label="In open orders" value={formatUsdUnits(seat?.reserved)} loading={seat === undefined} hint={seat ? `${seat.openOrderCount} order${seat.openOrderCount === 1 ? "" : "s"}` : undefined} />
-                  <StatTile label="Realized PnL" value={formatUsdUnits(seat?.realizedPnl)} loading={seat === undefined} tone={seat && seat.realizedPnl > 0n ? "up" : seat && seat.realizedPnl < 0n ? "down" : "neutral"} hint="Closed trades" />
+                  <StatTile label="Available to trade" value={formatUsdUnits(seat?.available)} tone="up" loading={seatLoading} hint="Free vault collateral" />
+                  <StatTile label="In open orders" value={formatUsdUnits(seat?.reserved)} loading={seatLoading} hint={seat ? `${seat.openOrderCount} order${seat.openOrderCount === 1 ? "" : "s"}` : undefined} />
+                  <StatTile label="Realized PnL" value={formatUsdUnits(seat?.realizedPnl)} loading={seatLoading} tone={seat && seat.realizedPnl > 0n ? "up" : seat && seat.realizedPnl < 0n ? "down" : "neutral"} hint="Closed trades" />
                   <StatTile label="Wallet SOL" value={summary.wallet?.sol == null ? "—" : (Number(summary.wallet.sol) / 1e9).toFixed(4)} loading={summary.wallet?.sol == null} tone={summary.wallet?.sol != null && summary.wallet.sol < 10_000_000n ? "warn" : "neutral"} hint="Network fees" />
                 </div>
               </Card>
 
               <Card title="Position" action={<span className="text-[11.5px] text-[var(--t-text-3)]">{delegated ? "Live on the rollup" : "Solana L1"}</span>}>
-                <PositionCard seat={seat} market={ACCOUNT_MARKET} />
+                <PositionCard seat={seat} unavailable={summary.seatUnavailable} market={ACCOUNT_MARKET} />
               </Card>
 
               <Card title="Recent market activity" action={<Link href="/activity" className="text-[12px] font-medium text-[var(--t-link)] hover:underline">View all →</Link>} bodyClassName="px-4 py-1">

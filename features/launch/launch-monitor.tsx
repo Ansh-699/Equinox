@@ -56,12 +56,16 @@ export function LaunchMonitor({ refreshKey }: { refreshKey: number }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ pool: string; text: string; href?: string } | null>(null);
   const [tick, setTick] = useState(0);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["id"]>("all");
 
   useEffect(() => {
     let stopped = false;
     const load = async () => {
-      const list = await fetch(`${publicMarketApiUrl.replace(/\/$/, "")}/v1/launches`).then((r) => r.json() as Promise<{ launches: Launch[] }>).catch(() => ({ launches: [] }));
+      const list = await fetch(`${publicMarketApiUrl.replace(/\/$/, "")}/v1/launches`).then((r) => r.json() as Promise<{ launches: Launch[] }>).catch(() => null);
+      if (stopped) return;
+      setLoadFailed(!list);
+      if (!list) { setRows((current) => current ?? []); return; }
       const withState = await Promise.all(list.launches.map(async (launch) => ({ ...launch, view: await readPool(connection, launch.pool).catch(() => null) })));
       if (!stopped) setRows(withState);
     };
@@ -128,8 +132,8 @@ export function LaunchMonitor({ refreshKey }: { refreshKey: number }) {
       ) : null}
       {rows && shown.length === 0 ? (
         <div className="mt-3 rounded-[12px] border border-dashed border-[var(--t-border-strong)]">
-          <EmptyState icon={<Rocket className="h-5 w-5" />} title={rows.length === 0 ? "No launches yet" : "Nothing in this stage"}>
-            {rows.length === 0 ? "Create the first one with the form on the right." : "Try another filter."}
+          <EmptyState icon={<Rocket className="h-5 w-5" />} title={loadFailed && rows.length === 0 ? "Couldn't load launches" : rows.length === 0 ? "No launches yet" : "Nothing in this stage"}>
+            {loadFailed && rows.length === 0 ? "The launch registry isn't answering. Retrying every 10 seconds." : rows.length === 0 ? "Create the first one with the form alongside." : "Try another filter."}
           </EmptyState>
         </div>
       ) : null}
