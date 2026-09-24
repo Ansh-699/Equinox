@@ -1,85 +1,69 @@
 "use client";
 /* eslint-disable @next/next/no-img-element -- wallet icons are data URIs from the extensions */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Check, Copy, Droplets, LogOut, X } from "lucide-react";
+import { ArrowRight, Check, Copy, Droplets, LogOut, X } from "lucide-react";
 import type { AppAuth } from "@/components/app-providers";
 import { WalletSelector } from "@/features/wallet/wallet-selector";
-import { refreshWalletBalances, useWalletBalances } from "@/features/portfolio/use-wallet-balances";
-import { loadTradingKey } from "@/lib/trading-key";
-import { useExecutionStatus } from "@/features/magicblock/use-execution-status";
-import { deriveV3ExecutionAccounts } from "@/clients/equinox/src";
-import { deriveCollateralTokenAccount } from "@/lib/token-accounts";
+import { refreshWalletBalances } from "@/features/portfolio/use-wallet-balances";
+import type { AccountSummary } from "@/features/portfolio/use-account-summary";
+import { AccountOverview, BalanceHero } from "@/features/account/account-overview";
+import { PositionCard } from "@/features/account/position-card";
+import { ActivityFeed } from "@/features/account/activity-list";
+import { NetworkList } from "@/features/account/settings-list";
+import { useMarketEvents } from "@/features/activity/use-market-events";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { BUTTON_PRIMARY, BUTTON_SECONDARY, SegmentedTabs } from "@/components/ui/primitives";
 import { publicMarketApiUrl } from "@/lib/demo-config";
 import { claimTestFunds } from "@/lib/faucet-client";
-import { SolanaRpcTransport } from "@/lib/rpc-transport";
-import deployment from "@/config/equinox-deployment.json";
-import { decodeV3SeatShard } from "../../workers/src/v3-market-state";
 
-const L1_RPC = process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
-const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 // Privy's own modal only for methods it can serve (email/Google); browser
 // wallets connect directly in this drawer.
 const PRIVY_MODAL_LOGIN = /email|google/.test(process.env.NEXT_PUBLIC_PRIVY_LOGIN_METHODS ?? "email,wallet");
-const usd = (units: bigint | null) => (units === null ? "—" : `$${(Number(units) / 1e6).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 const short = (value: string) => `${value.slice(0, 4)}…${value.slice(-4)}`;
 
-interface Seat { index: number; available: bigint; reserved: bigint; position: bigint }
+const TABS = [
+  { id: "overview", label: "Overview", href: "/portfolio" },
+  { id: "positions", label: "Positions", href: "/portfolio" },
+  { id: "activity", label: "Activity", href: "/activity" },
+  { id: "settings", label: "Settings", href: "/settings" },
+] as const;
+type TabId = (typeof TABS)[number]["id"];
+const TAB_KEY = "equinox:drawer-tab";
 
-/** The wallet's seat in the live market, read from whichever chain holds it. */
-function useSeat(wallet: string | null, delegated: boolean, open: boolean): Seat | null | undefined {
-  const [seat, setSeat] = useState<Seat | null | undefined>(undefined);
-  useEffect(() => {
-    if (!wallet || !open || !deployment.core) return;
-    let stopped = false;
-    const shards = deriveV3ExecutionAccounts(deployment.core, deployment.core).seatShards.map(String);
-    const load = async () => {
-      const response = await fetch(delegated ? deployment.magicBlock.rpc : L1_RPC, {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getMultipleAccounts", params: [shards, { encoding: "base64", commitment: "confirmed" }] }),
-      }).then((r) => r.json()).catch(() => null) as { result?: { value: ({ data: [string] } | null)[] } } | null;
-      if (stopped || !response?.result) return;
-      const positions = response.result.value.flatMap((account) => (account ? decodeV3SeatShard(Uint8Array.from(atob(account.data[0]), (c) => c.charCodeAt(0)))?.positions ?? [] : []));
-      const own = positions.find((p) => p.trader === wallet);
-      setSeat(own ? { index: own.shard * 32 + own.slot, available: own.availableCollateral, reserved: own.reservedMargin, position: own.basePosition } : null);
-    };
-    void load();
-    const timer = setInterval(() => void load(), 5_000);
-    return () => { stopped = true; clearInterval(timer); };
-  }, [wallet, delegated, open]);
-  return wallet ? seat : undefined;
+function readTab(): TabId {
+  try {
+    const stored = localStorage.getItem(TAB_KEY);
+    return TABS.some((tab) => tab.id === stored) ? (stored as TabId) : "overview";
+  } catch { return "overview"; }
 }
 
-function Stat({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: "up" | "warn" }) {
-  return (
-    <div className="rounded-[8px] border border-[var(--t-border)] bg-[var(--t-surface)] px-3 py-2.5">
-      <div className="text-[10.5px] uppercase tracking-[0.06em] text-[var(--t-text-3)]">{label}</div>
-      <div className={`tnum mt-0.5 text-[16px] font-semibold ${tone === "up" ? "text-[var(--t-up)]" : tone === "warn" ? "text-[var(--t-warn)]" : "text-[var(--t-text)]"}`}>{value}</div>
-      {hint ? <div className="mt-0.5 text-[10.5px] text-[var(--t-text-3)]">{hint}</div> : null}
-    </div>
-  );
+/** Only mounted while the Activity tab is showing, so the drawer does not
+ * hold a market socket open otherwise. */
+function DrawerActivity() {
+  const { events, status } = useMarketEvents(publicMarketApiUrl, "TSLA-PERP");
+  return <ActivityFeed events={events} limit={10} emptyText={status === "unavailable" ? "Market events are unavailable right now." : "No market events yet."} />;
 }
 
-/** Slide-over wallet panel: connect (installed Solana wallets, one signature
- * via Privy SIWS), then the account: balances, vault seat and market state. */
-export function WalletDrawer({ auth, open, onClose }: { auth: AppAuth; open: boolean; onClose: () => void }) {
+/** Slide-over account hub: connect (installed Solana wallets, one signature
+ * via Privy SIWS), then the account: total balance, and Overview /
+ * Positions / Activity / Settings tabs that each open their full page. */
+export function WalletDrawer({ auth, open, onClose, summary }: { auth: AppAuth; open: boolean; onClose: () => void; summary: AccountSummary }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const rpc = useMemo(() => new SolanaRpcTransport(L1_RPC), []);
+  const [tab, setTab] = useState<TabId>("overview");
   const address = auth.walletAddress;
-  const ata = useMemo(() => (address && deployment.collateralMint ? String(deriveCollateralTokenAccount(address, deployment.collateralMint, TOKEN_PROGRAM)) : null), [address]);
-  const balances = useWalletBalances(open ? rpc : null, address, ata);
-  const execution = useExecutionStatus(open ? publicMarketApiUrl : undefined, "TSLA-PERP");
-  const delegated = execution?.marketDelegated ?? false;
-  // The in-app trading key (lib/trading-key.ts) holds the seat once unlocked on the Trade page.
-  const trading = useMemo(() => (address && open ? loadTradingKey(address)?.publicKey.toBase58() ?? null : null), [address, open]);
-  const tradingAta = useMemo(() => (trading && deployment.collateralMint ? String(deriveCollateralTokenAccount(trading, deployment.collateralMint, TOKEN_PROGRAM)) : null), [trading]);
-  const tradingBalances = useWalletBalances(open && trading ? rpc : null, trading, tradingAta);
-  const seat = useSeat(trading ?? address, delegated, open);
+  // Remembered per browser; read after mount (storage is client-only).
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { if (open) setTab(readTab()); }, [open]);
+  const chooseTab = (next: TabId) => {
+    setTab(next);
+    try { localStorage.setItem(TAB_KEY, next); } catch { /* storage blocked */ }
+  };
   const privyNote = auth.authError?.startsWith("Privy sign-in skipped") ? "Wallet connected · Privy linking unavailable" : null;
   const icon = auth.walletOptions.find((option) => option.name.toLowerCase() === auth.walletClientType)?.icon;
 
@@ -181,50 +165,40 @@ export function WalletDrawer({ auth, open, onClose }: { auth: AppAuth; open: boo
                 </>
               ) : (
                 <>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Stat label="SOL" value={balances.solLamports === null ? "—" : (Number(balances.solLamports) / 1e9).toFixed(4)} hint="Network fees" tone={balances.solLamports !== null && balances.solLamports < 10_000_000n ? "warn" : undefined} />
-                    <Stat label="USDC" value={usd(balances.collateralTokenBalance)} hint="In your wallet" />
-                  </div>
-
-                  {trading ? (
-                    <>
-                      <h3 className="mb-2 mt-5 text-[12px] font-semibold uppercase tracking-[0.06em] text-[var(--t-text-3)]">Trading account · {trading.slice(0, 4)}…{trading.slice(-4)}</h3>
-                      <div className="grid grid-cols-2 gap-2">
-                        <Stat label="USDC" value={usd(tradingBalances.collateralTokenBalance)} hint="Signs trades silently" />
-                        <Stat label="SOL" value={tradingBalances.solLamports === null ? "—" : (Number(tradingBalances.solLamports) / 1e9).toFixed(4)} hint="Fees" />
-                      </div>
-                    </>
-                  ) : null}
-                  <h3 className="mb-2 mt-5 text-[12px] font-semibold uppercase tracking-[0.06em] text-[var(--t-text-3)]">Vault · TSLA-PERP</h3>
-                  {seat === undefined ? (
-                    <p className="text-[12px] text-[var(--t-text-3)]">Reading your seat…</p>
-                  ) : seat === null ? (
-                    <p className="text-[12.5px] leading-relaxed text-[var(--t-text-2)]">No seat yet. Press “Start trading” on the Trade page: it funds your trading account, creates the seat and deposits in one go.</p>
-                  ) : (
-                    <div className="grid grid-cols-2 gap-2">
-                      <Stat label="Available" value={usd(seat.available)} hint="Free collateral" tone="up" />
-                      <Stat label="Reserved" value={usd(seat.reserved)} hint="Open orders" />
-                      <Stat label="Position" value={`${seat.position > 0n ? "+" : ""}${seat.position} TSLA`} hint={`Seat #${seat.index}`} />
-                      <Stat label="Custody" value="Solana L1" hint="Program vault" />
-                    </div>
-                  )}
-
-                  <div className="mt-5 flex items-center gap-2 rounded-[8px] border border-[var(--t-border)] bg-[var(--t-surface)] px-3 py-2.5 text-[12px]">
-                    <span className={`h-2 w-2 rounded-full ${delegated ? "bg-[var(--t-up)]" : "bg-[var(--t-warn)]"}`} />
-                    <span className="text-[var(--t-text-2)]">{execution === null ? "Checking market…" : delegated ? "Orders route to the MagicBlock rollup — no popups per fill." : "Market on Solana L1: seats, deposits and withdrawals open."}</span>
-                  </div>
-
-                  <div className="mt-5 grid grid-cols-2 gap-2">
-                    <button type="button" onClick={() => void claimFunds()} className="flex h-[38px] items-center justify-center gap-2 rounded-[8px] border border-[var(--t-border-strong)] text-[13px] text-[var(--t-text)] transition-colors hover:bg-[var(--t-surface-3)]"><Droplets className="h-4 w-4" /> Test USDC</button>
-                    <Link href="/trade" onClick={onClose} className="flex h-[38px] items-center justify-center rounded-[8px] bg-[var(--t-up-3)] text-[13px] font-semibold text-[var(--t-on-fill)] transition-colors hover:bg-[var(--t-up-2)]">Trade</Link>
+                  <BalanceHero summary={summary} />
+                  <div className="mt-4 grid grid-cols-2 gap-2">
+                    <button type="button" onClick={() => void claimFunds()} className={BUTTON_SECONDARY}><Droplets className="h-4 w-4" /> Get test USDC</button>
+                    <Link href="/trade" onClick={onClose} className={BUTTON_PRIMARY}>Trade</Link>
                   </div>
                   {notice ? <p role="status" className="mt-2 text-[12px] text-[var(--t-text-2)]">{notice}</p> : null}
-                  {auth.wallets.length > 1 ? (
-                    <section className="mt-5">
-                      <h3 className="mb-2 text-[12px] text-[var(--t-text-3)]">Wallets</h3>
-                      <WalletSelector />
-                    </section>
-                  ) : null}
+
+                  <SegmentedTabs className="mt-5" label="Account sections" tabs={TABS} value={tab} onChange={chooseTab} />
+                  <div role="tabpanel" aria-label={TABS.find((t) => t.id === tab)?.label} className="mt-4">
+                    {tab === "overview" ? <AccountOverview summary={summary} /> : null}
+                    {tab === "positions" ? <PositionCard seat={summary.seat} compact /> : null}
+                    {tab === "activity" ? <DrawerActivity /> : null}
+                    {tab === "settings" ? (
+                      <div className="space-y-4">
+                        {auth.wallets.length > 1 ? (
+                          <section>
+                            <h3 className="mb-2 text-[12px] font-semibold text-[var(--t-text-2)]">Active wallet</h3>
+                            <WalletSelector />
+                          </section>
+                        ) : null}
+                        <section className="flex items-center justify-between rounded-[8px] border border-[var(--t-border)] px-3 py-2">
+                          <span className="text-[12.5px] text-[var(--t-text)]">Theme</span>
+                          <ThemeToggle />
+                        </section>
+                        <section>
+                          <h3 className="mb-1 text-[12px] font-semibold text-[var(--t-text-2)]">Network</h3>
+                          <NetworkList execution={summary.execution} />
+                        </section>
+                      </div>
+                    ) : null}
+                    <Link href={TABS.find((t) => t.id === tab)!.href} onClick={onClose} className="mt-4 flex items-center justify-end gap-1 text-[12.5px] font-medium text-[var(--t-link)] hover:underline">
+                      Open full page <ArrowRight className="h-3.5 w-3.5" />
+                    </Link>
+                  </div>
                 </>
               )}
             </div>
