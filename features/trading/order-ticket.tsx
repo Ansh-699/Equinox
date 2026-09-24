@@ -1,5 +1,6 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import { Spinner } from "@/components/ui/spinner";
 export type TicketKind = "market" | "limit";
 
@@ -38,6 +39,8 @@ const INPUT = `tnum h-[34px] w-full rounded-[4px] border border-[var(--t-border-
 const SUFFIX = "pointer-events-none absolute right-[10px] top-1/2 -translate-y-1/2 text-[12px] text-[var(--t-text-3)]";
 const LABEL = "text-[13px] text-[var(--t-text-2)]";
 const ROW = "flex h-[22px] items-center justify-between border-b border-[var(--t-surface-2)] last:border-b-0";
+/** Max slippage presets, in basis points (0.1% … 1%). */
+const SLIPPAGE_BPS = [10, 25, 50, 100] as const;
 const CHIP = `tnum h-[26px] rounded-[4px] border border-[var(--t-border-strong)] bg-[var(--t-surface)] text-[12px] text-[var(--t-text-2)] hover:text-[var(--t-text)] ${FOCUS}`;
 
 /** Order entry (SlipStream OrderForm) for a Equinox perp. */
@@ -157,7 +160,8 @@ export function OrderTicket({
             <label htmlFor="order-lev" className={LABEL}>Size multiplier</label>
             <span className="tnum text-[12px] font-semibold text-[var(--t-up)]">{ticket.leverage}×</span>
           </div>
-          <input id="order-lev" type="range" min={1} max={maxLeverage} step={1} value={ticket.leverage} onChange={(e) => set({ leverage: Number.parseInt(e.target.value, 10) })} className={`w-full cursor-pointer accent-[var(--t-up)] ${FOCUS}`} />
+          <input id="order-lev" type="range" min={1} max={maxLeverage} step={1} value={ticket.leverage} onChange={(e) => set({ leverage: Number.parseInt(e.target.value, 10) })}
+            style={{ "--fill": `${maxLeverage > 1 ? ((ticket.leverage - 1) / (maxLeverage - 1)) * 100 : 100}%` } as CSSProperties} className={`glass-range w-full cursor-pointer ${FOCUS}`} />
           <div className="tnum flex justify-between text-[11px] text-[var(--t-text-3)]">
             {Array.from({ length: maxLeverage }, (_, i) => <span key={i}>{i + 1}×</span>)}
           </div>
@@ -165,13 +169,15 @@ export function OrderTicket({
 
         {isMarket ? (
           <div className="flex flex-col gap-1.5">
-            <div className="flex items-baseline justify-between">
-              <label htmlFor="order-slippage" className={LABEL}>Max slippage</label>
-              <span className="text-[11.5px] text-[var(--t-text-3)]">basis points</span>
-            </div>
-            <div className="relative">
-              <input id="order-slippage" type="number" step="1" min={1} inputMode="numeric" placeholder="50" value={ticket.slippageBps} onChange={(e) => set({ slippageBps: e.target.value })} className={INPUT} />
-              <span className={SUFFIX}>bps</span>
+            <span id="order-slippage" className={LABEL}>Max slippage</span>
+            <div role="radiogroup" aria-labelledby="order-slippage" className="grid grid-cols-4 gap-1">
+              {SLIPPAGE_BPS.map((bps) => {
+                const on = ticket.slippageBps === String(bps);
+                return (
+                  <button key={bps} type="button" role="radio" aria-checked={on} onClick={() => set({ slippageBps: String(bps) })}
+                    className={`${CHIP} ${on ? "border-[var(--t-up)] bg-[var(--t-up)]/10 font-semibold text-[var(--t-text)]" : ""}`}>{bps / 100}%</button>
+                );
+              })}
             </div>
           </div>
         ) : null}

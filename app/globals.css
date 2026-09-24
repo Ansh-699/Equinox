@@ -455,3 +455,58 @@ input[type="number"] {
 .wallet-button.wallet-chip:hover { background: var(--t-surface-3); }
 .account-pill { gap: 10px; padding: 0 10px 0 12px; }
 .account-pill-active { border-color: var(--t-accent); }
+
+/* Liquid-glass range: a frosted track filled up to --fill, and a glass bead thumb. */
+.glass-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 22px;
+  background: transparent;
+}
+.glass-range::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--t-up) 85%, white 15%) 0 var(--fill), transparent var(--fill)),
+    color-mix(in srgb, var(--t-text) 8%, transparent);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.18), inset 0 -1px 0 rgb(255 255 255 / 0.12);
+}
+.glass-range::-moz-range-track {
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--t-text) 8%, transparent);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.18), inset 0 -1px 0 rgb(255 255 255 / 0.12);
+}
+.glass-range::-moz-range-progress {
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--t-up) 85%, white 15%);
+}
+.glass-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 22px;
+  height: 22px;
+  margin-top: -7px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--t-up) 45%, white 55%);
+  background:
+    radial-gradient(circle at 35% 30%, rgb(255 255 255 / 0.95), rgb(255 255 255 / 0.35) 45%, rgb(255 255 255 / 0.12) 70%),
+    color-mix(in srgb, var(--t-up) 45%, transparent);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.25), inset 0 -2px 4px color-mix(in srgb, var(--t-up) 35%, transparent), inset 0 1px 1px rgb(255 255 255 / 0.8);
+  transition: transform 120ms ease;
+}
+.glass-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--t-up) 45%, white 55%);
+  background:
+    radial-gradient(circle at 35% 30%, rgb(255 255 255 / 0.95), rgb(255 255 255 / 0.35) 45%, rgb(255 255 255 / 0.12) 70%),
+    color-mix(in srgb, var(--t-up) 45%, transparent);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.25), inset 0 -2px 4px color-mix(in srgb, var(--t-up) 35%, transparent), inset 0 1px 1px rgb(255 255 255 / 0.8);
+}
+.glass-range:active::-webkit-slider-thumb { transform: scale(1.12); }
+
+/* Scrolls sideways when narrow, with no visible scrollbar. */
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }

@@ -99,7 +99,7 @@ export function ActivityDrawer({ seat, seatError, seatIndex, symbol, markPrice, 
     <div className="grid shrink-0 grid-cols-1 md:grid-cols-[2fr_1fr]">
     <section className="flex min-w-0 flex-col border-t border-[var(--t-border)]" aria-label="Your activity">
       <div className="tk-head gap-4">
-        <div role="tablist" aria-label="Activity" className="slim-scroll flex min-w-0 items-center gap-4 overflow-x-auto">
+        <div role="tablist" aria-label="Activity" className="no-scrollbar flex min-w-0 items-center gap-4 overflow-x-auto">
           {TABS.map((t) => (
             <button key={t.id} role="tab" aria-selected={tab === t.id} aria-controls="activity-panel" className="tk-tab" onClick={() => { setTab(t.id); setOpen(true); }}>
               {t.label}

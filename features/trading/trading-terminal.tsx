@@ -510,8 +510,6 @@ export function TradingTerminal() {
         price={indexPrice}
         oracle={marketClock?.oracle ?? null}
         oracleAgeSeconds={oracleAgeSeconds}
-        delegated={executionStatus ? executionStatus.marketDelegated : null}
-        lastCommit={executionStatus ? String(executionStatus.lastCommittedL1Sequence) : v3MarketState?.lastCommittedSequence != null ? String(v3MarketState.lastCommittedSequence) : null}
       />
 
       <main id="main-content" tabIndex={-1} className="flex min-h-0 flex-1 flex-col outline-none xl:flex-row">
