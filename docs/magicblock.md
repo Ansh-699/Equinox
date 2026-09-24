@@ -194,8 +194,7 @@ real, invocable client path is
   commit/undelegate handlers must check it instead of (or in addition to)
   `market_authority`. Until that lands, live ER operation must delegate
   this responsibility to the market authority key itself, which conflicts
-  with the Worker signer model. See `docs/equinox-roadmap.md` (Priority
-  10 / 14d).
+  with the Worker signer model.
 - `pinocchio::cpi::invoke_signed` is a no-op off the `solana`/`bpf` target,
   so a host `cargo test` run cannot observe the delegation/Magic programs
   actually executing. What is verified off-chain: every account/PDA/

@@ -99,4 +99,4 @@ The page renders without a Privy app ID, with wallet actions unavailable. Use an
 | Instruction or account layout | `clients/equinox/src/abi/` and `programs/equinox/` together |
 | Shared visuals | `app/globals.css`, `components/layout/` |
 
-The root `package.json` contains the build, lint, unit, and browser scripts. The [test guide](../docs/testing.md) distinguishes local checks from live devnet evidence.
+The root `package.json` contains the build, lint, unit, and browser scripts. The [dated status snapshot](../docs/status/current.md) records live devnet evidence.

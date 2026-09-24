@@ -6,7 +6,6 @@ import { defineConfig, devices } from "@playwright/test";
 // against a real production build/start at all. This config only proves the
 // production server itself boots and serves real content -- no login, no
 // session, no trading flow. See tests/browser-production/smoke.spec.ts and
-// docs/frontend-build-diagnostics.md for the reproducibility investigation
 // this complements.
 const APP_PORT = 4174;
 

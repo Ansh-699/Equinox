@@ -22,4 +22,4 @@ npm run check:equinox-abi      # compare the committed layout with Rust
 npm run check:v3-layout-fixture
 ```
 
-`src/abi/*.test.ts` and the Rust instruction/layout tests provide parity examples. The [client SDK notes](../../docs/client-sdk.md) explain the account model; the [current status](../../docs/status/current.md) identifies what is actually deployed on devnet.
+`src/abi/*.test.ts` and the Rust instruction/layout tests provide parity examples. The [program guide](../../programs/equinox/README.md) explains the account model; the [current status](../../docs/status/current.md) identifies what is actually deployed on devnet.

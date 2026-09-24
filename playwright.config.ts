@@ -47,11 +47,7 @@ export default defineConfig({
       // test-mode shim this whole fixture suite depends on cannot run
       // against a real production server at all -- see
       // playwright.production.config.ts (a separate, auth-free smoke
-      // config) and docs/frontend-build-diagnostics.md, which confirms
-      // `next build`/`next start` both work fine in this environment (an
-      // earlier, no-longer-reproducible crash was investigated and ruled
-      // out there); this dev-mode choice is about the auth bypass, not a
-      // build workaround.
+      // config). This dev-mode choice is about the auth bypass.
       command: "npm run dev:e2e",
       url: `http://127.0.0.1:${APP_PORT}`,
       reuseExistingServer: false,
