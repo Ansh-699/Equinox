@@ -66,7 +66,7 @@ export function TradingTerminal() {
   const txToasts = useTxToasts();
   const [cancelPending, setCancelPending] = useState(false);
   const [faucetPending, setFaucetPending] = useState(false);
-  const [notice, setNotice] = useState("Live submission requires verified Pyth pricing, USDC custody and MagicBlock delegation.");
+  const [notice, setNotice] = useState("Orders run in the MagicBlock rollup against an on-chain verified price, with USDC custody in the vault on Solana.");
   const [sessionActionReason, setSessionActionReason] = useState<SessionActionResult["reason"]>(null);
   const [marketSymbol, setMarketSymbol] = useState(process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_SYMBOL ?? PRIMARY_MARKET.symbol);
   const [latestLifecycleEventKind, setLatestLifecycleEventKind] = useState<string | null>(null);
@@ -551,7 +551,7 @@ export function TradingTerminal() {
             ctaLabel={ctaLabel}
             blocker={blocker}
             pending={sessionOrder.pending}
-            footnote={canTrade ? `Session key active — orders sign locally, no wallet popup.` : walletTrading ? "Orders sign with your wallet and route to the MagicBlock rollup while the market is delegated." : `Session scope: ${marketConfig.symbol}. Withdrawals and collateral transfers are excluded.`}
+            footnote={canTrade ? `Session key active — orders sign locally, no wallet popup.` : walletTrading ? "Orders sign with your wallet and route to the MagicBlock rollup while the market is delegated." : "Sign in, then Start trading: one wallet signature and the in-app trading account signs every order silently."}
             onSubmit={submitOrder}
           />
           <div className="notice flex items-start gap-2 border-b border-[var(--t-border)] px-3 py-2.5 text-[11.5px] leading-snug text-[var(--t-text-2)]" role="status">
@@ -623,7 +623,7 @@ export function TradingTerminal() {
         </div>
       </main>
 
-      <ProtocolStatusStrip authenticated={auth.authenticated} v3={v3MarketState} delegated={executionStatus ? executionStatus.marketDelegated : null} oracleOnline={oracleSafety === "fresh"} />
+      <ProtocolStatusStrip authenticated={auth.authenticated} v3={v3MarketState} delegated={executionStatus ? executionStatus.marketDelegated : null} oracleOnline={oracleSafety === "fresh"} priceSource={isReporterPriced(v3) ? "reporter" : "pyth"} />
       <TxToasts toasts={txToasts.toasts} />
     </div>
   );

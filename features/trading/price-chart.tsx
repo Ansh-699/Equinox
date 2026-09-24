@@ -62,15 +62,16 @@ export function PriceChart({ marketApiUrl, symbol, live }: { marketApiUrl: strin
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-6 text-center">
             <span className="text-[12px] font-medium text-[var(--t-text)]">{loading ? "Loading price history…" : error ? "Couldn't load price history" : "No candles for this interval"}</span>
-            <span className="max-w-[42ch] text-[12px] leading-relaxed text-[var(--t-text-2)]">{error ? "The price-history feed didn't answer. It retries on its own; pick another interval if it stays empty." : `Equity.US.${symbol.replace("-PERP", "")}/USD · Pyth Pro`}</span>
+            <span className="max-w-[42ch] text-[12px] leading-relaxed text-[var(--t-text-2)]">{error ? "The price-history feed didn't answer. It retries on its own; pick another interval if it stays empty." : isReporterPriced(v3MarketFor(symbol)) ? "History builds from the on-chain reporter's posts." : `Equity.US.${symbol.replace("-PERP", "")}/USD · Pyth Pro`}</span>
           </div>
         )}
       </div>
 
       <div className="flex h-[30px] shrink-0 items-center justify-between gap-3 border-t border-[var(--t-border)] px-3 text-[11px] text-[var(--t-text-3)]">
-        <span className="hidden xl:inline">Scroll to zoom · drag to pan</span>
-        <span className="xl:hidden">Ctrl-scroll to zoom · drag to pan</span>
-        <span>{resolution.label} candles · {isReporterPriced(v3MarketFor(symbol)) ? "reporter price history" : "Pyth history"} + verified live price</span>
+        {/* One line each: the footer is a fixed 30 px, so wrapped text would spill into the panels below. */}
+        <span className="hidden shrink-0 whitespace-nowrap xl:inline">Scroll to zoom · drag to pan</span>
+        <span className="shrink-0 whitespace-nowrap xl:hidden">Ctrl-scroll to zoom · drag to pan</span>
+        <span className="min-w-0 truncate text-right">{resolution.label} candles · {isReporterPriced(v3MarketFor(symbol)) ? "on-chain reporter prices" : "Pyth history + live price"}</span>
       </div>
     </div>
   );

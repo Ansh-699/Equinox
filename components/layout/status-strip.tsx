@@ -66,12 +66,12 @@ export function ExecutionStatusBanner({
 }
 
 /** Slim footer strip: connection truth on the left, reference links on the right. */
-export function ProtocolStatusStrip({ authenticated, v3, delegated = null, oracleOnline }: { authenticated: boolean; v3: V3MarketReadiness; delegated?: boolean | null; oracleOnline: boolean }) {
+export function ProtocolStatusStrip({ authenticated, v3, delegated = null, oracleOnline, priceSource = "pyth" }: { authenticated: boolean; v3: V3MarketReadiness; delegated?: boolean | null; oracleOnline: boolean; priceSource?: "pyth" | "reporter" }) {
   return (
     <section aria-label="StockStream status" className="flex h-[32px] shrink-0 items-center gap-4 border-t border-[var(--t-border)] px-4 text-[11px] text-[var(--t-text-3)]">
       <span className="flex items-center gap-1.5">
         <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${oracleOnline ? "bg-[var(--t-up)]" : "bg-[var(--t-text-2)]"}`} />
-        <span className={oracleOnline ? "text-[var(--t-up)]" : "text-[var(--t-text-2)]"}>{oracleOnline ? "Pyth price verified" : "Waiting for a verified price"}</span>
+        <span className={oracleOnline ? "text-[var(--t-up)]" : "text-[var(--t-text-2)]"}>{oracleOnline ? (priceSource === "pyth" ? "Pyth price verified" : "Reporter price on-chain") : "Waiting for a verified price"}</span>
       </span>
       <span className="hidden sm:inline">Devnet · worthless test tokens</span>
       <span className="hidden md:inline">Session: <span className="text-[var(--t-text-2)]">{authenticated ? "authenticated" : "not authenticated"}</span></span>
