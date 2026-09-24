@@ -73,23 +73,23 @@ export function TopBar({ active, auth }: { active: ActiveSection; auth: AppAuth 
   }, [branch]);
 
   return (
-    <header className="relative flex h-[60px] shrink-0 items-center border-b border-[var(--t-border)] bg-[var(--t-bg)] px-4 sm:h-[68px] sm:px-6">
+    <header className="relative flex h-[56px] shrink-0 items-center border-b border-[var(--t-border)] bg-[var(--t-bg)] px-4 sm:px-5">
       <a href="#main-content" className="skip-link">Skip to main content</a>
-      <Link href="/" className="flex shrink-0 items-center gap-2.5" aria-label="Equinox home">
-        <img src="/favicon.svg" alt="" className="h-7 w-7 rounded sm:h-8 sm:w-8" />
-        <span className="text-[19px] font-semibold tracking-[-0.035em] text-[var(--t-text)] sm:text-[25px]">Equinox</span>
+      <Link href="/" className="flex shrink-0 items-center gap-2" aria-label="Equinox home">
+        <img src="/favicon.svg" alt="" className="h-7 w-7 rounded-[7px]" />
+        <span className="text-[20px] font-semibold tracking-[-0.03em] text-[var(--t-text)]">Equinox</span>
       </Link>
-      <span className="ml-3 hidden rounded bg-[var(--t-surface-3)] px-2 py-0.5 text-[10px] font-medium text-[var(--t-text-2)] xl:inline">Devnet</span>
+      <span className="ml-2.5 hidden rounded-[5px] border border-[var(--t-border)] px-1.5 py-px text-[10.5px] font-medium text-[var(--t-text-3)] xl:inline">Devnet</span>
 
-      <nav aria-label="Primary navigation" className="ml-8 hidden h-full min-w-0 items-stretch gap-6 md:flex">
+      <nav aria-label="Primary navigation" className="ml-7 hidden h-full min-w-0 items-stretch gap-5 md:flex">
         {NAV.map((item) => (
           <Link
             key={item.id}
             href={item.href}
             aria-current={active === item.id ? "page" : undefined}
-            className={`relative flex items-center text-[13.5px] font-medium transition-colors ${
+            className={`relative flex items-center text-[13px] font-medium transition-colors ${
               active === item.id
-                ? "text-[var(--t-text)] after:absolute after:inset-x-0 after:-bottom-px after:h-[2px] after:bg-[var(--t-text)]"
+                ? "text-[var(--t-text)] after:absolute after:inset-x-0 after:-bottom-px after:h-[2px] after:rounded-full after:bg-[var(--t-accent)]"
                 : "text-[var(--t-text-2)] hover:text-[var(--t-text)]"
             }`}
           >
@@ -98,7 +98,7 @@ export function TopBar({ active, auth }: { active: ActiveSection; auth: AppAuth 
         ))}
       </nav>
 
-      <div className="ml-auto flex shrink-0 items-center gap-1">
+      <div className="ml-auto flex shrink-0 items-center gap-0.5">
         <a href={`https://explorer.solana.com/address/${DEMO_PROGRAM_ID}?cluster=devnet`} target="_blank" rel="noopener noreferrer" className={ICON_LINK} aria-label="Program on Solana Explorer" title="Program on Explorer">
           <Compass className="h-4 w-4" strokeWidth={1.75} />
         </a>
