@@ -8,6 +8,9 @@
     "enabled": true
   },
   // Every minute: refresh the TSLA Pyth snapshot (see scheduled() in src/index.ts).
+  // Run beside the backends each request round-trips to several times: the
+  // MagicBlock rollup (devnet-as) and the market-maker VM are in Singapore.
+  "placement": { "region": "azure:southeastasia" },
   "triggers": {
     "crons": ["* * * * *"]
   },

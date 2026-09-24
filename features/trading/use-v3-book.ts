@@ -1,5 +1,6 @@
 "use client";
 
+import { decompress as zstdDecompress } from "fzstd";
 import { useEffect, useState } from "react";
 import { deriveV3ExecutionAccounts } from "@/clients/equinox/src";
 import deployment from "@/config/equinox-deployment.json";
@@ -75,6 +76,16 @@ const STALE_AFTER_MS = 20_000;
 const REQUOTE_GAP_MS = 2_500;
 const FIRST_READ_TIMEOUT_MS = 8_000;
 const FALLBACK_READ_DELAY_MS = 3_500;
+const MIN_RENDER_GAP_MS = 50;
+
+/** Account data from the rollup, which is asked for zstd-compressed: every
+ * trade pushes all 26 bundle accounts (~12 KB each, mostly empty slots), which
+ * as plain base64 was ~2 MB/s per open terminal and fell behind on the main
+ * thread; compressed it is ~1 KB a push. */
+function decodeAccount(data: string, encoding: string): Uint8Array {
+  const bytes = decodeBase64(data);
+  return encoding === "base64+zstd" ? zstdDecompress(bytes) : bytes;
+}
 
 function decodeBase64(data: string): Uint8Array {
   const raw = atob(data);
@@ -83,14 +94,27 @@ function decodeBase64(data: string): Uint8Array {
   return bytes;
 }
 
+// Decoded accounts keyed by their bytes: a push replaces one account's bytes,
+// so only that account is decoded again (was: all 26, every frame).
+const pageCache = new WeakMap<Uint8Array, V3BookPageState | null>();
+const seatCache = new WeakMap<Uint8Array, ReturnType<typeof decodeV3SeatShard>>();
+const eventCache = new WeakMap<Uint8Array, ReturnType<typeof decodeV3EventShard>>();
+function cached<T>(cache: WeakMap<Uint8Array, T>, bytes: Uint8Array, decode: (bytes: Uint8Array) => T): T {
+  if (!cache.has(bytes)) cache.set(bytes, decode(bytes));
+  return cache.get(bytes) as T;
+}
+
 /** Decodes the 18 book pages, 4 seat shards and 4 event shards into levels, fills and seats. */
 export function decodeBundle(pages: readonly (Uint8Array | null)[], seats: readonly (Uint8Array | null)[], events: readonly (Uint8Array | null)[], nowSec: bigint) {
-  const decoded = pages.map((bytes) => (bytes ? decodeV3BookPage(bytes) : null));
-  if (decoded.some((page) => !page) || !annotateBookTrees(decoded as V3BookPageState[])) return null;
+  const decoded = pages.map((bytes) => (bytes ? cached(pageCache, bytes, decodeV3BookPage) : null));
+  if (decoded.some((page) => !page)) return null;
+  // Tree membership is re-derived from this snapshot's roots: clear what a cached page carried over.
+  for (const page of decoded as V3BookPageState[]) for (const node of page.nodes) node.tree = undefined;
+  if (!annotateBookTrees(decoded as V3BookPageState[])) return null;
   const leaves = (decoded as V3BookPageState[]).flatMap((page) => page.nodes).filter((node) => node.tag === 2);
   // Oracle-pegged leaves need the live index; the book shows fixed-price liquidity.
   const fixed = leaves.filter((node) => node.tree !== "oracle-pegged");
-  const positions = seats.flatMap((bytes) => (bytes ? decodeV3SeatShard(bytes)?.positions ?? [] : [])).map((p) => ({
+  const positions = seats.flatMap((bytes) => (bytes ? cached(seatCache, bytes, decodeV3SeatShard)?.positions ?? [] : [])).map((p) => ({
     shard: p.shard, slot: p.slot, trader: p.trader, availableCollateral: String(p.availableCollateral), reservedMargin: String(p.reservedMargin),
     basePosition: String(p.basePosition), quoteEntryValue: String(p.quoteEntryValue), realizedPnl: String(p.realizedPnl),
     openOrderCount: p.openOrderCount, liquidationState: p.liquidationState,
@@ -98,7 +122,7 @@ export function decodeBundle(pages: readonly (Uint8Array | null)[], seats: reado
   return {
     bids: levelsFrom(fixed.filter((node) => node.side === 0), true, 0n, nowSec),
     asks: levelsFrom(fixed.filter((node) => node.side === 1), false, 0n, nowSec),
-    trades: tradesFrom(events.map((bytes) => ({ records: bytes ? decodeV3EventShard(bytes)?.records ?? [] : [] }))),
+    trades: tradesFrom(events.map((bytes) => ({ records: bytes ? cached(eventCache, bytes, decodeV3EventShard)?.records ?? [] : [] }))),
     positions,
     orders: fixed.filter((node) => node.expiresAt! > nowSec && node.quantity! > 0n).map((node): RestingOrderView => ({
       owner: node.owner!, orderKey: node.key, side: node.side === 0 ? "bid" : "ask", price: node.priceOrOffset!, quantity: node.quantity!,
@@ -201,9 +225,21 @@ export function useV3Book(marketApiUrl: string | undefined, core: string | undef
     };
 
     let lastQuotedAt = 0;
+    // Pushes keep only the latest raw text per account; it is decoded once, at
+    // the frame that renders it (none while the tab is hidden and rAF sleeps).
+    const pending = new Map<number, [string, string] | null>();
+    const lastRaw: (string | null)[] = keys.map(() => null);
     const publish = () => {
       scheduled = false;
       if (stopped) return false;
+      for (const [index, raw] of pending) {
+        // The rollup pushes every bundle account on each trade, changed or not:
+        // an identical payload keeps its bytes (and so its cached decode).
+        if (raw !== null && raw[0] === lastRaw[index]) continue;
+        lastRaw[index] = raw?.[0] ?? null;
+        data[index] = raw === null ? null : decodeAccount(raw[0], raw[1]);
+      }
+      pending.clear();
       let decoded;
       try {
         decoded = decodeBundle(data.slice(0, 18), data.slice(18, 22), data.slice(22, 26), BigInt(Math.floor(Date.now() / 1000)));
@@ -221,19 +257,28 @@ export function useV3Book(marketApiUrl: string | undefined, core: string | undef
       setBook({ ...decoded, status: decoded.bids.length || decoded.asks.length ? "live" : "empty", updatedAt: lastGood, domain });
       return true;
     };
-    // Coalesce bursts of account pushes into one render per frame.
-    const schedule = () => { if (!scheduled) { scheduled = true; requestAnimationFrame(publish); } };
+    // Coalesce bursts of account pushes: at most one render per 50 ms (20/s,
+    // below what reads as delay) on an animation frame. Every frame (60/s)
+    // kept the main thread busy re-styling the ladder during maker bursts.
+    let lastPublishAt = 0;
+    const schedule = () => {
+      if (scheduled) return;
+      scheduled = true;
+      const wait = Math.max(0, lastPublishAt + MIN_RENDER_GAP_MS - performance.now());
+      setTimeout(() => requestAnimationFrame(() => { lastPublishAt = performance.now(); publish(); }), wait);
+    };
 
     const snapshot = async () => {
       if (snapshotPending) return;
       snapshotPending = true;
       try {
-        const response = await fetch(rpc, { method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(FIRST_READ_TIMEOUT_MS), body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getMultipleAccounts", params: [keys, { encoding: "base64", commitment: "confirmed" }] }) });
+        const response = await fetch(rpc, { method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(FIRST_READ_TIMEOUT_MS), body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getMultipleAccounts", params: [keys, { encoding: "base64+zstd", commitment: "confirmed" }] }) });
         if (!response.ok) throw new Error("book RPC unavailable");
         const body = await response.json() as { result?: { value: ({ data: [string, string] } | null)[] } };
         const values = body.result?.value;
         if (!values || values.length !== keys.length || stopped) throw new Error("incomplete book snapshot");
-        values.forEach((value, index) => { data[index] = value ? decodeBase64(value.data[0]) : null; });
+        // A snapshot may be older than the pushes: the next push always applies.
+        values.forEach((value, index) => { data[index] = value ? decodeAccount(value.data[0], value.data[1]) : null; lastRaw[index] = null; });
         if (!publish()) markUnavailable();
       } catch {
         markUnavailable();
@@ -252,7 +297,7 @@ export function useV3Book(marketApiUrl: string | undefined, core: string | undef
         for (const [index, key] of keys.entries()) {
           if (socket?.readyState !== WebSocket.OPEN) break;
           try {
-            socket.send(JSON.stringify({ jsonrpc: "2.0", id: index + 1, method: "accountSubscribe", params: [key, { encoding: "base64", commitment: "processed" }] }));
+            socket.send(JSON.stringify({ jsonrpc: "2.0", id: index + 1, method: "accountSubscribe", params: [key, { encoding: "base64+zstd", commitment: "processed" }] }));
           } catch { break; }
         }
       };
@@ -261,7 +306,7 @@ export function useV3Book(marketApiUrl: string | undefined, core: string | undef
         if (typeof body.id === "number" && typeof body.result === "number") { subscriptions.set(body.result, body.id - 1); return; }
         const index = body.params ? subscriptions.get(body.params.subscription) : undefined;
         if (index === undefined || !body.params) return;
-        data[index] = body.params.result.value ? decodeBase64(body.params.result.value.data[0]) : null;
+        pending.set(index, body.params.result.value ? body.params.result.value.data : null);
         schedule();
       };
     }

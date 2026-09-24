@@ -143,7 +143,9 @@ export function TradingTerminal() {
   const withdrawGate = evaluateWithdrawGate(executionStatus, position.reconciliationStatus);
   // While the market trades in the rollup, withdrawals go through the rollup outbox, except mid-commit.
   const rollupWithdraw = !!executionStatus?.marketDelegated && !executionStatus.commitPending;
-  const book = useV3Book(marketApiUrl, v3.core || undefined, executionStatus ? executionStatus.marketDelegated : null);
+  // Every market in the manifest is delegated: read the rollup book at once
+  // instead of waiting ~1 s for the status call, which corrects it if not.
+  const book = useV3Book(marketApiUrl, v3.core || undefined, executionStatus ? executionStatus.marketDelegated : true);
   // While delegated, the rollup is the source of truth for seats (the L1 copy
   // is frozen), so resolve the wallet's seat from the live bundle.
   const fromRollup = !!executionStatus?.marketDelegated && !!trader && book.updatedAt !== null;

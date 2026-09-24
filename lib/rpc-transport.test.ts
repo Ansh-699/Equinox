@@ -69,6 +69,18 @@ describe('production RPC transports', () => {
     expect((await rpc.confirmCommit(marketAddress,4n)).sequence).toBe(4n);
     expect(calls.filter(call=>call==='sendTransaction')).toHaveLength(1);
   });
+  it('asks again while a just-funded fee payer is not visible yet, then gives up', async () => {
+    let missing = 2;
+    const flaky: typeof fetch = async (_input, init) => {
+      const request = JSON.parse(String(init?.body));
+      return response(request.id, { value: missing-- > 0 ? { err: 'AccountNotFound', unitsConsumed: 0 } : { err: null, unitsConsumed: 7 } });
+    };
+    const waits: number[] = [];
+    expect(await new SolanaRpcTransport('https://rpc.test', flaky, async (ms) => { waits.push(ms); }, 1).simulate(Uint8Array.of(1))).toEqual({ units: 7 });
+    expect(waits).toEqual([500, 500]);
+    const never: typeof fetch = async (_input, init) => response(JSON.parse(String(init?.body)).id, { value: { err: 'AccountNotFound', unitsConsumed: 0 } });
+    await expect(new SolanaRpcTransport('https://rpc.test', never, async () => {}, 1).simulate(Uint8Array.of(1))).rejects.toThrow(/simulation_rejected/);
+  });
   it('rejects simulation errors and never submits them', async () => {
     const calls:string[]=[];
     const rpc=new SolanaRpcTransport('https://rpc.test',async(_input,init)=>{

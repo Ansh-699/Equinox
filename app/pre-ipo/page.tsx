@@ -6,3 +6,6 @@ export const metadata: Metadata = { title: "Pre-IPO · Equinox" };
 export default function PreIpoPage() {
   return <PreIpoView />;
 }
+
+// No request-time data: render once, serve the HTML from cache.
+export const dynamic = "force-static";

@@ -144,6 +144,20 @@ export async function runIngestionTick(env: Env, fetcher: typeof fetch = fetch):
   return { marketsPolled: markets.results.length, eventsIngested };
 }
 
+/** Every open terminal polls execution status every few seconds, and each
+ * answer costs a D1 read plus L1 and rollup reads (~1 s). Viewers of a market
+ * share one in-flight or ≤2 s-old answer per isolate; failures aren't kept. */
+const STATUS_SHARE_MS = 2_000;
+const sharedStatus = new Map<string, { at: number; value: ReturnType<typeof fetchExecutionStatus> }>();
+export function sharedExecutionStatus(env: Env, symbol: string, stream: DurableObjectStub<MarketStream>, now = Date.now()): ReturnType<typeof fetchExecutionStatus> {
+  const hit = sharedStatus.get(symbol);
+  if (hit && now - hit.at < STATUS_SHARE_MS) return hit.value;
+  const value = fetchExecutionStatus(env, symbol, stream);
+  sharedStatus.set(symbol, { at: now, value });
+  value.then((outcome) => { if (outcome === undefined) sharedStatus.delete(symbol); }, () => sharedStatus.delete(symbol));
+  return value;
+}
+
 /** Backs `GET /v1/markets/:symbol/execution-status`. Extracted as its own
  * function (rather than inlined in the route handler) so tests can inject
  * a fake `fetcher` the same way `runIngestionTick` already does --
@@ -585,7 +599,7 @@ const worker = {
       if (request.method === "GET" && action === "stream") return stream.fetch(request);
       if (request.method === "GET" && action === "snapshot") return stream.fetch(new Request("https://internal.invalid/snapshot"));
       if (request.method === "GET" && action === "execution-status") {
-        const outcome = await fetchExecutionStatus(env, symbol, stream);
+        const outcome = await sharedExecutionStatus(env, symbol, stream);
         if (!outcome) return json({ error: "rpc_not_configured" }, 503);
         if (outcome === "not_found") return json({ error: "market_not_found" }, 404);
         return json(outcome);

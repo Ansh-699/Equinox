@@ -7,7 +7,7 @@ const { page, prompts, step, connect, close } = await launch();
 try {
   await connect();
   await page.goto(SITE.replace(/\/trade$/, "/pre-ipo"), { waitUntil: "load" });
-  await page.getByText("OPENAI-PERP").first().waitFor({ timeout: 30_000 });
+  await page.getByText("OPENAI/USDC").first().waitFor({ timeout: 30_000 });
   await page.getByRole("button", { name: /^AI labs/ }).click();
   const started = Date.now();
   await page.getByRole("button", { name: /Buy AI labs/ }).click();
