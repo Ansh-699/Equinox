@@ -100,10 +100,8 @@ Privy network round trip. It is double-gated: the server side
 "production"`, so this can never activate in a production build/start
 regardless of how the public env var is set. `?e2eWallets=N` (1-5)
 controls how many wallets it exposes, for testing both the auto-select
-and the explicit-choice paths. See `docs/testing.md` in this repo (the
-section below) for how this is used across the Playwright suite --
-distinct from the protocol-level `docs/testing.md` at the repo root
-covering Rust/Worker tests, if you're in the combined checkout.
+and the explicit-choice paths. The Playwright suite lives under
+`tests/browser/`; its commands are in the root `package.json`.
 
 ## Where to look next
 
