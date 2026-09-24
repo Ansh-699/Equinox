@@ -89,7 +89,7 @@ export function OrderBookDisplay({ book, symbol, onPickPrice, marketClosed = fal
                   {marketClosed && status !== "unavailable"
                     ? CLOSED_HINT
                     : status === "unavailable"
-                    ? "Neither the rollup nor the base layer answered."
+                    ? "The live book is unavailable. Retrying the market feed."
                     : status === "empty"
                       ? domain === "er" ? "The book decoded cleanly but nobody is quoting." : "Orders match in the MagicBlock rollup; the book fills once the market is delegated."
                       : ""}
@@ -98,11 +98,11 @@ export function OrderBookDisplay({ book, symbol, onPickPrice, marketClosed = fal
             ) : (
               <>
                 <div className="slim-scroll flex min-h-0 flex-1 flex-col-reverse overflow-y-auto">
-                  {askRows.map((l, slot) => <Row key={`a-${slot}`} {...l} pct={Math.min(100, (l.total / maxCum) * 100)} side="ask" onPick={onPickPrice} />)}
+                  {askRows.map((l, slot) => <Row key={`a-${slot}`} {...l} slot={slot} pct={Math.min(100, Math.sqrt(l.total / maxCum) * 100)} side="ask" onPick={onPickPrice} />)}
                 </div>
                 <MidRow mid={mid} spread={spread} />
                 <div className="slim-scroll flex min-h-0 flex-1 flex-col justify-start overflow-y-auto">
-                  {bidRows.map((l, slot) => <Row key={`b-${slot}`} {...l} pct={Math.min(100, (l.total / maxCum) * 100)} side="bid" onPick={onPickPrice} />)}
+                  {bidRows.map((l, slot) => <Row key={`b-${slot}`} {...l} slot={slot} pct={Math.min(100, Math.sqrt(l.total / maxCum) * 100)} side="bid" onPick={onPickPrice} />)}
                 </div>
               </>
             )}
@@ -124,7 +124,7 @@ export function OrderBookDisplay({ book, symbol, onPickPrice, marketClosed = fal
               trades.map((t, i) => {
                 const up = i + 1 < trades.length ? t.price >= trades[i + 1].price : true;
                 return (
-                  <div key={t.sequence} className="grid h-5 grid-cols-3 items-center px-3 text-[11.5px] hover:bg-[var(--t-surface-3)]">
+                  <div key={t.sequence} className="grid h-5 grid-cols-3 items-center px-3 text-[12px] hover:bg-[var(--t-surface-3)]">
                     <span className={`tnum ${up ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>{t.price.toFixed(2)}</span>
                     <span className="tnum text-right text-[var(--t-text)]">{t.size.toLocaleString()}</span>
                     <span className="tnum text-right text-[var(--t-text-2)]">{t.time ? new Date(t.time * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}</span>
@@ -177,20 +177,24 @@ function MidRow({ mid, spread }: { mid: number | null; spread: number | null }) 
   const [shown, setShown] = useState<"up" | "down" | null>(null);
   const prevMid = useRef<number | null>(null);
   const priceRef = useRef<HTMLSpanElement>(null);
+  const rowRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const p = prevMid.current;
     prevMid.current = mid;
     if (p === null || mid === null || mid === p) return;
     const direction = mid > p ? "up" : "down";
     setShown(direction);
-    tintNumber(priceRef.current, direction, 200);
-    const timer = window.setTimeout(() => setShown(null), 200);
-    return () => window.clearTimeout(timer);
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    priceRef.current?.animate([{ opacity: 0.55 }, { opacity: 1 }], { duration: 200, easing: BOOK_EASE });
+    rowRef.current?.animate(
+      [{ backgroundColor: direction === "up" ? "color-mix(in srgb, var(--t-up) 13%, transparent)" : "color-mix(in srgb, var(--t-down) 13%, transparent)" }, { backgroundColor: "transparent" }],
+      { duration: 320, easing: BOOK_EASE }
+    );
   }, [mid]);
 
   return (
-    <div className="relative h-[34px] shrink-0 flex items-baseline gap-2 px-3 border-y border-[var(--t-border)]">
-      <span ref={priceRef} className="relative text-[15px] font-bold tnum text-[var(--t-text)] leading-[34px]">
+    <div ref={rowRef} className="relative h-[34px] shrink-0 flex items-baseline gap-2 px-3 border-y border-[var(--t-border)]">
+      <span ref={priceRef} className={`relative text-[19px] font-bold tnum leading-[34px] ${shown === "up" ? "text-[var(--t-up)]" : shown === "down" ? "text-[var(--t-down)]" : "text-[var(--t-text)]"}`}>
         {mid !== null ? mid.toFixed(2) : "—"}
       </span>
       <span aria-hidden className={`inline-flex w-3 shrink-0 self-center ${shown === "up" ? "text-[var(--t-up)]" : "text-[var(--t-down)]"} ${shown && mid !== null ? "opacity-100" : "opacity-0"}`}>
@@ -208,6 +212,7 @@ const Row = memo(function Row({
   price,
   size,
   total,
+  slot,
   pct,
   side,
   onPick,
@@ -215,6 +220,7 @@ const Row = memo(function Row({
   price: number;
   size: number;
   total: number;
+  slot: number;
   pct: number;
   side: "bid" | "ask";
   onPick?: (price: number) => void;
@@ -225,29 +231,51 @@ const Row = memo(function Row({
   const priceRef = useNumericTint(price, priceText);
   const sizeRef = useNumericTint(size, sizeText);
   const totalRef = useNumericTint(total, totalText);
-  const previousTotal = useRef(total);
-  const depthRef = useRef<HTMLDivElement>(null);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const waveRef = useRef<HTMLSpanElement>(null);
+  const previous = useRef({ price, size, total });
+  const runningWave = useRef<Animation[]>([]);
   useEffect(() => {
-    const depthChanged = previousTotal.current !== total;
-    previousTotal.current = total;
-    if (!depthChanged || !depthRef.current || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
-    depthRef.current.getAnimations().forEach((animation) => animation.cancel());
-    depthRef.current.animate([{ opacity: 0.8 }, { opacity: 1 }], { duration: 160, easing: BOOK_EASE });
-  }, [total]);
+    const before = previous.current;
+    previous.current = { price, size, total };
+    if (price === before.price && size === before.size && total === before.total) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    runningWave.current.forEach((animation) => animation.cancel());
+    const delay = Math.min(slot * 25, 225);
+    const timing: KeyframeAnimationOptions = { duration: 450, delay, easing: "ease-in-out" };
+    runningWave.current = [
+      rowRef.current?.animate([{ transform: "translateY(0)" }, { transform: "translateY(-3px)" }, { transform: "translateY(0)" }], timing),
+      waveRef.current?.animate([{ opacity: 0 }, { opacity: 1 }, { opacity: 0 }], timing),
+    ].filter((animation): animation is Animation => animation !== undefined);
+  }, [price, size, total, slot]);
   return (
     <div
-      className={`relative grid h-5 shrink-0 grid-cols-3 items-center px-3 text-[11.5px] ${onPick ? "cursor-pointer hover:bg-[var(--t-surface-3)]" : ""}`}
+      ref={rowRef}
+      className={`relative grid h-5 shrink-0 grid-cols-3 items-center border-b border-[var(--t-border)]/40 px-3 py-0.5 text-[12px] leading-tight last:border-b-0 ${onPick ? "cursor-pointer hover:bg-[var(--t-surface-3)]" : ""}`}
       onClick={onPick ? () => onPick(price) : undefined}
       title={onPick ? "Use this price" : undefined}
     >
       <div
-        ref={depthRef}
         aria-hidden
-        className="absolute inset-y-0 right-0 motion-safe:transition-[width] motion-safe:duration-[160ms] motion-safe:ease-[cubic-bezier(0.16,1,0.3,1)]"
+        className="absolute inset-y-0 right-0 w-full origin-right opacity-[0.08] will-change-transform motion-safe:transition-transform motion-safe:duration-[1100ms] motion-safe:ease-[cubic-bezier(0.33,1,0.68,1)]"
         style={{
-          width: `${pct}%`,
-          backgroundColor: side === "bid" ? "rgba(34,197,94,0.10)" : "rgba(239,68,68,0.10)",
+          transform: `scaleX(${pct / 100})`,
+          backgroundColor: side === "bid" ? "var(--t-book-bid)" : "var(--t-book-ask)",
         }}
+      />
+      <div
+        aria-hidden
+        className="absolute inset-y-0 right-0 w-full origin-right opacity-[0.15] dark:opacity-[0.20] will-change-transform motion-safe:transition-transform motion-safe:duration-[350ms] motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]"
+        style={{
+          transform: `scaleX(${pct / 100})`,
+          backgroundColor: side === "bid" ? "var(--t-book-bid)" : "var(--t-book-ask)",
+        }}
+      />
+      <span
+        ref={waveRef}
+        aria-hidden
+        className="pointer-events-none absolute inset-y-0 left-0 w-1/3 opacity-0"
+        style={{ background: `linear-gradient(to right, color-mix(in srgb, var(--t-book-${side === "bid" ? "bid" : "ask"}) 32%, transparent), transparent)` }}
       />
       <span ref={priceRef} className={`relative tnum ${side === "bid" ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
         {priceText}
@@ -259,5 +287,5 @@ const Row = memo(function Row({
 });
 
 function fmtAmt(n: number): string {
-  return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+  return n.toLocaleString("en-US", { minimumFractionDigits: Number.isInteger(n) ? 0 : 4, maximumFractionDigits: 4 });
 }

@@ -9,7 +9,7 @@ function Row({ label, level, detail }: { label: string; level: Level; detail: st
   return (
     <div className="flex h-[26px] items-center justify-between gap-3 border-b border-[var(--t-surface-2)] last:border-b-0">
       <span className="shrink-0 text-[12px] text-[var(--t-text-2)]">{label}</span>
-      <span className="tnum inline-flex min-w-0 items-center gap-1.5 text-[11px] text-[var(--t-text)]">
+      <span className="inline-flex min-w-0 items-center gap-1.5 text-[12px] text-[var(--t-text)]">
         <span className="truncate">{detail}</span>
         <span className={`inline-block h-[6px] w-[6px] shrink-0 rounded-full ${DOT[level]}`} />
       </span>
@@ -68,7 +68,7 @@ export function ExecutionStatusBanner({
 /** Slim footer strip: connection truth on the left, reference links on the right. */
 export function ProtocolStatusStrip({ authenticated, v3, delegated = null, oracleOnline, priceSource = "pyth" }: { authenticated: boolean; v3: V3MarketReadiness; delegated?: boolean | null; oracleOnline: boolean; priceSource?: "pyth" | "reporter" }) {
   return (
-    <section aria-label="Equinox status" className="flex h-[32px] shrink-0 items-center gap-4 border-t border-[var(--t-border)] px-4 text-[11px] text-[var(--t-text-3)]">
+    <section aria-label="Equinox status" className="flex h-[32px] shrink-0 items-center gap-4 border-t border-[var(--t-border)] px-4 text-[12px] text-[var(--t-text-3)]">
       <span className="flex items-center gap-1.5">
         <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${oracleOnline ? "bg-[var(--t-up)]" : "bg-[var(--t-text-2)]"}`} />
         <span className={oracleOnline ? "text-[var(--t-up)]" : "text-[var(--t-text-2)]"}>{oracleOnline ? (priceSource === "pyth" ? "Pyth price verified" : "Reporter price on-chain") : "Waiting for a verified price"}</span>

@@ -87,7 +87,7 @@ export function TopBar({ active, auth }: { active: ActiveSection; auth: AppAuth 
             key={item.id}
             href={item.href}
             aria-current={active === item.id ? "page" : undefined}
-            className={`relative flex items-center text-[13.5px] font-medium transition-colors ${
+            className={`relative flex items-center text-[14px] font-medium transition-colors ${
               active === item.id
                 ? "text-[var(--t-text)] after:absolute after:inset-x-0 after:-bottom-px after:h-[2px] after:bg-[var(--t-text)]"
                 : "text-[var(--t-text-2)] hover:text-[var(--t-text)]"
