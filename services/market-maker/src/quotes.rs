@@ -14,8 +14,9 @@ impl Side {
     }
 }
 
-/// Ten rungs a side: 1 bp at the touch (≈2 bp spread), ≈0.23% deep.
-pub const LADDER_BPS: [i128; 10] = [1, 2, 3, 4, 6, 8, 11, 14, 18, 23];
+/// Twenty rungs a side, enough to fill the book panel: 1 bp at the touch
+/// (≈2 bp spread), ≈1% deep.
+pub const LADDER_BPS: [i128; 20] = [1, 2, 3, 4, 6, 8, 11, 14, 18, 23, 28, 34, 40, 47, 55, 63, 72, 82, 93, 105];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Quote {
@@ -57,7 +58,8 @@ pub fn ladder(index: i64, inventory: i128, rng: &mut impl Rng) -> Vec<Quote> {
         .enumerate()
         .flat_map(|(rung, bps)| {
             let offset = index * bps / 10_000;
-            let quantity = ((2 + rung as u64 * 3 + rng.gen_range(0..4u64)) * scale + 50) / 100; // deeper rungs rest more size
+            // Deeper rungs rest more size, flat past the tenth so the far book stays cheap in margin.
+            let quantity = ((2 + rung.min(9) as u64 * 3 + rng.gen_range(0..4u64)) * scale + 50) / 100;
             let quantity = quantity.max(1);
             [Side::Bid, Side::Ask].map(|side| Quote {
                 side,
@@ -159,7 +161,7 @@ mod tests {
     #[test]
     fn ladder_is_symmetric_when_flat_and_skews_against_inventory() {
         let flat = ladder(INDEX, 0, &mut fixed());
-        assert_eq!(flat.len(), 20);
+        assert_eq!(flat.len(), 2 * LADDER_BPS.len());
         let touch = (i128::from(INDEX) * LADDER_BPS[0] / 10_000) as i64;
         assert_eq!(flat[0], Quote { side: Side::Bid, price: INDEX - touch, quantity: 2, rung: 0 });
         assert_eq!(flat[1], Quote { side: Side::Ask, price: INDEX + touch, quantity: 2, rung: 0 });

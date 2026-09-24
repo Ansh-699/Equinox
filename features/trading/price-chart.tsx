@@ -3,12 +3,15 @@
 import { isReporterPriced, v3MarketFor } from "@/lib/v3-markets";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RESOLUTIONS, useCandles, type Candle, type Resolution } from "./use-candles";
+import type { BookLevel } from "./use-v3-book";
 
 type ChartType = "candles" | "line" | "area";
 
-/** Price chart: Pyth Pro OHLC history plus the live verified oracle price.
- * Canvas rendering ported from SlipStream's terminal chart. */
-export function PriceChart({ marketApiUrl, symbol, live }: { marketApiUrl: string | undefined; symbol: string; live: { price: number; publishTime: number } | null }) {
+/** Price chart: Pyth Pro OHLC history plus the live verified oracle price,
+ * and a Depth tab drawn from the live book. Canvas rendering ported from
+ * SlipStream's terminal chart. */
+export function PriceChart({ marketApiUrl, symbol, live, depth }: { marketApiUrl: string | undefined; symbol: string; live: { price: number; publishTime: number } | null; depth: { bids: BookLevel[]; asks: BookLevel[] } }) {
+  const [view, setView] = useState<"chart" | "depth">("chart");
   const [resolutionIndex, setResolutionIndex] = useState(1);
   const resolution = RESOLUTIONS[resolutionIndex];
   const [chartType, setChartType] = useState<ChartType>("candles");
@@ -22,8 +25,8 @@ export function PriceChart({ marketApiUrl, symbol, live }: { marketApiUrl: strin
     <div className="flex h-full min-h-[360px] w-full flex-col overflow-hidden bg-[var(--t-bg)]">
       <div className="tk-head justify-between gap-3">
         <div role="tablist" aria-label="Chart view" className="flex items-stretch gap-4">
-          <button type="button" role="tab" aria-selected aria-controls="chart-panel" className="tk-tab">Chart</button>
-          <button type="button" role="tab" aria-selected={false} disabled title="The depth ladder is in the Book panel." className="tk-tab">Depth</button>
+          <button type="button" role="tab" aria-selected={view === "chart"} aria-controls="chart-panel" className="tk-tab" onClick={() => setView("chart")}>Chart</button>
+          <button type="button" role="tab" aria-selected={view === "depth"} aria-controls="chart-panel" className="tk-tab" onClick={() => setView("depth")}>Depth</button>
         </div>
         <div className="flex items-baseline gap-2">
           <span className="tnum text-[13px] font-medium text-[var(--t-text)]">{latest ? `$${latest.c.toFixed(2)}` : "—"}</span>
@@ -33,6 +36,13 @@ export function PriceChart({ marketApiUrl, symbol, live }: { marketApiUrl: strin
         </div>
       </div>
 
+      {view === "depth" ? (
+        <div id="chart-panel" role="tabpanel" aria-label={`${symbol} order book depth`} className="relative min-h-0 flex-1 bg-[var(--t-bg)]">
+          {depth.bids.length || depth.asks.length
+            ? <DepthCanvas bids={depth.bids} asks={depth.asks} />
+            : <div className="absolute inset-0 flex items-center justify-center text-[12px] text-[var(--t-text-2)]">Waiting for the live book…</div>}
+        </div>
+      ) : <>
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-[var(--t-border)] px-3 py-1.5 sm:h-9 sm:flex-nowrap sm:py-0">
         <div role="group" aria-label="Candle interval" className="flex items-center gap-1">
           {RESOLUTIONS.map((r, i) => (
@@ -66,6 +76,7 @@ export function PriceChart({ marketApiUrl, symbol, live }: { marketApiUrl: strin
           </div>
         )}
       </div>
+      </>}
     </div>
   );
 }
@@ -240,6 +251,82 @@ function CandleCanvas({ candles, chartType, resolution }: { candles: Candle[]; c
       ) : null}
     </div>
   );
+}
+
+/** Cumulative depth: bids step down-left of the mid in green, asks up-right in red. */
+function DepthCanvas({ bids, asks }: { bids: BookLevel[]; asks: BookLevel[] }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [paint, setPaint] = useState(0);
+  useEffect(() => {
+    const bump = () => setPaint((n) => n + 1);
+    window.addEventListener("themechange", bump);
+    const observer = new ResizeObserver(bump);
+    if (wrapRef.current) observer.observe(wrapRef.current);
+    return () => { window.removeEventListener("themechange", bump); observer.disconnect(); };
+  }, []);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const wrap = wrapRef.current;
+    if (!canvas || !wrap) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = wrap.clientWidth, h = wrap.clientHeight;
+    if (w === 0 || h === 0) return;
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    canvas.style.width = `${w}px`; canvas.style.height = `${h}px`;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    const styles = getComputedStyle(canvas);
+    const token = (name: string, fallback: string) => styles.getPropertyValue(name).trim() || fallback;
+    const up = token("--t-up", "#22c55e"), down = token("--t-down", "#ef4444"), axis = token("--t-text-3", "#838c92");
+    const cumulate = (levels: BookLevel[]) => { let total = 0; return levels.map((l) => ({ price: l.price, total: (total += l.size) })); };
+    // Within 1.5% of the mid: a stray far order would otherwise squash the plot.
+    const center = bids.length && asks.length ? (bids[0].price + asks[0].price) / 2 : (bids[0] ?? asks[0]).price;
+    const near = (l: BookLevel) => Math.abs(l.price - center) <= center * 0.015;
+    const bidSteps = cumulate(bids.filter(near)), askSteps = cumulate(asks.filter(near));
+    const prices = [...bidSteps, ...askSteps].map((l) => l.price);
+    const lo = Math.min(...prices), hi = Math.max(...prices);
+    const maxTotal = Math.max(bidSteps.at(-1)?.total ?? 0, askSteps.at(-1)?.total ?? 0, 1);
+    const padB = 22, padT = 12, padR = 56;
+    const plotW = w - padR, plotH = h - padB - padT;
+    const xOf = (p: number) => ((p - lo) / (hi - lo || 1)) * plotW;
+    const yOf = (v: number) => padT + plotH - (v / maxTotal) * plotH;
+
+    ctx.font = `10px ${getComputedStyle(document.documentElement).getPropertyValue("--font-plex-mono").trim() || "ui-monospace"}, ui-monospace, monospace`;
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = axis;
+    for (let g = 0; g <= 4; g += 1) {
+      const v = (maxTotal * g) / 4;
+      ctx.textAlign = "left"; ctx.fillText(Math.round(v).toLocaleString(), plotW + 6, yOf(v));
+      const p = lo + ((hi - lo) * g) / 4;
+      ctx.textAlign = g === 0 ? "left" : g === 4 ? "right" : "center"; ctx.fillText(`$${p.toFixed(2)}`, xOf(p), h - padB / 2);
+    }
+
+    // A side walks away from the mid: each step holds its total until the next price.
+    const side = (steps: { price: number; total: number }[], color: string, fill: string) => {
+      if (!steps.length) return;
+      ctx.beginPath();
+      ctx.moveTo(xOf(steps[0].price), yOf(0));
+      let prev = 0;
+      for (const step of steps) { ctx.lineTo(xOf(step.price), yOf(prev)); ctx.lineTo(xOf(step.price), yOf(step.total)); prev = step.total; }
+      ctx.strokeStyle = color; ctx.lineWidth = 1.6; ctx.stroke();
+      ctx.lineTo(xOf(steps.at(-1)!.price), yOf(0)); ctx.closePath();
+      ctx.fillStyle = fill; ctx.fill();
+    };
+    side(bidSteps, up, "rgba(58,191,114,0.18)");
+    side(askSteps, down, "rgba(224,85,85,0.18)");
+    if (bids.length && asks.length) {
+      const mid = (bids[0].price + asks[0].price) / 2;
+      ctx.strokeStyle = axis; ctx.setLineDash([3, 3]); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(xOf(mid), padT); ctx.lineTo(xOf(mid), padT + plotH); ctx.stroke(); ctx.setLineDash([]);
+      ctx.textAlign = "center"; ctx.fillStyle = axis; ctx.fillText(`mid $${mid.toFixed(2)}`, xOf(mid), padT);
+    }
+  }, [bids, asks, paint]);
+
+  return <div ref={wrapRef} className="absolute inset-0"><canvas ref={canvasRef} className="block" /></div>;
 }
 
 /** Where a market's price comes from, for its chart caption. */

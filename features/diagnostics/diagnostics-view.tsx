@@ -34,7 +34,7 @@ export function DiagnosticsView() {
   const [l1Slot, setL1Slot] = useState<number | null>(null);
   const [erSlot, setErSlot] = useState<number | null>(null);
   // Public chain state: readable before sign-in.
-  const l1 = useMemo(() => new SolanaRpcTransport(process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://api.devnet.solana.com"), []);
+  const l1 = useMemo(() => new SolanaRpcTransport(process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://rpc.magicblock.app/devnet"), []);
   const er = useMemo(() => new SolanaRpcTransport(deployment.magicBlock.rpc), []);
   const clock = useMarketClock(DEMO_ORACLE_SNAPSHOT ? l1 : null, publicV3Core || null, DEMO_ORACLE_SNAPSHOT);
   const [now, setNow] = useState(0);

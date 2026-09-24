@@ -124,7 +124,7 @@ export function TradingTerminal() {
   );
   const openOrders = useOpenOrders(openOrdersAdapter, marketAddress, l1SeatIndex);
   // The oracle clock is public chain state: read it before sign-in too.
-  const readRpc = useMemo(() => new SolanaRpcTransport(process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://api.devnet.solana.com"), []);
+  const readRpc = useMemo(() => new SolanaRpcTransport(process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://rpc.magicblock.app/devnet"), []);
   const marketClock = useMarketClock(
     v3.oracleSnapshot ? readRpc : protocol?.rpc ?? null,
     v3.oracleSnapshot ? v3.core || null : marketAddress,
@@ -153,6 +153,9 @@ export function TradingTerminal() {
   const seat = fromRollup ? rollupSeat?.view ?? null : position.seat;
   // A signed-in trader whose seat has not been read yet (never "no seat" while unknown).
   const seatLoading = !!trader && (executionStatus === null || (executionStatus.marketDelegated && book.updatedAt === null));
+  // Nothing to trade with yet (no seat, or an empty one): the ticket's button starts trading instead of placing an order.
+  const needsFunding = auth.authenticated && !!executionStatus?.marketDelegated && !seatLoading
+    && (!seat || (seat.availableCollateral === 0n && seat.basePosition === 0n && seat.openOrderCount === 0));
   const walletSeatView = useMemo(() => (fromRollup && tradingKey.signer && auth.walletAddress ? seatFromPositions(book.positions, auth.walletAddress) : null), [fromRollup, tradingKey.signer, auth.walletAddress, book.positions]);
   const walletSeat = walletSeatView ? { index: walletSeatView.index, available: walletSeatView.view.availableCollateral } : null;
   function withdrawWalletSeat() {
@@ -360,6 +363,7 @@ export function TradingTerminal() {
   function submitOrder() {
     if (!auth.authenticated) { openWalletDrawer(); return; }
     if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: live order submission is unavailable."); return; }
+    if (needsFunding) { void startTrading(onboardingDeposit); return; }
     if (!canTrade && walletTrading) { void placeV3Order(); return; }
     if (canTrade) {
       const minutes = Number(ticket.expiresInMinutes) || 0;
@@ -463,7 +467,7 @@ export function TradingTerminal() {
     ?? (orderPending || sessionOrder.pending ? "Placing your order in the rollup…" : null)
     ?? (cancelPending ? "Cancelling in the rollup…" : null)
     ?? (faucetPending ? "Sending test funds…" : null);
-  const blocker = busy && !orderPending ? busy : marketClosed && auth.authenticated ? "Market closed — US session only" : !auth.authenticated
+  const blocker = busy && !orderPending ? busy : needsFunding ? null : marketClosed && auth.authenticated ? "Market closed — US session only" : !auth.authenticated
     ? null
     : !sized
       ? ticket.kind === "limit" && !(Number(ticket.price) > 0) ? "Enter a limit price" : markPrice === null ? "Waiting for the verified price" : "Enter an amount"
@@ -471,7 +475,9 @@ export function TradingTerminal() {
   const tickerName = marketSymbol.replace("-PERP", "");
   const ctaLabel = !auth.authenticated
     ? "Sign in to trade"
-    : `${canTrade || walletTrading ? "Place order" : "Preview order"} · ${ticket.side === "long" ? "Long" : "Short"} ${sized?.shares ?? 0} ${tickerName}`;
+    : needsFunding
+      ? `Start trading · deposit $${Number(onboardingDeposit) / 1e6}`
+      : `${canTrade || walletTrading ? "Place order" : "Preview order"} · ${ticket.side === "long" ? "Long" : "Short"} ${sized?.shares ?? 0} ${tickerName}`;
   const available = seat ? Number(seat.availableCollateral) / 1e6 : null;
 
   const guard = (action: string, run: () => void) => () => { if (publicDemoReadOnly) { setNotice(`Read-only Devnet demo: ${action} is unavailable.`); return; } run(); };
@@ -511,8 +517,8 @@ export function TradingTerminal() {
       <main id="main-content" tabIndex={-1} className="flex min-h-0 flex-1 flex-col outline-none xl:flex-row">
         {/* Chart + activity. Owns the slack at xl; fixed height while stacked. */}
         <div className="tk-col order-2 flex min-h-0 min-w-0 flex-col xl:order-none xl:flex-1">
-          <div className="h-[480px] shrink-0 overflow-hidden xl:h-auto xl:min-h-0 xl:flex-1">
-            <MarketPanel marketSymbol={marketSymbol} marketApiUrl={candlesApiUrl} live={live} />
+          <div className="h-[560px] shrink-0 overflow-hidden xl:h-auto xl:min-h-0 xl:flex-1">
+            <MarketPanel marketSymbol={marketSymbol} marketApiUrl={candlesApiUrl} live={live} depth={book} />
           </div>
           <ActivityDrawer
             aside={<ErTxPanel key={v3.symbol} marketApiUrl={marketApiUrl} market={v3.symbol} />}

@@ -14,7 +14,7 @@ import { LaunchMonitor, TokenAvatar } from "./launch-monitor";
 import { buildLaunchTransaction, describePreset, LAUNCH_PRESETS, TOTAL_SUPPLY, type LaunchPreset } from "./dbc-launch";
 import { formatCompactUsd, formatTinyUsd } from "./format";
 
-const RPC = process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
+const RPC = process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://rpc.magicblock.app/devnet";
 const STOCKS = ["TSLA", "AAPL", "NVDA"] as const;
 const INPUT = `h-[38px] w-full rounded-[8px] border border-[var(--t-border-strong)] bg-[var(--t-bg)] px-3 text-[13.5px] text-[var(--t-text)] ${FOCUS_RING}`;
 const explorer = (address: string, kind: "address" | "tx" = "address") => `https://explorer.solana.com/${kind}/${address}?cluster=devnet`;

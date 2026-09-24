@@ -12,7 +12,7 @@ try {
   await page.getByText(new RegExp(`${symbol}`)).first().waitFor();
   await page.getByText(/V3 delegation: delegated to MagicBlock/).waitFor({ timeout: 30_000 });
   step(`market: ${await page.getByRole("button", { name: /Change market/ }).innerText()}`);
-  await page.getByRole("button", { name: "Start trading" }).click();
+  await page.getByRole("button", { name: "Start trading", exact: true }).click();
   await waitNotice(/Deposited 500 USDC/);
   await page.waitForFunction(() => /Available\s*\$[1-9]/.test(document.querySelector("section.lifecycle-panel")?.textContent ?? ""), null, { timeout: 30_000 });
   step(`seat: ${await page.getByRole("button", { name: /Seat #\d+ active/ }).innerText()}`);

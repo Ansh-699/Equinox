@@ -6,7 +6,7 @@ import { launch } from "./harness.mts";
 const { page, prompts, step, waitNotice, connect, walletUsdc, close } = await launch();
 try {
   await connect();
-  await page.getByRole("button", { name: "Start trading" }).click();
+  await page.getByRole("button", { name: "Start trading", exact: true }).click();
   await waitNotice(/Deposited 100 USDC/);
   step(`seat: ${await page.getByRole("button", { name: /Seat #\d+ active/ }).innerText()}`);
   await page.waitForFunction(() => /Available\s*\$[1-9]/.test(document.querySelector("section.lifecycle-panel")?.textContent ?? ""), null, { timeout: 30_000 });
