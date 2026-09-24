@@ -56,7 +56,7 @@ export function PriceChart({ marketApiUrl, symbol, live }: { marketApiUrl: strin
         </span>
       </div>
 
-      <div id="chart-panel" role="tabpanel" aria-label={`${symbol} ${resolution.label} price chart`} className="relative min-h-0 flex-1 bg-[var(--t-bg)]">
+      <div id="chart-panel" role="tabpanel" aria-label={`${symbol} ${resolution.label} price chart`} className="relative min-h-0 flex-1 bg-[var(--t-bg)]" title="Scroll to zoom · drag to pan">
         {candles.length >= 2 ? (
           <CandleCanvas candles={candles} chartType={chartType} resolution={resolution} />
         ) : (
@@ -65,13 +65,6 @@ export function PriceChart({ marketApiUrl, symbol, live }: { marketApiUrl: strin
             <span className="max-w-[42ch] text-[12px] leading-relaxed text-[var(--t-text-2)]">{error ? "The price-history feed didn't answer. It retries on its own; pick another interval if it stays empty." : isReporterPriced(v3MarketFor(symbol)) ? "History builds from the on-chain reporter's posts." : `Equity.US.${symbol.replace("-PERP", "")}/USD · Pyth Pro`}</span>
           </div>
         )}
-      </div>
-
-      <div className="flex h-[30px] shrink-0 items-center justify-between gap-3 border-t border-[var(--t-border)] px-3 text-[11px] text-[var(--t-text-3)]">
-        {/* One line each: the footer is a fixed 30 px, so wrapped text would spill into the panels below. */}
-        <span className="hidden shrink-0 whitespace-nowrap xl:inline">Scroll to zoom · drag to pan</span>
-        <span className="shrink-0 whitespace-nowrap xl:hidden">Ctrl-scroll to zoom · drag to pan</span>
-        <span className="min-w-0 truncate text-right">{resolution.label} candles · {isReporterPriced(v3MarketFor(symbol)) ? "on-chain reporter prices" : "Pyth history + live price"}</span>
       </div>
     </div>
   );
@@ -128,7 +121,7 @@ function CandleCanvas({ candles, chartType, resolution }: { candles: Candle[]; c
     const styles = getComputedStyle(canvas);
     const token = (name: string, fallback: string) => styles.getPropertyValue(name).trim() || fallback;
     const dark = document.documentElement.classList.contains("dark");
-    const ink = (alpha: number) => (dark ? `rgba(255,255,255,${alpha})` : `rgba(15,23,23,${alpha})`);
+    const ink = (alpha: number) => (dark ? `rgba(255,255,255,${alpha})` : `rgba(17,12,10,${alpha})`);
     const up = token("--t-up", "#22c55e");
     const down = token("--t-down", "#ef4444");
     const axis = token("--t-text-3", "#838c92");
@@ -144,7 +137,7 @@ function CandleCanvas({ candles, chartType, resolution }: { candles: Candle[]; c
     const slot = plotW / n;
     const xOf = (i: number) => i * slot + slot / 2;
 
-    ctx.font = "10px ui-monospace, monospace";
+    ctx.font = `10px ${getComputedStyle(document.documentElement).getPropertyValue("--font-plex-mono").trim() || "ui-monospace"}, ui-monospace, monospace`;
     ctx.textBaseline = "middle";
     for (let g = 0; g <= 5; g += 1) {
       const price = min + ((max - min) * g) / 5;
@@ -179,7 +172,7 @@ function CandleCanvas({ candles, chartType, resolution }: { candles: Candle[]; c
         path();
         ctx.lineTo(xOf(n - 1), padT + plotH); ctx.lineTo(xOf(0), padT + plotH); ctx.closePath();
         const grad = ctx.createLinearGradient(0, padT, 0, padT + plotH);
-        grad.addColorStop(0, rising ? "rgba(34,197,94,0.25)" : "rgba(239,68,68,0.25)");
+        grad.addColorStop(0, rising ? "rgba(58,191,114,0.22)" : "rgba(224,85,85,0.22)");
         grad.addColorStop(1, "rgba(0,0,0,0)");
         ctx.fillStyle = grad; ctx.fill();
       }
