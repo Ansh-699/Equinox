@@ -4,8 +4,8 @@ import { derivePath } from "ed25519-hd-key";
 import { Keypair, Connection } from "@solana/web3.js";
 import fs from "node:fs";
 
-const MNEMONIC = process.env.STOCKSTREAM_MNEMONIC;
-if (!MNEMONIC) { console.error("STOCKSTREAM_MNEMONIC not set"); process.exit(1); }
+const MNEMONIC = process.env.EQUINOX_MNEMONIC;
+if (!MNEMONIC) { console.error("EQUINOX_MNEMONIC not set"); process.exit(1); }
 const words = MNEMONIC.trim().split(/\s+/);
 if (words.length !== 12) { console.error("expected 12 words"); process.exit(1); }
 try { validateMnemonic(words.join(" "), wordlist); } catch { console.error("invalid BIP-39 checksum"); process.exit(1); }

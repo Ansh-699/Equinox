@@ -1,4 +1,4 @@
-import { STOCKSTREAM_PROGRAM_ID } from "../../clients/stockstream/src/constants";
+import { EQUINOX_PROGRAM_ID } from "../../clients/equinox/src/constants";
 import { loadMarketRegistry } from "./active-markets";
 import { MagicRouterTransport, SolanaL1Transport } from "./chain-transports";
 import type { OrchestratorBuilders, OrchestratorDeps } from "./keeper-orchestrator";
@@ -108,12 +108,12 @@ export const DEFAULT_FUNDING_POLICY: FundingPolicy = { intervalMs: 60 * 60 * 100
 
 function buildersFor(authority: string) {
   return (marketPda: string): OrchestratorBuilders => {
-    const context: KeeperTransactionContext = { programAddress: STOCKSTREAM_PROGRAM_ID, market: marketPda, authority };
+    const context: KeeperTransactionContext = { programAddress: EQUINOX_PROGRAM_ID, market: marketPda, authority };
     return {
       // The Ed25519 pre-instruction is meaningful only once the live Pyth
       // pool produces a signed update. This builder remains inert unless
       // the orchestrator has a healthy pythSource and signer.
-      pyth: pythKeeperBuilder({ ...context, oracleAccounts: [meta(authority)], ed25519Instruction: reconcileVaultInstruction(STOCKSTREAM_PROGRAM_ID, [meta(authority)]) }),
+      pyth: pythKeeperBuilder({ ...context, oracleAccounts: [meta(authority)], ed25519Instruction: reconcileVaultInstruction(EQUINOX_PROGRAM_ID, [meta(authority)]) }),
       commit: magicBlockCommitKeeperBuilder(context),
       funding: fundingKeeperBuilder(context),
       session: sessionKeeperBuilder(context),

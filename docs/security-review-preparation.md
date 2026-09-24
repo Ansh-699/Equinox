@@ -8,7 +8,7 @@ audit. Every matrix here is derived from the actual implementation
 
 | Authority | Can | Cannot | Verified by |
 | --- | --- | --- | --- |
-| Deploy authority (`A5sV4Pkk…`) | program deploy/upgrade; holds market authority for its own markets | is NOT the protocol keeper, NOT a browser/session key | `docs/stockstream-devnet-release-gate.md` |
+| Deploy authority (`A5sV4Pkk…`) | program deploy/upgrade; holds market authority for its own markets | is NOT the protocol keeper, NOT a browser/session key | `docs/equinox-devnet-release-gate.md` |
 | Market authority (`header.market_authority`) | InitializeVault, UpdateFunding, UpdateMarketRisk, TransitionMarket, registry ops, DelegateMarket/CommitMarket | withdraw user collateral; move user funds | `handlers.rs::update_funding` (`IllegalOwner` gate) |
 | Emergency authority | Liquidate | market administration | `handlers.rs::liquidate` (`authority == header.emergency_authority`) |
 | Keeper authority (exchange config) | ReconcileVault, ResolveBadDebt, funding scheduling (when wired) | withdraw user collateral; move fees | `error.rs`/`instruction.rs` allowlists; `workers/src/keeper-signer.ts` |
@@ -31,8 +31,8 @@ audit. Every matrix here is derived from the actual implementation
 ## 3. Instruction/account matrix
 
 All 43 opcodes with their writable/signable accounts are enumerated in
-`programs/stockstream/src/instruction.rs` (decode) and
-`programs/stockstream/src/handlers.rs` (dispatch). The account-domain
+`programs/equinox/src/instruction.rs` (decode) and
+`programs/equinox/src/handlers.rs` (dispatch). The account-domain
 matrix (ER vs L1 writable sets per trading instruction) is
 `lib/magicblock.ts::ER_WRITABLE_CLUSTERS` and `docs/magicblock.md` § matrix.
 
@@ -40,14 +40,14 @@ matrix (ER vs L1 writable sets per trading instruction) is
 
 | PDA | Seeds | Owner | Used by |
 | --- | --- | --- | --- |
-| perp-market | `["perp-market", instrument]` | StockStream | market state (delegation target) |
-| instrument | `["instrument", id]` | StockStream | registry linkage |
-| exchange | (keypair in the current lifecycle; PDA not required) | StockStream | governance |
-| vault | `["vault", market]` | StockStream | collateral custody |
-| vault-authority | `["vault-authority", market]` | StockStream | vault signing authority |
-| settlement scratch | `["settlement", market, seat_le]` | StockStream | per-seat settlement working memory |
-| trading session | `["trading_session", owner, market, seat_le, session_signer]` | StockStream | scoped trading authorization |
-| delegate buffer | `["buffer", <delegated account>]` | StockStream | delegation in-flight copy |
+| perp-market | `["perp-market", instrument]` | Equinox | market state (delegation target) |
+| instrument | `["instrument", id]` | Equinox | registry linkage |
+| exchange | (keypair in the current lifecycle; PDA not required) | Equinox | governance |
+| vault | `["vault", market]` | Equinox | collateral custody |
+| vault-authority | `["vault-authority", market]` | Equinox | vault signing authority |
+| settlement scratch | `["settlement", market, seat_le]` | Equinox | per-seat settlement working memory |
+| trading session | `["trading_session", owner, market, seat_le, session_signer]` | Equinox | scoped trading authorization |
+| delegate buffer | `["buffer", <delegated account>]` | Equinox | delegation in-flight copy |
 | delegation record | `["delegation", <account>]` | Delegation Program | MagicBlock |
 | delegation metadata | `["delegation-metadata", <account>]` | Delegation Program | MagicBlock (seeds replay) |
 | undelegate buffer | `["undelegate-buffer", <account>]` | Delegation Program | restoration signer |

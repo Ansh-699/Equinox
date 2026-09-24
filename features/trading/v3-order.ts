@@ -1,5 +1,5 @@
 import { ComputeBudgetProgram, type TransactionInstruction } from "@solana/web3.js";
-import { deriveV3ExecutionAccounts, placeOrderV3 } from "@/clients/stockstream/src";
+import { deriveV3ExecutionAccounts, placeOrderV3 } from "@/clients/equinox/src";
 
 /** V3 prices use the oracle's raw scale: USD × 10^-exponent (TSLA exponent −5). */
 export function usdToRawPrice(usd: string, exponent = -5): bigint | null {

@@ -3,7 +3,7 @@
   "cluster": "devnet",
   "programId": "8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ",
   "deployedArtifactSha256": "bc8da09dd96924f841adf768b00fd25727a9677ca306ace01c7e42a7ae5d0fc0",
-  "artifactVerification": "solana program dump prefix sha256 equals target/deploy/stockstream.so",
+  "artifactVerification": "solana program dump prefix sha256 equals target/deploy/equinox.so",
   "reproduce": "scripts/v3-e2e-run.sh v3-e2e3",
   "market": {
     "exchange": "sjnDgFCKptJBgtByXtPnVt1tTCkGYngCgWR1khGUWYY",

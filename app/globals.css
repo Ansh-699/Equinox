@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* StockStream theme — the SlipStream terminal design language.
+/* Equinox theme — the SlipStream terminal design language.
    `.dark` on <html> (set before paint by the script in app/layout.tsx and
    flipped by components/theme-toggle.tsx) selects the dark palette; light is
    the :root default. Every surface reads the --t-* tokens, so both themes
@@ -72,7 +72,7 @@
   --t-link: #58a6ff;
 }
 
-/* StockStream extras + legacy aliases (older components use these names). */
+/* Equinox extras + legacy aliases (older components use these names). */
 :root {
   --t-up-soft: rgba(4, 120, 87, 0.1);
   --t-down-soft: #fdeaee;

@@ -1,0 +1,67 @@
+name: Equinox compatible Solana runtime
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "programs/equinox/**"
+      - "toolchain/**"
+      - "scripts/install-equinox-toolchain.sh"
+      - "scripts/verify-sbf-artifact.py"
+      - "scripts/secret-scan.sh"
+      - "package.json"
+      - ".github/workflows/equinox-runtime.yml"
+
+# The single authoritative toolchain pin lives in toolchain/equinox-runtime.env
+# and is consumed by scripts/install-equinox-toolchain.sh. Do not restate a
+# version here -- two authoritative versions is how the 2.2.20/4.2.1 mismatch
+# happened in the first place.
+jobs:
+  runtime:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Install the pinned Agave toolchain
+        run: bash scripts/install-equinox-toolchain.sh
+
+      - name: Host gates
+        run: |
+          cargo fmt --check
+          cargo check -p equinox
+          cargo test -p equinox
+          cargo test -p equinox --release
+
+      - name: Secret scan (same root gate as local verification)
+        run: npm run check:secrets
+
+      - name: Build the SBF artifact
+        run: cargo build-sbf --manifest-path programs/equinox/Cargo.toml --features bpf-entrypoint
+
+      - name: Verify artifact headers and identity (Gate 2 regression check)
+        run: |
+          file target/deploy/equinox.so
+          readelf -h target/deploy/equinox.so
+          python3 scripts/verify-sbf-artifact.py target/deploy/equinox.so
+
+      - name: Verify the SBF artifact is reproducible from a clean worktree
+        run: |
+          cp target/deploy/equinox.so /tmp/equinox-working-tree.so
+          rm -rf /tmp/equinox-repro
+          git worktree add --detach /tmp/equinox-repro HEAD
+          (
+            cd /tmp/equinox-repro
+            cargo build-sbf --manifest-path programs/equinox/Cargo.toml --features bpf-entrypoint
+          )
+          cmp /tmp/equinox-working-tree.so /tmp/equinox-repro/target/deploy/equinox.so
+          git worktree remove --force /tmp/equinox-repro
+
+      - name: Runtime harness against the real .so
+        run: |
+          cargo test -p equinox --features runtime-tests --test runtime_initialize
+          cargo test -p equinox --features runtime-tests --test runtime_settlement
+          cargo test -p equinox --features runtime-tests --test runtime_tokenkeg
+          cargo test -p equinox --features runtime-tests --test runtime_deposit
+          cargo test -p equinox --features runtime-tests --test runtime_withdraw
+          cargo test -p equinox --features runtime-tests --test runtime_funding_liquidation_session

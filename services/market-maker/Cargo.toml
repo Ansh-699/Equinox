@@ -1,9 +1,9 @@
 [package]
-name = "stockstream-market-maker"
+name = "equinox-market-maker"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Always-on devnet market maker for the StockStream V3 book in the MagicBlock rollup"
+description = "Always-on devnet market maker for the Equinox V3 book in the MagicBlock rollup"
 
 # Standalone: not part of the on-chain program workspace.
 [workspace]
@@ -11,7 +11,7 @@ description = "Always-on devnet market maker for the StockStream V3 book in the 
 [dependencies]
 anyhow = "1"
 # The on-chain program as a library: the keeper uses its seat decoder and risk math.
-stockstream = { path = "../../programs/stockstream" }
+equinox = { path = "../../programs/equinox" }
 axum = "0.8"
 base64 = "0.22"
 bs58 = "0.5"

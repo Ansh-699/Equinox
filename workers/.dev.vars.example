@@ -1,8 +1,8 @@
 INGESTION_TOKEN=replace-with-a-local-development-token
 # Authenticates the Next.js app/api/relay/session proxy to this Worker's
-# POST /v1/relay/session (x-stockstream-relayer-service-token header) --
+# POST /v1/relay/session (x-equinox-relayer-service-token header) --
 # a separate secret from INGESTION_TOKEN, and must match the root project's
-# STOCKSTREAM_RELAYER_TOKEN. Never a substitute for the per-user Privy
+# EQUINOX_RELAYER_TOKEN. Never a substitute for the per-user Privy
 # check that same route also performs.
 RELAYER_SERVICE_TOKEN=replace-with-a-local-development-token
 # Pyth Pro IDs are numeric catalog IDs, not Hermes hashes. Keep these

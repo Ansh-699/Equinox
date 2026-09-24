@@ -3,9 +3,9 @@
  *
  * `keeper-jobs.ts` deliberately treats wire-format construction as an injected
  * boundary (`TransactionBuilder<TInput>`). This module is the concrete
- * implementation of that boundary: it encodes StockStream instructions (the
+ * implementation of that boundary: it encodes Equinox instructions (the
  * exact data layouts and account orders mirrored by
- * `clients/stockstream/src/index.ts`), assembles a v0 transaction message,
+ * `clients/equinox/src/index.ts`), assembles a v0 transaction message,
  * signs it with the Worker's WebCrypto `Signer`, and returns the base64 wire
  * transaction the L1/ER transports already accept.
  *
@@ -148,10 +148,10 @@ function instruction(programAddress: string, accounts: AccountMeta[], data: Uint
 }
 
 // ---------------------------------------------------------------------
-// StockStream instruction encoders
+// Equinox instruction encoders
 //
-// Opcodes per programs/stockstream/src/instruction.rs. Account orders per the
-// Rust handlers and clients/stockstream/src/index.ts.
+// Opcodes per programs/equinox/src/instruction.rs. Account orders per the
+// Rust handlers and clients/equinox/src/index.ts.
 // ---------------------------------------------------------------------
 
 export const OPCODE = {
@@ -468,7 +468,7 @@ export function consumeOracleUpdateInstruction(programAddress: string, accounts:
 }
 
 // ---------------------------------------------------------------------
-// Compute Budget (native program) -- not a StockStream opcode, but every
+// Compute Budget (native program) -- not a Equinox opcode, but every
 // keeper transaction below prepends a SetComputeUnitLimit instruction so
 // its compute allocation is a deliberate, bounded choice rather than the
 // runtime's 200k-per-instruction default. Small, fixed, well-documented
@@ -490,7 +490,7 @@ export function setComputeUnitPriceInstruction(microLamports: bigint): Instructi
 }
 
 /** Conservative default: every keeper instruction this module encodes is a
- * single StockStream instruction, well under the runtime's per-instruction
+ * single Equinox instruction, well under the runtime's per-instruction
  * default of 200,000 CU (the most expensive recorded in real SBF runtime
  * tests is Liquidate at ~7,700 CU -- see runtime_funding_liquidation_session.rs). */
 const DEFAULT_COMPUTE_UNIT_LIMIT = 60_000;

@@ -3,7 +3,7 @@ export const UNDELEGATE_CALLBACK = [196, 28, 41, 206, 48, 37, 51, 167] as const;
 /**
  * Delegation-time automatic commit frequency, in milliseconds. This value is
  * encoded into the `Delegate` instruction's `commit_frequency_ms` field
- * (see `programs/stockstream/src/magicblock.rs::encode_delegate_instruction_data`),
+ * (see `programs/equinox/src/magicblock.rs::encode_delegate_instruction_data`),
  * so the delegation program auto-commits the market on this cadence for as long
  * as it stays delegated. It is NOT a keeper scheduling knob: the Worker commit
  * keeper's own minimum tick interval is separate
@@ -24,8 +24,8 @@ export function rejectMixedWritableDomains(accounts: WritableAccount[]): void {
 }
 
 /**
- * Account-domain matrix: which writable StockStream accounts each trading
- * instruction writes, verified against `programs/stockstream/src/handlers.rs`
+ * Account-domain matrix: which writable Equinox accounts each trading
+ * instruction writes, verified against `programs/equinox/src/handlers.rs`
  * (and `docs/magicblock.md`'s account-domain matrix). All of these are ER
  * execution-domain accounts: while the market is delegated, every one of them
  * must be delegated to the SAME ER validator, or the ER runtime rejects the

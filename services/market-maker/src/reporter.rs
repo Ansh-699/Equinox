@@ -12,8 +12,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use serde_json::Value;
-use stockstream::instruction::REPORT_PRICE_V3;
-use stockstream::oracle_snapshot::{OFFSET_AUTHENTICATED, OFFSET_PRICE, OFFSET_PUBLISH_TIMESTAMP};
+use equinox::instruction::REPORT_PRICE_V3;
+use equinox::oracle_snapshot::{OFFSET_AUTHENTICATED, OFFSET_PRICE, OFFSET_PUBLISH_TIMESTAMP};
 use tokio::sync::Mutex;
 
 use crate::maker::{now_ms, Status};

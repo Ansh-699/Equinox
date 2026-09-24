@@ -23,7 +23,7 @@ import {
 import { LocalKeypairSigner } from "./signer";
 import { signAndSerializeTransaction } from "./transactions";
 
-const STOCKSTREAM_PROGRAM = "8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ";
+const EQUINOX_PROGRAM = "8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ";
 
 /** A fresh Solana-CLI-style JSON keypair per test. */
 function keypairMaterial(): string {
@@ -128,14 +128,14 @@ test("base58Decode keeps leading zero bytes (leading '1' characters)", () => {
 // keeper must never be able to submit.
 // ---------------------------------------------------------------------
 
-test("an allowlisted StockStream keeper instruction passes the audit", async () => {
+test("an allowlisted Equinox keeper instruction passes the audit", async () => {
   // ReconcileVault (opcode 39) is a keeper family instruction.
   const signer = new LocalKeypairSigner("keeper:local-devnet", keypairMaterial());
     const keeperAddr = getBase58Decoder().decode(await signer.publicKey());
   const market = address("91Wxz2Nn4yvtjHEoYrDSMfyZYG86twVEMnCBwCZFFZE");
   const vault = address("sZ53hm8F9bJADXMUzbTJNUwFqDvdnThdytro4agPq3F");
   const reconcileInstruction = {
-    programAddress: address(STOCKSTREAM_PROGRAM),
+    programAddress: address(EQUINOX_PROGRAM),
     accounts: [
       { address: market, role: AccountRole.WRITABLE },
       { address: keeperAddr, role: AccountRole.READONLY_SIGNER },
@@ -157,7 +157,7 @@ test("keeper cannot submit a market-administration instruction (UpdateExchangeCo
   const signer = new LocalKeypairSigner("keeper:local-devnet", keypairMaterial());
   const exchange = address("CnWpbUPUEiuXwZo8Hon9ukkNSyJKnxxh3KSqRPDHxNqs");
   const administrationInstruction = {
-    programAddress: address(STOCKSTREAM_PROGRAM),
+    programAddress: address(EQUINOX_PROGRAM),
     accounts: [
       { address: exchange, role: AccountRole.WRITABLE },
       { address: exchange, role: AccountRole.READONLY_SIGNER },

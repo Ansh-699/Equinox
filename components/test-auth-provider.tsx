@@ -18,7 +18,7 @@
  * wallet COUNT is controlled by the `?e2eWallets=N` query param (default
  * 1) so a test can exercise the single-wallet auto-select path and the
  * multiple-wallet explicit-choice path without restarting the server.
- * window.__stockstreamE2E exposes wallet addresses and a
+ * window.__equinoxE2E exposes wallet addresses and a
  * per-address signature counter so tests can assert things like "exactly
  * one main-wallet prompt" or "never signed with the wrong wallet" without
  * reading application internals.
@@ -36,7 +36,7 @@ export function isE2eTestMode(): boolean {
 
 declare global {
   interface Window {
-    __stockstreamE2E?: {
+    __equinoxE2E?: {
       walletAddresses: string[];
       /** @deprecated kept for older tests; equals walletAddresses[0]. */
       walletAddress: string;
@@ -79,7 +79,7 @@ export function TestAuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!wallets.length) return;
     const addresses = wallets.map((wallet) => wallet.address);
-    window.__stockstreamE2E = { walletAddresses: addresses, walletAddress: addresses[0], promptCount: 0, promptsByAddress: Object.fromEntries(addresses.map((address) => [address, 0])) };
+    window.__equinoxE2E = { walletAddresses: addresses, walletAddress: addresses[0], promptCount: 0, promptsByAddress: Object.fromEntries(addresses.map((address) => [address, 0])) };
   }, [wallets]);
 
   const identity = useMemo<PrivyIdentity>(() => ({
@@ -87,7 +87,7 @@ export function TestAuthProvider({ children }: { children: React.ReactNode }) {
     privyAuthenticated: authenticated,
     directWallet: false,
     userId: authenticated ? "e2e-test-user" : null,
-    userLabel: authenticated ? "e2e@stockstream.test" : null,
+    userLabel: authenticated ? "e2e@equinox.test" : null,
     wallets,
     authError: null,
     login: () => setAuthenticated(true),
@@ -99,9 +99,9 @@ export function TestAuthProvider({ children }: { children: React.ReactNode }) {
     signWith: async (address, bytes) => {
       const wallet = testWallets.find((candidate) => candidate.publicKey.toBase58() === address);
       if (!wallet) throw new Error(`E2E test wallet ${address} not found`);
-      if (window.__stockstreamE2E) {
-        window.__stockstreamE2E.promptCount += 1;
-        window.__stockstreamE2E.promptsByAddress[address] = (window.__stockstreamE2E.promptsByAddress[address] ?? 0) + 1;
+      if (window.__equinoxE2E) {
+        window.__equinoxE2E.promptCount += 1;
+        window.__equinoxE2E.promptsByAddress[address] = (window.__equinoxE2E.promptsByAddress[address] ?? 0) + 1;
       }
       // `bytes` is a FULL serialized transaction (empty signature
       // placeholders already allocated) -- lib/solana-transaction.ts's

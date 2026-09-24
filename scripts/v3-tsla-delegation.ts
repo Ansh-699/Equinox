@@ -8,18 +8,18 @@ import {
   PublicKey,
   Transaction,
 } from "@solana/web3.js";
-import { delegateV3Account } from "../clients/stockstream/src/abi/v3-instructions";
+import { delegateV3Account } from "../clients/equinox/src/abi/v3-instructions";
 import {
   V3_BOOK_PAGE_SIZE,
   V3_EVENT_SHARD_SIZE,
   V3_MARKET_CORE_SIZE,
   V3_SEAT_SHARD_SIZE,
   decodeV3MarketCore,
-} from "../clients/stockstream/src/abi/v3";
+} from "../clients/equinox/src/abi/v3";
 
 const RPC = process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com";
 const ROUTER = "https://devnet-router.magicblock.app";
-const PROGRAM = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID || DEFAULT_PROGRAM_ID);
+const PROGRAM = new PublicKey(process.env.EQUINOX_PROGRAM_ID || DEFAULT_PROGRAM_ID);
 const DELEGATION_PROGRAM = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -81,7 +81,7 @@ if (selectedPosition === 0) {
   // The L1-owned snapshot, never delegated, is the ER price source.
   const snapshotAddress = PublicKey.findProgramAddressSync([Buffer.from("oracle-snapshot-v3"), CORE.toBuffer()], PROGRAM)[0];
   const snapshot = await connection.getAccountInfo(snapshotAddress, "confirmed");
-  if (snapshot && !snapshot.owner.equals(PROGRAM)) throw new Error("oracle snapshot is not owned by StockStream");
+  if (snapshot && !snapshot.owner.equals(PROGRAM)) throw new Error("oracle snapshot is not owned by Equinox");
   assertV3L1Readiness({
     core: infos[0]!.data, seatShards: infos.slice(19, 23).map(info => info!.data),
     accountCount: entries.length, nowSeconds: Math.floor(Date.now() / 1000), snapshot: snapshot?.data,

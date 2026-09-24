@@ -45,7 +45,7 @@ const server = http.createServer((req, res) => {
     // e2e test mode, sentinel) Privy access token -- this mock only cares
     // that the latter is present, not its specific value, since verifying
     // Privy identity is the real Worker's job, not this relay-behavior mock's.
-    const serviceToken = req.headers["x-stockstream-relayer-service-token"];
+    const serviceToken = req.headers["x-equinox-relayer-service-token"];
     const auth = req.headers.authorization;
     if (serviceToken !== EXPECTED_TOKEN || !auth?.startsWith("Bearer ")) {
       res.writeHead(401, { "content-type": "application/json" });

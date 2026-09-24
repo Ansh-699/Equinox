@@ -36,7 +36,7 @@ the plan must stop on any identity, owner, size, or writable-flag mismatch.
 2. Create exchange and instrument with TSLA metadata.
 3. Create and initialize the V3 core, pages, seat shards, and event shards.
 4. Create the 128-byte `OracleSnapshotV3` PDA while the core is
-   StockStream-owned.
+   Equinox-owned.
 5. Activate the core and create the trader seat.
 6. Submit the canonical L1 Pyth verification into the snapshot using:
    `[snapshot(w), core(ro), payer(signer,w), Pyth(ro), storage(ro),

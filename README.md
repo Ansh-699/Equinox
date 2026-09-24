@@ -1,6 +1,6 @@
-# StockStream frontend
+# Equinox frontend
 
-The Next.js App Router frontend for StockStream, a Solana perpetual-
+The Next.js App Router frontend for Equinox, a Solana perpetual-
 futures exchange for tokenized equities: Privy auth with explicit
 multi-wallet selection, browser session-key trading relayed through an
 authenticated Worker, MagicBlock Ephemeral Rollup execution-status
@@ -33,9 +33,9 @@ with inline comments on what's public vs. server-only and why. In short:
   nothing beyond the defaults already in `.env.example`.
 - Real Privy login needs `NEXT_PUBLIC_PRIVY_APP_ID` and `PRIVY_APP_SECRET`.
 - Real trading needs a deployed market/vault
-  (`NEXT_PUBLIC_STOCKSTREAM_MARKET_ADDRESS` and friends) and a reachable,
-  authenticated relayer (`STOCKSTREAM_RELAYER_URL`,
-  `NEXT_PUBLIC_STOCKSTREAM_RELAYER_ADDRESS`).
+  (`NEXT_PUBLIC_EQUINOX_MARKET_ADDRESS` and friends) and a reachable,
+  authenticated relayer (`EQUINOX_RELAYER_URL`,
+  `NEXT_PUBLIC_EQUINOX_RELAYER_ADDRESS`).
 - Going all the way to a real Devnet session is its own procedure, not
   just env vars -- see `docs/live-devnet-runbook.md`.
 

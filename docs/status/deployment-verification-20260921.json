@@ -25,7 +25,7 @@
   },
   "commands": [
     "solana program show --url https://api.devnet.solana.com H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET",
-    "solana program dump --url https://api.devnet.solana.com H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET /tmp/stockstream-deployed-current.so"
+    "solana program dump --url https://api.devnet.solana.com H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET /tmp/equinox-deployed-current.so"
   ],
   "mutations": "read-only verification; no transaction submitted"
 }

@@ -1,5 +1,5 @@
-/** Shared test-only helper for building a real binary StockStream event log
- * line (`Program data: <base64>`), matching `programs/stockstream/src/events.rs`
+/** Shared test-only helper for building a real binary Equinox event log
+ * line (`Program data: <base64>`), matching `programs/equinox/src/events.rs`
  * exactly. Used by every test that needs a realistic decoded event without
  * duplicating the byte-layout logic per test file. */
 

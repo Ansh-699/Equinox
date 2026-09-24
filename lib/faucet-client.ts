@@ -9,7 +9,7 @@ export async function claimTestFunds(auth: Pick<AppAuth, "privyAuthenticated" | 
   let claim: Record<string, string> = { wallet: address };
   if (!token) {
     try {
-      const message = `StockStream devnet faucet\nwallet: ${address}\nissued: ${Math.floor(Date.now() / 1000)}`;
+      const message = `Equinox devnet faucet\nwallet: ${address}\nissued: ${Math.floor(Date.now() / 1000)}`;
       const signature = await auth.signMessage(address, new TextEncoder().encode(message));
       claim = { wallet: address, message, signature: btoa(String.fromCharCode(...signature)) };
     } catch (error) {

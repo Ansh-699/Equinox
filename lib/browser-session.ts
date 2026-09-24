@@ -126,7 +126,7 @@ export interface SessionStatus {
   seatIndex: number;
   actions: number;
   /** Unix SECONDS, matching `TradingSession.expires_at` on-chain
-   * (programs/stockstream/src::session.rs). The program compares this
+   * (programs/equinox/src::session.rs). The program compares this
    * against `header.last_verified_oracle_timestamp` -- the market's own
    * clock, anchored to the oracle, not `Clock::get()` and not
    * milliseconds (see handlers.rs::authorize_trading_session /

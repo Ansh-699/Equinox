@@ -1,4 +1,4 @@
-import deployment from "@/config/stockstream-deployment.json";
+import deployment from "@/config/equinox-deployment.json";
 
 /** A live V3 market (deployment manifest `markets`): TSLA-PERP priced by Pyth,
  * pre-IPO perps priced by the market-maker service's PreStocks reporter. */

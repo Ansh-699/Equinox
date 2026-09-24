@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { assertV3L1Readiness, V3_LIFECYCLE_ORDER } from "./v3-lifecycle-readiness.mjs";
 function fixture() {
-  const core = Buffer.from(readFileSync(new URL("../clients/stockstream/src/abi/v3-core-revision2.hex", import.meta.url), "utf8"), "hex");
+  const core = Buffer.from(readFileSync(new URL("../clients/equinox/src/abi/v3-core-revision2.hex", import.meta.url), "utf8"), "hex");
   const seatShards = Array.from({length:4}, () => Buffer.alloc(8236));
   seatShards[0][44] = 1; seatShards[0].writeBigUInt64LE(100n,84);
   return { core, seatShards, accountCount:27, nowSeconds:1700000000 };

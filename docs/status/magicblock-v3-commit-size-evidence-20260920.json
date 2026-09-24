@@ -21,7 +21,7 @@
     "Program H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET consumed 96309 of 200000 compute units",
     "Program H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET failed: custom program error: 0xa0000002"
   ],
-  "interpretation": "The StockStream V3 program reaches the deployed Magic Program CPI. The MagicBlock validator rejects the 27-account scheduled intent before accepting it because the resulting base-layer intent cannot fit in a transaction. This is distinct from the prior V2 InvalidAccountData/oversized-account rejection.",
+  "interpretation": "The Equinox V3 program reaches the deployed Magic Program CPI. The MagicBlock validator rejects the 27-account scheduled intent before accepting it because the resulting base-layer intent cannot fit in a transaction. This is distinct from the prior V2 InvalidAccountData/oversized-account rejection.",
   "reproducer": "scripts/magicblock-v3-commit-repro.mjs",
   "sourceEvidence": "/tmp/magicblock-validator.hhZOc5/programs/magicblock/src/magic_sys.rs (INTENT_TOO_LARGE_ERR = 0xA0000002) and programs/magicblock/src/schedule_transactions/process_schedule_commit.rs (validate_intent_size failure log)"
 }

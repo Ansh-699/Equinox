@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { cancelAll, cancelAllV3, cancelOrder, cancelOrderV3, placeOrder, placeOrderV3, replaceOrder, replaceOrderV3, type PlaceOrderParams, type V3ExecutionAccounts } from "@/clients/stockstream/src";
+import { cancelAll, cancelAllV3, cancelOrder, cancelOrderV3, placeOrder, placeOrderV3, replaceOrder, replaceOrderV3, type PlaceOrderParams, type V3ExecutionAccounts } from "@/clients/equinox/src";
 import { buildSessionSignedTransaction, isSessionUsable, submitToRelayer, toKitInstruction, type SessionStatus } from "@/lib/session-trading";
 import { actionAllowed } from "@/lib/browser-session";
 import { readCsrfToken } from "@/lib/csrf";
@@ -11,7 +11,7 @@ import type { SolanaRpcTransport } from "@/lib/rpc-transport";
 import type { AppAuth } from "@/components/app-providers";
 import type { ExecutionDisplayState } from "@/lib/execution-status";
 
-const RELAYER_ADDRESS = process.env.NEXT_PUBLIC_STOCKSTREAM_RELAYER_ADDRESS;
+const RELAYER_ADDRESS = process.env.NEXT_PUBLIC_EQUINOX_RELAYER_ADDRESS;
 
 type SessionAction = "place" | "cancel" | "cancelAll" | "replace" | "reduceOnlyClose";
 
@@ -38,7 +38,7 @@ export type SessionExecutionMode =
  * silently downgrade a malformed/missing session bundle to V2. */
 export function resolveSessionExecutionMode(
   session: Pick<SessionStatus, "v3ExecutionAccounts">,
-  configuredV3Core: string | undefined = process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS,
+  configuredV3Core: string | undefined = process.env.NEXT_PUBLIC_EQUINOX_V3_CORE_ADDRESS,
 ): SessionExecutionMode {
   const accounts = session.v3ExecutionAccounts as V3ExecutionAccounts | undefined;
   if (configuredV3Core && !accounts) {
@@ -93,7 +93,7 @@ export function useSessionOrder(
     const gate = evaluateSessionActionGate(session, actions, executionStatus);
     if (!gate.allowed) return onResult(gate.result);
     const { domain } = gate;
-    if (!RELAYER_ADDRESS) return onResult(blocked("relayer_unconfigured", "NEXT_PUBLIC_STOCKSTREAM_RELAYER_ADDRESS is unset"));
+    if (!RELAYER_ADDRESS) return onResult(blocked("relayer_unconfigured", "NEXT_PUBLIC_EQUINOX_RELAYER_ADDRESS is unset"));
     if (!rpc) return onResult(blocked("relayer_unavailable", "No RPC transport for a fresh blockhash"));
     if (!auth.walletAddress) return onResult(blocked("authentication_required", "No active wallet"));
     if (!session) return onResult(blocked("session_invalid", "No authorized session")); // narrows for TS; gate.allowed already guarantees this

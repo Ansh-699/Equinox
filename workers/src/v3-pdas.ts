@@ -4,11 +4,11 @@
  * dependency graph just to derive read-only shard addresses.
  */
 import { address, getBase58Encoder, getProgramDerivedAddress } from "@solana/kit";
-import { STOCKSTREAM_PROGRAM_ID } from "../../clients/stockstream/src/constants";
+import { EQUINOX_PROGRAM_ID } from "../../clients/equinox/src/constants";
 
 export const V3_BOOK_PAGES_PER_SIDE = 9;
 
-const programAddress = address(STOCKSTREAM_PROGRAM_ID);
+const programAddress = address(EQUINOX_PROGRAM_ID);
 const utf8 = new TextEncoder();
 const base58 = getBase58Encoder();
 

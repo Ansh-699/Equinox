@@ -141,7 +141,7 @@
     "rootCause": "MagicBlock stores the exponent field as positive decimal places (stored = -pythExponent), consistent with its own `sample` consumer and all six live ER feeds. The Lazer quantized price is written unscaled, so raw price * 10^-stored is the economic value.",
     "canonicalConversion": "canonicalExponent = -storedExponent, accepted only when storedExponent == -catalogExponent exactly",
     "l1Value8": "Stale L1 delegation-time copies for 1314 and 1435 were initialized with 8 (wrong for -5 equity feeds). The ER copies hold 5; the mechanism that changed the ER copy is not visible in upstream source (updates preserve the exponent) and is an open support question.",
-    "stockstreamV3Compatible": false,
+    "equinoxV3Compatible": false,
     "remainingBlockers": [
       "confidence never written (always 0)",
       "no market session or trading status",
@@ -163,6 +163,6 @@
       "WebSocket, BTC/ETH publish 1790097785: L1 notified, ER sent no notification in 420 s; ER getAccountInfo afterwards returned the current value for both"
     ],
     "samples": 2,
-    "interpretation": "ER RPC reads of cloned L1 accounts were current, and the only measured sync lag was 160 ms. ER WebSocket delivery was not reliable for accounts ER had not previously read. This is a proxy only: it does not prove that an ER transaction reads a StockStream OracleSnapshotV3 within ten seconds of an L1 write, and no L1 write was made."
+    "interpretation": "ER RPC reads of cloned L1 accounts were current, and the only measured sync lag was 160 ms. ER WebSocket delivery was not reliable for accounts ER had not previously read. This is a proxy only: it does not prove that an ER transaction reads a Equinox OracleSnapshotV3 within ten seconds of an L1 write, and no L1 write was made."
   }
 }

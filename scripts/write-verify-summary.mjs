@@ -27,7 +27,7 @@ const rustTests = rustMatches.reduce((sum, match) => sum + Number(match[1]), 0);
 const frontendTests = first(read("frontend-tests"), /Tests\s+(\d+)\s+passed/, "frontend test count");
 const workerTests = first(read("worker-tests"), /Tests\s+(\d+)\s+passed/, "Worker test count");
 const playwrightTests = first(read("playwright"), /(?:Running\s+\d+\s+tests[\s\S]*?\n\s*)?(\d+)\s+passed\s+\(/, "Playwright test count");
-const artifactPath = `${process.cwd()}/target/deploy/stockstream.so`;
+const artifactPath = `${process.cwd()}/target/deploy/equinox.so`;
 const artifactSha256 = crypto.createHash("sha256").update(fs.readFileSync(artifactPath)).digest("hex");
 const commit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 const abiOk = read("abi").includes("ABI-OK");
@@ -53,7 +53,7 @@ const summary = {
     playwrightTests,
     secretScan: secretScanOk,
   },
-  artifact: { path: "target/deploy/stockstream.so", sha256: artifactSha256 },
+  artifact: { path: "target/deploy/equinox.so", sha256: artifactSha256 },
 };
 fs.mkdirSync(path.dirname(path.resolve(outputPath)), { recursive: true });
 fs.writeFileSync(outputPath, `${JSON.stringify(summary, null, 2)}\n`);

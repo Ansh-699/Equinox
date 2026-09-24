@@ -16,10 +16,10 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, bail, Result};
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use serde_json::json;
-use stockstream::instruction::{ABORT_V3_SNAPSHOT, COMMIT_MARKET, LIQUIDATE, UPDATE_FUNDING};
-use stockstream::magicblock::{DELEGATION_PROGRAM_ID, MAGIC_CONTEXT_ID, MAGIC_PROGRAM_ID};
-use stockstream::risk::{is_liquidatable, settle_funding};
-use stockstream::v3::{
+use equinox::instruction::{ABORT_V3_SNAPSHOT, COMMIT_MARKET, LIQUIDATE, UPDATE_FUNDING};
+use equinox::magicblock::{DELEGATION_PROGRAM_ID, MAGIC_CONTEXT_ID, MAGIC_PROGRAM_ID};
+use equinox::risk::{is_liquidatable, settle_funding};
+use equinox::v3::{
     read_shard_seat, read_v3_risk_config, V3_CORE_CHILD_RECORDS_OFFSET, V3_CORE_CHILD_RECORD_SIZE,
     V3_CORE_COMMIT_PHASE_OFFSET, V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET, V3_CORE_FUNDING_ACCUMULATOR_OFFSET,
     V3_CORE_LAST_FUNDING_TIMESTAMP_OFFSET, V3_CORE_SNAPSHOT_EPOCH_OFFSET,

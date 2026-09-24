@@ -10,7 +10,7 @@ const seat = (overrides: Partial<Parameters<typeof equity>[0]> = {}) => ({
   ...overrides,
 });
 
-describe("risk-model (parity with programs/stockstream/src/risk.rs)", () => {
+describe("risk-model (parity with programs/equinox/src/risk.rs)", () => {
   it("notional rejects non-positive price or negative quantity", () => {
     expect(() => notional(1n, 0n)).toThrow();
     expect(() => notional(-1n, 1n)).toThrow();

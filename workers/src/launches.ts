@@ -1,4 +1,4 @@
-/** Registry of Meteora DBC launches made through StockStream, for the Launch
+/** Registry of Meteora DBC launches made through Equinox, for the Launch
  * page's list. Display data only: every number shown is read from the chain. */
 
 export const DBC_PROGRAM_ID = "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN";

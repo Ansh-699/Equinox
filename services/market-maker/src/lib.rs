@@ -1,4 +1,4 @@
-//! StockStream market maker: an always-on devnet quoting bot for the V3
+//! Equinox market maker: an always-on devnet quoting bot for the V3
 //! TSLA-PERP book inside the MagicBlock rollup, meant for a small VM placed
 //! next to the rollup validator (devnet-as is in Singapore).
 

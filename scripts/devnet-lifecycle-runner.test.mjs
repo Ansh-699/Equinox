@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stockstream-v3-runner-"));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), "equinox-v3-runner-"));
 const statePath = path.join(directory, "lifecycle.json");
 const delegationPath = path.join(directory, "delegation.json");
 const commitPath = path.join(directory, "commit.json");

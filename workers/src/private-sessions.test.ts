@@ -93,7 +93,7 @@ it("returns null for an unoccupied seat rather than a false owner", async () => 
 
 /** Sets every `TraderSeat` field at its verified byte offset (see
  * `SEAT_FIELD_OFFSETS` in `private-sessions.ts`, cross-checked against
- * `programs/stockstream/src/state.rs` via `core::mem::offset_of!`), on top
+ * `programs/equinox/src/state.rs` via `core::mem::offset_of!`), on top
  * of the existing `marketWithSeat` fixture. */
 function fullSeatBytes(seatIndex: number, fields: { availableCollateral: bigint; reservedMargin: bigint; basePosition: bigint; realizedPnl: bigint; openOrderCount: number; liquidationState: number; sequence: bigint }): Uint8Array {
   const bytes = marketWithSeat(seatIndex, true, OWNER_BYTES);

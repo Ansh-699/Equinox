@@ -47,16 +47,16 @@ calls the configured URL directly from the browser).
 
 ## 4. A deployed program, market, and vault on Devnet
 
-- `STOCKSTREAM_PROGRAM_ID` is already fixed:
+- `EQUINOX_PROGRAM_ID` is already fixed:
   `H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET` (see `.env.example`).
   Confirm the actual deployed program at that address on Devnet matches
-  what this branch's `clients/stockstream/src/index.ts` decoders expect
+  what this branch's `clients/equinox/src/index.ts` decoders expect
   (`MARKET_VERSION`, account sizes) -- **do this check explicitly**;
   see `docs/abi-handoff-checklist.md` if the canonical ABI package has
   landed by the time this runs, since offsets may have moved.
-- `NEXT_PUBLIC_STOCKSTREAM_MARKET_ADDRESS`,
-  `NEXT_PUBLIC_STOCKSTREAM_SETTLEMENT_SCRATCH_ADDRESS`,
-  `NEXT_PUBLIC_STOCKSTREAM_VAULT`, `NEXT_PUBLIC_STOCKSTREAM_VAULT_AUTHORITY`
+- `NEXT_PUBLIC_EQUINOX_MARKET_ADDRESS`,
+  `NEXT_PUBLIC_EQUINOX_SETTLEMENT_SCRATCH_ADDRESS`,
+  `NEXT_PUBLIC_EQUINOX_VAULT`, `NEXT_PUBLIC_EQUINOX_VAULT_AUTHORITY`
   -- all empty in `.env.example` today. These need real, initialized
   Devnet accounts before any transaction this app constructs will land
   successfully; this branch's UI constructs unsigned previews of the
@@ -65,24 +65,24 @@ calls the configured URL directly from the browser).
 
 ## 5. A reachable, authenticated relayer
 
-`STOCKSTREAM_RELAYER_URL` defaults to `http://localhost:8787` in
+`EQUINOX_RELAYER_URL` defaults to `http://localhost:8787` in
 `.env.example` -- a real deployment needs this pointed at the actual
 deployed Worker. Beyond reachability:
 
-- `.env.example`'s own comment on `STOCKSTREAM_RELAYER_TOKEN` records a
+- `.env.example`'s own comment on `EQUINOX_RELAYER_TOKEN` records a
   **known gap as of this branch**: the Worker route had no per-user auth
   of its own, only a shared bearer conflated with keeper ingestion. The
-  main-agent branch (`stockstream/core-auth-sprint`) has since landed
+  main-agent branch (`equinox/core-auth-sprint`) has since landed
   commits titled "wire the relay route to authoritative Privy auth" and
   "authoritative Privy relayer auth: 20-step verification chain" --
   **verify directly against whichever branch is actually deployed**
   whether this gap is closed, rather than trusting either this stale
   comment or the commit titles alone.
-- `NEXT_PUBLIC_STOCKSTREAM_RELAYER_ADDRESS` (the relayer's public fee-
+- `NEXT_PUBLIC_EQUINOX_RELAYER_ADDRESS` (the relayer's public fee-
   payer address) must be set and must match a real, funded fee-payer the
   Worker actually signs with -- `.env.example` notes this stays unset
   today because nothing in this branch's view of `workers/` assigns
-  `globalThis.__stockstreamRelayerSigner`, which makes every relay
+  `globalThis.__equinoxRelayerSigner`, which makes every relay
   request fail closed with `fee_payer_unavailable`
   (`lib/session-relay-status.ts`) rather than silently proceeding.
   Confirm this is actually wired on whichever Worker deployment is used.

@@ -35,7 +35,7 @@ fi
 echo "balance meets the calculated minimum OK"
 
 echo "== 4. Verify program identity =="
-PROGRAM_ID=$(solana-keygen pubkey .keys/stockstream-program-keypair.json)
+PROGRAM_ID=$(solana-keygen pubkey .keys/equinox-program-keypair.json)
 case "$PROGRAM_ID" in
   H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET) echo "program: $PROGRAM_ID OK";;
   *) echo "REFUSING: program keypair mismatch ($PROGRAM_ID)"; exit 1;;
@@ -57,7 +57,7 @@ if (s.deploymentCheck && !s.deploymentCheck.byteEqual) {
 ")
 if [ "$CHECK" = "upgrade-needed" ]; then
   echo "upgrading the deployed program to the current local artifact..."
-  solana program deploy target/deploy/stockstream.so --url devnet \
+  solana program deploy target/deploy/equinox.so --url devnet \
     --program-id H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET \
     --upgrade-authority ~/.config/solana/id.json \
     --fee-payer ~/.config/solana/id.json --output json

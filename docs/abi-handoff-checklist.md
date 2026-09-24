@@ -1,9 +1,9 @@
 # ABI handoff checklist and rebase procedure
 
 **Status as of this writing: a canonical ABI package already exists on
-`stockstream/core-auth-sprint` but has not been merged into this branch
-(`stockstream/frontend-product`) or acted on. Separately, this branch's
-own SDK (`clients/stockstream/src/index.ts`) already has a complete,
+`equinox/core-auth-sprint` but has not been merged into this branch
+(`equinox/frontend-product`) or acted on. Separately, this branch's
+own SDK (`clients/equinox/src/index.ts`) already has a complete,
 tested per-kind event/oracle payload decoder that predates this session
 and has never been wired into any UI.** All four of this document's
 original open questions are now resolved (see the "Resolved: ..."
@@ -14,18 +14,18 @@ scratch.
 
 ## What actually changed (verified by reading the commits directly, not assumed)
 
-`stockstream/core-auth-sprint` is 12 commits ahead of the point this branch
+`equinox/core-auth-sprint` is 12 commits ahead of the point this branch
 forked from (merge-base `bea420a`). Three of those commits are the ABI
 package:
 
-- `1aea6db` "publish canonical StockStream ABI package" — adds
-  `clients/stockstream/src/abi/{accounts,constants,errors,events,index,
+- `1aea6db` "publish canonical Equinox ABI package" — adds
+  `clients/equinox/src/abi/{accounts,constants,errors,events,index,
   instructions,oracle,orderbook,pda,sessions}.ts` and `layout.json`.
 - `831935d` "add Rust ABI manifest generator with CI parity test" — adds
-  `programs/stockstream/tests/abi_manifest.rs`, a small `book.rs` change,
+  `programs/equinox/tests/abi_manifest.rs`, a small `book.rs` change,
   and the generated `layout.json` the TS constants are transcribed from.
 - `64117c1` "add generate/check ABI parity npm scripts" — adds
-  `npm run generate:stockstream-abi` / `npm run check:stockstream-abi`,
+  `npm run generate:equinox-abi` / `npm run check:equinox-abi`,
   which regenerate `layout.json` from the Rust source via `cargo test`
   and diff it against the checked-in copy. This is a real, CI-enforceable
   parity gate, not a hand-maintained set of constants that can silently
@@ -35,10 +35,10 @@ package:
 merge-base and each branch's tip shows exactly two overlapping files
 between what this branch changed and what `core-auth-sprint` changed:
 `package.json` and `package-lock.json` (see "Rebase procedure" below for
-the exact, trivial diff). Nothing in `clients/stockstream/src/index.ts`
+the exact, trivial diff). Nothing in `clients/equinox/src/index.ts`
 (the module every frontend file in this branch actually imports from) was
 touched by the ABI package commits — the new layout lives entirely under
-a new `clients/stockstream/src/abi/` directory. A rebase of this branch
+a new `clients/equinox/src/abi/` directory. A rebase of this branch
 onto current `core-auth-sprint` should apply cleanly with no code
 conflicts.
 
@@ -50,30 +50,30 @@ one directly against the actual new files:
 | Blocked item | Resolved by the new ABI package? | Detail |
 |---|---|---|
 | Raw order-book (PATRICIA tree) decoding | **Yes** | `orderbook.ts` has real, generated offsets: `ARENA_NODES_OFFSET`, `ANY_NODE_SIZE` (88), `TAG_INNER`/`TAG_LEAF`, and per-field offsets for both `InnerNode` and `LeafNode` (side, quantity, expires_at, peg_limit, price_or_offset, sequence). The V3 Worker aggregate adapter now consumes the validated page/tree projection; `unimplementedOpenOrdersAdapter` is retained only for explicit V2/unknown-version fallback. |
-| Per-kind raw event decoding | **Already resolved on THIS branch, independently of the new ABI package -- see below** | The new `abi/events.ts`'s `EVENT_HEADER_SIZE`/`EVENT_PAYLOAD_SIZE` (12/88) are a **verified bug**, not a real discrepancy to reconcile (see "Resolved: the event-payload-size question" below). Separately and more importantly: `clients/stockstream/src/index.ts` (unchanged between the two branches, i.e. already on THIS branch) already has a complete, unit-tested set of per-kind payload decoders (`decodeOrderPayload`, `decodeFillPayload`, `decodePositionPayload`, `decodeFundingPayload`, `decodeLiquidationPayload`, `decodeOraclePayload`, `decodeDelegationPayload`, `decodeSessionPayload`, `decodeRegistryPayload`, `decodeReconciliationPayload`), matching `programs/stockstream/src/events.rs`'s real `payload_*` builder functions byte-for-byte, with real assertions in `clients/stockstream/src/index.test.ts`. |
-| Raw oracle payload decoding | **The decoder already exists and is tested on THIS branch (`decodeOraclePayload`) -- never wired into any UI** | `clients/stockstream/src/index.ts::decodeOraclePayload` decodes `events::payload_oracle`'s real fields (price, exponent, confidence, session) and is exercised in `index.test.ts`. `lib/oracle-safety.ts` was deliberately built to never call it, per the standing "hold" instruction -- see below for why this is flagged as a decision point rather than acted on unilaterally. |
-| Canonical ABI migration (this frontend's own `clients/stockstream/src/index.ts` vs. the new `abi/` package) | **Verified compatible already -- no migration needed for market/session decoding** | `accounts.ts::decodeMarketHeader` and `sessions.ts::decodeTradingSession` were checked field-by-field against this branch's existing `decodeMarketState`/`decodeTradingSession`: identical offsets throughout (see the resolved session-discriminator question below). The only genuinely NEW layout the `abi/` package provides that this branch didn't already have is the order book (`orderbook.ts`) -- that's the real, and only, migration item. |
+| Per-kind raw event decoding | **Already resolved on THIS branch, independently of the new ABI package -- see below** | The new `abi/events.ts`'s `EVENT_HEADER_SIZE`/`EVENT_PAYLOAD_SIZE` (12/88) are a **verified bug**, not a real discrepancy to reconcile (see "Resolved: the event-payload-size question" below). Separately and more importantly: `clients/equinox/src/index.ts` (unchanged between the two branches, i.e. already on THIS branch) already has a complete, unit-tested set of per-kind payload decoders (`decodeOrderPayload`, `decodeFillPayload`, `decodePositionPayload`, `decodeFundingPayload`, `decodeLiquidationPayload`, `decodeOraclePayload`, `decodeDelegationPayload`, `decodeSessionPayload`, `decodeRegistryPayload`, `decodeReconciliationPayload`), matching `programs/equinox/src/events.rs`'s real `payload_*` builder functions byte-for-byte, with real assertions in `clients/equinox/src/index.test.ts`. |
+| Raw oracle payload decoding | **The decoder already exists and is tested on THIS branch (`decodeOraclePayload`) -- never wired into any UI** | `clients/equinox/src/index.ts::decodeOraclePayload` decodes `events::payload_oracle`'s real fields (price, exponent, confidence, session) and is exercised in `index.test.ts`. `lib/oracle-safety.ts` was deliberately built to never call it, per the standing "hold" instruction -- see below for why this is flagged as a decision point rather than acted on unilaterally. |
+| Canonical ABI migration (this frontend's own `clients/equinox/src/index.ts` vs. the new `abi/` package) | **Verified compatible already -- no migration needed for market/session decoding** | `accounts.ts::decodeMarketHeader` and `sessions.ts::decodeTradingSession` were checked field-by-field against this branch's existing `decodeMarketState`/`decodeTradingSession`: identical offsets throughout (see the resolved session-discriminator question below). The only genuinely NEW layout the `abi/` package provides that this branch didn't already have is the order book (`orderbook.ts`) -- that's the real, and only, migration item. |
 | Live relayer submission | No change | Unrelated to the ABI package. Still requires the main agent's authenticated relayer to be live and reachable from a real Devnet environment. |
 | Live Devnable browser acceptance | No change | Same -- an environment/infrastructure blocker, not an ABI one. |
 
 ## Resolved: the event-payload-size question (was an open question, now answered)
 
-Read `programs/stockstream/src/events.rs` directly on `core-auth-sprint`
+Read `programs/equinox/src/events.rs` directly on `core-auth-sprint`
 (the real, current, authoritative source -- not either TS file). It
 defines `EVENT_PAYLOAD_SIZE = 48` and `EventHeader` as `discriminator(u16)
 + abi_version(u8) + reserved(u8) + sequence(u64) + market([u8;32]) +
 timestamp(u64)`, which is exactly **52 bytes** (`size_of::<EventHeader>()`
 asserted at compile time in the same file). This matches
 `workers/src/event-decoder.ts`'s 52/48 exactly and matches this branch's
-own `clients/stockstream/src/index.ts` (`EVENT_HEADER_SIZE`/
+own `clients/equinox/src/index.ts` (`EVENT_HEADER_SIZE`/
 `EVENT_PAYLOAD_SIZE` there, unchanged between branches).
 
 **The new `abi/events.ts` and `abi_manifest.rs`'s `EVENT_HEADER_SIZE = 12`,
 `EVENT_PAYLOAD_SIZE = 88` are wrong** -- not a newer/different valid
 framing, a bug. Traced why the generator's own "CI parity" test doesn't
 catch it: `abi_manifest.rs`'s `manifest_constants_are_consistent` test
-only asserts the *total* `EVENT_SIZE` against `stockstream::events::
-EVENT_SIZE` (`assert_eq!(EVENT_SIZE, stockstream::events::EVENT_SIZE)`)
+only asserts the *total* `EVENT_SIZE` against `equinox::events::
+EVENT_SIZE` (`assert_eq!(EVENT_SIZE, equinox::events::EVENT_SIZE)`)
 -- it never independently checks `EVENT_HEADER_SIZE` or
 `EVENT_PAYLOAD_SIZE` against the real constants. `12 + 88 = 100` and
 `52 + 48 = 100` are both correct as *totals*, so the wrong header/payload
@@ -84,31 +84,31 @@ reporting upstream rather than working past it here.
 **Practical consequence:** never use `abi/events.ts`'s
 `EVENT_HEADER_SIZE`/`EVENT_PAYLOAD_SIZE` if/when this branch rebases onto
 `core-auth-sprint`. Keep using the already-correct 52/48 split
-(`workers/src/event-decoder.ts` and `clients/stockstream/src/index.ts`
+(`workers/src/event-decoder.ts` and `clients/equinox/src/index.ts`
 already agree on it) until the generator itself is fixed on that branch.
 
 ## Resolved: per-kind event payload decoding already exists on THIS branch, untouched by the ABI package, and has never been wired to any UI
 
 This is the single most important finding in this document. Reading
-`programs/stockstream/src/events.rs` in full (both branches -- it's
+`programs/equinox/src/events.rs` in full (both branches -- it's
 unchanged between them) shows real, documented, byte-exact payload
 builder functions: `payload_order`, `payload_fill`, `payload_position`,
 `payload_funding`, `payload_liquidation`, `payload_oracle`,
 `payload_delegation`, `payload_session`, `payload_registry`,
 `payload_reconciliation`, each with an exact byte-offset doc comment.
 
-**`clients/stockstream/src/index.ts` already has a matching decoder for
+**`clients/equinox/src/index.ts` already has a matching decoder for
 every one of them** -- `decodeOrderPayload`, `decodeFillPayload`,
 `decodePositionPayload`, `decodeFundingPayload`,
 `decodeLiquidationPayload`, `decodeOraclePayload`,
 `decodeDelegationPayload`, `decodeSessionPayload`,
 `decodeRegistryPayload`, `decodeReconciliationPayload` -- plus
-`decodeStockStreamEvent`, which decodes the 52-byte header and hands back
+`decodeEquinoxEvent`, which decodes the 52-byte header and hands back
 the raw 48-byte payload for one of the above to interpret by kind. These
 are **not new, not experimental, and not part of the ABI package** --
 they predate this session's fork point entirely, and
-`clients/stockstream/src/index.test.ts` already exercises several of them
-(`decodeStockStreamEvent`, `decodeFillPayload`, `decodeSeatAmountPayload`)
+`clients/equinox/src/index.test.ts` already exercises several of them
+(`decodeEquinoxEvent`, `decodeFillPayload`, `decodeSeatAmountPayload`)
 with real fixture bytes.
 
 **Verified nobody in this app actually calls them**: `grep -rl` for every
@@ -141,7 +141,7 @@ unilaterally by continuing past the standing "hold."
 
 ## Further open questions to resolve BEFORE relying on the NEW `abi/` package specifically
 
-Do not start implementing against `clients/stockstream/src/abi/` without
+Do not start implementing against `clients/equinox/src/abi/` without
 resolving these -- guessing past them would be exactly the kind of
 unverified-layout decoding this whole branch has been careful to avoid:
 
@@ -151,7 +151,7 @@ unverified-layout decoding this whole branch has been careful to avoid:
    it is not itself a payload-layout source; the layouts are in
    `events.rs` (see above, now resolved).
 2. ~~Session discriminator/offset reconciliation.~~ **Resolved: already
-   matches, no action needed.** `clients/stockstream/src/index.ts::
+   matches, no action needed.** `clients/equinox/src/index.ts::
    decodeTradingSession` (unchanged between branches) already checks
    `discriminator !== "STKSES02"` and every single field offset (owner
    12-44, sessionSigner 44-76, targetProgram 76-108, market 108-140,
@@ -173,13 +173,13 @@ unverified-layout decoding this whole branch has been careful to avoid:
 
 ## Rebase procedure
 
-Run from a worktree on `stockstream/frontend-product` (this branch), with
+Run from a worktree on `equinox/frontend-product` (this branch), with
 a clean working tree (`git status` first -- stash or commit anything
 outstanding).
 
 ```sh
 git fetch origin  # or wherever core-auth-sprint actually lives for you
-git rebase stockstream/core-auth-sprint
+git rebase equinox/core-auth-sprint
 ```
 
 Expected outcome: applies cleanly except for one small, easily-resolved
@@ -191,12 +191,12 @@ is the `scripts` block growing on both sides:
 -    "test:browser": "playwright test"
 +    "test:browser": "playwright test",
 +    "test:browser:production": "playwright test --config=playwright.production.config.ts"
-+    "generate:stockstream-abi": "...",
-+    "check:stockstream-abi": "..."
++    "generate:equinox-abi": "...",
++    "check:equinox-abi": "..."
 ```
 
 Resolution: keep both sides' additions (this branch's `test:browser*`
-entries plus `core-auth-sprint`'s `generate/check:stockstream-abi`
+entries plus `core-auth-sprint`'s `generate/check:equinox-abi`
 entries), then run `npm install` to regenerate a consistent
 `package-lock.json` rather than hand-editing the lockfile. Re-run
 `npx tsc --noEmit`, `npx eslint .`, `npm test`, and `npm run test:browser`
@@ -210,7 +210,7 @@ confirmed compatible/no-op, one confirmed a bug to avoid). What's left
 is implementation work and one real decision, in dependency order:
 
 1. **Decision point, not implementation**: whether to wire
-   `clients/stockstream/src/index.ts`'s already-existing, already-tested
+   `clients/equinox/src/index.ts`'s already-existing, already-tested
    per-kind decoders (`decodeOraclePayload`, `decodeOrderPayload`,
    `decodeFillPayload`, etc.) into `lib/oracle-safety.ts` and
    `lib/activity-view-model.ts`. This is flagged, not decided, in this

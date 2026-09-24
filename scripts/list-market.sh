@@ -4,7 +4,7 @@
 #   scripts/list-market.sh <SYMBOL> <feed-id> meteora <damm-v2-pool> <base-mint> [lot=1000000]
 #   scripts/list-market.sh <SYMBOL> <feed-id> prestocks <PRESTOCKS_TOKEN> <token-mint>
 # Steps: create the market (~1.3 devnet SOL from the authority) -> name the VM
-# keeper as reporter and keeper -> add it to config/stockstream-deployment.json
+# keeper as reporter and keeper -> add it to config/equinox-deployment.json
 # -> rebuild the VM service (reporter starts posting) -> seat and fund the bots
 # -> delegate the 27 accounts -> restart the service (bots start quoting).
 # Signs with the market authority (~/.config/solana/id.json) -- run locally only.
@@ -24,7 +24,7 @@ node scripts/v3-set-keeper.mjs "$KEEPER"
 python3 - "$market" "$symbol" "$kind" "$source" "$mint" "$lot" "$feed" <<'PY'
 import json, os, sys
 market, symbol, kind, source, mint, lot, feed = sys.argv[1:]
-p = "config/stockstream-deployment.json"; d = json.load(open(p))
+p = "config/equinox-deployment.json"; d = json.load(open(p))
 s = json.load(open(os.path.expanduser(f"~/.local/state/stockstream/preipo-{symbol.lower()}-state.json")))
 oracle = {"kind": "meteora", "pool": source, "mint": mint, "lot": float(lot), "feedId": int(feed)} if kind == "meteora" else {"kind": "prestocks", "token": source, "mint": mint, "feedId": int(feed)}
 entry = {"symbol": market, "name": symbol + (f" (per {int(float(lot)):,} tokens)" if kind == "meteora" else ""), "kind": "launch" if kind == "meteora" else "pre-ipo",
@@ -35,8 +35,8 @@ print("registered", market)
 PY
 
 deploy_vm() {
-  tar -czf - config/stockstream-deployment.json programs/stockstream/src programs/stockstream/Cargo.toml services/market-maker/src services/market-maker/Cargo.toml services/market-maker/Cargo.lock \
-    | ssh -i "$SSH_KEY" "$VM" 'cd ~/stockstream-build && tar -xzf - && sudo docker build -q -f services/market-maker/Dockerfile -t stockstream-mm . >/dev/null && id=$(sudo docker create stockstream-mm) && sudo docker cp $id:/usr/local/bin/stockstream-market-maker /tmp/mm.new && sudo docker rm $id >/dev/null && sudo install -m 755 /tmp/mm.new /usr/local/bin/stockstream-market-maker && sudo systemctl restart stockstream-mm'
+  tar -czf - config/equinox-deployment.json programs/equinox/src programs/equinox/Cargo.toml services/market-maker/src services/market-maker/Cargo.toml services/market-maker/Cargo.lock \
+    | ssh -i "$SSH_KEY" "$VM" 'cd ~/equinox-build && tar -xzf - && sudo docker build -q -f services/market-maker/Dockerfile -t stockstream-mm . >/dev/null && id=$(sudo docker create stockstream-mm) && sudo docker cp $id:/usr/local/bin/equinox-market-maker /tmp/mm.new && sudo docker rm $id >/dev/null && sudo install -m 755 /tmp/mm.new /usr/local/bin/equinox-market-maker && sudo systemctl restart stockstream-mm'
 }
 deploy_vm
 echo "waiting for the reporter's first price…"; sleep 30

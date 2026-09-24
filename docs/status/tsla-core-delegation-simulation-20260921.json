@@ -53,7 +53,7 @@
     "error": null,
     "unitsConsumed": 45060,
     "signatureVerified": true,
-    "stockStreamSucceeded": true,
+    "equinoxSucceeded": true,
     "delegationProgramSucceeded": true
   },
   "excluded": [

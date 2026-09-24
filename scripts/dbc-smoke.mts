@@ -23,7 +23,7 @@ const send = async (tx: Transaction, lastValidBlockHeight: number) => {
 };
 const preset = LAUNCH_PRESETS.find((p) => p.id === "devnet")!;
 const before = await connection.getBalance(creator.publicKey);
-const launch = await buildLaunchTransaction(connection, { name: "Smoke Equity", symbol: "SMOKE", uri: "https://stockstream.ansht.workers.dev/favicon.svg", preset, creator: creator.publicKey });
+const launch = await buildLaunchTransaction(connection, { name: "Smoke Equity", symbol: "SMOKE", uri: "https://equinox.ansht.workers.dev/favicon.svg", preset, creator: creator.publicKey });
 console.log("launch", await send(launch.transaction, launch.lastValidBlockHeight), "pool", launch.pool.toBase58(), "cost SOL", (before - await connection.getBalance(creator.publicKey)) / 1e9);
 fs.writeFileSync(`${process.env.HOME}/.local/state/stockstream/dbc-smoke.json`, JSON.stringify({ pool: launch.pool.toBase58(), mint: launch.baseMint.toBase58(), creator: [...creator.secretKey] }), { mode: 0o600 });
 console.log("fresh", await readPool(connection, launch.pool));

@@ -12,7 +12,7 @@ async function setRelayerMode(mode: string, resetNonce = false) {
 }
 
 async function promptCount(page: Page): Promise<number> {
-  return page.evaluate(() => window.__stockstreamE2E?.promptCount ?? 0);
+  return page.evaluate(() => window.__equinoxE2E?.promptCount ?? 0);
 }
 
 async function login(page: Page) {
@@ -23,7 +23,7 @@ async function login(page: Page) {
   // finishes its own async POST /api/auth/session -- authorizeSession()
   // needs the LATTER, or it can race a still-null `protocol` on a cold
   // (not-yet-warmed) dev server and silently no-op.
-  await expect(page.getByRole("region", { name: "StockStream status" }).getByText("authenticated", { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("region", { name: "Equinox status" }).getByText("authenticated", { exact: true })).toBeVisible({ timeout: 10_000 });
 }
 
 async function authorizeSession(page: Page) {
@@ -58,7 +58,7 @@ test("opens on Devnet with a visible risk indicator", async ({ page }) => {
 test("login shows the active wallet, matching the test-mode signer's address", async ({ page }) => {
   await page.goto("/trade");
   await login(page);
-  const address = await page.evaluate(() => window.__stockstreamE2E?.walletAddress);
+  const address = await page.evaluate(() => window.__equinoxE2E?.walletAddress);
   expect(address).toBeTruthy();
   await expect(page.locator(".wallet-button").first()).toContainText(address!.slice(0, 4));
 });
@@ -229,7 +229,7 @@ test("a dropped app session surfaces authentication_required, not a silent failu
   // -- the CSRF cookie stays, so the request genuinely reaches the relay
   // proxy and is rejected there (app/api/relay/session/route.ts's own
   // readPersistentSession check), rather than short-circuiting client-side.
-  await context.clearCookies({ name: "stockstream_session" });
+  await context.clearCookies({ name: "equinox_session" });
   await page.getByRole("button", { name: "Place order" }).click();
   await expect(page.locator(".notice")).toContainText("Authentication required", { timeout: 10_000 });
   await expect(page.locator(".notice")).toContainText("No application session");
@@ -239,7 +239,7 @@ test("no server secret names appear anywhere in the rendered page or its scripts
   await page.goto("/trade");
   await login(page);
   const html = await page.content();
-  for (const secret of ["PRIVY_APP_SECRET", "PYTH_PRO_API_KEY", "KEEPER_KEYPAIR_JSON", "STOCKSTREAM_RELAYER_TOKEN", "mock-relayer-token"]) {
+  for (const secret of ["PRIVY_APP_SECRET", "PYTH_PRO_API_KEY", "KEEPER_KEYPAIR_JSON", "EQUINOX_RELAYER_TOKEN", "mock-relayer-token"]) {
     expect(html).not.toContain(secret);
   }
 });

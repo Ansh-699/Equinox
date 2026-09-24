@@ -40,7 +40,7 @@ const LABEL = "text-[12px] text-[var(--t-text-2)]";
 const ROW = "flex h-[22px] items-center justify-between border-b border-[var(--t-surface-2)] last:border-b-0";
 const CHIP = `tnum h-[26px] rounded-[4px] border border-[var(--t-border-strong)] bg-[var(--t-surface)] text-[11.5px] text-[var(--t-text-2)] hover:text-[var(--t-text)] ${FOCUS}`;
 
-/** Order entry (SlipStream OrderForm) for a StockStream perp. */
+/** Order entry (SlipStream OrderForm) for a Equinox perp. */
 export function OrderTicket({
   ticket,
   onChange,

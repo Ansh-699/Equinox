@@ -21,7 +21,7 @@ function Empty({ children }: { children: ReactNode }) {
 }
 const Loading = ({ what }: { what: string }) => <Empty><Spinner /> Loading {what} from the rollup…</Empty>;
 
-/** Entry = Σ(qty × raw price) ÷ position (programs/stockstream/src/risk.rs), in USD. */
+/** Entry = Σ(qty × raw price) ÷ position (programs/equinox/src/risk.rs), in USD. */
 export function positionView(seat: TraderSeatView, markPrice: number | null) {
   const base = Number(seat.basePosition);
   if (base === 0) return null;

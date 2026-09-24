@@ -5,8 +5,8 @@ import { routeSessionDatabase, revokePersistentSession } from "@/lib/auth/route-
 
 export async function POST(request: Request) {
   const cookieStore = await cookies();
-  const csrf = cookieStore.get("stockstream_csrf")?.value;
-  if (!csrf || request.headers.get("x-stockstream-csrf") !== csrf) return NextResponse.json({ error: "CSRF validation failed" }, { status: 403 });
+  const csrf = cookieStore.get("equinox_csrf")?.value;
+  if (!csrf || request.headers.get("x-equinox-csrf") !== csrf) return NextResponse.json({ error: "CSRF validation failed" }, { status: 403 });
   const raw = cookieStore.get(SESSION_COOKIE)?.value;
   if (raw) await revokePersistentSession(routeSessionDatabase(), raw);
   const response = NextResponse.json({ ok: true });

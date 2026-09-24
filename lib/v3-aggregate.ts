@@ -1,4 +1,4 @@
-import deployment from "@/config/stockstream-deployment.json";
+import deployment from "@/config/equinox-deployment.json";
 import { MagicRouterTransport } from "../workers/src/chain-transports";
 import { deriveBookPageV3, deriveEventShardV3, deriveSeatShardV3, V3_BOOK_PAGES_PER_SIDE } from "../workers/src/v3-pdas";
 import { fetchAuthoritativeV3Market, v3JsonValue } from "../workers/src/v3-market-state";

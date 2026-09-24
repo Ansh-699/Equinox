@@ -17,6 +17,6 @@
     "Program H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET consumed 771 of 200000 compute units",
     "Program H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET failed: custom program error: 0x600e"
   ],
-  "interpretation": "The preserved core is still delegated but the 26 child shards are restored to StockStream, so a full 27-account commit cannot proceed from the current safe state. Historical size-rejection and DLP-version evidence remains in the support bundle.",
+  "interpretation": "The preserved core is still delegated but the 26 child shards are restored to Equinox, so a full 27-account commit cannot proceed from the current safe state. Historical size-rejection and DLP-version evidence remains in the support bundle.",
   "safety": "Simulation only; no transaction submitted and no account mutated."
 }

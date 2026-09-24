@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { TopBar } from "@/components/layout/top-bar";
 import { useAppAuth } from "@/components/app-providers";
-import { useStockStreamProtocol } from "@/features/wallet/use-stockstream-protocol";
+import { useEquinoxProtocol } from "@/features/wallet/use-equinox-protocol";
 import { useTradingKey } from "@/features/wallet/use-trading-key";
 import { useV3Book } from "@/features/trading/use-v3-book";
 import { seatFromPositions } from "@/features/trading/rollup-seat";
@@ -17,7 +17,7 @@ import { useWalletBalances } from "./use-wallet-balances";
 import { marketForSymbol } from "@/lib/markets";
 import { deriveCollateralTokenAccount } from "@/lib/token-accounts";
 
-const marketApiUrl = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_API_URL;
+const marketApiUrl = process.env.NEXT_PUBLIC_EQUINOX_MARKET_API_URL;
 
 function formatLamports(lamports: bigint | null): string {
   if (lamports === null) return "--";
@@ -26,14 +26,14 @@ function formatLamports(lamports: bigint | null): string {
 
 export function PortfolioView() {
   const auth = useAppAuth();
-  const marketSymbol = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_SYMBOL ?? "AAPL-PERP";
+  const marketSymbol = process.env.NEXT_PUBLIC_EQUINOX_MARKET_SYMBOL ?? "AAPL-PERP";
   const marketConfig = marketForSymbol(marketSymbol);
-  const marketAddress = process.env.NEXT_PUBLIC_STOCKSTREAM_MARKET_ADDRESS ?? marketConfig.marketPda;
+  const marketAddress = process.env.NEXT_PUBLIC_EQUINOX_MARKET_ADDRESS ?? marketConfig.marketPda;
   // Same identity as the Trade page: the in-app trading key, once unlocked there.
   const tradingKey = useTradingKey(auth);
   const trader = tradingKey.signer?.address ?? auth.walletAddress;
-  const protocol = useStockStreamProtocol(auth.authenticated ? marketAddress : null, tradingKey.signer);
-  const v3Core = process.env.NEXT_PUBLIC_STOCKSTREAM_V3_CORE_ADDRESS;
+  const protocol = useEquinoxProtocol(auth.authenticated ? marketAddress : null, tradingKey.signer);
+  const v3Core = process.env.NEXT_PUBLIC_EQUINOX_V3_CORE_ADDRESS;
   const l1Position = usePosition(protocol?.rpc ?? null, marketAddress, 0, { marketApiUrl, core: v3Core, ...(v3Core ? { trader: trader ?? null } : {}) });
   const executionStatus = useExecutionStatus(marketApiUrl, marketSymbol);
   // While delegated the rollup holds the live seat.
@@ -48,8 +48,8 @@ export function PortfolioView() {
   const withdrawGate = delegated && !executionStatus?.commitPending ? { allowed: true } : l1Gate;
   const [amount, setAmount] = useState("100");
 
-  const mint = process.env.NEXT_PUBLIC_STOCKSTREAM_COLLATERAL_MINT;
-  const tokenProgram = process.env.NEXT_PUBLIC_STOCKSTREAM_TOKEN_PROGRAM;
+  const mint = process.env.NEXT_PUBLIC_EQUINOX_COLLATERAL_MINT;
+  const tokenProgram = process.env.NEXT_PUBLIC_EQUINOX_TOKEN_PROGRAM;
   const collateralTokenAccount = trader && mint && tokenProgram ? deriveCollateralTokenAccount(trader, mint, tokenProgram) : null;
   const balances = useWalletBalances(protocol?.rpc ?? null, trader, collateralTokenAccount);
 

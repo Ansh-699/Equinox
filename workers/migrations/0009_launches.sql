@@ -1,4 +1,4 @@
--- Meteora DBC launches made through StockStream (display registry; the chain is the truth).
+-- Meteora DBC launches made through Equinox (display registry; the chain is the truth).
 CREATE TABLE IF NOT EXISTS launches (
   pool TEXT PRIMARY KEY,
   base_mint TEXT NOT NULL,

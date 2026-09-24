@@ -133,7 +133,7 @@ export function LandingView() {
         <div className={styles.megaInner}>
           <div className={styles.megaBrand}>
             <img src="/favicon.svg" alt="" width={30} height={30} className={styles.megaGem} />
-            STOCKSTREAM
+            EQUINOX
           </div>
           <div className={styles.megaCols}>
             <div>
@@ -162,11 +162,11 @@ export function LandingView() {
           </div>
           <div className={styles.megaRule} />
           <p className={styles.megaCopy}>
-            © 2026 StockStream. Devnet build — test USDC, not real funds. The rollup operator orders and matches trades; it cannot move collateral or settle against a price it chose.
+            © 2026 Equinox. Devnet build — test USDC, not real funds. The rollup operator orders and matches trades; it cannot move collateral or settle against a price it chose.
           </p>
         </div>
         <div className={styles.megaMark} aria-hidden>
-          <span className={styles.megaMarkText}>STOCKSTREAM</span>
+          <span className={styles.megaMarkText}>EQUINOX</span>
         </div>
       </footer>
     </div>

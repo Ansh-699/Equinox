@@ -3,14 +3,14 @@ import { beforeAll, expect, it, vi } from 'vitest';
 import { fetchExecutionStatus, fetchV3MarketSnapshot, runIngestionTick, runKeeperOrchestrationTick } from './index';
 import { eventLogLine } from './test-event-fixtures';
 import { getBase58Decoder, getBase58Encoder } from '@solana/kit';
-import { STOCKSTREAM_PROGRAM_ID } from '../../clients/stockstream/src/constants';
+import { EQUINOX_PROGRAM_ID } from '../../clients/equinox/src/constants';
 
 const bindings = env as Env & { TEST_MIGRATIONS: Parameters<typeof applyD1Migrations>[1] };
 beforeAll(async () => { await applyD1Migrations(bindings.DB!, bindings.TEST_MIGRATIONS); });
 
 const token = 'test-only-ingestion';
 function request(path: string, body: unknown): Request {
-  return new Request(`https://stockstream.test${path}`, {
+  return new Request(`https://equinox.test${path}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: JSON.stringify(body),
@@ -40,7 +40,7 @@ it('fetchV3MarketSnapshot performs one atomic 27-account read and preserves its 
   const fetcher = vi.fn(async (_input: unknown, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body)) as { method: string; params: [string[]] };
     requests.push({ method: body.method, addresses: body.params[0] });
-    return Response.json({ jsonrpc: '2.0', id: 1, result: { context: { slot: 77 }, value: accounts.map((bytes) => ({ data: [base64(bytes), 'base64'], owner: STOCKSTREAM_PROGRAM_ID, lamports: 1 })) } });
+    return Response.json({ jsonrpc: '2.0', id: 1, result: { context: { slot: 77 }, value: accounts.map((bytes) => ({ data: [base64(bytes), 'base64'], owner: EQUINOX_PROGRAM_ID, lamports: 1 })) } });
   }) as unknown as typeof fetch;
   const aggregate = await fetchV3MarketSnapshot({ SOLANA_RPC_URL: 'https://l1.fixture.test' } as unknown as Env, coreAddress, 'l1', fetcher);
   expect(aggregate).toMatchObject({ asOfSlot: 77, completeBook: true, completeExecutionState: true });
@@ -149,9 +149,9 @@ it('fetchExecutionStatus reports undefined without an RPC endpoint configured, a
 });
 
 it('reports keeper health (leases, due dead letters, and job configuration), and requires authorization', async () => {
-  const unauthorized = await SELF.fetch(new Request('https://stockstream.test/v1/health/keepers'));
+  const unauthorized = await SELF.fetch(new Request('https://equinox.test/v1/health/keepers'));
   expect(unauthorized.status).toBe(401);
-  const response = await SELF.fetch(new Request('https://stockstream.test/v1/health/keepers', { headers: { Authorization: `Bearer ${token}` } }));
+  const response = await SELF.fetch(new Request('https://equinox.test/v1/health/keepers', { headers: { Authorization: `Bearer ${token}` } }));
   expect(response.status).toBe(200);
   const body = await response.json<{ deadLetters: { due: number }; leases: unknown[]; keeperConfiguration: { pyth: string; signer: string; magicRouter: string } }>();
   expect(typeof body.deadLetters.due).toBe('number');
@@ -187,11 +187,11 @@ it('runKeeperOrchestrationTick discovers a registered market and produces a summ
 });
 
 it('e2e test mode bypasses Privy verification for the exact sentinel token, but never for a real-looking one', async () => {
-  const relaySession = (bearer: string) => new Request('https://stockstream.test/v1/relay/session', {
+  const relaySession = (bearer: string) => new Request('https://equinox.test/v1/relay/session', {
     method: 'POST',
     headers: {
       authorization: `Bearer ${bearer}`,
-      'x-stockstream-relayer-service-token': 'test-only-relayer-service-token',
+      'x-equinox-relayer-service-token': 'test-only-relayer-service-token',
       'content-type': 'application/json',
     },
     body: JSON.stringify({

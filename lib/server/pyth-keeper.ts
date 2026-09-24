@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { PublicKey, TransactionInstruction } from '@solana/web3.js';
 import { PythLazerClient, type ParsedFeedPayload } from '@pythnetwork/pyth-lazer-sdk';
-import { consumeOracleUpdate, consumeOracleUpdateV3, CONSUME_ORACLE_UPDATE_MESSAGE_OFFSET } from '../../clients/stockstream/src';
-import { updateOracleSnapshotV3, type V3OracleAccounts, type V3OracleSnapshotAccounts } from '../../clients/stockstream/src/abi/v3-instructions';
+import { consumeOracleUpdate, consumeOracleUpdateV3, CONSUME_ORACLE_UPDATE_MESSAGE_OFFSET } from '../../clients/equinox/src';
+import { updateOracleSnapshotV3, type V3OracleAccounts, type V3OracleSnapshotAccounts } from '../../clients/equinox/src/abi/v3-instructions';
 import { requirePythServerConfig } from '../oracle';
 
 const ED25519_PROGRAM = new PublicKey('Ed25519SigVerify111111111111111111111111111');
@@ -23,9 +23,9 @@ export function loadPythKeeperConfig(env:Record<string,string|undefined>):PythKe
   for(const endpoint of endpoints) if(new URL(endpoint).protocol!=='wss:') throw new Error('Pyth endpoints must use wss');
   const channel=env.PYTH_PRO_MIN_CHANNEL??'fixed_rate@200ms';
   if(!PYTH_CHANNELS.includes(channel as PythChannel)) throw new Error('PYTH_PRO_MIN_CHANNEL must be a documented Pyth Pro channel');
-  const names=['STOCKSTREAM_MARKET_ADDRESS','KEEPER_PUBLIC_KEY','PYTH_PROGRAM_ADDRESS','PYTH_STORAGE_ADDRESS','PYTH_TREASURY_ADDRESS'] as const;
+  const names=['EQUINOX_MARKET_ADDRESS','KEEPER_PUBLIC_KEY','PYTH_PROGRAM_ADDRESS','PYTH_STORAGE_ADDRESS','PYTH_TREASURY_ADDRESS'] as const;
   for(const name of names) if(!env[name]) throw new Error(`${name} is required`);
-  return {apiKey:base.apiKey,feedId,endpoints,channel:channel as PythChannel,accounts:{market:env.STOCKSTREAM_MARKET_ADDRESS!,payer:env.KEEPER_PUBLIC_KEY!,pythProgram:env.PYTH_PROGRAM_ADDRESS!,storage:env.PYTH_STORAGE_ADDRESS!,treasury:env.PYTH_TREASURY_ADDRESS!,systemProgram:SYSTEM_PROGRAM,instructionsSysvar:'Sysvar1nstructions1111111111111111111111111'}};
+  return {apiKey:base.apiKey,feedId,endpoints,channel:channel as PythChannel,accounts:{market:env.EQUINOX_MARKET_ADDRESS!,payer:env.KEEPER_PUBLIC_KEY!,pythProgram:env.PYTH_PROGRAM_ADDRESS!,storage:env.PYTH_STORAGE_ADDRESS!,treasury:env.PYTH_TREASURY_ADDRESS!,systemProgram:SYSTEM_PROGRAM,instructionsSysvar:'Sysvar1nstructions1111111111111111111111111'}};
 }
 const defaultFactory:ClientFactory=async config=>{
   const client=await PythLazerClient.create({token:config.apiKey,webSocketPoolConfig:{urls:[...config.endpoints]}});

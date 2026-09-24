@@ -10,7 +10,7 @@ import {
 } from "./chain-transports";
 
 /** A real mock HTTP server for the JSON-RPC transport: parses the actual
- * request body StockStream's transports send and returns the real
+ * request body Equinox's transports send and returns the real
  * `{jsonrpc, id, result}` (or `error`) envelope shape a Solana RPC node
  * would, keyed by method name -- not a stubbed transport interface. */
 function mockRpcServer(handlers: Record<string, (params: unknown[]) => unknown>): typeof fetch {

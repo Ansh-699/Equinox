@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Bounded StockStream MagicBlock Devnet lifecycle.
+ * Bounded Equinox MagicBlock Devnet lifecycle.
  * Resumable stages (checkpoint state in /tmp/opencode/lifecycle-state.json).
  * Never prints secret bytes.
  */
@@ -17,7 +17,7 @@ const RPC = "https://api.devnet.solana.com";
 const ROUTER = "https://devnet-router.magicblock.app";
 const CONNECTION = new Connection(RPC, "confirmed");
 const STATE_PATH = "/tmp/opencode/lifecycle-state.json";
-const PROGRAM_ID = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? "8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ");
+const PROGRAM_ID = new PublicKey(process.env.EQUINOX_PROGRAM_ID ?? "8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ");
 const DELEGATION_PROGRAM = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
 const MAGIC_PROGRAM = new PublicKey("Magic11111111111111111111111111111111111111");
 const MAGIC_CONTEXT = new PublicKey("MagicContext1111111111111111111111111111111");
@@ -341,7 +341,7 @@ async function readErAccount(address) {
 }
 
 /** `TradingSession.next_expected_nonce` (offset 201, u64 LE) -- see
- * clients/stockstream/src/abi/sessions.ts::decodeTradingSession, the
+ * clients/equinox/src/abi/sessions.ts::decodeTradingSession, the
  * canonical decoder this offset is taken from. */
 async function readSessionNonce(sessionAddress) {
   const account = await readErAccount(sessionAddress);
@@ -359,7 +359,7 @@ function writeU128LE(buf, offset, value) {
   buf.writeBigUInt64LE(value >> 64n, offset + 8);
 }
 
-// PATRICIA arena layout -- clients/stockstream/src/abi/orderbook.ts is the
+// PATRICIA arena layout -- clients/equinox/src/abi/orderbook.ts is the
 // canonical source for every one of these offsets.
 const BID_ARENA_OFFSET = 512;
 const ASK_ARENA_OFFSET = 91_152;
@@ -685,7 +685,7 @@ async function stageUndelegate() {
 }
 
 /** Waits for the Delegation Program's async external-undelegate callback
- * to actually restore the market to StockStream ownership on L1 --
+ * to actually restore the market to Equinox ownership on L1 --
  * `commit_and_undelegate`/`undelegate` only request undelegation; the real
  * ownership handoff happens later, out of band, once the validator
  * processes it. */
@@ -701,7 +701,7 @@ async function stageRestore() {
       return;
     }
     if (Date.now() > deadline) {
-      throw new Error(`market did not restore to StockStream ownership within 120s (owner=${info ? info.owner.toBase58() : "missing"})`);
+      throw new Error(`market did not restore to Equinox ownership within 120s (owner=${info ? info.owner.toBase58() : "missing"})`);
     }
     log(`waiting for restore... current owner=${info ? info.owner.toBase58() : "missing"}`);
     await new Promise((resolve) => setTimeout(resolve, 3000));
@@ -711,7 +711,7 @@ async function stageRestore() {
 async function stageWithdraw() {
   const state = load();
   if (state.withdrawn) { log("already withdrawn:", state.withdrawn); return; }
-  if (!state.restored) throw new Error("restore first (market must be back under StockStream ownership before an L1 withdrawal)");
+  if (!state.restored) throw new Error("restore first (market must be back under Equinox ownership before an L1 withdrawal)");
   const market = pk(state.market);
   const mint = pk(state.mint);
   const vault = PublicKey.findProgramAddressSync([Buffer.from("vault"), market.toBuffer()], PROGRAM_ID)[0];
@@ -731,7 +731,7 @@ async function stageWithdraw() {
   })], [authority]);
   const reconciledHeader = await CONNECTION.getAccountInfo(market);
   // Offset 473: RESERVED_RECONCILIATION_STATUS_OFFSET, per the generated
-  // clients/stockstream/src/abi/layout.json (compiler-verified via
+  // clients/equinox/src/abi/layout.json (compiler-verified via
   // offset_of!, never hand-guessed).
   log("reconciliation status:", reconciledHeader.data[473], "(1=Reconciled expected)");
 

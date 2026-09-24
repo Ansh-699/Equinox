@@ -1,6 +1,6 @@
-//! StockStream V3 market layout: the 27-account execution bundle, the
+//! Equinox V3 market layout: the 27-account execution bundle, the
 //! order instructions the maker sends (byte-compatible with
-//! clients/stockstream), and decoders for the accounts it reads.
+//! clients/equinox), and decoders for the accounts it reads.
 
 use crate::quotes::{RestingOrder, Side};
 use crate::solana::{find_program_address, AccountMeta, Instruction, Pubkey};

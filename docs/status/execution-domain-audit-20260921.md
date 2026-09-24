@@ -1,8 +1,8 @@
-# StockStream execution-domain and order-book audit
+# Equinox execution-domain and order-book audit
 
 Audit date: 2026-09-21
 Repository HEAD: `288cb5d4b48d8e32d92fe1cfb071a4e1bc294a5e`
-Branch: `stockstream/takeover-ee3c5f6`
+Branch: `equinox/takeover-ee3c5f6`
 Program: `H3UogXdaamHi4Ga9ZzrZNNttCRpasZgarexVyNTZvGET`
 Preserved V3 core: `47Mx7SZvt7EY6NydsA5krgrqvcDDR1H5BG5xTPDSnhso`
 
@@ -22,7 +22,7 @@ protocol verification gate. No full gate was rerun on the final audit commit.
 
 ## Executive summary
 
-StockStream implements an onchain Pinocchio/PATRICIA perpetuals matcher
+Equinox implements an onchain Pinocchio/PATRICIA perpetuals matcher
 designed to execute inside a MagicBlock Ephemeral Rollup using a 27-account V3
 execution bundle. The matching, risk, liquidation, session, relayer, and
 frontend paths are substantially implemented and locally tested. The complete
@@ -61,7 +61,7 @@ The distinction is important:
 - **Source-designed ER:** V3 handlers and routing are designed for delegated
   MagicBlock ER execution.
 - **Current live ER state:** 27 accounts exist, but only the core is delegated;
-  26 children are restored and owned by StockStream.
+  26 children are restored and owned by Equinox.
 - **Local/mock ER tests:** transport, routing, relayer, and browser fixture
   tests exercise ER-shaped paths without proving a live trade.
 - **Actual live ER trade evidence:** none. There is no verified session-signed
@@ -73,7 +73,7 @@ The distinction is important:
 Browser order ticket
   -> features/trading/trading-terminal.tsx::submitOrder
   -> features/sessions/use-session-order.ts::placeSessionOrder
-  -> clients/stockstream/src/abi/v3-instructions.ts::placeOrderV3
+  -> clients/equinox/src/abi/v3-instructions.ts::placeOrderV3
      (canonical 27-account bundle + authority + optional session PDA)
   -> lib/session-trading.ts::buildSessionSignedTransaction
      (browser-local session signature; relayer fee-payer slot empty)
@@ -84,8 +84,8 @@ Browser order ticket
      (exact program/opcode/accounts/signatures/blockhash/nonce/policy)
   -> workers/src/session-relayer.ts::relaySessionTransaction
      -> SolanaL1Transport OR MagicBlockErTransport, selected by `l1`/`er`
-  -> programs/stockstream/src/handlers.rs dispatch
-  -> programs/stockstream/src/v3.rs::place_order_v3
+  -> programs/equinox/src/handlers.rs dispatch
+  -> programs/equinox/src/v3.rs::place_order_v3
   -> v3.rs::plan_crossing_cross_tree
   -> v3.rs::apply_match_plan
   -> v3.rs::settle_v3_fill
@@ -103,7 +103,7 @@ preconditions.
 
 ## Canonical V3 account bundle
 
-`programs/stockstream/src/v3.rs` defines
+`programs/equinox/src/v3.rs` defines
 `V3_EXECUTION_BUNDLE_LEN = 1 + 18 + 4 + 4 = 27`:
 
 1. one `MarketCoreV3` account;
@@ -164,7 +164,7 @@ At L1 slot `501826534` and ER slot `600894159`:
   book pages 10,184 bytes, seat shards 8,236 bytes, event shards 3,244 bytes;
 - delegated count is 1: only core
   `47Mx7SZvt7EY6NydsA5krgrqvcDDR1H5BG5xTPDSnhso`;
-- all 26 child pages/shards are restored and owned by the StockStream program;
+- all 26 child pages/shards are restored and owned by the Equinox program;
 - the complete writable 27-account ER bundle is **not** ER-ready;
 - no real live place/crossing/cancel transaction is evidenced;
 - no real live fill or position/PnL/fee/funding readback is evidenced;
@@ -221,7 +221,7 @@ transaction was sent.
 
 ### Immutable deployed program
 
-The deployed StockStream program reports upgrade authority `none`, and its ELF
+The deployed Equinox program reports upgrade authority `none`, and its ELF
 does not match the current local artifact. No upgrade is possible on this ID.
 
 ### Missing live evidence
@@ -242,7 +242,7 @@ relayer checks; no demo action was routed into the preserved delegated core.
 
 ## Final claim
 
-StockStream implements an onchain Pinocchio/PATRICIA perpetuals matcher designed
+Equinox implements an onchain Pinocchio/PATRICIA perpetuals matcher designed
 to execute inside a MagicBlock Ephemeral Rollup using a 27-account V3 execution
 bundle. The matching, risk, liquidation, session, relayer, and frontend paths
 are substantially implemented and locally tested. The complete V3 matcher is

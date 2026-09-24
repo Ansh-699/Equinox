@@ -42,8 +42,8 @@ the specifications above.
 | `live-devnet-runbook.md` | Resumable live Devnet lifecycle procedure |
 | `pyth-ops.md` | Pyth catalog, entitlement, and incident procedure |
 | `security-review-preparation.md` | Audit-readiness and evidence checklist |
-| `stockstream-build-record.md` | Reproducible build and artifact verification |
-| `stockstream-devnet-release-gate.md` | Devnet release acceptance gate |
+| `equinox-build-record.md` | Reproducible build and artifact verification |
+| `equinox-devnet-release-gate.md` | Devnet release acceptance gate |
 | `testing.md` | Test commands and verification scope |
 | `abi-handoff-checklist.md` | ABI handoff and rebase checklist |
 | `accessibility.md` | Frontend accessibility verification |
@@ -61,8 +61,8 @@ authority, unless `docs/status/current.md` explicitly cites them.
 | `phase-2-external-references.md` | External concept references |
 | `research-log.md` | External research log |
 | `sbpf-compatibility.md` | SBPF compatibility investigation |
-| `stockstream-roadmap.md` | Prioritized roadmap and planning record |
-| `stockstream-separation-report.md` | Historical separation analysis |
+| `equinox-roadmap.md` | Prioritized roadmap and planning record |
+| `equinox-separation-report.md` | Historical separation analysis |
 
 `README.md` is the navigation map for this directory. New status evidence
 belongs under `docs/status/`; dated evidence files should not be silently

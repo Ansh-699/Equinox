@@ -5,7 +5,7 @@ bounded settlement plan on the SBF stack. The canonical PDA seeds are
 `[b"settlement", market_pubkey, trader_seat_index_le_bytes]`. This keeps active
 traders independent and avoids a global settlement lock.
 
-The account is StockStream-owned, writable, exact-length, versioned, and bound
+The account is Equinox-owned, writable, exact-length, versioned, and bound
 to its market, trader public key, and seat index. It is distinct from the market
 account and signer. `InitializeSettlementScratch` requires the trader signer
 and validates this binding. Account creation funding and System Program CPI are

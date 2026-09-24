@@ -4,7 +4,7 @@ declare global {
   interface Window { Buffer: typeof Buffer; }
 }
 
-// @solana/web3.js and the generated StockStream client construct instruction
+// @solana/web3.js and the generated Equinox client construct instruction
 // data with the Node `Buffer` global. Next.js's browser bundle does not
 // provide one, so any on-chain instruction built client-side throws
 // "Buffer is not defined" without this. Import this module once from a

@@ -22,7 +22,7 @@ RELAYER_KEYPAIR_JSON
 `RELAYER_KEYPAIR_JSON` must be the approved fee-payer keypair and must be
 validated against the public fee-payer address before entry. The same
 `RELAYER_SERVICE_TOKEN` must be installed in the Next.js server runtime as
-`STOCKSTREAM_RELAYER_TOKEN`; it must never be exposed to browser variables.
+`EQUINOX_RELAYER_TOKEN`; it must never be exposed to browser variables.
 
 ## Install or rotate a secret
 

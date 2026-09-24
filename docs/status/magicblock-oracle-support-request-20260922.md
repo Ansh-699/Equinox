@@ -33,7 +33,7 @@ Pyth exponent:
 - The live `UpdatePriceFeed` wire (215 bytes, matches upstream `UpdateData`)
   carries no exponent field.
 
-StockStream now accepts exactly `stored == -catalogExponent` in its
+Equinox now accepts exactly `stored == -catalogExponent` in its
 diagnostics decoder and returns the canonical `-5`. It never accepts both signs.
 The upstream README's `10_f64.powi(price.exponent)` example contradicts the
 program and should be corrected.
@@ -45,7 +45,7 @@ preserve the exponent, and no public instruction explains the change.
 
 ## Remaining incompatibilities
 
-The account cannot back StockStream's authenticated `OracleSnapshotV3`:
+The account cannot back Equinox's authenticated `OracleSnapshotV3`:
 
 1. **Confidence:** never written. Initialized to `0`, preserved by updates,
    and the pusher subscribes only to `price`.
@@ -71,10 +71,10 @@ The account cannot back StockStream's authenticated `OracleSnapshotV3`:
    signature onchain, or that exposes the signed payload so a consumer can
    verify it?
 5. Which channel does the devnet pusher use for feed 1435?
-6. What is the supported way for an undelegated L1 account (StockStream's
+6. What is the supported way for an undelegated L1 account (Equinox's
    `OracleSnapshotV3`) to be kept current in ER, and what is its latency
    bound?
 
-Until 3, 4 and 6 are answered, StockStream rejects the account and does not
+Until 3, 4 and 6 are answered, Equinox rejects the account and does not
 delegate, authorize sessions, place orders, match fills, commit, restore, or
 withdraw.

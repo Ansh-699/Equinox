@@ -9,7 +9,7 @@ feed and channel:
 - Solana payload channel ID: `2`
 - Catalog exponent: `-5`
 - Required redundancy: at least two authenticated streams
-- Network/application: StockStream Devnet test environment
+- Network/application: Equinox Devnet test environment
 
 Current evidence: all three configured Lazer endpoints reject subscriptions for
 feed `922` with `Not entitled: no grant accepts this feed (asset type

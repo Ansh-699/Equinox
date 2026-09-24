@@ -229,7 +229,7 @@ describe("verifyTradingSession", () => {
     expect(result).toEqual({ ok: false, reason: "session_not_found" });
   });
 
-  it("rejects a session account not owned by the StockStream program -- nothing else could have written this layout honestly, but fail closed anyway", () => {
+  it("rejects a session account not owned by the Equinox program -- nothing else could have written this layout honestly, but fail closed anyway", () => {
     const result = verifyTradingSession(baseInput({ sessionAccountOwner: "11111111111111111111111111111111111111111" }));
     expect(result).toEqual({ ok: false, reason: "session_not_found" });
   });

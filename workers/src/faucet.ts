@@ -35,7 +35,7 @@ export async function faucetInstructions(keeper: string, wallet: string, mint: s
 
 /** Message a browser wallet signs to claim test funds without a Privy session. */
 export function faucetClaimMessage(wallet: string, issuedAt: number): string {
-  return `StockStream devnet faucet\nwallet: ${wallet}\nissued: ${issuedAt}`;
+  return `Equinox devnet faucet\nwallet: ${wallet}\nissued: ${issuedAt}`;
 }
 
 /** Verifies a wallet-signed faucet claim: exact message, fresh (5 min), valid Ed25519 signature. */

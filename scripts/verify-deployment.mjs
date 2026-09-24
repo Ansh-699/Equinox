@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Read-only verification of the deployed StockStream program on Devnet.
+ * Read-only verification of the deployed Equinox program on Devnet.
  * No transaction is sent. Compares the live ELF (extracted from the
  * ProgramData account via its section-header table) against the local
- * `target/deploy/stockstream.so`, checks executable/authority/data
+ * `target/deploy/equinox.so`, checks executable/authority/data
  * relationships, and verifies opcode 42/43 PDA-creation CPIs and the
  * mark-price funding guard presence by ELF content hashing against the
  * recorded build history.
@@ -13,7 +13,7 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import { DEFAULT_PROGRAM_ID } from "./deployment-manifest.mjs";
 
 const RPC = "https://api.devnet.solana.com";
-const PROGRAM_ID = new PublicKey(process.env.STOCKSTREAM_PROGRAM_ID ?? DEFAULT_PROGRAM_ID);
+const PROGRAM_ID = new PublicKey(process.env.EQUINOX_PROGRAM_ID ?? DEFAULT_PROGRAM_ID);
 const OWNER = new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111");
 const conn = new Connection("https://api.devnet.solana.com", "confirmed");
 const statePath = process.argv[2] ?? "/tmp/opencode/lifecycle-state.json";
@@ -34,7 +34,7 @@ const eShentsize = data.readUInt16LE(elfStart + 0x3a);
 const eShnum = data.readUInt16LE(elfStart + 0x3c);
 const elfLen = Number(eShoff) + eShentsize * eShnum;
 const deployed = data.subarray(elfStart, elfStart + elfLen);
-const local = fs.readFileSync("target/deploy/stockstream.so");
+const local = fs.readFileSync("target/deploy/equinox.so");
 const { createHash } = await import("node:crypto");
 const deployedSha = createHash("sha256").update(deployed).digest("hex");
 const localSha = createHash("sha256").digest ? createHash("sha256").update(local).digest("hex") : "";

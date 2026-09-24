@@ -22,7 +22,7 @@ import { E2E_TEST_TOKEN, isE2eTestModeServer, verifyE2eTestToken } from "@/lib/a
  *
  * The Worker itself is reached with two independent, separately-purposed
  * credentials, no longer conflated into one shared bearer:
- *   - `x-stockstream-relayer-service-token` (STOCKSTREAM_RELAYER_TOKEN):
+ *   - `x-equinox-relayer-service-token` (EQUINOX_RELAYER_TOKEN):
  *     authenticates THIS SERVER to the Worker as a legitimate backend. It
  *     must never reach the browser and proves nothing about which user is
  *     making the request.
@@ -49,8 +49,8 @@ import { E2E_TEST_TOKEN, isE2eTestModeServer, verifyE2eTestToken } from "@/lib/a
  */
 export async function POST(request: Request) {
   const cookieStore = await cookies();
-  const csrf = cookieStore.get("stockstream_csrf")?.value;
-  if (!csrf || request.headers.get("x-stockstream-csrf") !== csrf) {
+  const csrf = cookieStore.get("equinox_csrf")?.value;
+  if (!csrf || request.headers.get("x-equinox-csrf") !== csrf) {
     return NextResponse.json({ error: "authentication_required", detail: "CSRF validation failed" }, { status: 403 });
   }
   const session = await readPersistentSession(routeSessionDatabase(), cookieStore.get(SESSION_COOKIE)?.value);
@@ -91,8 +91,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "authentication_required", detail: "Privy token does not match the requesting wallet" }, { status: 401 });
   }
 
-  const relayerUrl = process.env.STOCKSTREAM_RELAYER_URL;
-  const relayerServiceToken = process.env.STOCKSTREAM_RELAYER_TOKEN;
+  const relayerUrl = process.env.EQUINOX_RELAYER_URL;
+  const relayerServiceToken = process.env.EQUINOX_RELAYER_TOKEN;
   if (!relayerUrl || !relayerServiceToken) return NextResponse.json({ error: "relayer_unconfigured" }, { status: 503 });
 
   const upstream = await fetch(`${relayerUrl}/v1/relay/session`, {
@@ -100,7 +100,7 @@ export async function POST(request: Request) {
     headers: {
       "content-type": "application/json",
       authorization: `Bearer ${body.privyAccessToken}`,
-      "x-stockstream-relayer-service-token": relayerServiceToken,
+      "x-equinox-relayer-service-token": relayerServiceToken,
     },
     body: JSON.stringify({
       transactionBase64: body.transactionBase64,

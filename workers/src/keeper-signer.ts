@@ -34,13 +34,13 @@
  */
 
 import { getCompiledTransactionMessageDecoder, getTransactionDecoder, type Instruction } from "@solana/kit";
-import { STOCKSTREAM_PROGRAM_ID } from "../../clients/stockstream/src/constants";
+import { EQUINOX_PROGRAM_ID } from "../../clients/equinox/src/constants";
 import { LocalKeypairSigner, type Signer } from "./signer";
 
 /** Program addresses that may appear in a keeper-signed transaction. */
 export const KEEPER_ALLOWED_PROGRAMS: readonly string[] = [
-  // StockStream itself (every keeper instruction family lives here).
-  STOCKSTREAM_PROGRAM_ID,
+  // Equinox itself (every keeper instruction family lives here).
+  EQUINOX_PROGRAM_ID,
   // Compute budget (the submission path prepends it).
   "ComputeBudget111111111111111111111111111111",
   // The Ed25519 native pre-instruction and the Pyth Pro Lazer oracle
@@ -54,11 +54,11 @@ export const KEEPER_ALLOWED_PROGRAMS: readonly string[] = [
 
 const KEEPER_ALLOWED_PROGRAM_SET = new Set(KEEPER_ALLOWED_PROGRAMS);
 
-const STOCKSTREAM_PROGRAM = STOCKSTREAM_PROGRAM_ID;
+const EQUINOX_PROGRAM = EQUINOX_PROGRAM_ID;
 const MAGIC_PROGRAM = "Magic11111111111111111111111111111111111111";
 const SYSTEM_PROGRAM = "11111111111111111111111111111111";
 
-/** StockStream instruction opcodes a keeper signer may ever sign, by
+/** Equinox instruction opcodes a keeper signer may ever sign, by
  * family. Everything else (deposits, withdrawals, session authorization,
  * market administration, delegation lifecycle) is a main-wallet or market-
  * authority action and is never keeper-permitted. */
@@ -71,7 +71,7 @@ export const KEEPER_INSTRUCTION_ALLOWLIST: ReadonlySet<number> = new Set<number>
 
 /** Opcode allowlist per allowed program (null = membership only). */
 function opcodeAllowlistForProgram(program: string): ReadonlySet<number> | null {
-  if (program === STOCKSTREAM_PROGRAM) return KEEPER_INSTRUCTION_ALLOWLIST;
+  if (program === EQUINOX_PROGRAM) return KEEPER_INSTRUCTION_ALLOWLIST;
   if (program === MAGIC_PROGRAM) {
     // ScheduleIntentBundle (bincode enum variant 11) is the only Magic
     // Program instruction the commit keeper invokes.
@@ -86,7 +86,7 @@ export interface KeeperTransactionAudit {
 }
 
 /** Audits a base64 wire transaction against the keeper allowlist BEFORE
- * submission: unknown programs, StockStream opcodes outside the allowlist,
+ * submission: unknown programs, Equinox opcodes outside the allowlist,
  * and any explicit System-Program lamport movement (fee-payer drain
  * attempts) are violations. Never throws; never logs transaction bytes. */
 export function auditKeeperTransaction(base64WireTransaction: string): KeeperTransactionAudit {

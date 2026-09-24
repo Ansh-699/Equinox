@@ -12,7 +12,7 @@ Checks (failures):
   * missing/zero entry point
   * implausibly small stub artifact (the ~1.3 KB no-entrypoint case)
   * wrong e_machine
-  * missing StockStream program identity (the pinned program ID bytes)
+  * missing Equinox program identity (the pinned program ID bytes)
 
 Reported, not failed on: SHF_GNU_RETAIN section presence, so a future `#[used]`
 shows up in CI output instead of silently regressing the header.
@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 
 # Derived from the Rust-generated ABI manifest so this gate cannot drift from
-# `programs/stockstream/src/lib.rs`'s `ID` (a second hardcoded pin silently
+# `programs/equinox/src/lib.rs`'s `ID` (a second hardcoded pin silently
 # passed the old program ID after the identity moved).
 _B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
@@ -40,7 +40,7 @@ def _b58decode(text: str) -> bytes:
 def _program_id_bytes() -> bytes:
     manifest = (
         Path(__file__).resolve().parent.parent
-        / "clients/stockstream/src/abi/layout.json"
+        / "clients/equinox/src/abi/layout.json"
     )
     return _b58decode(json.loads(manifest.read_text())["PROGRAM_ID"])
 
@@ -93,7 +93,7 @@ def gnu_retain_sections(data: bytes) -> list[str]:
 
 
 def main() -> int:
-    path = Path(sys.argv[1] if len(sys.argv) > 1 else "target/deploy/stockstream.so")
+    path = Path(sys.argv[1] if len(sys.argv) > 1 else "target/deploy/equinox.so")
     if not path.is_file():
         print(f"FAIL: artifact not found: {path}", file=sys.stderr)
         return 1
@@ -135,7 +135,7 @@ def main() -> int:
 
     print(f"program id:      {'present' if PROGRAM_ID in data else 'MISSING'}")
     if PROGRAM_ID not in data:
-        failures.append("pinned StockStream program ID bytes are not present in the artifact")
+        failures.append("pinned Equinox program ID bytes are not present in the artifact")
 
     retain = gnu_retain_sections(data)
     if retain:
@@ -153,7 +153,7 @@ def main() -> int:
             print(f"  - {item}", file=sys.stderr)
         return 1
 
-    print("\nOK: artifact is loadable and is the StockStream program")
+    print("\nOK: artifact is loadable and is the Equinox program")
     return 0
 
 

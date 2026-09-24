@@ -47,8 +47,8 @@
   "interpretation": {
     "erOracleAccountPresent": true,
     "supportsPriceAndExponentRead": true,
-    "stockstreamObservationCompatible": false,
-    "reason": "The current account stores exponent 5 while the Pyth catalog requires -5; its public initialization instruction encoded trailing exponent 8. The account also lacks StockStream's channel, market-session, trading-status, sequence and authenticated-snapshot fields. No adapter or ER write-through into OracleSnapshotV3 is deployed.",
+    "equinoxObservationCompatible": false,
+    "reason": "The current account stores exponent 5 while the Pyth catalog requires -5; its public initialization instruction encoded trailing exponent 8. The account also lacks Equinox's channel, market-session, trading-status, sequence and authenticated-snapshot fields. No adapter or ER write-through into OracleSnapshotV3 is deployed.",
     "nextSafeStep": "Implement and locally test an authenticated read-only adapter or obtain a validator-supported bridge; do not use this account as a drop-in replacement without preserving all validation fields."
   },
   "stateMutation": false

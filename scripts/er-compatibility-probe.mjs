@@ -5,7 +5,7 @@
  * This script derives the configured Pyth Lazer account, reads it from L1 and
  * ER, and observes a few ER WebSocket updates. It never signs, submits, or
  * allocates an account. A live MagicBlock price account is not treated as a
- * StockStream OracleSnapshotV3 unless the manifest contains a reviewed bridge.
+ * Equinox OracleSnapshotV3 unless the manifest contains a reviewed bridge.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -14,7 +14,7 @@ import { PublicKey } from "@solana/web3.js";
 import WebSocket from "ws";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const manifest = JSON.parse(fs.readFileSync(path.join(here, "..", "config", "stockstream-deployment.json"), "utf8"));
+const manifest = JSON.parse(fs.readFileSync(path.join(here, "..", "config", "equinox-deployment.json"), "utf8"));
 const ORACLE_PROGRAM = new PublicKey("PriCems5tHihc6UDXDjzjeawomAwBduWMGAi8ZUjppd");
 const [feedPda] = PublicKey.findProgramAddressSync(
   [Buffer.from("price_feed"), Buffer.from("pyth-lazer"), Buffer.from(String(manifest.oracle.feedId))],
@@ -104,7 +104,7 @@ console.log(JSON.stringify({
   l1,
   er,
   erWebSocketUpdates: updates,
-  stockstreamSnapshotConfigured: manifest.oracleSnapshot !== null,
-  stockstreamSnapshotCompatibility: false,
-  reason: "MagicBlock's price account is not a substitute for the authenticated StockStream OracleSnapshotV3 schema.",
+  equinoxSnapshotConfigured: manifest.oracleSnapshot !== null,
+  equinoxSnapshotCompatibility: false,
+  reason: "MagicBlock's price account is not a substitute for the authenticated Equinox OracleSnapshotV3 schema.",
 }, null, 2));

@@ -9,7 +9,7 @@ const inter = Inter({ variable: "--font-inter", subsets: ["latin"], display: "sw
 const poppins = Poppins({ variable: "--font-poppins", weight: ["400", "500", "600", "700"], subsets: ["latin"], display: "swap" });
 
 export const metadata: Metadata = {
-  title: "StockStream",
+  title: "Equinox",
   description: "Perpetual futures on US stocks: matched in a MagicBlock Ephemeral Rollup, priced by Pyth, settled on Solana.",
   icons: { icon: "/favicon.svg" }
 };

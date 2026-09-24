@@ -69,7 +69,7 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
 /** Bridges real Privy hooks into PrivyIdentityContext. The Solana-specific
  * views (@privy-io/react-auth/solana) are only ever called from here,
  * inside a component guaranteed to have a real PrivyProvider ancestor --
- * never from features/wallet/use-stockstream-protocol.ts directly, which
+ * never from features/wallet/use-equinox-protocol.ts directly, which
  * used to crash the entire trading terminal whenever
  * NEXT_PUBLIC_PRIVY_APP_ID was unset (those hooks throw outside a
  * PrivyProvider). This component intentionally knows nothing about wallet

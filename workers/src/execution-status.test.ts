@@ -116,7 +116,7 @@ describe("ER/L1 execution-status reconciliation", () => {
 
 /** Builds a real 500-byte market account buffer with the given fields at
  * their verified offsets (`FIELD_OFFSETS` in `execution-status.ts`,
- * cross-checked against `programs/stockstream/src/state.rs` via
+ * cross-checked against `programs/equinox/src/state.rs` via
  * `core::mem::offset_of!`), rather than mocking the decoder. */
 function marketAccountBytes(fields: Partial<DelegationFields>): Uint8Array {
   const bytes = new Uint8Array(500);

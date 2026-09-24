@@ -7,7 +7,7 @@
  * deliberately NOT the security boundary: the actual enforcement of
  * "withdrawals are blocked while delegated" happens on-chain, in the Rust
  * program's own `DelegationStatus`/`l1_withdrawals_allowed()` (see
- * `programs/stockstream/src/state.rs` and `docs/custody.md`). This module
+ * `programs/equinox/src/state.rs` and `docs/custody.md`). This module
  * exists so the indexer never *displays* ER-accepted state as if it were
  * L1-committed truth, and never advances its own view on a sequence that
  * doesn't follow monotonically from what it already observed.
@@ -133,7 +133,7 @@ export function beginRestoration(state: ExecutionState): ExecutionState {
   return { status: "restoration_pending", sequences: state.sequences };
 }
 
-/** Restoration confirmed: the market account is owned by StockStream on
+/** Restoration confirmed: the market account is owned by Equinox on
  * L1 again and `restorationSequence` must have actually advanced -- a
  * restoration event that doesn't move this counter is either a duplicate
  * or a forged/replayed callback, not a fresh confirmation. */
@@ -169,8 +169,8 @@ export function isL1Committed(state: ExecutionState): boolean {
 // (`repositories.ts::ExecutionStatusRepository`).
 // ---------------------------------------------------------------------
 
-/** Byte offsets within a StockStream market account's raw data, verified
- * against `programs/stockstream/src/state.rs` via `core::mem::offset_of!`
+/** Byte offsets within a Equinox market account's raw data, verified
+ * against `programs/equinox/src/state.rs` via `core::mem::offset_of!`
  * (`reserved_upgrade` starts at 327; each `RESERVED_*` constant there is
  * relative to it). Mirrors `chain-transports.ts`'s own
  * `DELEGATION_STATUS_OFFSET` for the one field both modules need. */
@@ -195,7 +195,7 @@ export interface DelegationFields {
 /** Pure decode of the raw account bytes -- no RPC, no trust decision beyond
  * "these are the bytes at these offsets" (the same boundary
  * `chain-transports.ts` draws for `classifyWritableAccountDomain`). */
-/** V3 market cores (`STKMK003`, programs/stockstream/src/v3.rs offsets). */
+/** V3 market cores (`STKMK003`, programs/equinox/src/v3.rs offsets). */
 const V3_CORE_DISCRIMINATOR = "STKMK003";
 const V3_OFFSETS = { globalEventSequence: 148, delegationStatus: 197, expectedCommitSequence: 198, lastCommittedSequence: 206 } as const;
 

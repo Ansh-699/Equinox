@@ -1,13 +1,13 @@
 import { expect, test } from "vitest";
 import { applyCors, preflight } from "./cors";
 
-const env = { CORS_ALLOWED_ORIGINS: "https://stockstream.ansht.workers.dev, http://localhost:3000" };
+const env = { CORS_ALLOWED_ORIGINS: "https://equinox.ansht.workers.dev, http://localhost:3000" };
 const request = (method: string, origin?: string) =>
   new Request("https://api.example/v1/markets", { method, headers: origin ? { origin } : {} });
 
 test("echoes an allowed origin on read responses only", () => {
-  const allowed = applyCors(request("GET", "https://stockstream.ansht.workers.dev"), env, new Response("{}"));
-  expect(allowed.headers.get("access-control-allow-origin")).toBe("https://stockstream.ansht.workers.dev");
+  const allowed = applyCors(request("GET", "https://equinox.ansht.workers.dev"), env, new Response("{}"));
+  expect(allowed.headers.get("access-control-allow-origin")).toBe("https://equinox.ansht.workers.dev");
   expect(allowed.headers.get("vary")).toContain("Origin");
   expect(applyCors(request("GET", "https://evil.example"), env, new Response("{}")).headers.get("access-control-allow-origin")).toBeNull();
   expect(applyCors(request("POST", "http://localhost:3000"), env, new Response("{}")).headers.get("access-control-allow-origin")).toBeNull();

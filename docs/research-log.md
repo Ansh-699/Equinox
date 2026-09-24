@@ -1,4 +1,4 @@
-# StockStream External Research Log
+# Equinox External Research Log
 
 All external decisions and URLs in one file. Every entry was verified during
 implementation, not from memory.

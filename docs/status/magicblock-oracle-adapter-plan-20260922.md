@@ -24,8 +24,8 @@ Pyth receiver layout:
 | EMA fields | 109–124 | Pyth receiver fields |
 | posted slot | 125–132 | unsigned 64-bit ER slot |
 
-The account does not contain StockStream's channel ID, market session, trading
-status, StockStream sequence, or `OracleSnapshotV3` authenticated-update
+The account does not contain Equinox's channel ID, market session, trading
+status, Equinox sequence, or `OracleSnapshotV3` authenticated-update
 metadata. Its owner and account PDA must be checked; a price-only read is not
 acceptable.
 
@@ -61,7 +61,7 @@ shows the following:
    path, and it rejects today's live account because confidence is absent.
 2. Bind channel `2` and exponent `-5` to the configured instrument. Do not
    infer channel or exponent from an unauthenticated client value.
-3. Bind market session and trading status to the active StockStream instrument
+3. Bind market session and trading status to the active Equinox instrument
    and core state. Reject halted, restricted, closed, or mismatched states.
 4. Use `posted_slot` only as provider metadata; do not treat it as a Pyth
    message sequence. Add a monotonic adapter sequence in the delegated

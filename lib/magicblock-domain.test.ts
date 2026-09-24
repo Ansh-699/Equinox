@@ -68,7 +68,7 @@ test("matrix: oracle updates can never be an ER transaction", () => {
   expect(ER_WRITABLE_CLUSTERS.oracleUpdate).toEqual([]);
   // The consume_oracle_update instruction writes the Pyth program's own
   // storage/treasury accounts: even if someone marks them writable, they can
-  // never be part of StockStream's delegated cluster.
+  // never be part of Equinox's delegated cluster.
   expect(() =>
     validateTransactionAccountDomain(
       "oracleUpdate",
