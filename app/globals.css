@@ -7,6 +7,18 @@
    stay in step. */
 @custom-variant dark (&:is(.dark *));
 
+.brand-mark {
+  display: inline-block;
+  flex: none;
+  border-radius: 50%;
+  background: url("/brand/equinox-light.png") center / 146% no-repeat;
+}
+
+.dark .brand-mark,
+.brand-mark-on-dark {
+  background-image: url("/brand/equinox-dark.png");
+}
+
 @theme inline {
   --font-sans: var(--font-ui);
   --font-mono: var(--font-data);
