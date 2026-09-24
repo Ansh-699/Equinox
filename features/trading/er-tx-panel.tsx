@@ -56,10 +56,10 @@ export function ErTxPanel({ marketApiUrl, market }: { marketApiUrl: string | und
           <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--t-up)]" />
         </span>
         <span className="text-[12px] font-medium text-[var(--t-text)]">MagicBlock ER · live txns</span>
-        <span className="tnum ml-auto text-[11px] text-[var(--t-text-3)]" title="Send → the rollup reports the transaction finalized, measured by whoever sent it">{myTrip !== null ? <>You p50 <span className="font-medium text-[var(--t-up)]">{myTrip} ms</span></> : <>Bot p50 <span className="font-medium text-[var(--t-up)]">{trip ?? "—"} ms</span></>}</span>
+        <span className="tnum ml-auto text-[11px] text-[var(--t-text-3)]" title="Send → the MagicBlock rollup has executed it (not Solana L1 settlement), measured by whoever sent it">{myTrip !== null ? <>You p50 <span className="font-medium text-[var(--t-up)]">{myTrip} ms</span></> : <>Bot p50 <span className="font-medium text-[var(--t-up)]">{trip ?? "—"} ms</span></>}</span>
       </div>
       <div className="tnum flex flex-wrap gap-x-3 border-b border-[var(--t-surface-2)] px-3 py-1 text-[10.5px] text-[var(--t-text-3)]">
-        <span>Each time: send → finalized in the rollup (Singapore), as seen by the sender. The bot sits next to the rollup ({bot?.colo ?? "…"}, {bot?.pingMs ?? "—"} ms away){myTrip !== null ? "; your rows include the internet distance from you" : "; a user's time adds their internet distance"}.</span>
+        <span>Rollup confirmation time, as seen by the sender: send → MagicBlock&apos;s sequencer (Singapore) has executed it. Not Solana L1: the rollup settles to Solana at each commit (every 30 min). The bot runs {bot?.pingMs ?? "—"} ms from the rollup ({bot?.colo ?? "…"}); {myTrip !== null ? "your rows add your internet distance" : "a user's time adds their internet distance"}.</span>
       </div>
       <div className="slim-scroll h-[212px] overflow-auto">
         {rows.length === 0 ? (
