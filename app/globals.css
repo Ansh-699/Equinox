@@ -7,9 +7,21 @@
    stay in step. */
 @custom-variant dark (&:is(.dark *));
 
+.brand-mark {
+  display: inline-block;
+  flex: none;
+  border-radius: 50%;
+  background: url("/brand/equinox-light.png") center / 146% no-repeat;
+}
+
+.dark .brand-mark,
+.brand-mark-on-dark {
+  background-image: url("/brand/equinox-dark.png");
+}
+
 @theme inline {
   --font-sans: var(--font-ui);
-  --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-mono: var(--font-data);
 }
 
 :root {
@@ -31,6 +43,8 @@
   --t-down-2: #a82520;
   --t-down-3: #a82520;
   --t-down-bg: #fbeae8;
+  --t-book-bid: #167a38;
+  --t-book-ask: #c8312a;
   /* Ink for text sitting ON a saturated fill (--t-up-3 / --t-down-3). Those
      fills are dark in BOTH themes, so this stays white in both. */
   --t-on-fill: #ffffff;
@@ -61,6 +75,8 @@
   --t-down-2: #c84040;
   --t-down-3: #b8322f;
   --t-down-bg: #2a1716;
+  --t-book-bid: #3abf72;
+  --t-book-ask: #e05555;
   --t-on-fill: #ffffff;
   --t-border-strong: #6f6967;   /* 3.0:1 on surface-3 */
   --t-scroll-thumb: rgba(255, 255, 255, 0.14);
@@ -85,8 +101,8 @@
   --red-soft: var(--t-down-soft);
   --blue: var(--t-link);
   --font-ui: var(--font-poppins), ui-sans-serif, system-ui, sans-serif;
-  --font-num: var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
   --font-display: var(--font-poppins), ui-sans-serif, system-ui, sans-serif;
+  --font-data: var(--font-plex-mono), "IBM Plex Mono", ui-monospace, monospace;
 }
 .dark {
   color-scheme: dark;
@@ -95,7 +111,8 @@
 }
 
 html, body { background: var(--t-bg); }
-body { margin: 0; color: var(--t-text); font-family: var(--font-ui); font-size: 13px; -webkit-font-smoothing: antialiased; }
+body { margin: 0; color: var(--t-text); font-family: var(--font-ui); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
@@ -107,9 +124,9 @@ button:disabled { cursor: not-allowed; }
 
 /* Numbers read in IBM Plex Mono, as on ordr.trade. */
 .tnum {
-  font-family: var(--font-num);
+  font-family: var(--font-data);
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.01em;
+  font-feature-settings: "tnum" 1;
 }
 
 /* Emerald glow accent for primary CTAs */
@@ -289,7 +306,7 @@ input[type="number"] {
   --tk-text-3: var(--t-text-3);
   --tk-green: var(--t-up);
   --tk-red: var(--t-down);
-  font-family: var(--font-ui), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-ui);
   background: var(--tk-bg);
   color: var(--tk-text);
 }
@@ -308,7 +325,7 @@ input[type="number"] {
   height: 40px;
   padding: 0 2px;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--tk-text-2);
   background: none;

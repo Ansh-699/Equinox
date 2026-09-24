@@ -89,10 +89,10 @@ export function ErTxPanel({ marketApiUrl, market }: { marketApiUrl: string | und
           <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--t-up)]" />
         </span>
         <span className="whitespace-nowrap text-[12px] font-medium text-[var(--t-text)]" title="Each row: time from send to inclusion in a MagicBlock rollup block (10 ms blocks). Solana L1 settlement follows at each commit.">MagicBlock ER · live</span>
-        <span className="tnum ml-auto whitespace-nowrap text-[11px] text-[var(--t-text-3)]" title="Send → the MagicBlock rollup has executed it (not Solana L1 settlement), measured by whoever sent it">{myTrip !== null
-          ? <>You p50 <span className="font-medium text-[var(--t-up)]">{myTrip} ms</span></>
-          : <>Your order ≈ <span className="font-medium text-[var(--t-up)]">{viewerRtt === null ? "—" : `${viewerRtt + (trip ?? 15)} ms`}</span></>}
-          <span className="ml-2">in a block {trip ?? "—"} ms</span></span>
+        <span className="ml-auto whitespace-nowrap text-[11px] text-[var(--t-text-3)]" title="Send → the MagicBlock rollup has executed it (not Solana L1 settlement), measured by whoever sent it">{myTrip !== null
+          ? <>You p50 <span className="tnum font-medium text-[var(--t-up)]">{myTrip} ms</span></>
+          : <>Your order ≈ <span className="tnum font-medium text-[var(--t-up)]">{viewerRtt === null ? "—" : `${viewerRtt + (trip ?? 15)} ms`}</span></>}
+          <span className="ml-2">in a block <span className="tnum">{trip ?? "—"} ms</span></span></span>
       </div>
       <div className="slim-scroll h-[168px] overflow-auto">
         {rows.length === 0 ? (
@@ -102,21 +102,21 @@ export function ErTxPanel({ marketApiUrl, market }: { marketApiUrl: string | und
         ) : (
           <ul className="divide-y divide-[var(--t-surface-2)]">
             {rows.map((row) => (
-              <li key={row.signature} className={`tnum grid grid-cols-[52px_1fr_auto] items-center gap-2 px-3 py-[5px] text-[11.5px] ${row.mine ? "bg-[var(--t-surface-2)]" : ""}`}>
-                <a href={rollupExplorer(row.signature)} target="_blank" rel="noreferrer" className="truncate text-[var(--t-text-3)] hover:text-[var(--t-text)]">
+              <li key={row.signature} className={`grid grid-cols-[52px_1fr_auto] items-center gap-2 px-3 py-[5px] text-[11.5px] ${row.mine ? "bg-[var(--t-surface-2)]" : ""}`}>
+                <a href={rollupExplorer(row.signature)} target="_blank" rel="noreferrer" className="tnum truncate text-[var(--t-text-3)] hover:text-[var(--t-text)]">
                   {new Date(row.at).toLocaleTimeString([], { hour12: false, minute: "2-digit", second: "2-digit" })}
                 </a>
                 <span className="min-w-0 truncate">
                   <span className={row.mine ? "font-medium text-[var(--t-accent,var(--t-text))]" : "text-[var(--t-text-2)]"}>{row.mine ? `You · ${row.kind}` : LABEL[row.kind] ?? row.kind}</span>
                   {row.side && row.price !== undefined ? (
-                    <span className={`ml-1.5 ${row.side === "bid" ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>{row.side === "bid" ? "B" : "S"} {row.quantity} @ {row.price.toFixed(2)}</span>
+                    <span className={`tnum ml-1.5 ${row.side === "bid" ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>{row.side === "bid" ? "B" : "S"} {row.quantity} @ {row.price.toFixed(2)}</span>
                   ) : null}
                 </span>
                 <span className="flex items-center gap-1.5">
                   <span className="hidden h-[3px] w-10 overflow-hidden rounded bg-[var(--t-surface-3)] sm:block">
                     <span className="block h-full rounded bg-[var(--t-up)]" style={{ width: `${Math.min(100, ((onChain(row) ?? 0) / scale) * 100)}%` }} />
                   </span>
-                  <span className={`w-[60px] text-right ${row.ok ? "text-[var(--t-text)]" : "text-[var(--t-down)]"}`} title="send → finalized in the rollup, as seen by the sender">
+                  <span className={`tnum w-[60px] text-right ${row.ok ? "text-[var(--t-text)]" : "text-[var(--t-down)]"}`} title="send → finalized in the rollup, as seen by the sender">
                     {row.ok && onChain(row) !== null ? `${onChain(row)} ms` : "failed"}
                   </span>
                 </span>

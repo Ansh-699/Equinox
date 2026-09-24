@@ -47,8 +47,8 @@ function MarketPicker({ symbol, onChange }: { symbol: string; onChange: (symbol:
       >
         <span className="grid h-6 w-6 place-items-center rounded-full bg-[var(--t-surface-3)] text-[10px] font-bold text-[var(--t-text)]">{symbol.slice(0, 1)}</span>
         <span className="flex flex-col items-start leading-none">
-          <span className="text-[14px] font-semibold tracking-tight text-[var(--t-text)]">{symbol}</span>
-          <span className="mt-0.5 text-[10.5px] text-[var(--t-text-3)]">{current?.name ?? ""} {current?.kind === "pre-ipo" ? "pre-IPO perpetual" : "perpetual"}</span>
+          <span className="text-[16px] font-semibold tracking-tight text-[var(--t-text)]">{symbol}</span>
+          <span className="mt-0.5 text-[11px] text-[var(--t-text-3)]">{current?.name ?? ""} {current?.kind === "pre-ipo" ? "pre-IPO perpetual" : "perpetual"}</span>
         </span>
         <ChevronDown className={`h-4 w-4 text-[var(--t-text-2)] transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={1.75} />
       </button>

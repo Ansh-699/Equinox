@@ -8,6 +8,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { BrandMark } from "@/components/ui/brand-mark";
 import { TradeScreen, seededRng, type PerpDemoData } from "./trade-demo";
 import { ChromeCta } from "./chrome-cta";
 import demoStyles from "./TradeDemo.module.css";
@@ -240,7 +241,7 @@ export function LandingHero({ demo, markets, activity, realActivity }: { demo: P
       <section className={styles.hero}>
         <div className={`${styles.heroItem} ${styles.d0}`}>
           <span className={styles.wordmark}>
-            <img src="/favicon.svg" alt="" width={30} height={30} className={styles.logoImg} />
+            <BrandMark size={30} darkSurface />
             EQUINOX
           </span>
         </div>
@@ -292,7 +293,7 @@ export function LandingHero({ demo, markets, activity, realActivity }: { demo: P
         <div ref={panelRef} id="landing-preview-panel" role="tabpanel" aria-labelledby={`tab-${activeTab}`} className={`${demoStyles.panel} ${revealed ? demoStyles.revealed : ""}`}>
           <div className={demoStyles.appBar}>
             <span className={demoStyles.appLogo}>
-              <img src="/favicon.svg" alt="" width={18} height={18} className={styles.logoImg} />
+              <BrandMark size={18} darkSurface />
               EQUINOX
             </span>
             <span className={demoStyles.appNav}>
