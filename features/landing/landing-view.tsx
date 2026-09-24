@@ -16,7 +16,6 @@ import { useExecutionStatus } from "@/features/magicblock/use-execution-status";
 import { RESOLUTIONS, useCandles } from "@/features/trading/use-candles";
 import { tradesFrom } from "@/features/trading/use-v3-book";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { BrandMark } from "@/components/ui/brand-mark";
 import { Reveal } from "@/components/reveal";
 import { LandingHero, type ActivityRow, type PreviewMarket } from "./landing-hero";
 import styles from "./landing.module.css";
@@ -133,7 +132,7 @@ export function LandingView() {
       <footer className={styles.mega}>
         <div className={styles.megaInner}>
           <div className={styles.megaBrand}>
-            <BrandMark size={30} darkSurface />
+            <img src="/favicon.svg" alt="" width={30} height={30} className={styles.megaGem} />
             EQUINOX
           </div>
           <div className={styles.megaCols}>

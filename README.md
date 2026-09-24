@@ -1,11 +1,3 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="public/brand/equinox-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="public/brand/equinox-light.png">
-    <img src="public/brand/equinox-light.png" alt="Equinox logo" width="180">
-  </picture>
-</p>
-
 # Equinox
 
 Equinox is a devnet trading app for stock-themed perpetuals and token launches on Solana. Orders execute in a MagicBlock Ephemeral Rollup; collateral stays in a Solana L1 vault. The app currently lists TSLA-PERP and three PreStocks-priced pre-IPO markets. A separate launch flow creates equity-themed tokens on Meteora Dynamic Bonding Curves.
