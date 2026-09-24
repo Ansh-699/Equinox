@@ -33,8 +33,14 @@ const CLOSED_REFRESH_EVERY_MS: u64 = 30_000;
 #[serde(rename_all = "camelCase")]
 pub struct ErTx {
     pub kind: &'static str,
+    /// Send → the rollup's "processed" push: one network round trip plus the rollup's work.
     pub ms: Option<u64>,
+    /// The plain network round trip: this tick's uncontended ping over the same HTTP
+    /// connection pool the transaction is sent on (subscription acks queue behind
+    /// each other in a burst, so they are not clean samples).
     pub net_ms: Option<u64>,
+    /// The rollup's own share: `ms - net_ms`.
+    pub er_ms: Option<u64>,
     pub ok: bool,
     pub at: u64,
     pub signature: String,
@@ -178,10 +184,12 @@ impl Maker {
             Some(watch) => watch.processed(Duration::from_secs(3)).await,
             None => None,
         };
+        let ms = processed.map(|(arrived, _)| arrived.saturating_duration_since(started).as_millis() as u64);
         Some(ErTx {
             kind,
-            ms: processed.map(|(arrived, _)| arrived.saturating_duration_since(started).as_millis() as u64),
+            ms,
             net_ms,
+            er_ms: ms.zip(net_ms).map(|(total, network)| total.saturating_sub(network)),
             ok: processed.is_some_and(|(_, ok)| ok),
             at,
             signature,
