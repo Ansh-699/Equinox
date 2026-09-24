@@ -24,6 +24,7 @@ import { ProtocolKeeperOrchestrator, type OrchestratorRunSummary } from './keepe
 import { STOCKSTREAM_PROGRAM_ID } from '../../clients/stockstream/src/constants';
 import { handleV3MarketRoute } from './v3-routes';
 import { fetchPreIpoTokens } from './pre-ipo';
+import { listLaunches, registerLaunch } from './launches';
 import { getBase58Decoder } from '@solana/kit';
 import { deriveSeatShardV3 } from './v3-pdas';
 import { decodeV3Core, decodeV3SeatShard } from './v3-market-state';
@@ -290,7 +291,7 @@ async function marketMakerStatus(env: Env): Promise<Response> {
   return response;
 }
 
-const PUBLIC_POST_ROUTES = new Set(["/v1/oracle/refresh", "/v1/faucet"]);
+const PUBLIC_POST_ROUTES = new Set(["/v1/oracle/refresh", "/v1/faucet", "/v1/launches"]);
 let inflightRefresh: Promise<RefreshResult> | null = null;
 /** One refresh per isolate at a time; concurrent callers share its result. */
 function refreshSnapshotOnce(env: Env): Promise<RefreshResult> {
@@ -327,6 +328,13 @@ const worker = {
       const response = json({ tokens: await fetchPreIpoTokens() });
       response.headers.set("cache-control", "public, max-age=60");
       return response;
+    }
+    if (url.pathname === "/v1/launches" && env.DB && env.SOLANA_RPC_URL) {
+      if (request.method === "GET") return json({ launches: await listLaunches(env.DB) });
+      if (request.method === "POST") {
+        const result = await registerLaunch(env.DB, new SolanaL1Transport(env.SOLANA_RPC_URL), await request.json().catch(() => null));
+        return json(result.body, result.status);
+      }
     }
     if (request.method === "POST" && url.pathname === "/v1/faucet") return claimFaucet(request, env);
     if (request.method === "POST" && url.pathname === "/v1/operator/mint") return operatorMint(request, env);

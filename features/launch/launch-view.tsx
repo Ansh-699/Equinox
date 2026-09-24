@@ -5,7 +5,11 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import { Rocket } from "lucide-react";
 import { openWalletDrawer, TopBar } from "@/components/layout/top-bar";
 import { useAppAuth } from "@/components/app-providers";
-import { useActiveWalletSigner } from "@/components/wallet-signer-context";
+import { useTradingKey } from "@/features/wallet/use-trading-key";
+import { tradingKeySigner } from "@/lib/trading-key";
+import { claimTestFunds } from "@/lib/faucet-client";
+import { publicMarketApiUrl } from "@/lib/demo-config";
+import { LaunchMonitor } from "./launch-monitor";
 import { HINT, PanelHead, primaryBtn } from "@/features/trading/lifecycle-panel";
 import { buildLaunchTransaction, describePreset, LAUNCH_PRESETS, TOTAL_SUPPLY, type LaunchPreset } from "./dbc-launch";
 
@@ -15,6 +19,7 @@ const INPUT = "h-[34px] w-full rounded-[4px] border border-[var(--t-border-stron
 const explorer = (address: string, kind: "address" | "tx" = "address") => `https://explorer.solana.com/${kind}/${address}?cluster=devnet`;
 
 type Result = { pool: string; mint: string; config: string; signature: string };
+const usd = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
 /** Fee over time for the preset's linear decay, as an SVG path. */
 function FeeCurve({ preset }: { preset: LaunchPreset }) {
@@ -33,7 +38,8 @@ function FeeCurve({ preset }: { preset: LaunchPreset }) {
 /** Meteora DBC launchpad for stock-themed tokens, signed by the Privy wallet. */
 export function LaunchView() {
   const auth = useAppAuth();
-  const signer = useActiveWalletSigner();
+  const tradingKey = useTradingKey(auth);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [preset, setPreset] = useState<LaunchPreset>(LAUNCH_PRESETS[0]);
   const [stock, setStock] = useState<(typeof STOCKS)[number]>("TSLA");
   const [name, setName] = useState("Tesla Believers");
@@ -46,22 +52,34 @@ export function LaunchView() {
   const connection = useMemo(() => new Connection(RPC, "confirmed"), []);
 
   async function launch() {
-    if (!auth.authenticated || !signer.address) { openWalletDrawer(); return; }
+    if (!auth.authenticated || !auth.walletAddress) { openWalletDrawer(); return; }
     if (!name.trim() || !/^[A-Z0-9]{2,10}$/.test(symbol)) { setStatus("Give the token a name and a 2–10 character symbol (A–Z, 0–9)."); return; }
     setPending(true);
     setResult(null);
     try {
+      // Signed by the trading account (one wallet prompt the first time on this device).
+      const signer = tradingKey.signer ?? tradingKeySigner(await tradingKey.unlock());
+      const creator = new PublicKey(signer.address!);
+      // Rent for the config, pool and mint (~0.02 SOL): the faucet tops up SOL and test USDC.
+      if ((await connection.getBalance(creator)) < 30_000_000) {
+        setStatus("Funding your trading account with devnet SOL and test USDC…");
+        await claimTestFunds({ privyAuthenticated: false, getAccessToken: async () => null, signMessage: (_a: string, bytes: Uint8Array) => signer.signMessage(bytes) }, signer.address!);
+        for (let i = 0; i < 20 && (await connection.getBalance(creator)) < 30_000_000; i += 1) await new Promise((r) => setTimeout(r, 1_000));
+      }
       setStatus("Building the Meteora DBC config and pool…");
       const built = await buildLaunchTransaction(connection, {
-        name: name.trim(), symbol, uri: uri.trim() || `${location.origin}/favicon.svg`, preset, creator: new PublicKey(signer.address),
+        name: name.trim(), symbol, uri: uri.trim() || `${location.origin}/favicon.svg`, preset, creator,
       });
-      setStatus("Approve the launch in your wallet…");
+      setStatus("Creating the pool on Solana devnet…");
       const signed = await signer.signTransaction(built.transaction.serialize({ requireAllSignatures: false }));
       setStatus("Sending to Solana devnet…");
       const signature = await connection.sendRawTransaction(signed);
       const outcome = await connection.confirmTransaction({ signature, blockhash: built.transaction.recentBlockhash!, lastValidBlockHeight: built.lastValidBlockHeight }, "confirmed");
       if (outcome.value.err) throw new Error(`launch failed: ${JSON.stringify(outcome.value.err)}`);
       setResult({ pool: built.pool.toBase58(), mint: built.baseMint.toBase58(), config: built.config.toBase58(), signature });
+      // List it on the Launch page for everyone (display registry; the chain is the truth).
+      await fetch(`${publicMarketApiUrl.replace(/\/$/, "")}/v1/launches`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pool: built.pool.toBase58(), baseMint: built.baseMint.toBase58(), symbol, name: name.trim(), preset: preset.id }) }).catch(() => undefined);
+      setRefreshKey((k) => k + 1);
       setStatus(null);
     } catch (error) {
       setStatus(`Not launched: ${error instanceof Error ? error.message : String(error)}`);
@@ -81,11 +99,11 @@ export function LaunchView() {
             </div>
             <h1 className="mt-2 text-[24px] font-semibold tracking-tight text-[var(--t-text)]">Launch a stock-themed token with an equity-tuned curve</h1>
             <p className="mt-2 max-w-[70ch] text-[13px] leading-relaxed text-[var(--t-text-2)]">
-              Most bonding curves are tuned for memecoins. These presets are tuned for equity-like assets: decaying launch fees against opening-day sniping, volatility-scaled dynamic fees, and permanently locked liquidity when the pool graduates to Meteora DAMM v2. The pool is created on Solana devnet and your wallet owns it.
+              Most bonding curves are tuned for memecoins and priced in SOL. These are priced in dollars (test USDC) and tuned for equity-like assets: decaying launch fees against opening-day sniping, volatility-scaled dynamic fees, and permanently locked liquidity when the pool graduates to Meteora DAMM v2. A graduated token can then be listed as a StockStream perp, priced from its DAMM v2 pool.
             </p>
           </div>
 
-          <div className="grid gap-3 p-5 md:grid-cols-3" role="radiogroup" aria-label="Curve preset">
+          <div className="grid gap-3 p-5 md:grid-cols-2" role="radiogroup" aria-label="Curve preset">
             {LAUNCH_PRESETS.map((p) => {
               const on = p.id === preset.id;
               const s = describePreset(p);
@@ -111,13 +129,13 @@ export function LaunchView() {
 
           <dl className="grid grid-cols-2 gap-px border-t border-[var(--t-border)] bg-[var(--t-border)] md:grid-cols-4">
             {[
-              ["Start market cap", `${preset.initialMarketCap} SOL`],
-              ["Graduates at", `${preset.migrationMarketCap} SOL`],
+              ["Start market cap", usd(preset.initialMarketCap)],
+              ["Graduates at", usd(preset.migrationMarketCap)],
               ["Dynamic fee", preset.dynamicFee ? "volatility-scaled" : "off"],
               ["Locked at graduation", `${preset.lockedLiquidityPercentage}% of LP`],
               ["Supply", `${(TOTAL_SUPPLY / 1e9).toFixed(0)}B tokens`],
-              ["Start price", `${summary.startPrice.toExponential(2)} SOL`],
-              ["Graduation price", `${summary.graduationPrice.toExponential(2)} SOL`],
+              ["Start price", `$${summary.startPrice.toExponential(2)}`],
+              ["Graduation price", `$${summary.graduationPrice.toExponential(2)}`],
               ["Migrates to", "Meteora DAMM v2"],
             ].map(([k, v]) => (
               <div key={k} className="bg-[var(--t-bg)] px-4 py-3">
@@ -144,7 +162,7 @@ export function LaunchView() {
             <button type="button" className={primaryBtn(pending)} disabled={pending} onClick={() => void launch()}>
               {!auth.authenticated ? "Sign in to launch" : pending ? "Launching…" : `Launch ${symbol || "token"} on Meteora`}
             </button>
-            <p className={HINT}>One wallet signature. Creates a DBC config (the {preset.label.toLowerCase()} curve) and a {stock}-themed pool quoted in SOL; you keep creator fees and the creator LP share. Needs ~0.05 devnet SOL for rent.</p>
+            <p className={HINT}>Signed by your trading account (one wallet prompt the first time). Creates a DBC config (the {preset.label.toLowerCase()} curve) and a {stock}-themed pool priced in test USDC; the creator keeps creator fees and the creator LP share. ~0.02 devnet SOL of rent, topped up from the faucet.</p>
             {status ? <p role="status" className="text-[12px] text-[var(--t-text-2)]">{status}</p> : null}
             {result ? (
               <div className="space-y-1 rounded-[4px] border border-[var(--t-up)] bg-[var(--t-up-soft)] p-2.5 text-[12px]">
@@ -157,6 +175,7 @@ export function LaunchView() {
           </div>
         </aside>
       </main>
+      <LaunchMonitor refreshKey={refreshKey} />
     </div>
   );
 }

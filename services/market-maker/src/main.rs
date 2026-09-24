@@ -10,7 +10,8 @@
 //!   `MM_FUNDING_EVERY_S` (default 3600) pace them.
 //! - `STOCKSTREAM_DEPLOYMENT`: deployment JSON path (default: the one compiled in);
 //!   its `markets` list names every market (the first is primary). Markets with
-//!   `oracle.kind = "prestocks"` get a price reporter (the keeper key reports).
+//!   `oracle.kind = "prestocks"` (a PreStocks token) or `"meteora"` (a graduated
+//!   DAMM v2 pool, priced per `lot` tokens) get a price reporter (the keeper key reports).
 //! - `SOLANA_RPC_URL`: Solana RPC for the reporter's L1 posts (default devnet)
 //! - `SOLANA_SEND_URL`: where the reporter sends its posts (default the public devnet RPC)
 //! - `MM_DATA_DIR`: where reporter-priced markets' candles persist (default /var/lib/stockstream)
@@ -25,7 +26,7 @@ use stockstream_market_maker::candles::PriceHistory;
 use serde_json::Value;
 use stockstream_market_maker::keeper::Keeper;
 use stockstream_market_maker::maker::{Maker, MarketConfig, Status};
-use stockstream_market_maker::reporter::Reporter;
+use stockstream_market_maker::reporter::{PriceSource, Reporter};
 use stockstream_market_maker::solana::{b58, pubkey, Keypair};
 use stockstream_market_maker::v3::Bundle;
 use tokio::sync::Mutex;
@@ -59,14 +60,19 @@ async fn main() -> Result<()> {
         path.iter().try_fold(&deployment, |node, key| node.get(*key)).and_then(Value::as_str).map(str::to_string).ok_or_else(|| anyhow!("deployment is missing {}", path.join(".")))
     };
     let program = pubkey(&field(&["programId"])?)?;
-    // (market, PreStocks token when the market is reporter-priced)
-    let markets: Vec<(MarketConfig, Option<String>)> = match deployment.get("markets").and_then(Value::as_array) {
+    // (market, where its price comes from when this service reports it)
+    let markets: Vec<(MarketConfig, Option<PriceSource>)> = match deployment.get("markets").and_then(Value::as_array) {
         Some(list) => list
             .iter()
             .enumerate()
             .map(|(index, market)| {
                 let text = |key: &str| market[key].as_str().ok_or_else(|| anyhow!("market {index} is missing {key}"));
-                let token = (market["oracle"]["kind"].as_str() == Some("prestocks")).then(|| market["oracle"]["token"].as_str().map(str::to_string)).flatten();
+                let oracle = &market["oracle"];
+                let token = match oracle["kind"].as_str() {
+                    Some("prestocks") => oracle["token"].as_str().map(|token| PriceSource::PreStocks { token: token.to_string() }),
+                    Some("meteora") => Some(PriceSource::MeteoraPool { pool: pubkey(oracle["pool"].as_str().ok_or_else(|| anyhow!("market {index}: meteora oracle needs a pool"))?)?, lot: oracle["lot"].as_f64().unwrap_or(1_000_000.0) }),
+                    _ => None,
+                };
                 Ok((MarketConfig { symbol: text("symbol")?.to_string(), bundle: Bundle::derive(program, pubkey(text("core")?)?, pubkey(text("oracleSnapshot")?)?), reporter_priced: token.is_some(), primary: index == 0 }, token))
             })
             .collect::<Result<_>>()?,
@@ -106,7 +112,7 @@ async fn main() -> Result<()> {
             jobs.push(Box::pin(keeper.run()));
             if let Some(token) = token {
                 let reporter = Arc::new(Reporter::new(&l1_url, &send_url, prestocks.clone(), history.clone(), keypair("MM_KEEPER_KEYPAIR")?, program, market.bundle.core, market.bundle.oracle_snapshot, token.clone(), market.symbol.clone(), state.clone())?);
-                tracing::info!(market = %market.symbol, token, "reporting PreStocks price");
+                tracing::info!(market = %market.symbol, ?token, "reporting price");
                 jobs.push(Box::pin(reporter.run(Duration::from_millis(reporters * 1_300))));
                 reporters += 1;
             }
