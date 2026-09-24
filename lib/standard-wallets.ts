@@ -58,11 +58,23 @@ export function toBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-// A cached snapshot for useSyncExternalStore: recomputed only on register events.
+// A cached snapshot for useSyncExternalStore: recomputed on register events.
 const NO_WALLETS: SolanaWalletOption[] = [];
 let snapshot: SolanaWalletOption[] | null = null;
+const sameWallets = (a: readonly SolanaWalletOption[], b: readonly SolanaWalletOption[]) => a.length === b.length && a.every((option, index) => option.wallet === b[index].wallet);
 export function subscribeSolanaWallets(listener: () => void): () => void {
-  return onWalletsChanged(() => { snapshot = listSolanaWallets(); listener(); });
+  const refresh = () => {
+    const next = listSolanaWallets();
+    if (snapshot && sameWallets(snapshot, next)) return;
+    snapshot = next;
+    listener();
+  };
+  const off = onWalletsChanged(refresh);
+  // Extensions register asynchronously at page load: one that registered
+  // after the first snapshot but before this subscription fired no event
+  // we could hear, so re-read once now.
+  refresh();
+  return off;
 }
 export function getSolanaWalletsSnapshot(): SolanaWalletOption[] {
   snapshot ??= listSolanaWallets();
