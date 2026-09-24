@@ -10,7 +10,7 @@ const POLL_MS = 1_000;
  * tab left open does not spend Worker requests; the Worker's proxy is the fallback. */
 const MM_STATUS_URL = process.env.NEXT_PUBLIC_MM_STATUS_URL || undefined;
 const EMPTY: readonly ErTxSample[] = [];
-const explorer = (signature: string) =>
+export const rollupExplorer = (signature: string) =>
   `https://explorer.solana.com/tx/${signature}?cluster=custom&customUrl=${encodeURIComponent(deployment.magicBlock.rpc)}`;
 const LABEL: Record<string, string> = { quote: "Quote", replace: "Requote", cancel: "Cancel", take: "Taker fill" };
 
@@ -69,7 +69,7 @@ export function ErTxPanel({ marketApiUrl }: { marketApiUrl: string | undefined }
           <ul className="divide-y divide-[var(--t-surface-2)]">
             {rows.map((row) => (
               <li key={row.signature} className={`tnum grid grid-cols-[52px_1fr_auto] items-center gap-2 px-3 py-[5px] text-[11.5px] ${row.mine ? "bg-[var(--t-surface-2)]" : ""}`}>
-                <a href={explorer(row.signature)} target="_blank" rel="noreferrer" className="truncate text-[var(--t-text-3)] hover:text-[var(--t-text)]">
+                <a href={rollupExplorer(row.signature)} target="_blank" rel="noreferrer" className="truncate text-[var(--t-text-3)] hover:text-[var(--t-text)]">
                   {new Date(row.at).toLocaleTimeString([], { hour12: false, minute: "2-digit", second: "2-digit" })}
                 </a>
                 <span className="min-w-0 truncate">

@@ -19,7 +19,8 @@ use crate::solana::{b58, set_compute_unit_limit, sign_transaction, Instruction, 
 use crate::v3::{cancel_order, place_order, replace_order, resting_orders, seat_positions, snapshot, Bundle, OrderInput};
 
 const QUOTE_TTL_S: u64 = 60;
-const MAX_SNAPSHOT_AGE_S: u64 = 6;
+/// Refresh the rollup price past this age: browsers take the fast path up to 7 s.
+const MAX_SNAPSHOT_AGE_S: u64 = 3;
 const MAX_ACTIONS_PER_TICK: usize = 12;
 const JITTER_RUNGS_PER_TICK: usize = 2;
 const TAKE_EVERY_MS: (u64, u64) = (700, 2_200);

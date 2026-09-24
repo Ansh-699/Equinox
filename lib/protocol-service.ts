@@ -43,9 +43,15 @@ export class StockStreamProtocolService {
     return executeL1(preview, this.transport.wallet, this.transport.l1, bytes, fresh);
   }
 
+  /** Pre-fetches what an order needs (blockhash, price age) so a click only signs and sends. */
+  warm(writableAccounts: readonly string[]): void {
+    this.transport.er.warm?.(writableAccounts);
+    this.transport.freshOracle?.warm();
+  }
+
   /** `oracle: "best-effort"` for writes that must not depend on a live price
    * (withdrawals): refresh when possible, never fail because it could not. */
-  async executeEr(preview: TransactionPreview, instructions: readonly TransactionInstruction[], writableAccounts: readonly string[], options: { oracle?: "required" | "best-effort" } = {}): Promise<{ preview: TransactionPreview; sequence: bigint }> {
+  async executeEr(preview: TransactionPreview, instructions: readonly TransactionInstruction[], writableAccounts: readonly string[], options: { oracle?: "required" | "best-effort" } = {}): Promise<{ preview: TransactionPreview; sequence: bigint; signature?: string }> {
     const refresh = () => options.oracle === "best-effort" ? this.transport.freshOracle?.er().catch(() => undefined) : this.transport.freshOracle?.er();
     // Blockhash and price freshness in parallel: both are rollup round trips.
     const [blockhash] = await Promise.all([this.transport.er.getAccountAwareBlockhash(writableAccounts), refresh()]);

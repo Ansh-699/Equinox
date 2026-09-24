@@ -28,7 +28,7 @@ import { OrderBookDisplay } from "./order-book";
 import { DEFAULT_TICKET, OrderTicket, sizeTicket, type Ticket } from "./order-ticket";
 import { LifecyclePanel } from "./lifecycle-panel";
 import { ActivityDrawer } from "./activity-drawer";
-import { ErTxPanel } from "./er-tx-panel";
+import { ErTxPanel, rollupExplorer } from "./er-tx-panel";
 import { InstantTradingCard } from "./instant-trading-card";
 import { Spinner } from "@/components/ui/spinner";
 import { useV3Book } from "./use-v3-book";
@@ -45,6 +45,7 @@ import { SolanaRpcTransport } from "@/lib/rpc-transport";
 import { marketStreamEvents } from "@/lib/market-stream-events";
 import { buildV3OrderInstructions } from "./v3-order";
 import { firstFreeSeat, seatFromPositions } from "./rollup-seat";
+import { TxToasts, useTxToasts } from "./tx-toasts";
 
 const marketApiUrl = publicMarketApiUrl;
 const ONBOARDING_DEPOSIT = 100_000_000n; // 100 test USDC
@@ -55,7 +56,10 @@ interface MarketEvent { kind: string; sequence?: number; payload: { kind?: strin
 export function TradingTerminal() {
   const auth = useAppAuth();
   const [ticket, setTicket] = useState<Ticket>(DEFAULT_TICKET);
-  const [orderPending, setOrderPending] = useState(false);
+  // Wallet orders never block the button: several can be in flight at once.
+  const [ordersInFlight, setOrdersInFlight] = useState(0);
+  const orderPending = ordersInFlight > 0;
+  const txToasts = useTxToasts();
   const [cancelPending, setCancelPending] = useState(false);
   const [faucetPending, setFaucetPending] = useState(false);
   const [notice, setNotice] = useState("Live submission requires verified Pyth pricing, USDC custody and MagicBlock delegation.");
@@ -306,23 +310,31 @@ export function TradingTerminal() {
     if ("error" in built) { setNotice(built.error); return; }
     const [, order] = built.instructions;
     const preview: TransactionPreview = { instruction: "PlaceOrder", programId: order.programId.toBase58(), accounts: order.keys.map((meta) => ({ address: meta.pubkey.toBase58(), signer: meta.isSigner, writable: meta.isWritable })), status: "constructed" };
-    setOrderPending(true);
+    setOrdersInFlight((n) => n + 1);
+    const what = `${ticket.side === "long" ? "Buy" : "Sell"} ${quantity} TSLA${orderTypeFor(ticket) === "ioc" ? "" : ` @ ${Number(sized.limitPriceUsd).toFixed(2)}`}`;
+    const clicked = performance.now();
+    const toastId = txToasts.push({ ok: true, pending: true, title: `${what} · sending…` });
     try {
       // The indexer's live execution status already says where the market lives: no extra round trip.
       if (executionStatus?.orderRoutingDomain === "er") {
         setNotice("Placing your order in the MagicBlock rollup…");
-        await protocol.service.executeEr(preview, built.instructions, built.writableAccounts);
+        const result = await protocol.service.executeEr(preview, built.instructions, built.writableAccounts);
+        const ms = Math.round(performance.now() - clicked);
         setNotice("Order accepted by the MagicBlock rollup.");
+        txToasts.settle(toastId, { ok: true, title: `${what} · done`, detail: `Finalized in the rollup · ${ms} ms from click`, href: result.signature ? rollupExplorer(result.signature) : undefined });
       } else {
         setNotice("Placing your order on Solana L1 (the market is not delegated right now)…");
         const result = await protocol.service.executeL1(preview, built.instructions, { freshOracle: true });
         recordSignature("PlaceOrder", result.signature, "l1");
         setNotice(`Order ${result.confirmation} on L1.`);
+        txToasts.settle(toastId, { ok: true, title: `${what} · ${result.confirmation} on Solana`, href: `https://explorer.solana.com/tx/${result.signature}?cluster=devnet` });
       }
     } catch (error) {
-      setNotice(`Order not placed: ${error instanceof Error ? error.message : String(error)}`);
+      const message = error instanceof Error ? error.message : String(error);
+      setNotice(`Order not placed: ${message}`);
+      txToasts.settle(toastId, { ok: false, title: `${what} · not placed`, detail: message });
     } finally {
-      setOrderPending(false);
+      setOrdersInFlight((n) => n - 1);
     }
   }
 
@@ -442,6 +454,21 @@ export function TradingTerminal() {
 
   const guard = (action: string, run: () => void) => () => { if (publicDemoReadOnly) { setNotice(`Read-only Devnet demo: ${action} is unavailable.`); return; } run(); };
   const onCancelOrder = (orderKey: bigint) => guard("order cancellation", () => void (walletTrading && !canTrade ? cancelV3(orderKey) : sessionOrder.cancelSessionOrder(orderKey)))();
+  // Keep an order's prerequisites (delegation check, blockhash, price age) warm:
+  // a click then only signs and sends.
+  const orderAccounts = useMemo(() => {
+    if (!publicV3Core || !trader) return null;
+    const execution = deriveV3ExecutionAccounts(publicV3Core, trader);
+    return [execution.core, ...execution.bookPages, ...execution.seatShards, ...execution.eventShards].map(String);
+  }, [trader]);
+  useEffect(() => {
+    if (!protocol || !orderAccounts || !executionStatus?.marketDelegated) return;
+    const warm = () => { if (!document.hidden) protocol.service.warm(orderAccounts); };
+    warm();
+    const timer = setInterval(warm, 800);
+    return () => clearInterval(timer);
+  }, [protocol, orderAccounts, executionStatus?.marketDelegated]);
+
   const onCancelAllOrders = guard("order cancellation", () => void (walletTrading && !canTrade ? cancelV3(null) : sessionOrder.cancelAllSessionOrders(4)));
 
   return (
@@ -504,7 +531,7 @@ export function TradingTerminal() {
             availableUsd={available}
             ctaLabel={ctaLabel}
             blocker={blocker}
-            pending={orderPending || sessionOrder.pending}
+            pending={sessionOrder.pending}
             footnote={canTrade ? `Session key active — orders sign locally, no wallet popup.` : walletTrading ? "Orders sign with your wallet and route to the MagicBlock rollup while the market is delegated." : `Session scope: ${marketConfig.symbol}. Withdrawals and collateral transfers are excluded.`}
             onSubmit={submitOrder}
           />
@@ -578,6 +605,7 @@ export function TradingTerminal() {
       </main>
 
       <ProtocolStatusStrip authenticated={auth.authenticated} v3={v3MarketState} delegated={executionStatus ? executionStatus.marketDelegated : null} oracleOnline={oracleSafety === "fresh"} />
+      <TxToasts toasts={txToasts.toasts} />
     </div>
   );
 }
