@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { claimInboxDepositV3, depositCollateral, depositCollateralV3, depositToInboxV3 } from "@/clients/stockstream/src";
+import { depositCollateral, depositCollateralV3 } from "@/clients/stockstream/src";
+import { rollupDeposit } from "./rollup-deposit";
 import type { ResolvedCustodyAccounts } from "./custody-accounts";
 import type { TransactionPreview } from "@/lib/execution-boundary";
 import { RpcFailure } from "@/lib/rpc-transport";
@@ -21,30 +22,9 @@ export function useDeposit(protocol: StockStreamProtocol | null, report?: (messa
     if (!protocol) { setNotice("Deposit blocked: connect a wallet capable of signing on Devnet."); return; }
     if (amount <= 0n) { setNotice("Deposit blocked: enter a positive amount."); return; }
     if (inRollup && accounts.v3) {
-      const { core, seatShard, eventShards, authority, source, vault, mint, tokenProgram } = accounts.v3.deposit;
-      const toPreview = (name: string, ix: ReturnType<typeof depositToInboxV3>): TransactionPreview => ({
-        instruction: name, programId: ix.programId.toBase58(), status: "constructed",
-        accounts: ix.keys.map((meta) => ({ address: meta.pubkey.toBase58(), signer: meta.isSigner, writable: meta.isWritable })),
-      });
       setPending(true);
       try {
-        setNotice("Step 1/2 · Depositing into the vault on Solana…");
-        const inbox = depositToInboxV3({ core, trader: authority, source, vault, mint, tokenProgram }, amount);
-        const result = await protocol.service.executeL1(toPreview("DepositToInboxV3", inbox), [inbox]);
-        recordSignature("DepositToInboxV3", result.signature, "l1");
-        setNotice("Step 2/2 · Crediting your seat in the MagicBlock rollup…");
-        const claim = claimInboxDepositV3({ core, seatShard, eventShards, trader: authority }, accounts.seatIndex);
-        const writable = [core, seatShard, ...eventShards].map(String);
-        // The rollup clones the receipt from L1; give it a moment to see the new total.
-        for (let attempt = 0; ; attempt += 1) {
-          try {
-            await protocol.service.executeEr(toPreview("ClaimInboxDepositV3", claim), [claim], writable);
-            break;
-          } catch (error) {
-            if (attempt >= 3) throw error;
-            await new Promise((resolve) => setTimeout(resolve, 2_000));
-          }
-        }
+        await rollupDeposit(protocol, accounts, amount, setNotice);
         setNotice(`Deposited ${Number(amount) / 1e6} USDC — credited to your seat in the rollup.`);
       } catch (error) {
         setNotice(`Deposit not completed: ${error instanceof Error ? error.message : String(error)}. Tokens already in the vault stay on your receipt and are credited on the next deposit.`);

@@ -41,7 +41,7 @@ import type { TransactionPreview } from "@/lib/execution-boundary";
 import { recordSignature } from "@/lib/last-signature";
 import { claimTestFunds } from "@/lib/faucet-client";
 import { publicMarketApiUrl } from "@/lib/demo-config";
-import { isReporterPriced, MM_SERVICE_URL, PRIMARY_MARKET, v3MarketFor } from "@/lib/v3-markets";
+import { isReporterPriced, MM_SERVICE_URL, PRIMARY_MARKET, V3_MARKETS, v3MarketFor } from "@/lib/v3-markets";
 import { MARKET_BY_SYMBOL } from "@/lib/markets";
 import { SolanaRpcTransport } from "@/lib/rpc-transport";
 import { marketStreamEvents } from "@/lib/market-stream-events";
@@ -81,6 +81,12 @@ export function TradingTerminal() {
     tick();
     const interval = setInterval(tick, 5_000);
     return () => clearInterval(interval);
+  }, []);
+  // Deep links (`/trade?market=OPENAI-PERP`, e.g. from the Pre-IPO page) pick the market after hydration.
+  useEffect(() => {
+    const wanted = new URLSearchParams(window.location.search).get("market");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one read of the URL on mount
+    if (wanted && V3_MARKETS.some((market) => market.symbol === wanted)) setMarketSymbol(wanted);
   }, []);
   // The live V3 market (its core, snapshot and price source) drives every read and write.
   const v3 = v3MarketFor(marketSymbol);

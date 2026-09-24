@@ -1,7 +1,7 @@
-/** Pre-IPO token prices from PreStocks and Tessera, proxied because neither
- * API sends CORS headers. Display data only: never used for margin or risk. */
+/** Pre-IPO token prices from PreStocks, proxied because the API sends no
+ * CORS headers. (PreStocks only: its bounty excludes other pre-IPO tokens.) Display data only: never used for margin or risk. */
 export interface PreIpoToken {
-  issuer: "PreStocks" | "Tessera";
+  issuer: "PreStocks";
   name: string;
   symbol: string;
   mint: string;
@@ -28,23 +28,12 @@ export function normalizePreStocks(rows: unknown): PreIpoToken[] {
   });
 }
 
-export function normalizeTessera(rows: unknown): PreIpoToken[] {
-  if (!Array.isArray(rows)) return [];
-  return rows.flatMap((row) => {
-    const r = row as Record<string, unknown>;
-    const mint = str(r.mint), mark = num(r.markPrice);
-    if (!mint || mark === null) return [];
-    return [{ issuer: "Tessera" as const, name: str(r.name) ?? mint, symbol: str(r.symbol) ?? "", mint, markPrice: mark, tokenPrice: null, markValuation: num(r.markValuation), sector: str(r.sector), image: null, url: "https://app.tessera.pe" }];
-  });
-}
-
 let cached: { at: number; tokens: PreIpoToken[] } | null = null;
 
 export async function fetchPreIpoTokens(fetcher: typeof fetch = fetch, now = Date.now()): Promise<PreIpoToken[]> {
   if (cached && now - cached.at < 60_000) return cached.tokens;
   const get = (url: string) => fetcher(url, { headers: { accept: "application/json" } }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
-  const [prestocks, tessera] = await Promise.all([get("https://prestocks.com/api/prestocks"), get("https://rest-api.tessera.pe/v1/public/token-details")]);
-  const tokens = [...normalizePreStocks(prestocks), ...normalizeTessera(tessera)];
+  const tokens = normalizePreStocks(await get("https://prestocks.com/api/prestocks"));
   if (tokens.length) cached = { at: now, tokens };
   return tokens;
 }
