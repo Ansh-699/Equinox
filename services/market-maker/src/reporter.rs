@@ -72,6 +72,28 @@ pub struct ReporterStatus {
     pub last_error: Option<String>,
 }
 
+/// Where a reporter-priced market's price comes from.
+#[derive(Clone, Debug)]
+pub enum PriceSource {
+    /// A PreStocks pre-IPO token: its on-chain price, within ±50% of PreStocks' mark.
+    PreStocks { token: String },
+    /// A token launched on Meteora DBC that graduated to a DAMM v2 pool (USDC
+    /// quoted): the pool's price for `lot` tokens (launched tokens trade far
+    /// below a cent, under the perps' 5-decimal price scale).
+    MeteoraPool { pool: Pubkey, lot: f64 },
+}
+
+/// DAMM v2 pool: `sqrt_price` (Q64.64 of quote per base) sits at byte 456 of the
+/// account, after the fee struct, both mints and vaults, liquidity and fee counters.
+const DAMM_V2_SQRT_PRICE_OFFSET: usize = 456;
+
+/// Quote (USDC) per base token from a DAMM v2 pool account, both 6 decimals.
+pub fn damm_v2_price(pool: &[u8]) -> Option<f64> {
+    let bytes: [u8; 16] = pool.get(DAMM_V2_SQRT_PRICE_OFFSET..DAMM_V2_SQRT_PRICE_OFFSET + 16)?.try_into().ok()?;
+    let sqrt = u128::from_le_bytes(bytes) as f64 / 18_446_744_073_709_551_616.0;
+    (sqrt > 0.0).then_some(sqrt * sqrt)
+}
+
 /// Largest move (bps) the program accepts after `elapsed_s` seconds, less a margin.
 pub fn allowed_move_bps(elapsed_s: u64) -> i128 {
     i128::from(elapsed_s.saturating_mul(10).saturating_add(50).min(1_000)) - 5
@@ -101,25 +123,35 @@ pub struct Reporter {
     program: Pubkey,
     core: Pubkey,
     snapshot: Pubkey,
-    token: String,
+    source: PriceSource,
     symbol: String,
     status: Arc<Mutex<Status>>,
 }
 
 impl Reporter {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(l1_url: &str, send_url: &str, feed: Arc<PreStocksFeed>, history: Arc<crate::candles::PriceHistory>, key: Keypair, program: Pubkey, core: Pubkey, snapshot: Pubkey, token: String, symbol: String, status: Arc<Mutex<Status>>) -> Result<Self> {
-        Ok(Self { l1: Rpc::new(l1_url)?, sender: Rpc::new(send_url)?, history, feed, key, program, core, snapshot, token, symbol, status })
+    pub fn new(l1_url: &str, send_url: &str, feed: Arc<PreStocksFeed>, history: Arc<crate::candles::PriceHistory>, key: Keypair, program: Pubkey, core: Pubkey, snapshot: Pubkey, source: PriceSource, symbol: String, status: Arc<Mutex<Status>>) -> Result<Self> {
+        Ok(Self { l1: Rpc::new(l1_url)?, sender: Rpc::new(send_url)?, history, feed, key, program, core, snapshot, source, symbol, status })
     }
 
     /// `offset` staggers several reporters so their posts do not land together.
     pub async fn run(self: Arc<Self>, offset: Duration) {
         tokio::time::sleep(offset).await;
-        self.status.lock().await.market(&self.symbol).reporter = Some(ReporterStatus { key: b58(&self.key.pubkey()), source: format!("PreStocks {}", self.token), ..ReporterStatus::default() });
+        self.status.lock().await.market(&self.symbol).reporter = Some(ReporterStatus { key: b58(&self.key.pubkey()), source: match &self.source {
+            PriceSource::PreStocks { token } => format!("PreStocks {token}"),
+            PriceSource::MeteoraPool { pool, lot } => format!("Meteora DAMM v2 {} × {lot}", b58(pool)),
+        }, ..ReporterStatus::default() });
         let mut blockhash: Option<(Instant, [u8; 32])> = None;
         loop {
             let result = async {
-                let (mark, token) = self.feed.prices(&self.token).await.context("PreStocks API")?;
+                let (mark, token) = match &self.source {
+                    PriceSource::PreStocks { token } => self.feed.prices(token).await.context("PreStocks API")?,
+                    PriceSource::MeteoraPool { pool, lot } => {
+                        let bytes = self.l1.account(pool).await?.ok_or_else(|| anyhow!("Meteora pool missing"))?;
+                        let price = damm_v2_price(&bytes).ok_or_else(|| anyhow!("Meteora pool has no price"))? * lot;
+                        (price, Some(price))
+                    }
+                };
                 let snapshot = self.l1.account(&self.snapshot).await?.ok_or_else(|| anyhow!("oracle snapshot missing"))?;
                 let previous = i64::from_le_bytes(snapshot[OFFSET_PRICE..OFFSET_PRICE + 8].try_into()?);
                 let previous_publish = u64::from_le_bytes(snapshot[OFFSET_PUBLISH_TIMESTAMP..OFFSET_PUBLISH_TIMESTAMP + 8].try_into()?);
@@ -188,6 +220,16 @@ impl Reporter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_a_damm_v2_pool_price() {
+        // The devnet graduation test pool: $2,000 market cap over 1e9 tokens.
+        let mut pool = vec![0u8; 1_112];
+        pool[456..472].copy_from_slice(&26_087_635_650_665_564u128.to_le_bytes());
+        let price = damm_v2_price(&pool).unwrap();
+        assert!((price - 2e-6).abs() < 1e-12, "{price}");
+        assert_eq!(damm_v2_price(&[0u8; 100]), None);
+    }
 
     #[test]
     fn index_follows_the_token_within_half_the_mark() {
