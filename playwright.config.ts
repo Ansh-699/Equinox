@@ -45,9 +45,8 @@ export default defineConfig({
       // server-side auth bypass (lib/auth/e2e-test-mode.ts) requires
       // NODE_ENV !== "production", so the fake-wallet/injected-signature
       // test-mode shim this whole fixture suite depends on cannot run
-      // against a real production server at all -- see
-      // playwright.production.config.ts (a separate, auth-free smoke
-      // config). This dev-mode choice is about the auth bypass.
+      // against a real production server. This dev-mode choice is about
+      // the auth bypass.
       command: "npm run dev:e2e",
       url: `http://127.0.0.1:${APP_PORT}`,
       reuseExistingServer: false,
