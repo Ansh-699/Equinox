@@ -435,3 +435,5 @@ input[type="number"] {
 /* Connected wallet: a quiet chip, not a call to action. */
 .wallet-button.wallet-chip { background: var(--t-surface); border-color: var(--t-border-strong); color: var(--t-text); font-weight: 500; }
 .wallet-button.wallet-chip:hover { background: var(--t-surface-3); }
+.account-pill { gap: 10px; padding: 0 10px 0 12px; }
+.account-pill-active { border-color: var(--t-text); box-shadow: inset 0 0 0 1px var(--t-text); }

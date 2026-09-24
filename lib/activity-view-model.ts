@@ -43,3 +43,28 @@ export function toActivityRow(event: RawActivityEvent): ActivityRowView {
     observedAt: event.observedAt,
   };
 }
+
+/** "OrderPartiallyFilled" -> "Order partially filled". Only reshapes the
+ * already-decoded name; "details unavailable" and "Unknown(n)" pass through. */
+export function humanizeEventKind(detail: string): string {
+  if (!/^[A-Z][A-Za-z]+$/.test(detail)) return detail;
+  const words = detail.replace(/([a-z])([A-Z])/g, "$1 $2").split(" ");
+  return words.map((word, index) => (index === 0 ? word : word.toLowerCase())).join(" ");
+}
+
+/** Filter groups the Activity feed offers over the coarse categories. */
+export const ACTIVITY_FILTERS = [
+  { id: "all", label: "All", categories: null },
+  { id: "trades", label: "Trades", categories: ["fill"] },
+  { id: "orders", label: "Orders", categories: ["book"] },
+  { id: "funding", label: "Funding", categories: ["funding"] },
+  { id: "oracle", label: "Oracle", categories: ["oracle"] },
+  { id: "custody", label: "Custody", categories: ["custody"] },
+  { id: "market", label: "Market", categories: ["health"] },
+] as const;
+export type ActivityFilterId = (typeof ACTIVITY_FILTERS)[number]["id"];
+
+export function matchesActivityFilter(category: string, filter: ActivityFilterId): boolean {
+  const entry = ACTIVITY_FILTERS.find((f) => f.id === filter);
+  return !entry?.categories || (entry.categories as readonly string[]).includes(category);
+}
