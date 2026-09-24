@@ -9,73 +9,71 @@
 
 @theme inline {
   --font-sans: var(--font-ui);
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 :root {
-  --t-bg: #ffffff;
+  /* Palette after ordr.trade: warm paper in light, green-black in dark.
+     Ratios are against --t-bg / --t-surface-3 (the darkest surface). */
+  --t-bg: #fcf7f6;
   --t-surface: #ffffff;
-  --t-surface-2: #f3f5f7;
-  --t-surface-3: #e9edf0;
-  --t-border: #d5dbdf;
-  --t-text: #0e1417;      /* 16.9:1 on --t-surface */
-  --t-text-2: #46515b;    /*  8.3:1 */
-  --t-text-3: #5f6a74;    /*  5.9:1 */
+  --t-surface-2: #f5f1ef;
+  --t-surface-3: #ebe7e5;
+  --t-border: #e1dddb;
+  --t-text: #110c0a;      /* 18.3:1 */
+  --t-text-2: #5d5654;    /*  6.8:1 */
+  --t-text-3: #645d5b;    /*  5.3:1 on surface-3 */
   --t-text-hi: #000000;
-  --t-up: #047857;        /*  4.8:1  emerald-700 */
-  --t-up-2: #036b4d;
-  --t-up-3: #025c42;
-  --t-down: #be123c;      /*  6.4:1  rose-700 */
-  --t-down-2: #a10f33;
-  --t-down-3: #8c0d2c;
-  --t-down-bg: #fdeaee;
+  --t-up: #136b33;        /*  5.4:1 on surface-3 */
+  --t-up-2: #10622c;
+  --t-up-3: #167a38;
+  --t-down: #b92c26;      /*  5.0:1 on surface-3 */
+  --t-down-2: #a82520;
+  --t-down-3: #a82520;
+  --t-down-bg: #fbeae8;
   /* Ink for text sitting ON a saturated fill (--t-up-3 / --t-down-3). Those
-     fills are dark in BOTH themes, so this stays white in both. Without it,
-     filled buttons took `text-white` -- which the light remap above rewrites to
-     dark ink -- and rendered black-on-dark-green at 2.26:1. */
+     fills are dark in BOTH themes, so this stays white in both. */
   --t-on-fill: #ffffff;
   /* --t-border is a hairline DIVIDER (decorative, no WCAG bar). A control whose
-     only boundary is its border must clear 3:1 per 1.4.11, which #d5dbdf at
-     1.40:1 does not — so interactive edges take --t-border-strong instead. */
-  --t-border-strong: #84919c;   /* 3.23:1 on white */
-  --t-scroll-thumb: rgba(15, 23, 23, 0.28);
-  --t-scroll-thumb-hover: rgba(15, 23, 23, 0.45);
-  --t-warn: #a2490a;      /*  6.0:1 on white, 5.1:1 on --t-surface-3.
-                             amber-700 (#b45309) measured 4.27:1 against
-                             surface-3 -- an AA failure only the darkest
-                             surface exposed, which is exactly the kind of
-                             pair the old code never checked. */
-  --t-link: #0369a1;      /*  5.6:1  sky-700 */
+     only boundary is its border must clear 3:1 per 1.4.11, so interactive
+     edges take --t-border-strong instead. */
+  --t-border-strong: #8a827f;   /* 3.5:1 on --t-bg */
+  --t-scroll-thumb: rgba(17, 12, 10, 0.22);
+  --t-scroll-thumb-hover: rgba(17, 12, 10, 0.4);
+  --t-warn: #a2490a;      /*  4.9:1 on surface-3 */
+  --t-link: #7f4900;      /*  6.0:1: ordr's amber accent */
+  --t-accent: #7f4900;
 }
 .dark {
-  --t-bg: #0b0d0e;
-  --t-surface: #121516;
-  --t-surface-2: #15191a;
-  --t-surface-3: #171b1c;
-  --t-border: #1d2224;
-  --t-text: #e6e9ea;
-  --t-text-2: #a2abb1;
-  --t-text-3: #838c92;
+  --t-bg: #141715;
+  --t-surface: #191c1a;
+  --t-surface-2: #1b1e1c;
+  --t-surface-3: #1e211f;
+  --t-border: #252826;
+  --t-text: #f8f4f3;
+  --t-text-2: #989493;    /*  5.4:1 on surface-3 */
+  --t-text-3: #8f8a88;    /*  4.8:1 on surface-3 */
   --t-text-hi: #ffffff;
-  --t-up: #22c55e;
-  --t-up-2: #1c9463;
-  --t-up-3: #16794f;
-  --t-down: #ef4444;
-  --t-down-2: #c04447;
-  --t-down-3: #a93436;
-  --t-down-bg: #2b1416;
+  --t-up: #3abf72;
+  --t-up-2: #1f7a47;
+  --t-up-3: #17703f;      /* white on it: 6.1:1 */
+  --t-down: #e86666;      /*  5.0:1 on surface-3 */
+  --t-down-2: #c84040;
+  --t-down-3: #b8322f;
+  --t-down-bg: #2a1716;
   --t-on-fill: #ffffff;
-  --t-border-strong: #5f696d;   /* 3.01:1 on --t-bg */
-  --t-scroll-thumb: rgba(255, 255, 255, 0.18);
-  --t-scroll-thumb-hover: rgba(255, 255, 255, 0.3);
+  --t-border-strong: #6f6967;   /* 3.0:1 on surface-3 */
+  --t-scroll-thumb: rgba(255, 255, 255, 0.14);
+  --t-scroll-thumb-hover: rgba(255, 255, 255, 0.26);
   --t-warn: #f59e0b;
-  --t-link: #58a6ff;
+  --t-link: #e7963d;
+  --t-accent: #e7963d;
 }
 
 /* Equinox extras + legacy aliases (older components use these names). */
 :root {
-  --t-up-soft: rgba(4, 120, 87, 0.1);
-  --t-down-soft: #fdeaee;
+  --t-up-soft: rgba(22, 122, 56, 0.1);
+  --t-down-soft: #fbeae8;
   --ink: var(--t-text);
   --muted: var(--t-text-2);
   --line: var(--t-border);
@@ -86,13 +84,14 @@
   --red: var(--t-down);
   --red-soft: var(--t-down-soft);
   --blue: var(--t-link);
-  --font-ui: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-ui: var(--font-poppins), ui-sans-serif, system-ui, sans-serif;
+  --font-num: var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
   --font-display: var(--font-poppins), ui-sans-serif, system-ui, sans-serif;
 }
 .dark {
   color-scheme: dark;
-  --t-up-soft: rgba(34, 197, 94, 0.12);
-  --t-down-soft: #2b1416;
+  --t-up-soft: rgba(58, 191, 114, 0.12);
+  --t-down-soft: #2a1716;
 }
 
 html, body { background: var(--t-bg); }
@@ -106,9 +105,11 @@ button:disabled { cursor: not-allowed; }
 .skip-link { position: absolute; top: -48px; left: 8px; z-index: 50; background: var(--t-surface-3); color: var(--t-text); padding: 9px 14px; border-radius: 6px; font-size: 13px; text-decoration: none; transition: top .15s; }
 .skip-link:focus { top: 8px; }
 
+/* Numbers read in IBM Plex Mono, as on ordr.trade. */
 .tnum {
+  font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum" 1, "ss01" 1;
+  letter-spacing: -0.01em;
 }
 
 /* Emerald glow accent for primary CTAs */
@@ -291,9 +292,8 @@ input[type="number"] {
   font-family: var(--font-ui), ui-sans-serif, system-ui, sans-serif;
   background: var(--tk-bg);
   color: var(--tk-text);
-  font-feature-settings: "cv05", "ss01";
 }
-.terminal ::selection { background: rgba(34, 197, 94, 0.3); }
+.terminal ::selection { background: rgba(231, 150, 61, 0.3); }
 
 /* Panel chrome shared by every column. */
 .tk-head {
@@ -307,6 +307,7 @@ input[type="number"] {
   position: relative;
   height: 40px;
   padding: 0 2px;
+  white-space: nowrap;
   font-size: 13px;
   font-weight: 500;
   color: var(--tk-text-2);
@@ -366,7 +367,7 @@ input[type="number"] {
 .shell > :not(header) { max-width: 1480px; margin-left: auto; margin-right: auto; padding-left: 20px; padding-right: 20px; }
 .wallet-button, .lifecycle-action, .quiet-action { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid var(--t-up-3); background: var(--t-up-3); color: var(--t-on-fill); padding: 6px 12px; height: 32px; border-radius: 6px; font-weight: 600; font-size: 12.5px; text-decoration: none; white-space: nowrap; }
 .wallet-button:hover, .lifecycle-action:hover { background: var(--t-up-2); }
-.topbar-wallet { height: 36px; padding: 0 14px; border-color: var(--t-border-strong); background: var(--t-bg); color: var(--t-text); font-weight: 500; }
+.topbar-wallet { height: 34px; padding: 0 12px; border-color: var(--t-border-strong); border-radius: 6px; background: var(--t-surface); color: var(--t-text); font-weight: 500; font-size: 12.5px; }
 .topbar-wallet:hover { background: var(--t-surface-3); }
 .quiet-action, .quiet-action:hover { background: var(--t-surface); border-color: var(--t-border-strong); color: var(--t-text); }
 .quiet-action:hover { background: var(--t-surface-3); }
@@ -436,4 +437,4 @@ input[type="number"] {
 .wallet-button.wallet-chip { background: var(--t-surface); border-color: var(--t-border-strong); color: var(--t-text); font-weight: 500; }
 .wallet-button.wallet-chip:hover { background: var(--t-surface-3); }
 .account-pill { gap: 10px; padding: 0 10px 0 12px; }
-.account-pill-active { border-color: var(--t-text); box-shadow: inset 0 0 0 1px var(--t-text); }
+.account-pill-active { border-color: var(--t-accent); }

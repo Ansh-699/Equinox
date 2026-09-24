@@ -246,7 +246,7 @@ const Row = memo(function Row({
         className="absolute inset-y-0 right-0 motion-safe:transition-[width] motion-safe:duration-[160ms] motion-safe:ease-[cubic-bezier(0.16,1,0.3,1)]"
         style={{
           width: `${pct}%`,
-          backgroundColor: side === "bid" ? "rgba(34,197,94,0.10)" : "rgba(239,68,68,0.10)",
+          backgroundColor: side === "bid" ? "rgba(58,191,114,0.12)" : "rgba(224,85,85,0.12)",
         }}
       />
       <span ref={priceRef} className={`relative tnum ${side === "bid" ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
