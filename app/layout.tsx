@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { IBM_Plex_Mono, Poppins } from "next/font/google";
 import { AppProviders } from "@/components/app-providers";
 import { THEME_SCRIPT } from "@/components/theme-toggle";
+import { ThemeFavicon } from "@/components/theme-favicon";
 import "./globals.css";
 
 const poppins = Poppins({ variable: "--font-poppins", weight: ["400", "500", "600", "700"], subsets: ["latin"], display: "swap" });
@@ -10,7 +11,10 @@ const plexMono = IBM_Plex_Mono({ variable: "--font-plex-mono", weight: ["400", "
 export const metadata: Metadata = {
   title: "Equinox",
   description: "Perpetual futures on US stocks: matched in a MagicBlock Ephemeral Rollup, priced by Pyth, settled on Solana.",
-  icons: { icon: "/favicon.svg" }
+  icons: {
+    icon: "/brand/equinox-dark.png",
+    apple: "/brand/equinox-dark.png",
+  },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
@@ -21,6 +25,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
       <body>
+        <ThemeFavicon />
         <AppProviders>{children}</AppProviders>
       </body>
     </html>

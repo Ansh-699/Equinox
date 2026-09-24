@@ -545,11 +545,6 @@
 
 /* ---------- wordmark + credibility pill internals ---------- */
 
-.logoImg {
-  border-radius: 50%;
-  object-fit: cover;
-}
-
 .credInner {
   display: inline-flex;
   align-items: center;
@@ -613,10 +608,6 @@
   font-weight: 800;
   letter-spacing: 0.14em;
   margin-bottom: 56px;
-}
-
-.megaGem {
-  border-radius: 6px;
 }
 
 .megaCols {
