@@ -34,11 +34,11 @@ export function sizeTicket(ticket: Ticket, markPrice: number | null, initialMarg
 }
 
 const FOCUS = "focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]";
-const INPUT = `tnum h-[34px] w-full rounded-[4px] border border-[var(--t-border-strong)] bg-[var(--t-surface)] px-[10px] pr-14 text-[13px] text-[var(--t-text)] placeholder:text-[var(--t-text-3)] ${FOCUS}`;
-const SUFFIX = "pointer-events-none absolute right-[10px] top-1/2 -translate-y-1/2 text-[11px] text-[var(--t-text-3)]";
-const LABEL = "text-[12px] text-[var(--t-text-2)]";
+const INPUT = `tnum h-[34px] w-full rounded-[4px] border border-[var(--t-border-strong)] bg-[var(--t-surface)] px-[10px] pr-14 text-[14px] text-[var(--t-text)] placeholder:text-[var(--t-text-3)] ${FOCUS}`;
+const SUFFIX = "pointer-events-none absolute right-[10px] top-1/2 -translate-y-1/2 text-[12px] text-[var(--t-text-3)]";
+const LABEL = "text-[13px] text-[var(--t-text-2)]";
 const ROW = "flex h-[22px] items-center justify-between border-b border-[var(--t-surface-2)] last:border-b-0";
-const CHIP = `tnum h-[26px] rounded-[4px] border border-[var(--t-border-strong)] bg-[var(--t-surface)] text-[11.5px] text-[var(--t-text-2)] hover:text-[var(--t-text)] ${FOCUS}`;
+const CHIP = `tnum h-[26px] rounded-[4px] border border-[var(--t-border-strong)] bg-[var(--t-surface)] text-[12px] text-[var(--t-text-2)] hover:text-[var(--t-text)] ${FOCUS}`;
 
 /** Order entry (SlipStream OrderForm) for a Equinox perp. */
 export function OrderTicket({
@@ -86,7 +86,7 @@ export function OrderTicket({
             type="button"
             onClick={() => set({ kind })}
             aria-pressed={ticket.kind === kind}
-            className={`relative text-[13px] font-medium ${FOCUS} ${ticket.kind === kind ? "text-[var(--t-text)] after:absolute after:inset-x-0 after:-bottom-px after:h-[2px] after:bg-[var(--t-text)]" : "text-[var(--t-text-2)] hover:text-[var(--t-text)]"}`}
+            className={`relative text-[14px] font-medium ${FOCUS} ${ticket.kind === kind ? "text-[var(--t-text)] after:absolute after:inset-x-0 after:-bottom-px after:h-[2px] after:bg-[var(--t-text)]" : "text-[var(--t-text-2)] hover:text-[var(--t-text)]"}`}
           >
             {kind === "market" ? "Market" : "Limit"}
           </button>
@@ -105,7 +105,7 @@ export function OrderTicket({
                 type="button"
                 onClick={() => set({ side })}
                 aria-pressed={on}
-                className={`flex h-[44px] items-center justify-center rounded-[4px] border text-[13px] font-medium ${FOCUS} ${
+                className={`flex h-[44px] items-center justify-center rounded-[4px] border text-[14px] font-medium ${FOCUS} ${
                   on
                     ? long ? "border-[var(--t-up)] bg-[rgba(34,197,94,0.12)] text-[var(--t-up)]" : "border-[var(--t-down)] bg-[rgba(239,68,68,0.12)] text-[var(--t-down)]"
                     : "border-[var(--t-border-strong)] bg-[var(--t-surface)] text-[var(--t-text-2)] hover:text-[var(--t-text)]"

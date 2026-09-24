@@ -7,6 +7,7 @@ import { ChevronDown, Compass, Menu, Settings, WalletCards, X, Zap } from "lucid
 import { WalletDrawer } from "@/components/wallet/wallet-drawer";
 import type { AppAuth } from "@/components/app-providers";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { BrandMark } from "@/components/ui/brand-mark";
 import { DEMO_PROGRAM_ID } from "@/lib/demo-config";
 import { useAccountSummary } from "@/features/portfolio/use-account-summary";
 import { formatUsdUnits, Skeleton } from "@/components/ui/primitives";
@@ -76,7 +77,7 @@ export function TopBar({ active, auth }: { active: ActiveSection; auth: AppAuth 
     <header className="relative flex h-[56px] shrink-0 items-center border-b border-[var(--t-border)] bg-[var(--t-bg)] px-4 sm:px-5">
       <a href="#main-content" className="skip-link">Skip to main content</a>
       <Link href="/" className="flex shrink-0 items-center gap-2" aria-label="Equinox home">
-        <img src="/favicon.svg" alt="" className="h-7 w-7 rounded-[7px]" />
+        <BrandMark size={28} />
         <span className="text-[20px] font-semibold tracking-[-0.03em] text-[var(--t-text)]">Equinox</span>
       </Link>
       <span className="ml-2.5 hidden rounded-[5px] border border-[var(--t-border)] px-1.5 py-px text-[10.5px] font-medium text-[var(--t-text-3)] xl:inline">Devnet</span>
@@ -87,7 +88,7 @@ export function TopBar({ active, auth }: { active: ActiveSection; auth: AppAuth 
             key={item.id}
             href={item.href}
             aria-current={active === item.id ? "page" : undefined}
-            className={`relative flex items-center text-[13px] font-medium transition-colors ${
+            className={`relative flex items-center text-[14px] font-medium transition-colors ${
               active === item.id
                 ? "text-[var(--t-text)] after:absolute after:inset-x-0 after:-bottom-px after:h-[2px] after:rounded-full after:bg-[var(--t-accent)]"
                 : "text-[var(--t-text-2)] hover:text-[var(--t-text)]"

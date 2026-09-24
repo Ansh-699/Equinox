@@ -1,18 +1,22 @@
 # Equinox market maker
 
-An always-on devnet quoting bot for the V3 TSLA-PERP book inside the MagicBlock
-rollup. It replaced the Cloudflare Durable Object, which hit Durable Object
-request limits at one tick every ~0.5 s.
+An always-on Rust service for the V3 markets listed in
+[`config/equinox-deployment.json`](../../config/equinox-deployment.json).
+It replaced a Cloudflare Durable Object that could not sustain the quoting
+tick rate. The service runs market-making, optional keeper jobs, and price
+reporters for PreStocks- or Meteora-priced markets in one process.
 
-Each tick:
+For each market with funded maker and taker seats, a tick:
 - reads the maker's own resting orders from the rollup book;
 - replaces only the rungs that drifted, with an atomic `ReplaceOrder`, so a level is never empty;
 - re-sizes two settled rungs, so the book keeps moving;
 - has a taker seat cross the touch with 1–2 lots, so fills print.
 
 Every transaction is timed from send to the rollup's `signatureSubscribe`
-"processed" push. The bot pauses while Pyth reports the US session closed:
-the program refuses orders then.
+"processed" push. The bot pauses when that market's price session is closed:
+the program refuses new orders then. With `MM_KEEPER_KEYPAIR` set, the
+same process also commits shards, updates funding, scans liquidations, and
+posts reporter prices where the manifest calls for them.
 
 ## Where to run it
 
@@ -68,9 +72,10 @@ docker run -d --restart=always --name stockstream-mm -p 127.0.0.1:8080:8080 \
 
 ## Status for the terminal (HTTPS)
 
-The terminal's live-transactions panel polls the status every second. Serve
-it over HTTPS and point the frontend at it directly: polling through the
-Worker would spend Worker requests (about 86k/day for one open tab).
+The terminal receives completed transactions from `/v1/mm/stream` (SSE)
+and polls `/v1/mm/status` every five seconds for backfill. Serve the
+service over HTTPS and point the frontend at it directly; proxying each
+browser through the Worker would spend Worker requests.
 
 1. Install Caddy.
 2. Copy `deploy/Caddyfile` to `/etc/caddy/Caddyfile` and replace the host with
@@ -91,7 +96,7 @@ Worker would spend Worker requests (about 86k/day for one open tab).
 |---|---|---|
 | `MM_MAKER_KEYPAIR`, `MM_TAKER_KEYPAIR` | required | paths to solana-keygen JSON files; each key must already own a seat in the market |
 | `MM_KEEPER_KEYPAIR` | unset | the core's keeper key; turns on commits, funding and liquidation (see Keeper) |
-| `MM_COMMIT_EVERY_S`, `MM_FUNDING_EVERY_S` | `120`, `3600` | keeper pacing |
+| `MM_COMMIT_EVERY_S`, `MM_FUNDING_EVERY_S` | `120`, `3600` | source defaults; deployed pacing is set separately |
 | `MAGICBLOCK_RPC_URL` | deployment `magicBlock.rpc` | rollup RPC and websocket |
 | `MARKET_API_URL` | the Equinox Worker | permissionless Pyth snapshot refresh when the rollup price is older than 6 s |
 | `MM_STATUS_ADDR` | `0.0.0.0:8080` | status server (`/v1/mm/status`, `/healthz`) |
@@ -129,4 +134,3 @@ SOL for rollup fees.
 
 The status JSON gains a `keeper` object (commits, last sequence, pause length,
 funding steps, liquidations, errors).
-

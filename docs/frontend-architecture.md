@@ -100,10 +100,8 @@ Privy network round trip. It is double-gated: the server side
 "production"`, so this can never activate in a production build/start
 regardless of how the public env var is set. `?e2eWallets=N` (1-5)
 controls how many wallets it exposes, for testing both the auto-select
-and the explicit-choice paths. See `docs/testing.md` in this repo (the
-section below) for how this is used across the Playwright suite --
-distinct from the protocol-level `docs/testing.md` at the repo root
-covering Rust/Worker tests, if you're in the combined checkout.
+and the explicit-choice paths. The Playwright suite lives under
+`tests/browser/`; its commands are in the root `package.json`.
 
 ## Where to look next
 
@@ -112,7 +110,4 @@ covering Rust/Worker tests, if you're in the combined checkout.
   "what," in its own doc comment.
 - Accessibility posture and what was actually verified vs. not:
   `docs/accessibility.md`.
-- What's blocked on the canonical ABI and exactly why:
-  `docs/abi-handoff-checklist.md`.
-- Going from this branch's mocked E2E suite to a real Devnet session:
-  `docs/live-devnet-runbook.md`.
+- Current deployed behavior and evidence: `docs/status/current.md`.

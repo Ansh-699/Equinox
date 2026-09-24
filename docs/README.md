@@ -1,16 +1,20 @@
 # Equinox documentation map
 
-`docs/status/current.md` is the authoritative current-state snapshot. The
-remaining documents are classified here so historical design notes are not
-mistaken for live guarantees.
+[Project overview](../README.md) · [Frontend guide](../app/README.md) ·
+[Program guide](../programs/equinox/README.md) ·
+[Client guide](../clients/equinox/README.md) ·
+[Market API guide](../workers/README.md) ·
+[Market-maker guide](../services/market-maker/README.md)
+
+`docs/status/current.md` is the current-state snapshot. Older sections inside
+it record prior findings; its top dated summary takes precedence.
 
 | Class | Documents |
 | --- | --- |
-| Canonical architecture and protocol | `architecture.md`, `program-layout.md`, `orderbook.md`, `events.md`, `settlement.md`, `settlement-scratch.md`, `custody.md`, `risk.md`, `sessions.md`, `market-registry.md`, `transports.md`, `client-sdk.md`, `worker.md`, `frontend-architecture.md`, `authentication.md`, `security.md` |
-| Operational runbooks | `live-devnet-runbook.md`, `devnet-configuration.md`, `keepers.md`, `pyth-ops.md`, `testing.md`, `equinox-devnet-release-gate.md`, `abi-handoff-checklist.md` |
-| Build and release records | `equinox-build-record.md`, `sbpf-compatibility.md`, `frontend-build-diagnostics.md`, `security-review-preparation.md` |
-| Historical or superseded design | `magicblock-economics-redesign.md`, `magicblock.md`, `equinox-separation-report.md`, `equinox-roadmap.md` |
-| Research | `research-log.md`, `phase-2-external-references.md`, `research/backpack-stock-market-reference.md` |
+| Canonical architecture and protocol | `architecture.md`, `program-layout.md`, `orderbook.md`, `events.md`, `settlement-scratch.md`, `custody.md`, `risk.md`, `sessions.md`, `oracle.md`, `indexer.md`, `transports.md`, `worker.md`, `frontend-architecture.md`, `security.md` |
+| Operational guides | `devnet-configuration.md`, `pyth-ops.md`, `accessibility.md` |
+| Compatibility notes | `sbpf-compatibility.md` |
+| Historical integration notes | `magicblock.md` |
 | Authoritative live evidence | `status/current.md`, `status/devnet-lifecycle-evidence-20260919.json`, `status/magicblock-commit-simulation-20260919.json`, `status/magicblock-v3-commit-size-evidence-20260920.json`, `status/v3-recovery-evidence-20260920.json`, `status/v3-sharded-commit-evidence-20260920.json` |
 
 When a historical document conflicts with `status/current.md`, the status

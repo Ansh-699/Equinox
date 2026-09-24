@@ -73,6 +73,8 @@ const L1_RPC = process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://api.devnet.sol
 /** One failed read is not an outage; only a silent feed for this long is. */
 const STALE_AFTER_MS = 20_000;
 const REQUOTE_GAP_MS = 2_500;
+const FIRST_READ_TIMEOUT_MS = 8_000;
+const FALLBACK_READ_DELAY_MS = 3_500;
 
 function decodeBase64(data: string): Uint8Array {
   const raw = atob(data);
@@ -105,15 +107,64 @@ export function decodeBundle(pages: readonly (Uint8Array | null)[], seats: reado
   };
 }
 
+interface AggregateNode extends RawNode {
+  owner?: number;
+  key?: Int;
+  postOnly?: boolean;
+  reduceOnly?: boolean;
+}
+
+interface AggregateBookResponse {
+  completeExecutionState?: boolean;
+  core?: { delegationStatus?: number };
+  orderBook?: { bids?: AggregateNode[]; asks?: AggregateNode[] };
+  positions?: SeatPosition[];
+  eventShards?: RawAggregate["eventShards"];
+}
+
+/** The market API's complete, single-domain V3 snapshot is a read fallback
+ * when a visitor's browser cannot reach MagicBlock RPC directly. */
+function bookFromAggregate(value: AggregateBookResponse, domain: "er" | "l1") {
+  const delegationStatus = value.core?.delegationStatus;
+  const correctDomain = domain === "er" ? delegationStatus === 1 || delegationStatus === 2 : delegationStatus === 0 || delegationStatus === 3;
+  if (!value.completeExecutionState || !correctDomain || !Array.isArray(value.orderBook?.bids) || !Array.isArray(value.orderBook?.asks) || !Array.isArray(value.positions) || !Array.isArray(value.eventShards)) return null;
+  const nowSec = BigInt(Math.floor(Date.now() / 1000));
+  const fixed = [...value.orderBook.bids, ...value.orderBook.asks].filter((node) => node.tag === 2 && node.tree !== "oracle-pegged");
+  const orders: RestingOrderView[] = [];
+  for (const node of fixed) {
+    if (node.owner === undefined || node.key === undefined || node.expiresAt === undefined || node.quantity === undefined || node.priceOrOffset === undefined || node.side === undefined) return null;
+    if (BigInt(node.expiresAt) <= nowSec || BigInt(node.quantity) <= 0n) continue;
+    orders.push({
+      owner: node.owner, orderKey: BigInt(node.key), side: node.side === 0 ? "bid" : "ask",
+      price: BigInt(node.priceOrOffset), quantity: BigInt(node.quantity), expiresAt: BigInt(node.expiresAt),
+      postOnly: !!node.postOnly, reduceOnly: !!node.reduceOnly,
+    });
+  }
+  return {
+    bids: levelsFrom(fixed.filter((node) => node.side === 0), true, 0n, nowSec),
+    asks: levelsFrom(fixed.filter((node) => node.side === 1), false, 0n, nowSec),
+    trades: tradesFrom(value.eventShards),
+    positions: value.positions,
+    orders,
+  };
+}
+
 /** Live V3 book straight from the chain that owns it: the MagicBlock rollup
  * while delegated (websocket account pushes, so every fill and quote shows
  * up as it happens), Solana L1 otherwise. Reads bypass the market API, so
  * the book never waits on the Worker. */
-export function useV3Book(_marketApiUrl: string | undefined, core: string | undefined, delegated: boolean | null): V3Book {
+export function useV3Book(marketApiUrl: string | undefined, core: string | undefined, delegated: boolean | null): V3Book {
   // Until the indexer says where the market lives, read nothing: the frozen
   // L1 copy of a delegated market would flash an empty book.
   const domain: "er" | "l1" | null = delegated === null ? null : delegated ? "er" : "l1";
   const [book, setBook] = useState<V3Book>({ ...EMPTY, status: core ? "loading" : "unavailable", domain: domain ?? "er" });
+  const [sourceTimedOut, setSourceTimedOut] = useState(false);
+
+  useEffect(() => {
+    if (!core || domain) return;
+    const timer = window.setTimeout(() => setSourceTimedOut(true), FIRST_READ_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [core, domain]);
 
   useEffect(() => {
     if (!core || !domain) return;
@@ -124,37 +175,70 @@ export function useV3Book(_marketApiUrl: string | undefined, core: string | unde
     let stopped = false;
     let lastGood = 0;
     let scheduled = false;
+    let snapshotPending = false;
+
+    const fallbackSnapshot = async () => {
+      if (!marketApiUrl || stopped || lastGood > 0) return;
+      try {
+        const response = await fetch(`${marketApiUrl}/v1/v3/markets/${core}?domain=${domain}`, { signal: AbortSignal.timeout(FIRST_READ_TIMEOUT_MS) });
+        if (!response.ok) return;
+        const aggregate = await response.json() as AggregateBookResponse;
+        if (stopped || lastGood > 0) return;
+        const decoded = bookFromAggregate(aggregate, domain);
+        if (!decoded) return;
+        lastGood = Date.now();
+        setBook({ ...decoded, status: decoded.bids.length || decoded.asks.length ? "live" : "empty", updatedAt: lastGood, domain });
+      } catch { /* Direct RPC keeps retrying; the fallback is best effort. */ }
+    };
+    const fallbackTimer = window.setTimeout(() => void fallbackSnapshot(), FALLBACK_READ_DELAY_MS);
+
+    const markUnavailable = () => {
+      if (stopped) return;
+      setBook((previous) => ({
+        ...previous, domain,
+        status: previous.updatedAt ? (Date.now() - previous.updatedAt > STALE_AFTER_MS ? "stale" : previous.status) : "unavailable",
+      }));
+    };
 
     let lastQuotedAt = 0;
     const publish = () => {
       scheduled = false;
-      if (stopped) return;
-      const decoded = decodeBundle(data.slice(0, 18), data.slice(18, 22), data.slice(22, 26), BigInt(Math.floor(Date.now() / 1000)));
-      if (!decoded) return;
+      if (stopped) return false;
+      let decoded;
+      try {
+        decoded = decodeBundle(data.slice(0, 18), data.slice(18, 22), data.slice(22, 26), BigInt(Math.floor(Date.now() / 1000)));
+      } catch {
+        markUnavailable();
+        return false;
+      }
+      if (!decoded) return false;
       lastGood = Date.now();
       const quoted = decoded.bids.length > 0 || decoded.asks.length > 0;
       // A market maker requotes by cancel-then-place: hold the last levels
       // through that sub-second gap instead of flashing an empty book.
-      if (!quoted && lastGood - lastQuotedAt < REQUOTE_GAP_MS) { setTimeout(schedule, REQUOTE_GAP_MS); return; }
+      if (!quoted && lastGood - lastQuotedAt < REQUOTE_GAP_MS) { setTimeout(schedule, REQUOTE_GAP_MS); return true; }
       if (quoted) lastQuotedAt = lastGood;
       setBook({ ...decoded, status: decoded.bids.length || decoded.asks.length ? "live" : "empty", updatedAt: lastGood, domain });
+      return true;
     };
     // Coalesce bursts of account pushes into one render per frame.
     const schedule = () => { if (!scheduled) { scheduled = true; requestAnimationFrame(publish); } };
 
     const snapshot = async () => {
+      if (snapshotPending) return;
+      snapshotPending = true;
       try {
-        const response = await fetch(rpc, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getMultipleAccounts", params: [keys, { encoding: "base64", commitment: "confirmed" }] }) });
+        const response = await fetch(rpc, { method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(FIRST_READ_TIMEOUT_MS), body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getMultipleAccounts", params: [keys, { encoding: "base64", commitment: "confirmed" }] }) });
+        if (!response.ok) throw new Error("book RPC unavailable");
         const body = await response.json() as { result?: { value: ({ data: [string, string] } | null)[] } };
         const values = body.result?.value;
-        if (!values || stopped) throw new Error("no accounts");
+        if (!values || values.length !== keys.length || stopped) throw new Error("incomplete book snapshot");
         values.forEach((value, index) => { data[index] = value ? decodeBase64(value.data[0]) : null; });
-        publish();
+        if (!publish()) markUnavailable();
       } catch {
-        if (!stopped) setBook((previous) => ({
-          ...previous, domain,
-          status: previous.updatedAt ? (Date.now() - previous.updatedAt > STALE_AFTER_MS ? "stale" : previous.status) : "unavailable",
-        }));
+        markUnavailable();
+      } finally {
+        snapshotPending = false;
       }
     };
     void snapshot();
@@ -164,7 +248,14 @@ export function useV3Book(_marketApiUrl: string | undefined, core: string | unde
     if (domain === "er") {
       socket = new WebSocket(rpc.replace(/^http/, "ws"));
       const subscriptions = new Map<number, number>();
-      socket.onopen = () => keys.forEach((key, index) => socket?.send(JSON.stringify({ jsonrpc: "2.0", id: index + 1, method: "accountSubscribe", params: [key, { encoding: "base64", commitment: "processed" }] })));
+      socket.onopen = () => {
+        for (const [index, key] of keys.entries()) {
+          if (socket?.readyState !== WebSocket.OPEN) break;
+          try {
+            socket.send(JSON.stringify({ jsonrpc: "2.0", id: index + 1, method: "accountSubscribe", params: [key, { encoding: "base64", commitment: "processed" }] }));
+          } catch { break; }
+        }
+      };
       socket.onmessage = (message) => {
         const body = JSON.parse(message.data as string) as { id?: number; result?: number; params?: { subscription: number; result: { value: { data: [string, string] } | null } } };
         if (typeof body.id === "number" && typeof body.result === "number") { subscriptions.set(body.result, body.id - 1); return; }
@@ -180,11 +271,11 @@ export function useV3Book(_marketApiUrl: string | undefined, core: string | unde
       if (socket?.readyState === WebSocket.OPEN && Date.now() - lastGood < 10_000) return;
       void snapshot();
     }, domain === "er" ? 1_000 : 15_000);
-    return () => { stopped = true; clearInterval(timer); socket?.close(); };
-  }, [core, domain]);
+    return () => { stopped = true; clearTimeout(fallbackTimer); clearInterval(timer); socket?.close(); };
+  }, [core, domain, marketApiUrl]);
 
   if (!core) return { ...EMPTY, status: "unavailable", domain: domain ?? "er" };
   // Unknown domain, or a switch whose first read has not landed yet: still loading.
-  if (!domain || book.domain !== domain) return { ...EMPTY, status: "loading", domain: domain ?? "er" };
+  if (!domain || book.domain !== domain) return { ...EMPTY, status: !domain && sourceTimedOut ? "unavailable" : "loading", domain: domain ?? "er" };
   return book;
 }

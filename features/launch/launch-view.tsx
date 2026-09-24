@@ -103,7 +103,7 @@ export function LaunchView() {
       }
       setPhase("build");
       const built = await buildLaunchTransaction(connection, {
-        name: name.trim(), symbol, uri: uri.trim() || `${location.origin}/favicon.svg`, preset, creator,
+        name: name.trim(), symbol, uri: uri.trim() || `${location.origin}/brand/equinox-dark.png`, preset, creator,
       });
       setPhase("sign");
       const signed = await signer.signTransaction(built.transaction.serialize({ requireAllSignatures: false }));
