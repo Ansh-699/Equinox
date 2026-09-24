@@ -43,6 +43,30 @@ flowchart LR
 
 The older [frontend architecture notes](../docs/frontend-architecture.md) explain wallet selection and adapter boundaries in depth. For the current live behavior and open issues, start with [the dated status snapshot](../docs/status/current.md).
 
+## Pre-IPO and launch flows
+
+The sponsor pages use the same wallet selection and trading-key path as `/trade`, but their source data and chain actions differ:
+
+| Flow | Read path | Signed action | Boundary to keep clear |
+| --- | --- | --- | --- |
+| PreStocks catalog | Worker `GET /v1/pre-ipo` proxies issuer data; the market-maker status supplies reporter and perp prices. | Token links open external mainnet trading; Equinox perp orders use the rollup. | Mainnet tokens and devnet perps are separate assets. |
+| Pre-IPO basket | `features/pre-ipo/` plans whole-share legs and shows estimated margin. | Authorized trading key creates missing seats, funds isolated margin, and submits each leg. | A basket is multiple market orders, each with its own result. |
+| Meteora launch | `features/launch/` reads curve presets and launch registry data. | Trading key creates a DBC config/pool and signs curve buys or sells on Solana devnet. | A graduated DAMM v2 pool does not automatically appear in the perp selector. |
+
+```mermaid
+flowchart LR
+  P["/pre-ipo"] --> C["Worker: PreStocks catalog"]
+  P --> B["Basket planner"]
+  B --> T["Trading key"]
+  T --> E["Rollup: seats + perp orders"]
+  L["/launch"] --> D["Meteora DBC SDK"]
+  D --> S["Solana devnet: curve pool"]
+  S --> G["DAMM v2 after graduation"]
+  G --> O["Operator listing for new perp"]
+```
+
+The market picker and per-market address resolution come from [`config/equinox-deployment.json`](../config/equinox-deployment.json). For a new market, update the manifest and shared ABI/account wiring before exposing it in the terminal. The [root sponsor section](../README.md#sponsor-add-ons-and-integrations) explains the pricing trust model and listing step.
+
 ## Local development
 
 From the repository root:
