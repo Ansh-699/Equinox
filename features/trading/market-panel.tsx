@@ -90,8 +90,6 @@ export function MarketBar({
   price,
   oracle,
   oracleAgeSeconds,
-  delegated,
-  lastCommit,
 }: {
   marketSymbol: string;
   onMarketSymbolChange: (symbol: string) => void;
@@ -101,8 +99,6 @@ export function MarketBar({
   price: number | null;
   oracle: OracleView | null;
   oracleAgeSeconds: number | null;
-  delegated: boolean | null;
-  lastCommit: string | null;
 }) {
   const { candles } = useCandles(marketApiUrl, marketSymbol, DAY, live);
   const day = useMemo(() => {
@@ -131,12 +127,9 @@ export function MarketBar({
       </div>
       <div className="h-7 w-px shrink-0 bg-[var(--t-border)]" />
       <div role="group" aria-label="Market stats" tabIndex={0} className="flex min-w-0 items-center gap-6 overflow-x-auto [scrollbar-width:none]">
-        <Stat label="Pyth confidence" value={oracle ? `± ${oracle.confidence.toFixed(3)}` : "—"} />
         <Stat label="24h High" value={day ? day.high.toFixed(2) : "—"} />
         <Stat label="24h Low" value={day ? day.low.toFixed(2) : "—"} />
         <Stat label="Session" value={oracle ? (oracle.tradingOpen ? "Open" : "Closed") : "—"} tone={oracle ? (oracle.tradingOpen ? "up" : "down") : undefined} />
-        <Stat label="Execution" value={delegated === null ? "—" : delegated ? "MagicBlock ER" : "Solana L1"} />
-        <Stat label="Last commit" value={lastCommit ?? "—"} />
       </div>
       {stale ? (
         <div role="status" className="ml-auto shrink-0 rounded border border-[var(--t-warn)]/40 bg-[var(--t-warn)]/10 px-2.5 py-1 text-[11px] font-medium text-[var(--t-warn)]">
