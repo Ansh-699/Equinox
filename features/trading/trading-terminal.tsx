@@ -511,7 +511,7 @@ export function TradingTerminal() {
       <main id="main-content" tabIndex={-1} className="flex min-h-0 flex-1 flex-col outline-none xl:flex-row">
         {/* Chart + activity. Owns the slack at xl; fixed height while stacked. */}
         <div className="tk-col order-2 flex min-h-0 min-w-0 flex-col xl:order-none xl:flex-1">
-          <div className="h-[420px] shrink-0 xl:h-auto xl:min-h-0 xl:flex-1">
+          <div className="h-[480px] shrink-0 overflow-hidden xl:h-auto xl:min-h-0 xl:flex-1">
             <MarketPanel marketSymbol={marketSymbol} marketApiUrl={candlesApiUrl} live={live} />
           </div>
           <ActivityDrawer

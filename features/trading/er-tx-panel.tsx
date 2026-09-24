@@ -88,16 +88,13 @@ export function ErTxPanel({ marketApiUrl, market }: { marketApiUrl: string | und
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--t-up)] opacity-60" />
           <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--t-up)]" />
         </span>
-        <span className="whitespace-nowrap text-[12px] font-medium text-[var(--t-text)]">MagicBlock ER · live</span>
+        <span className="whitespace-nowrap text-[12px] font-medium text-[var(--t-text)]" title="Each row: time from send to inclusion in a MagicBlock rollup block (10 ms blocks). Solana L1 settlement follows at each commit.">MagicBlock ER · live</span>
         <span className="ml-auto whitespace-nowrap text-[11px] text-[var(--t-text-3)]" title="Send → the MagicBlock rollup has executed it (not Solana L1 settlement), measured by whoever sent it">{myTrip !== null
           ? <>You p50 <span className="tnum font-medium text-[var(--t-up)]">{myTrip} ms</span></>
           : <>Your order ≈ <span className="tnum font-medium text-[var(--t-up)]">{viewerRtt === null ? "—" : `${viewerRtt + (trip ?? 15)} ms`}</span></>}
           <span className="ml-2">in a block <span className="tnum">{trip ?? "—"} ms</span></span></span>
       </div>
-      <div className="flex flex-wrap gap-x-3 border-b border-[var(--t-surface-2)] px-3 py-1 text-[12px] leading-relaxed text-[var(--t-text-3)]">
-        <span>Each row: send → included in a produced MagicBlock rollup block (10 ms blocks), for the market-maker bot in Singapore, 2 ms from the rollup. &ldquo;Your order&rdquo; adds your live measured round trip to the rollup: the end-to-end time your own order takes. Solana L1 settlement follows at each commit (every 30 min).</span>
-      </div>
-      <div className="slim-scroll h-[212px] overflow-auto">
+      <div className="slim-scroll h-[168px] overflow-auto">
         {rows.length === 0 ? (
           <div className="flex h-full items-center justify-center gap-2 px-4 text-center text-[12px] text-[var(--t-text-2)]">
             {bot?.offline ? "Market maker offline — no bot transactions to show." : bot?.marketOpen === false ? "US market closed — the bot is idle until the session reopens." : <><Spinner /> Waiting for rollup transactions…</>}

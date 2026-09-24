@@ -4,13 +4,17 @@ import { AppProviders } from "@/components/app-providers";
 import { THEME_SCRIPT } from "@/components/theme-toggle";
 import "./globals.css";
 
+// Poppins for text and IBM Plex Mono for numbers, the ordr.trade pairing.
 const poppins = Poppins({ variable: "--font-poppins", weight: ["400", "500", "600", "700"], subsets: ["latin"], display: "swap" });
 const plexMono = IBM_Plex_Mono({ variable: "--font-plex-mono", weight: ["400", "500", "600"], subsets: ["latin"], display: "swap" });
 
 export const metadata: Metadata = {
   title: "Equinox",
   description: "Perpetual futures on US stocks: matched in a MagicBlock Ephemeral Rollup, priced by Pyth, settled on Solana.",
-  icons: { icon: "/equinox-favicon.png", apple: "/equinox-favicon.png" }
+  icons: {
+    icon: "/equinox-favicon.png",
+    apple: "/equinox-favicon.png",
+  },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
