@@ -104,6 +104,22 @@ pub fn plan_quotes(resting: &[RestingOrder], targets: &[Quote], index: i64, now:
         actions.extend(live.iter().skip(wanted.len()).map(|order| QuoteAction::Cancel(order.key)));
     }
     actions.extend(resting.iter().filter(|o| o.expires_at <= now).map(|o| QuoteAction::Cancel(o.key)));
+    // Post-only quotes can't cross the maker's own resting orders: after a jump,
+    // a bid at the new price would hit the old asks and fail (and, sent first,
+    // starve the asks' own moves every tick). Hold such rungs back a tick; the
+    // other side moves away first. Orders this batch replaces or cancels still
+    // rest until it lands, so they count.
+    let live = resting.iter().filter(|o| o.expires_at > now);
+    let best_ask = live.clone().filter(|o| o.side == Side::Ask).map(|o| o.price).min();
+    let best_bid = live.filter(|o| o.side == Side::Bid).map(|o| o.price).max();
+    let crosses = |q: &Quote| match q.side {
+        Side::Bid => best_ask.is_some_and(|ask| q.price >= ask),
+        Side::Ask => best_bid.is_some_and(|bid| q.price <= bid),
+    };
+    actions.retain(|action| match action {
+        QuoteAction::Place(q) | QuoteAction::Replace(_, q) => !crosses(q),
+        QuoteAction::Cancel(_) => true,
+    });
     actions
 }
 
@@ -209,5 +225,17 @@ mod tests {
             let order = resting.iter().find(|o| o.key == *key).unwrap();
             assert_eq!(order.price, quote.price);
         }
+    }
+
+    #[test]
+    fn a_price_jump_moves_the_far_side_first_instead_of_crossing_itself() {
+        let mut rng = StepRng::new(0, 1);
+        let resting: Vec<_> = ladder(INDEX, 0, &mut rng).iter().enumerate()
+            .map(|(i, q)| RestingOrder { key: i as u128 + 1, side: q.side, price: q.price, quantity: q.quantity, expires_at: NOW + 60 }).collect();
+        let jumped = INDEX + INDEX * 3 / 100; // +3%, wider than the whole ladder
+        let actions = plan_quotes(&resting, &ladder(jumped, 0, &mut rng), jumped, NOW);
+        let best_ask = resting.iter().filter(|o| o.side == Side::Ask).map(|o| o.price).min().unwrap();
+        assert!(actions.iter().all(|a| !matches!(a, QuoteAction::Place(q) | QuoteAction::Replace(_, q) if q.side == Side::Bid && q.price >= best_ask)));
+        assert!(actions.iter().any(|a| matches!(a, QuoteAction::Replace(_, q) if q.side == Side::Ask)), "asks move up first");
     }
 }

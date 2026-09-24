@@ -113,7 +113,7 @@ export function LandingView() {
               <div className={styles.previewCard}>
                 <span className={styles.previewFixture}>Execution</span>
                 <span className={styles.previewTitle}>{execution ? (execution.marketDelegated ? "MagicBlock Ephemeral Rollup" : "Solana L1") : "—"}</span>
-                <span className={styles.previewVol}>{execution ? (execution.marketDelegated ? "order book delegated · matching in the rollup" : "book on L1 · seats and deposits open") : "status loading"}</span>
+                <span className={styles.previewVol}>{execution ? (execution.marketDelegated ? "order book delegated · matching in the rollup" : "book on L1 · accounts and deposits open") : "status loading"}</span>
               </div>
               <div className={styles.previewCard}>
                 <span className={styles.previewFixture}>Finality</span>

@@ -1,7 +1,9 @@
 "use client";
+/* eslint-disable @next/next/no-img-element -- token images come from each launch's own metadata URI */
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { ChefHat, Clock, Copy, Crown, ExternalLink, Search, Users, Zap } from "lucide-react";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { useAppAuth } from "@/components/app-providers";
@@ -10,71 +12,61 @@ import { tradingKeySigner } from "@/lib/trading-key";
 import { publicMarketApiUrl } from "@/lib/demo-config";
 import { V3_MARKETS } from "@/lib/v3-markets";
 import { buildGraduateTransaction, buildSwapTransaction, LAUNCH_PRESETS, readPool, type PoolView } from "./dbc-launch";
-import { formatCompactUsd, formatTinyUsd } from "./format";
-import { Badge, EmptyState, Skeleton, type Tone } from "@/components/ui/primitives";
-import { Rocket } from "lucide-react";
+import { readLaunchStats, type LaunchStats } from "./launch-stats";
+import { formatCompactUsd } from "./format";
 
 const RPC = process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://rpc.magicblock.app/devnet";
 const explorer = (address: string, kind: "address" | "tx" = "address") => `https://explorer.solana.com/${kind}/${address}?cluster=devnet`;
-const AVATAR_COLORS = ["#16a34a", "#2563eb", "#9333ea", "#db2777", "#ea580c", "#0891b2", "#ca8a04"];
-
-/** Coloured initial for a token, stable per symbol. */
-export function TokenAvatar({ symbol, size = 36 }: { symbol: string; size?: number }) {
-  const hash = [...symbol].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
-  return (
-    <span aria-hidden className="grid shrink-0 place-items-center rounded-full font-bold text-white" style={{ width: size, height: size, fontSize: size * 0.38, background: AVATAR_COLORS[hash % AVATAR_COLORS.length] }}>
-      {symbol.slice(0, 2)}
-    </span>
-  );
-}
-
-type Stage = "bonding" | "ready" | "graduated";
-const stageOf = (view: PoolView | null): Stage => (view?.graduated ? "graduated" : view && view.progress >= 1 ? "ready" : "bonding");
-const STAGE: Record<Stage, { label: string; tone: Tone }> = {
-  bonding: { label: "Bonding", tone: "link" },
-  ready: { label: "Ready to graduate", tone: "warn" },
-  graduated: { label: "Graduated", tone: "up" },
+const age = (ms: number) => {
+  const s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : s < 86_400 ? `${Math.floor(s / 3600)}h` : `${Math.floor(s / 86_400)}d`;
 };
-const FILTERS = [
-  { id: "all", label: "All" },
-  { id: "bonding", label: "Bonding" },
-  { id: "ready", label: "Ready" },
-  { id: "graduated", label: "Graduated" },
-] as const;
 
 interface Launch { pool: string; baseMint: string; symbol: string; name: string; preset: string; createdAt: number }
-type Row = Launch & { view: PoolView | null };
+type Row = Launch & { view: PoolView | null; stats: LaunchStats | null };
+type Stage = "new" | "final" | "graduated";
+/** Final stretch starts at 60% of the curve (Axiom's column between new pairs and migrated). */
+const FINAL_STRETCH = 0.6;
+const stageOf = (row: Row): Stage => (row.view?.graduated ? "graduated" : (row.view?.progress ?? 0) >= FINAL_STRETCH ? "final" : "new");
+const COLUMNS: { stage: Stage; title: string; hint: string }[] = [
+  { stage: "new", title: "New pairs", hint: "On the bonding curve" },
+  { stage: "final", title: "Final stretch", hint: `≥ ${FINAL_STRETCH * 100}% to graduation` },
+  { stage: "graduated", title: "Graduated", hint: "Migrated to Meteora DAMM v2" },
+];
 
-/** Every Equinox launch, live from the chain: curve progress to graduation,
- * buy/sell on the curve and graduation to DAMM v2, all signed by the trading
- * account; a graduated token shows its Equinox perp once listed. */
-export function LaunchMonitor({ refreshKey }: { refreshKey: number }) {
+/** Pulse: every Equinox launch in three live columns by lifecycle stage, read
+ * from the chain (curve, holders, fees, transactions). Buys, sells and
+ * graduation are signed by the in-app trading account; a graduated token links
+ * to its Equinox perp once listed. */
+export function LaunchMonitor({ refreshKey, quickBuyUsd }: { refreshKey: number; quickBuyUsd: number }) {
   const auth = useAppAuth();
   const tradingKey = useTradingKey(auth);
   const connection = useMemo(() => new Connection(RPC, "confirmed"), []);
   const [rows, setRows] = useState<Row[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [notice, setNotice] = useState<{ pool: string; text: string; href?: string } | null>(null);
+  const [notice, setNotice] = useState<{ pool: string; text: string; href?: string; ok?: boolean } | null>(null);
   const [tick, setTick] = useState(0);
-  const [loadFailed, setLoadFailed] = useState(false);
-  const [filter, setFilter] = useState<(typeof FILTERS)[number]["id"]>("all");
+  const [, setClock] = useState(0);
 
   useEffect(() => {
     let stopped = false;
     const load = async () => {
-      const list = await fetch(`${publicMarketApiUrl.replace(/\/$/, "")}/v1/launches`).then((r) => r.json() as Promise<{ launches: Launch[] }>).catch(() => null);
-      if (stopped) return;
-      setLoadFailed(!list);
-      if (!list) { setRows((current) => current ?? []); return; }
-      const withState = await Promise.all(list.launches.map(async (launch) => ({ ...launch, view: await readPool(connection, launch.pool).catch(() => null) })));
+      const list = await fetch(`${publicMarketApiUrl.replace(/\/$/, "")}/v1/launches`).then((r) => r.json() as Promise<{ launches: Launch[] }>).catch(() => ({ launches: [] }));
+      const withState = await Promise.all(list.launches.map(async (launch): Promise<Row> => {
+        const view = await readPool(connection, launch.pool).catch(() => null);
+        const stats = view ? await readLaunchStats(connection, { pool: launch.pool, baseMint: launch.baseMint, creator: view.creator, dammPool: view.dammPool }).catch(() => null) : null;
+        return { ...launch, view, stats };
+      }));
       if (!stopped) setRows(withState);
     };
     void load();
-    const timer = setInterval(() => void load(), 10_000);
+    const timer = setInterval(() => void load(), 12_000);
     return () => { stopped = true; clearInterval(timer); };
   }, [connection, refreshKey, tick]);
+  // Ages tick every few seconds without refetching.
+  useEffect(() => { const t = setInterval(() => setClock((n) => n + 1), 5_000); return () => clearInterval(t); }, []);
 
-  /** Signs and sends one launch-page transaction with the trading account. */
+  /** Signs and sends one launch transaction with the trading account. */
   async function act(pool: string, label: string, build: (owner: PublicKey) => Promise<{ transaction: { serialize(o: { requireAllSignatures: boolean }): Uint8Array; recentBlockhash?: string }; lastValidBlockHeight: number }>) {
     if (!auth.walletAddress) { setNotice({ pool, text: "Connect a wallet first (top right)." }); return; }
     setBusy(pool);
@@ -86,10 +78,11 @@ export function LaunchMonitor({ refreshKey }: { refreshKey: number }) {
       const signature = await connection.sendRawTransaction(signed);
       const outcome = await connection.confirmTransaction({ signature, blockhash: built.transaction.recentBlockhash!, lastValidBlockHeight: built.lastValidBlockHeight }, "confirmed");
       if (outcome.value.err) throw new Error(JSON.stringify(outcome.value.err));
-      setNotice({ pool, text: `${label} · done`, href: explorer(signature, "tx") });
+      setNotice({ pool, text: `${label} · done`, href: explorer(signature, "tx"), ok: true });
       setTick((t) => t + 1);
     } catch (error) {
-      setNotice({ pool, text: `${label} failed: ${error instanceof Error ? error.message : String(error)}` });
+      const message = error instanceof Error ? error.message : String(error);
+      setNotice({ pool, text: `${label} failed: ${/insufficient/i.test(message) ? "not enough test USDC or SOL in your trading account (Start trading on the Trade page funds it)" : message}` });
     } finally {
       setBusy(null);
     }
@@ -104,100 +97,158 @@ export function LaunchMonitor({ refreshKey }: { refreshKey: number }) {
     });
   }
 
-  const counts = { all: rows?.length ?? 0, bonding: 0, ready: 0, graduated: 0 };
-  rows?.forEach((row) => { counts[stageOf(row.view)] += 1; });
-  const shown = rows?.filter((row) => filter === "all" || stageOf(row.view) === filter) ?? [];
-  const BTN = "h-[32px] rounded-[8px] px-3 text-[12.5px] font-semibold transition-colors disabled:opacity-50";
+  const byStage = (stage: Stage) => (rows ?? []).filter((row) => stageOf(row) === stage).sort((a, b) =>
+    stage === "final" ? (b.view?.progress ?? 0) - (a.view?.progress ?? 0) : b.createdAt - a.createdAt);
 
   return (
-    <section aria-label="Launches">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-[17px] font-semibold text-[var(--t-text)]">Live launches</h2>
-          <p className="text-[12px] text-[var(--t-text-3)]">Read live from Solana every 10s. Buy on the curve; at 100% anyone can graduate it.</p>
-        </div>
-        <div role="group" aria-label="Filter launches" className="flex gap-1 rounded-[8px] bg-[var(--t-surface-3)] p-1">
-          {FILTERS.map((f) => (
-            <button key={f.id} type="button" aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}
-              className={`h-[26px] rounded-[6px] px-2.5 text-[12px] font-medium ${filter === f.id ? "bg-[var(--t-bg)] text-[var(--t-text)] shadow-sm" : "text-[var(--t-text-2)] hover:text-[var(--t-text)]"}`}>
-              {f.label} <span className="tnum text-[var(--t-text-3)]">{counts[f.id]}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-      {!rows ? (
-        <div className="mt-3 grid gap-3 md:grid-cols-2">
-          {[0, 1].map((i) => <div key={i} className="space-y-3 rounded-[12px] border border-[var(--t-border)] bg-[var(--t-surface)] p-4"><Skeleton className="h-9 w-40" /><Skeleton className="h-2 w-full" /><Skeleton className="h-4 w-32" /></div>)}
-        </div>
-      ) : null}
-      {rows && shown.length === 0 ? (
-        <div className="mt-3 rounded-[12px] border border-dashed border-[var(--t-border-strong)]">
-          <EmptyState icon={<Rocket className="h-5 w-5" />} title={loadFailed && rows.length === 0 ? "Couldn't load launches" : rows.length === 0 ? "No launches yet" : "Nothing in this stage"}>
-            {loadFailed && rows.length === 0 ? "The launch registry isn't answering. Retrying every 10 seconds." : rows.length === 0 ? "Create the first one with the form alongside." : "Try another filter."}
-          </EmptyState>
-        </div>
-      ) : null}
-      <div className="mt-3 grid gap-3 md:grid-cols-2">
-        {shown.map((row) => {
-          const view = row.view;
-          const stage = stageOf(view);
-          const perp = V3_MARKETS.find((market) => market.oracle.kind === "meteora" && market.oracle.mint === row.baseMint);
-          const preset = LAUNCH_PRESETS.find((p) => p.id === row.preset);
-          const pct = view ? Math.min(100, view.progress * 100) : 0;
-          return (
-            <article key={row.pool} className="flex flex-col rounded-[12px] border border-[var(--t-border)] bg-[var(--t-surface)] p-4 transition-colors hover:border-[var(--t-border-strong)]">
-              <div className="flex items-center gap-3">
-                <TokenAvatar symbol={row.symbol} />
-                <div className="min-w-0 flex-1">
-                  <h3 className="text-[14.5px] font-semibold text-[var(--t-text)]">{row.symbol}</h3>
-                  <p className="truncate text-[12px] text-[var(--t-text-3)]">{row.name}{preset ? ` · ${preset.label}` : ""}</p>
-                </div>
-                <Badge tone={STAGE[stage].tone} dot>{STAGE[stage].label}</Badge>
-              </div>
-              {view ? (
-                <>
-                  <div className="tnum mt-4 flex items-baseline justify-between text-[12px]">
-                    <span className="text-[var(--t-text-2)]"><b className="text-[var(--t-text)]">{formatCompactUsd(view.raisedUsd)}</b> of {formatCompactUsd(view.thresholdUsd)} raised</span>
-                    <span className="font-semibold text-[var(--t-text)]">{pct.toFixed(pct >= 10 ? 0 : 1)}%</span>
-                  </div>
-                  <div className="mt-1.5 h-2.5 overflow-hidden rounded-full bg-[var(--t-surface-3)]" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100} aria-label={`${row.symbol} curve progress to graduation`}>
-                    <div className="h-full rounded-full bg-gradient-to-r from-[var(--t-up-3)] to-[var(--t-up)]" style={{ width: `${pct}%` }} />
-                  </div>
-                  <dl className="tnum mt-3 grid grid-cols-2 gap-2 text-[12px]">
-                    <div className="rounded-[8px] bg-[var(--t-surface-2)] px-2.5 py-1.5"><dt className="text-[10.5px] text-[var(--t-text-3)]">Price</dt><dd className="font-semibold text-[var(--t-text)]" title={`$${view.price}`}>{formatTinyUsd(view.price)}</dd></div>
-                    <div className="rounded-[8px] bg-[var(--t-surface-2)] px-2.5 py-1.5"><dt className="text-[10.5px] text-[var(--t-text-3)]">Market cap</dt><dd className="font-semibold text-[var(--t-text)]">{formatCompactUsd(view.marketCap)}</dd></div>
-                  </dl>
-                </>
-              ) : <p className="mt-3 text-[12px] text-[var(--t-text-3)]">Pool state unavailable right now.</p>}
-              <div className="mt-auto flex flex-wrap items-center gap-2 pt-3 text-[12.5px]">
-                {view && stage === "bonding" ? (
-                  <>
-                    {[25, 100].map((amount) => (
-                      <button key={amount} type="button" disabled={busy === row.pool} onClick={() => void act(row.pool, `Buying $${amount} of ${row.symbol}`, (owner) => buildSwapTransaction(connection, { owner, pool: new PublicKey(row.pool), side: "buy", amount, slippageBps: 300 }))}
-                        className={`${BTN} bg-[var(--t-up-3)] text-[var(--t-on-fill)] hover:bg-[var(--t-up-2)]`}>Buy ${amount}</button>
-                    ))}
-                    <button type="button" disabled={busy === row.pool} onClick={() => void sellAll(row)} className={`${BTN} border border-[var(--t-border-strong)] font-medium text-[var(--t-text-2)] hover:text-[var(--t-text)]`}>Sell all</button>
-                  </>
-                ) : null}
-                {view && stage === "ready" ? (
-                  <button type="button" disabled={busy === row.pool} onClick={() => void act(row.pool, `Graduating ${row.symbol} to DAMM v2`, (payer) => buildGraduateTransaction(connection, { payer, pool: new PublicKey(row.pool) }))}
-                    className={`${BTN} bg-[var(--t-up-3)] text-[var(--t-on-fill)] hover:bg-[var(--t-up-2)]`}>Graduate to Meteora</button>
-                ) : null}
-                {stage === "graduated" ? (perp
-                  ? <Link className={`${BTN} inline-flex items-center bg-[var(--t-up-3)] text-[var(--t-on-fill)] hover:bg-[var(--t-up-2)]`} href={`/trade?market=${perp.symbol}`}>Trade {perp.symbol} perp</Link>
-                  : <span className="text-[11.5px] text-[var(--t-text-3)]">Perp listing queued</span>) : null}
-                <span className="ml-auto flex items-center gap-3 text-[11.5px]">
-                  {view?.dammPool ? <a className="text-[var(--t-link)] hover:underline" href={explorer(view.dammPool)} target="_blank" rel="noopener noreferrer">Meteora pool ↗</a> : null}
-                  <a className="text-[var(--t-text-3)] hover:underline" href={explorer(row.pool)} target="_blank" rel="noopener noreferrer">Curve ↗</a>
-                </span>
-              </div>
-              {notice?.pool === row.pool ? (
-                <p role="status" className="mt-2 break-words text-[12px] text-[var(--t-text-2)]">{notice.text}{notice.href ? <> · <a className="text-[var(--t-link)] hover:underline" href={notice.href} target="_blank" rel="noreferrer">View ↗</a></> : null}</p>
-              ) : null}
-            </article>
-          );
-        })}
-      </div>
+    <section aria-label="Launches by stage" className="grid gap-3 lg:grid-cols-3">
+      {COLUMNS.map((column) => (
+        <PulseColumn key={column.stage} title={column.title} hint={column.hint} rows={rows === null ? null : byStage(column.stage)}>
+          {(row) => (
+            <PulseCard key={row.pool} row={row} stage={column.stage} quickBuyUsd={quickBuyUsd} busy={busy === row.pool}
+              notice={notice?.pool === row.pool ? notice : null}
+              onBuy={() => void act(row.pool, `Buying $${quickBuyUsd} of ${row.symbol}`, (owner) => buildSwapTransaction(connection, { owner, pool: new PublicKey(row.pool), side: "buy", amount: quickBuyUsd, slippageBps: 300 }))}
+              onSell={() => void sellAll(row)}
+              onGraduate={() => void act(row.pool, `Graduating ${row.symbol} to DAMM v2`, (payer) => buildGraduateTransaction(connection, { payer, pool: new PublicKey(row.pool) }))}
+            />
+          )}
+        </PulseColumn>
+      ))}
     </section>
+  );
+}
+
+function PulseColumn({ title, hint, rows, children }: { title: string; hint: string; rows: Row[] | null; children: (row: Row) => React.ReactNode }) {
+  const [query, setQuery] = useState("");
+  const shown = rows?.filter((row) => `${row.symbol} ${row.name}`.toLowerCase().includes(query.trim().toLowerCase())) ?? null;
+  return (
+    <div className="flex min-h-[320px] flex-col overflow-hidden rounded-[10px] border border-[var(--t-border)] bg-[var(--t-surface)] lg:h-[calc(100vh-190px)] lg:min-h-[520px]">
+      <div className="flex items-center gap-2 border-b border-[var(--t-border)] px-3 py-2.5">
+        <h2 className="text-[15px] font-semibold text-[var(--t-text)]">{title}</h2>
+        <span className="tnum rounded bg-[var(--t-surface-3)] px-1.5 py-0.5 text-[10.5px] font-semibold text-[var(--t-text-2)]">{rows?.length ?? "…"}</span>
+        <label className="ml-auto flex h-7 w-[46%] items-center gap-1.5 rounded-full border border-[var(--t-border)] bg-[var(--t-bg)] px-2.5 text-[11.5px] text-[var(--t-text-3)]">
+          <Search className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by ticker or name" aria-label={`Search ${title}`} className="w-full bg-transparent text-[var(--t-text)] outline-none placeholder:text-[var(--t-text-3)]" />
+        </label>
+      </div>
+      <p className="border-b border-[var(--t-border)] px-3 py-1 text-[10.5px] text-[var(--t-text-3)]">{hint}</p>
+      <div className="slim-scroll min-h-0 flex-1 overflow-y-auto">
+        {shown === null
+          ? Array.from({ length: 3 }, (_, i) => <CardSkeleton key={i} />)
+          : shown.length === 0
+            ? <p className="px-4 py-10 text-center text-[12px] text-[var(--t-text-3)]">{query ? "No launch matches." : "Nothing here yet."}</p>
+            : shown.map(children)}
+      </div>
+    </div>
+  );
+}
+
+function CardSkeleton() {
+  return (
+    <div className="flex animate-pulse gap-3 border-b border-[var(--t-border)] px-3 py-3">
+      <span className="h-[60px] w-[60px] shrink-0 rounded-[8px] bg-[var(--t-surface-3)]" />
+      <div className="flex flex-1 flex-col gap-2 pt-1">
+        <span className="h-3 w-1/2 rounded bg-[var(--t-surface-3)]" />
+        <span className="h-2.5 w-3/4 rounded bg-[var(--t-surface-3)]" />
+        <span className="h-2 w-full rounded bg-[var(--t-surface-3)]" />
+      </div>
+    </div>
+  );
+}
+
+const AVATAR_COLORS = ["#16a34a", "#2563eb", "#9333ea", "#db2777", "#ea580c", "#0891b2", "#ca8a04"];
+
+/** Initials on a colour picked from the symbol (the create form's preview). */
+export function TokenAvatar({ symbol, size = 36 }: { symbol: string; size?: number }) {
+  const hash = [...symbol].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+  return (
+    <span aria-hidden className="grid shrink-0 place-items-center rounded-full font-bold text-white" style={{ width: size, height: size, fontSize: size * 0.38, background: AVATAR_COLORS[hash % AVATAR_COLORS.length] }}>
+      {symbol.slice(0, 2)}
+    </span>
+  );
+}
+
+/** A token avatar: its metadata image, or initials on a colour derived from the mint. */
+function CardAvatar({ row, stage }: { row: Row; stage: Stage }) {
+  const hue = [...row.baseMint].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
+  const ring = stage === "graduated" ? "ring-[var(--t-accent)]" : stage === "final" ? "ring-[var(--t-up)]" : "ring-[var(--t-border-strong)]";
+  return (
+    <div className="relative shrink-0">
+      <div className={`h-[60px] w-[60px] overflow-hidden rounded-[8px] ring-2 ${ring}`} style={{ background: `linear-gradient(135deg, hsl(${hue} 70% 55%), hsl(${(hue + 60) % 360} 70% 40%))` }}>
+        {row.stats?.image
+          ? <img src={row.stats.image} alt="" className="h-full w-full object-cover" onError={(e) => { e.currentTarget.style.display = "none"; }} />
+          : <span className="grid h-full w-full place-items-center text-[16px] font-bold text-white">{row.symbol.slice(0, 2)}</span>}
+      </div>
+      <span className="mt-1 block w-[60px] truncate text-center text-[9.5px] text-[var(--t-text-3)]">{row.baseMint.slice(0, 4)}…{row.baseMint.slice(-4)}</span>
+    </div>
+  );
+}
+
+function Metric({ icon: Icon, value, title, tone }: { icon: typeof Users; value: string; title: string; tone?: "up" | "down" | "warn" }) {
+  const color = tone === "up" ? "text-[var(--t-up)]" : tone === "down" ? "text-[var(--t-down)]" : tone === "warn" ? "text-[var(--t-warn)]" : "text-[var(--t-text-2)]";
+  return <span title={title} className={`inline-flex items-center gap-1 ${color}`}><Icon className="h-3 w-3" aria-hidden /><span className="sr-only">{title}: </span>{value}</span>;
+}
+
+function PulseCard({ row, stage, quickBuyUsd, busy, notice, onBuy, onSell, onGraduate }: {
+  row: Row; stage: Stage; quickBuyUsd: number; busy: boolean; notice: { text: string; href?: string; ok?: boolean } | null;
+  onBuy: () => void; onSell: () => void; onGraduate: () => void;
+}) {
+  const { view, stats } = row;
+  const perp = V3_MARKETS.find((market) => market.oracle.kind === "meteora" && market.oracle.mint === row.baseMint);
+  const preset = LAUNCH_PRESETS.find((p) => p.id === row.preset);
+  const ready = !!view && !view.graduated && view.progress >= 1;
+  const [copied, setCopied] = useState(false);
+  return (
+    <article className="group border-b border-[var(--t-border)] px-3 py-3 transition-colors hover:bg-[var(--t-surface-3)]/40">
+      <div className="flex gap-3">
+        <CardAvatar row={row} stage={stage} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-1.5">
+            <span className="truncate text-[15px] font-semibold text-[var(--t-text)]">{row.symbol}</span>
+            <span className="truncate text-[12.5px] text-[var(--t-text-3)]">{row.name}</span>
+            <button type="button" aria-label={copied ? "Mint copied" : "Copy mint address"} title="Copy mint" onClick={() => navigator.clipboard.writeText(row.baseMint).then(() => setCopied(true), () => undefined)} className="text-[var(--t-text-3)] hover:text-[var(--t-text)]"><Copy className="h-3 w-3" /></button>
+            <span className="ml-auto shrink-0 text-right text-[11px] text-[var(--t-text-3)]">MC <span className="tnum text-[13px] font-semibold text-[var(--t-text)]">{view ? formatCompactUsd(view.marketCap) : "—"}</span></span>
+          </div>
+          <div className="tnum mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px]">
+            <span className="font-semibold text-[var(--t-up)]" title="Age">{age(row.createdAt)}</span>
+            <Metric icon={Users} value={stats ? String(stats.holders) : "—"} title="Holders" />
+            <Metric icon={Crown} value={stats ? `${stats.top10Pct.toFixed(0)}%` : "—"} title="Top 10 holders' share of supply" tone={stats && stats.top10Pct > 30 ? "warn" : undefined} />
+            <Metric icon={ChefHat} value={stats ? `${stats.devPct.toFixed(1)}%` : "—"} title="Creator's share of supply" tone={stats && stats.devPct > 10 ? "warn" : undefined} />
+            <Metric icon={Clock} value={stats?.lastTradeAt ? age(stats.lastTradeAt) : "—"} title="Since the last transaction" />
+            <span className="ml-auto text-[var(--t-text-3)]" title="Trading fees paid · transactions">F <span className="text-[var(--t-text)]">{view ? formatCompactUsd(view.feesUsd) : "—"}</span> · TX <span className="text-[var(--t-text)]">{stats ? `${stats.txns}${stats.txnsCapped ? "+" : ""}` : "—"}</span></span>
+          </div>
+          {view ? (
+            <div className="mt-2 flex items-center gap-2">
+              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--t-surface-3)]" role="progressbar" aria-valuenow={Math.round(view.progress * 100)} aria-valuemin={0} aria-valuemax={100} aria-label="Curve progress to graduation">
+                <div className={`h-full rounded-full ${stage === "graduated" ? "bg-[var(--t-accent)]" : "bg-[var(--t-up)]"}`} style={{ width: `${Math.round(view.progress * 100)}%` }} />
+              </div>
+              <span className="tnum shrink-0 text-[10.5px] text-[var(--t-text-2)]">{stage === "graduated" ? "graduated" : `${(view.progress * 100).toFixed(0)}% · ${formatCompactUsd(view.raisedUsd)}/${formatCompactUsd(view.thresholdUsd)}`}</span>
+            </div>
+          ) : <p className="mt-2 text-[11px] text-[var(--t-text-3)]">Pool state unavailable.</p>}
+        </div>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-1.5 pl-[72px] text-[11.5px]">
+        <span className="rounded bg-[var(--t-surface-3)] px-1.5 py-0.5 text-[10px] text-[var(--t-text-2)]">{preset?.label ?? row.preset}</span>
+        {view?.dammPool ? <a className="inline-flex items-center gap-0.5 text-[var(--t-link)] hover:underline" href={explorer(view.dammPool)} target="_blank" rel="noopener noreferrer">DAMM v2 <ExternalLink className="h-3 w-3" /></a> : null}
+        {stage === "graduated" ? (perp
+          ? <Link className="font-semibold text-[var(--t-up)] hover:underline" href={`/trade?market=${perp.symbol}`}>Trade {perp.symbol}</Link>
+          : <span className="text-[var(--t-text-3)]">Perp listing queued</span>) : null}
+        <span className="ml-auto flex items-center gap-1.5">
+          {view && !view.graduated && !ready ? (
+            <>
+              <button type="button" disabled={busy} onClick={onSell} className="rounded-full border border-[var(--t-border)] px-2.5 py-1 text-[var(--t-text-2)] hover:text-[var(--t-text)] disabled:opacity-50">Sell all</button>
+              <button type="button" disabled={busy} onClick={onBuy} className="inline-flex items-center gap-1 rounded-full bg-[var(--t-up-3)] px-3 py-1 font-semibold text-[var(--t-on-fill)] hover:bg-[var(--t-up-2)] disabled:opacity-50">
+                <Zap className="h-3.5 w-3.5" aria-hidden /> ${quickBuyUsd}
+              </button>
+            </>
+          ) : null}
+          {ready ? <button type="button" disabled={busy} onClick={onGraduate} className="rounded-full bg-[var(--t-up-3)] px-3 py-1 font-semibold text-[var(--t-on-fill)] hover:bg-[var(--t-up-2)] disabled:opacity-50">Graduate to DAMM v2</button> : null}
+          <a className="text-[var(--t-text-3)] hover:text-[var(--t-text)]" href={explorer(row.pool)} target="_blank" rel="noopener noreferrer" aria-label={`${row.symbol} pool on the explorer`}><ExternalLink className="h-3.5 w-3.5" /></a>
+        </span>
+      </div>
+      {notice ? (
+        <p role="status" className={`mt-1.5 pl-[72px] text-[11.5px] ${notice.ok ? "text-[var(--t-up)]" : "text-[var(--t-text-2)]"}`}>{notice.text}{notice.href ? <> · <a className="text-[var(--t-link)] hover:underline" href={notice.href} target="_blank" rel="noreferrer">View ↗</a></> : null}</p>
+      ) : null}
+    </article>
   );
 }

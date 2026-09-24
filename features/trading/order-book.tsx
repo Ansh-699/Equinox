@@ -5,22 +5,41 @@ import { ArrowDown, ArrowUp } from "lucide-react";
 import type { V3Book } from "./use-v3-book";
 import { Spinner } from "@/components/ui/spinner";
 
-const DEPTH = 20;
+// Every level the book holds (it scrolls): capping it once hid a trader's own
+// far-from-mid order behind twenty market-maker rungs.
+const DEPTH = 100;
+const SKELETON_ROWS = 16;
 
-/** Placeholder ladder while the first read of the book is in flight. */
+/** Placeholder ladder while the first read is in flight: the real book's exact
+ * structure (asks, mid row, bids, pressure bar) with depth bars that deepen
+ * away from the mid, under one shimmer. */
 function BookSkeleton() {
-  const rows = (side: "ask" | "bid") => Array.from({ length: 10 }, (_, i) => (
-    <div key={`${side}${i}`} className="grid h-5 grid-cols-3 items-center gap-3 px-3">
-      <span className={`h-2.5 w-14 animate-pulse rounded ${side === "ask" ? "bg-[var(--t-down)]/20" : "bg-[var(--t-up)]/20"}`} />
-      <span className="ml-auto h-2.5 w-8 animate-pulse rounded bg-[var(--t-surface-3)]" />
-      <span className="ml-auto h-2.5 w-10 animate-pulse rounded bg-[var(--t-surface-3)]" />
-    </div>
-  ));
+  const rows = (side: "ask" | "bid") => Array.from({ length: SKELETON_ROWS }, (_, i) => {
+    // Distance from the mid: asks render top-down toward it, bids away from it.
+    const depth = side === "ask" ? SKELETON_ROWS - 1 - i : i;
+    return (
+      <div key={`${side}${i}`} className="relative grid h-5 shrink-0 grid-cols-3 items-center border-b border-[var(--t-border)]/40 px-3">
+        <span aria-hidden className={`absolute inset-y-0 right-0 ${side === "ask" ? "bg-[var(--t-book-ask)]" : "bg-[var(--t-book-bid)]"} opacity-[0.10]`} style={{ width: `${Math.min(96, 8 + depth * 6 + ((i * 7) % 5))}%` }} />
+        <span className={`relative h-2 w-[52px] rounded-sm ${side === "ask" ? "bg-[var(--t-down)]/25" : "bg-[var(--t-up)]/25"}`} />
+        <span className="relative ml-auto h-2 rounded-sm bg-[var(--t-surface-3)]" style={{ width: `${18 + ((i * 5) % 3) * 6}px` }} />
+        <span className="relative ml-auto h-2 w-9 rounded-sm bg-[var(--t-surface-3)]" />
+      </div>
+    );
+  });
   return (
-    <div role="status" aria-label="Loading the order book" className="flex flex-1 flex-col justify-center gap-0.5 py-2">
-      {rows("ask")}
-      <div className="flex h-8 items-center gap-2 px-3 text-[11px] text-[var(--t-text-2)]"><Spinner /> Loading the live book from the rollup…</div>
-      {rows("bid")}
+    <div role="status" aria-label="Loading the live order book" className="book-shimmer relative flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col justify-end overflow-hidden">{rows("ask")}</div>
+      <div className="flex h-[34px] shrink-0 items-center gap-2 border-y border-[var(--t-border)] px-3">
+        <span className="h-4 w-[72px] rounded-sm bg-[var(--t-surface-3)]" />
+        <span className="flex items-center gap-1.5 whitespace-nowrap text-[11px] text-[var(--t-text-3)]"><Spinner className="h-3 w-3" /> Syncing the rollup book…</span>
+        <span className="ml-auto h-2 w-[64px] rounded-sm bg-[var(--t-surface-3)]" />
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col justify-start overflow-hidden">{rows("bid")}</div>
+      <div className="flex h-8 shrink-0 items-center gap-2 border-t border-[var(--t-border)] px-3">
+        <span className="h-2 w-12 rounded-sm bg-[var(--t-up)]/25" />
+        <span className="h-1 flex-1 rounded bg-[var(--t-surface-3)]" />
+        <span className="h-2 w-12 rounded-sm bg-[var(--t-down)]/25" />
+      </div>
     </div>
   );
 }
@@ -29,7 +48,8 @@ function BookSkeleton() {
  * tabs, cumulative depth bars, mid/spread and buy/sell pressure. */
 const CLOSED_HINT = "TSLA trades in the US session (pre-market 4:00 ET through after-hours 20:00 ET). The program refuses orders while Pyth reports the market closed; quotes return when it reopens.";
 
-export function OrderBookDisplay({ book, symbol, onPickPrice, marketClosed = false }: { book: V3Book; symbol: string; onPickPrice?: (price: number) => void; marketClosed?: boolean }) {
+/** `own` holds "bid:price" / "ask:price" keys of the viewer's resting orders. */
+export function OrderBookDisplay({ book, symbol, onPickPrice, marketClosed = false, own }: { book: V3Book; symbol: string; onPickPrice?: (price: number) => void; marketClosed?: boolean; own?: ReadonlySet<string> }) {
   const { bids, asks, trades, status, updatedAt, domain } = book;
   const [tab, setTab] = useState<"book" | "trades">("book");
 
@@ -60,7 +80,7 @@ export function OrderBookDisplay({ book, symbol, onPickPrice, marketClosed = fal
       </div>
 
       <div className="flex h-8 shrink-0 items-center gap-1.5 border-b border-[var(--t-border)] px-3">
-        <span className="tk-chip">{domain === "er" ? "MagicBlock ER" : "Solana L1"}</span>
+        <span className="tk-chip">{domain === "er" ? "MagicBlock rollup" : "Solana L1"}</span>
         <span className="tk-chip">Price-time priority</span>
       </div>
 
@@ -98,11 +118,11 @@ export function OrderBookDisplay({ book, symbol, onPickPrice, marketClosed = fal
             ) : (
               <>
                 <div className="slim-scroll flex min-h-0 flex-1 flex-col-reverse overflow-y-auto">
-                  {askRows.map((l, slot) => <Row key={`a-${slot}`} {...l} slot={slot} pct={Math.min(100, Math.sqrt(l.total / maxCum) * 100)} side="ask" onPick={onPickPrice} />)}
+                  {askRows.map((l, slot) => <Row key={`a-${slot}`} {...l} slot={slot} pct={Math.min(100, Math.sqrt(l.total / maxCum) * 100)} side="ask" onPick={onPickPrice} mine={own?.has(`ask:${l.price}`) ?? false} />)}
                 </div>
                 <MidRow mid={mid} spread={spread} />
                 <div className="slim-scroll flex min-h-0 flex-1 flex-col justify-start overflow-y-auto">
-                  {bidRows.map((l, slot) => <Row key={`b-${slot}`} {...l} slot={slot} pct={Math.min(100, Math.sqrt(l.total / maxCum) * 100)} side="bid" onPick={onPickPrice} />)}
+                  {bidRows.map((l, slot) => <Row key={`b-${slot}`} {...l} slot={slot} pct={Math.min(100, Math.sqrt(l.total / maxCum) * 100)} side="bid" onPick={onPickPrice} mine={own?.has(`bid:${l.price}`) ?? false} />)}
                 </div>
               </>
             )}
@@ -216,6 +236,7 @@ const Row = memo(function Row({
   pct,
   side,
   onPick,
+  mine,
 }: {
   price: number;
   size: number;
@@ -224,6 +245,7 @@ const Row = memo(function Row({
   pct: number;
   side: "bid" | "ask";
   onPick?: (price: number) => void;
+  mine: boolean;
 }) {
   const priceText = price.toFixed(2);
   const sizeText = fmtAmt(size);
@@ -235,6 +257,19 @@ const Row = memo(function Row({
   const waveRef = useRef<HTMLSpanElement>(null);
   const previous = useRef({ price, size, total });
   const runningWave = useRef<Animation[]>([]);
+  // A just-placed own order far from the mid: scroll its column (not the page) to it.
+  const wasMine = useRef(mine);
+  useEffect(() => {
+    const row = rowRef.current;
+    const column = row?.parentElement;
+    if (mine && !wasMine.current && row && column) {
+      const top = row.offsetTop - column.offsetTop;
+      if (top < column.scrollTop || top + row.offsetHeight > column.scrollTop + column.clientHeight) {
+        column.scrollTo({ top: top - column.clientHeight / 2, behavior: "smooth" });
+      }
+    }
+    wasMine.current = mine;
+  }, [mine]);
   useEffect(() => {
     const before = previous.current;
     previous.current = { price, size, total };
@@ -253,7 +288,8 @@ const Row = memo(function Row({
       ref={rowRef}
       className={`relative grid h-5 shrink-0 grid-cols-3 items-center border-b border-[var(--t-border)]/40 px-3 py-0.5 text-[12px] leading-tight last:border-b-0 ${onPick ? "cursor-pointer hover:bg-[var(--t-surface-3)]" : ""}`}
       onClick={onPick ? () => onPick(price) : undefined}
-      title={onPick ? "Use this price" : undefined}
+      title={mine ? "Your order rests at this price" : onPick ? "Use this price" : undefined}
+      data-mine={mine || undefined}
     >
       <div
         aria-hidden
@@ -277,7 +313,8 @@ const Row = memo(function Row({
         className="pointer-events-none absolute inset-y-0 left-0 w-1/3 opacity-0"
         style={{ background: `linear-gradient(to right, color-mix(in srgb, var(--t-book-${side === "bid" ? "bid" : "ask"}) 32%, transparent), transparent)` }}
       />
-      <span ref={priceRef} className={`relative tnum ${side === "bid" ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
+      <span ref={priceRef} className={`relative flex items-center gap-1 tnum ${side === "bid" ? "text-[var(--t-up)]" : "text-[var(--t-down)]"} ${mine ? "font-semibold" : ""}`}>
+        {mine ? <span aria-label="Your order" className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--t-accent,var(--t-text))]" /> : null}
         {priceText}
       </span>
       <span ref={sizeRef} className="relative text-right tnum text-[var(--t-text)]">{sizeText}</span>

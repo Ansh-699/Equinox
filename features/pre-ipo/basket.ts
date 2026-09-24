@@ -64,7 +64,7 @@ async function tradeLeg(plan: LegPlan, side: "long" | "short", leverage: number,
   const price = Number(snapshot.price) / 1e5;
 
   if (!own) {
-    report(`${market.symbol}: creating your seat…`);
+    report(`${market.symbol}: opening your margin account…`);
     const seat = createV3TraderSeat({ core: market.core, seatShards: execution.seatShards, eventShards: execution.eventShards, trader: wallet }, seatIndex);
     await protocol.service.executeEr(preview("CreateV3TraderSeat", seat), [seat], [market.core, ...execution.seatShards, ...execution.eventShards].map(String));
   }

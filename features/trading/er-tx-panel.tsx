@@ -88,7 +88,7 @@ export function ErTxPanel({ marketApiUrl, market }: { marketApiUrl: string | und
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--t-up)] opacity-60" />
           <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--t-up)]" />
         </span>
-        <span className="whitespace-nowrap text-[12px] font-medium text-[var(--t-text)]" title="Each row: time from send to inclusion in a MagicBlock rollup block (10 ms blocks). Solana L1 settlement follows at each commit.">MagicBlock ER · live</span>
+        <span className="whitespace-nowrap text-[12px] font-medium text-[var(--t-text)]" title="Each row: time from send to inclusion in a MagicBlock rollup block (10 ms blocks). Solana L1 settlement follows at each commit.">Delegated session · live</span>
         <span className="ml-auto whitespace-nowrap text-[11px] text-[var(--t-text-3)]" title="Send → the MagicBlock rollup has executed it (not Solana L1 settlement), measured by whoever sent it">{myTrip !== null
           ? <>You p50 <span className="tnum font-medium text-[var(--t-up)]">{myTrip} ms</span></>
           : <>Your order ≈ <span className="tnum font-medium text-[var(--t-up)]">{viewerRtt === null ? "—" : `${viewerRtt + (trip ?? 15)} ms`}</span></>}

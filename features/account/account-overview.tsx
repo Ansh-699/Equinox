@@ -45,7 +45,7 @@ export function RollupStatusLine({ summary }: { summary: AccountSummary }) {
     <div className="flex items-center gap-2 rounded-[8px] border border-[var(--t-border)] bg-[var(--t-surface)] px-3 py-2.5 text-[12px]">
       <span className={`h-2 w-2 shrink-0 rounded-full ${execution === null ? "bg-[var(--t-text-3)]" : delegated ? "bg-[var(--t-up)]" : "bg-[var(--t-warn)]"}`} />
       <span className="text-[var(--t-text-2)]">
-        {execution === null ? "Checking market…" : delegated ? "Live on the MagicBlock rollup: orders fill without wallet popups." : "Market on Solana L1: seats, deposits and withdrawals open."}
+        {execution === null ? "Checking market…" : delegated ? "Live on the MagicBlock rollup: orders fill without wallet popups." : "Market on Solana L1: accounts, deposits and withdrawals open."}
       </span>
     </div>
   );
@@ -79,7 +79,7 @@ export function AccountOverview({ summary }: { summary: AccountSummary }) {
         ) : summary.seat === undefined ? (
           <div className="grid grid-cols-2 gap-2"><StatTile label="Available" value="" loading /><StatTile label="In orders" value="" loading /></div>
         ) : summary.seat === null ? (
-          <p className="rounded-[8px] border border-dashed border-[var(--t-border-strong)] px-3 py-3 text-[12px] leading-relaxed text-[var(--t-text-2)]">No vault seat yet. Press <b className="text-[var(--t-text)]">Start trading</b> on the Trade page: it funds your trading account, opens a seat and deposits in one go.</p>
+          <p className="rounded-[8px] border border-dashed border-[var(--t-border-strong)] px-3 py-3 text-[12px] leading-relaxed text-[var(--t-text-2)]">No margin account yet. Press <b className="text-[var(--t-text)]">Start trading</b> on the Trade page: it funds your trading account, opens a margin account and deposits in one go.</p>
         ) : (
           <div className="grid grid-cols-2 gap-2">
             <StatTile label="Available" value={formatUsdUnits(summary.seat.available)} hint="Free to trade" tone="up" />

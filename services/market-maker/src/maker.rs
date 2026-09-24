@@ -181,7 +181,14 @@ impl Maker {
         Ok(Self {
             rpc,
             rpc_url: rpc_url.to_string(),
-            http: reqwest::Client::builder().timeout(Duration::from_secs(20)).build()?,
+            // HTTP/1 with a short idle pool: a dead HTTP/2 connection to the market API
+            // once hung every Pyth refresh (and so TSLA quoting) until a restart.
+            http: reqwest::Client::builder()
+                .http1_only()
+                .pool_idle_timeout(Duration::from_secs(20))
+                .connect_timeout(Duration::from_secs(5))
+                .timeout(Duration::from_secs(12))
+                .build()?,
             market_api,
             market,
             bundle,
@@ -336,7 +343,9 @@ impl Maker {
             let mut last = self.last_closed_refresh_ms.lock().await;
             if now.saturating_sub(*last) >= CLOSED_REFRESH_EVERY_MS {
                 *last = now;
-                let _ = self.refresh_oracle().await;
+                if let Err(error) = self.refresh_oracle().await {
+                    tracing::warn!(market = %self.market.symbol, "closed-session price refresh failed: {error:#}");
+                }
             }
             return Ok(());
         }

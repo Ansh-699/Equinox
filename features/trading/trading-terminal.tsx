@@ -25,7 +25,7 @@ import { useMarketClock } from "@/features/oracle/use-market-clock";
 import { deriveOracleSafety, ORACLE_LIFECYCLE_EVENT_KINDS } from "@/lib/oracle-safety";
 import { MarketBar, MarketPanel } from "./market-panel";
 import { OrderBookDisplay } from "./order-book";
-import { DEFAULT_TICKET, OrderTicket, sizeTicket, type Ticket } from "./order-ticket";
+import { DEFAULT_TICKET, OrderTicket, orderGuard, sizeTicket, type Ticket } from "./order-ticket";
 import { LifecyclePanel } from "./lifecycle-panel";
 import { ActivityDrawer } from "./activity-drawer";
 import { ErTxPanel, rollupExplorer } from "./er-tx-panel";
@@ -68,7 +68,6 @@ export function TradingTerminal() {
   const orderPending = ordersInFlight > 0;
   const txToasts = useTxToasts();
   const [cancelPending, setCancelPending] = useState(false);
-  const [faucetPending, setFaucetPending] = useState(false);
   const [notice, setNotice] = useState("Orders run in the MagicBlock rollup against an on-chain verified price, with USDC custody in the vault on Solana.");
   const [sessionActionReason, setSessionActionReason] = useState<SessionActionResult["reason"]>(null);
   const [marketSymbol, setMarketSymbol] = useState(process.env.NEXT_PUBLIC_EQUINOX_MARKET_SYMBOL ?? PRIMARY_MARKET.symbol);
@@ -172,6 +171,10 @@ export function TradingTerminal() {
       ? { kind: "ready", stale: false, orders: mine.map((order) => ({ ...order, tree: "fixed" as const, filledQuantity: 0n, expiresAt: order.expiresAt === 2n ** 64n - 1n ? null : order.expiresAt })) }
       : { kind: "empty" };
   }, [seatLoading, fromRollup, openOrders, rollupSeat, book.orders]);
+  // "side:price" of the viewer's resting orders, so the book can mark them.
+  const ownLevels = new Set(
+    rollupSeat ? book.orders.filter((order) => order.owner === rollupSeat.index).map((order) => `${order.side}:${Number(order.price) / 1e5}`) : [],
+  );
   // The headline price is the verified Pyth snapshot; the book mid only stands in without one.
   const bookMid = book.bids[0] && book.asks[0] ? (book.bids[0].price + book.asks[0].price) / 2 : null;
   // A stale snapshot (it only refreshes when someone trades) is not the price:
@@ -182,6 +185,10 @@ export function TradingTerminal() {
   const markPrice = indexPrice ?? bookMid;
   const sized = sizeTicket(ticket, markPrice, marketConfig.initialMarginBps);
   const quantity = BigInt(sized?.shares ?? 0);
+  // Orders the program would refuse (or an obvious typo) never reach the wallet.
+  const orderCheck = sized && sized.shares > 0 && !needsFunding
+    ? orderGuard({ kind: ticket.kind, side: ticket.side, reduceOnly: ticket.reduceOnly, price: ticket.price, marginUsd: sized.margin, markPrice, availableUsd: seat ? Number(seat.availableCollateral) / 1e6 : null, position: seat ? seat.basePosition : null })
+    : null;
   const orderTypeFor = (t: Ticket) => (t.kind === "market" ? "ioc" : t.postOnly ? "post-only" : "limit");
   const walletCollateral = useMemo(() => resolveCustodyAccounts(trader, marketAddress, marketConfig, seatIndex, v3)?.sourceOrDestination?.toString() ?? null, [trader, marketAddress, marketConfig, v3, seatIndex]);
   const balances = useWalletBalances(readRpc, trader, walletCollateral);
@@ -232,8 +239,8 @@ export function TradingTerminal() {
   }, [marketSymbol]);
 
   async function runLifecycle(): Promise<boolean> {
-    if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: lifecycle writes are disabled."); return false; }
-    if (!trader || !marketAddress || !protocol) { setNotice("Configure the market, sign in, and connect a wallet before creating a seat."); return false; }
+    if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: account changes are disabled."); return false; }
+    if (!trader || !marketAddress || !protocol) { setNotice("Sign in and connect a wallet before opening a margin account."); return false; }
     try {
       const v3Core = v3.core;
       if (v3Core) {
@@ -241,7 +248,7 @@ export function TradingTerminal() {
         // MagicBlock rollup while delegated. Never mid-transition.
         const domain = executionStatus?.orderRoutingDomain;
         if (domain !== "l1" && domain !== "er") {
-          setNotice("CreateV3TraderSeat blocked: the V3 bundle is between L1 and the rollup right now.");
+          setNotice("Can't open a margin account right now: the market is moving between Solana and the rollup. Try again in a few seconds.");
           return false;
         }
         const execution = deriveV3ExecutionAccounts(v3Core, trader);
@@ -253,9 +260,9 @@ export function TradingTerminal() {
           status: "constructed",
         };
         if (domain === "er") {
-          setNotice("Creating your seat in the MagicBlock rollup…");
+          setNotice("Opening your margin account in the MagicBlock rollup…");
           await protocol.service.executeEr(preview, [seat], [v3Core, ...execution.seatShards, ...execution.eventShards].map(String));
-          setNotice(`Seat #${seatIndex} created in the rollup. Deposit USDC to start trading.`);
+          setNotice(`Margin account #${seatIndex} opened in the rollup. Deposit USDC to start trading.`);
           return true;
         }
         setNotice("Submitting CreateV3TraderSeat…");
@@ -322,7 +329,7 @@ export function TradingTerminal() {
   /** Main-wallet V3 order: routed to MagicBlock ER while the market is delegated, else L1. */
   async function placeV3Order() {
     if (!protocol || !trader || !v3.core || !v3.oracleSnapshot || !sized) return;
-    if (!seat) { setNotice("Create your seat and deposit collateral before placing an order."); return; }
+    if (!seat) { setNotice("Press Start trading first: it opens your margin account and deposits collateral."); return; }
     if (!marketClock) { setNotice("Waiting for the verified price before placing an order."); return; }
     const built = buildV3OrderInstructions({
       core: v3.core, wallet: trader, oracleSnapshot: v3.oracleSnapshot, seatIndex,
@@ -388,13 +395,6 @@ export function TradingTerminal() {
   const live = marketClock?.oracle ? { price: marketClock.oracle.price, publishTime: Number(marketClock.lastVerifiedOracleTimestamp) } : null;
   const oracleAgeSeconds = marketClock && nowUnixSeconds ? Math.max(0, nowUnixSeconds - Number(marketClock.lastVerifiedOracleTimestamp)) : null;
 
-  /** Devnet faucet: 1,000 test USDC (and a little SOL for fees) to the signed-in wallet. */
-  async function claimFunds() {
-    if (!trader) { openWalletDrawer(); return; }
-    setFaucetPending(true);
-    setNotice("Sending test funds…");
-    try { setNotice(await claimTestFunds(traderAuth, trader)); } finally { setFaucetPending(false); refreshWalletBalances(); }
-  }
 
   /** One click from a connected wallet to a funded seat, and the path every
    * Deposit takes: unlock the trading key (the only wallet prompt, once per
@@ -418,13 +418,13 @@ export function TradingTerminal() {
       return;
     }
     if (!protocol || !trader || !walletCollateral) return;
-    if (seatLoading) { setNotice("Loading your seat — try again in a moment."); return; }
+    if (seatLoading) { setNotice("Loading your margin account — try again in a moment."); return; }
     const hasSeat = !!seat || seatCreatedFor.current === trader;
     try {
       let usdc = await readRpc.tokenBalance(walletCollateral).catch(() => 0n);
       const sol = await readRpc.solBalance(trader).catch(() => 0n);
       if (usdc < amount || sol < 10_000_000n) {
-        setOnboarding("1/3 · Funding…");
+        setOnboarding("1/3 · Getting test USDC and SOL…");
         setNotice("1/3 · Funding your trading account with test USDC and SOL…");
         const message = await claimTestFunds(traderAuth, trader);
         refreshWalletBalances();
@@ -436,11 +436,11 @@ export function TradingTerminal() {
         if (usdc < amount) { setNotice(message); return; }
       }
       if (!hasSeat) {
-        setOnboarding("2/3 · Creating seat…");
+        setOnboarding("2/3 · Opening margin account…");
         if (!(await runLifecycle())) return;
         seatCreatedFor.current = trader;
       }
-      setOnboarding("3/3 · Depositing…");
+      setOnboarding("3/3 · Depositing into the rollup…");
       const accounts = resolveCustodyAccounts(trader, marketAddress, marketConfig, seatIndex, v3);
       if (accounts) await deposit.submitDeposit(accounts, amount, executionStatus?.marketDelegated ?? false);
     } finally {
@@ -465,13 +465,12 @@ export function TradingTerminal() {
     ?? (deposit.pending ? "Depositing…" : null)
     ?? (withdraw.pending || walletWithdraw.pending ? "Withdrawing…" : null)
     ?? (orderPending || sessionOrder.pending ? "Placing your order in the rollup…" : null)
-    ?? (cancelPending ? "Cancelling in the rollup…" : null)
-    ?? (faucetPending ? "Sending test funds…" : null);
+    ?? (cancelPending ? "Cancelling in the rollup…" : null);
   const blocker = busy && !orderPending ? busy : needsFunding ? null : marketClosed && auth.authenticated ? "Market closed — US session only" : !auth.authenticated
     ? null
     : !sized
       ? ticket.kind === "limit" && !(Number(ticket.price) > 0) ? "Enter a limit price" : markPrice === null ? "Waiting for the verified price" : "Enter an amount"
-      : sized.shares <= 0 ? "Below one share" : null;
+      : sized.shares <= 0 ? "Below one share" : orderCheck?.block ?? null;
   const tickerName = marketSymbol.replace("-PERP", "");
   const ctaLabel = !auth.authenticated
     ? "Sign in to trade"
@@ -542,7 +541,7 @@ export function TradingTerminal() {
 
         {/* Depth. */}
         <div className="tk-col order-3 flex h-[560px] w-full shrink-0 flex-col xl:order-none xl:h-auto xl:w-[320px]">
-          <OrderBookDisplay book={book} symbol={marketSymbol} marketClosed={marketClosed} onPickPrice={pickBookPrice} />
+          <OrderBookDisplay book={book} symbol={marketSymbol} marketClosed={marketClosed} onPickPrice={pickBookPrice} own={ownLevels} />
         </div>
 
         {/* Entry, wallet, and system truth. */}
@@ -557,6 +556,7 @@ export function TradingTerminal() {
             availableUsd={available}
             ctaLabel={ctaLabel}
             blocker={blocker}
+            warning={orderCheck?.warn ?? null}
             pending={sessionOrder.pending}
             footnote={canTrade ? `Session key active — orders sign locally, no wallet popup.` : walletTrading ? "Orders sign with your wallet and route to the MagicBlock rollup while the market is delegated." : "Sign in, then Start trading: one wallet signature and the in-app trading account signs every order silently."}
             onSubmit={submitOrder}
@@ -579,8 +579,7 @@ export function TradingTerminal() {
             onStartTrading={() => void startTrading(onboardingDeposit)}
             onboarding={onboarding ?? (tradingKey.unlocking ? "Waiting for wallet signature…" : null)}
             busy={busy}
-            seatActionLabel="Create V3 seat"
-            onFaucet={v3.core ? () => void claimFunds() : undefined}
+            seatActionLabel="Open margin account"
             onDeposit={(units) => guard("deposits", () => {
               // Never guess the path: the market's location decides who signs.
               if (!executionStatus) { setNotice("Checking where the market runs — try again in a moment."); return; }
@@ -598,10 +597,6 @@ export function TradingTerminal() {
             withdrawDisabled={!withdrawGate.allowed && !rollupWithdraw}
             withdrawReason={withdrawGate.allowed || rollupWithdraw ? null : withdrawGate.reason ?? null}
             rollupLive={executionStatus?.marketDelegated ?? false}
-            onInitializeVault={constructVault}
-            onCancelAll={onCancelAllOrders}
-            onCancelOrder={onCancelOrder}
-            onReplaceOrder={(orderKey) => guard("order replacement", () => replaceWithCurrentTicket(orderKey))()}
           />
           {/* Live V3 wallet trading uses the in-app trading key. User sessions only exist for
               markets on L1 authorized by the market authority, so that panel stays for the fixture. */}

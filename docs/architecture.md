@@ -80,8 +80,10 @@ in every market. Margin is isolated per market (one seat per market).
 ### Market-maker service (`services/market-maker`, Rust/tokio, Azure Singapore VM)
 
 One process, ~2 ms from the rollup. For every market in the manifest:
-- **Maker**: 10 post-only rungs a side (1-23 bps), sized to about the same
-  dollar depth as TSLA, requoted in place; a taker seat crosses the touch.
+- **Maker**: 20 post-only rungs a side (1 bp to ~1%), sized to about the same
+  dollar depth as TSLA, requoted in place; after a price jump the side moving
+  away goes first (a rung that would cross the maker's own resting orders waits
+  a tick); a taker seat crosses the touch.
 - **Keeper**: liquidation scan every 3 s (the program's own risk code), hourly
   funding, commit to Solana every 30 min (trading pauses ~1.2 s).
 - **Reporter** (reporter-priced markets): every second reads its source and
@@ -117,8 +119,10 @@ One process, ~2 ms from the rollup. For every market in the manifest:
 - **Pre-IPO** (`/pre-ipo`): perp cards (perp price, PreStocks mark, token
   price, token vs mark), baskets (AI labs, Frontier) planned in whole shares
   and traded in parallel, and every PreStocks token.
-- **Launch** (`/launch`): equity-tuned Meteora DBC presets priced in USD,
-  create, buy/sell on the curve, graduate to DAMM v2, monitor, perp link.
+- **Launch** (`/launch`, Pulse): three live columns (New pairs, Final stretch
+  at ≥60% of the curve, Graduated to DAMM v2) with holders, top-10 and creator
+  share, fees and transaction counts read from the chain; ⚡ quick buy, sell,
+  graduate, perp link; creating a launch opens a side panel.
 
 ## Flows
 
@@ -142,7 +146,7 @@ funds the bots, delegates, and the reporter prices it from the pool.
 
 | Task | Command |
 |---|---|
-| New pre-IPO or launch market | `scripts/list-market.sh …` (see its header; ~1.3 devnet SOL) |
+| New pre-IPO or launch market | `scripts/list-market.sh …` (see its header; ~1.3 devnet SOL); it also registers the market with the market API, without which the terminal can't locate the book |
 | Name or clear a keeper / reporter, abort a snapshot | `node scripts/v3-set-keeper.mjs …` |
 | Top up a core's commit-fee lamports | `node scripts/v3-topup-core.mjs 1` |
 | Service deploy | build `services/market-maker` in its Dockerfile on the VM, install, `systemctl restart stockstream-mm` |

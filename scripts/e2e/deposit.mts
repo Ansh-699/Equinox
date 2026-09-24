@@ -7,7 +7,7 @@ import { launch } from "./harness.mts";
 const { page, prompts, step, waitNotice, connect, close } = await launch();
 try {
   await connect();
-  await page.getByText(/V3 delegation: delegated to MagicBlock/).waitFor({ timeout: 30_000 });
+  await page.getByText(/Rollup session: live on MagicBlock/).waitFor({ timeout: 30_000 });
   await page.locator("#custody-amount").fill("200");
   await page.getByRole("button", { name: "Deposit", exact: true }).click();
   await waitNotice(/Deposited 200 USDC/);

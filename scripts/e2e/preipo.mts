@@ -8,14 +8,14 @@ const { page, prompts, step, waitNotice, connect, close } = await launch();
 try {
   await connect();
   await page.getByRole("button", { name: /Change market/ }).click();
-  await page.getByRole("option").filter({ hasText: symbol }).getByRole("button").click();
+  await page.getByRole("option").filter({ hasText: symbol.replace("-PERP", "/USDC") }).getByRole("button").click();
   await page.getByText(new RegExp(`${symbol}`)).first().waitFor();
-  await page.getByText(/V3 delegation: delegated to MagicBlock/).waitFor({ timeout: 30_000 });
+  await page.getByText(/Rollup session: live on MagicBlock/).waitFor({ timeout: 30_000 });
   step(`market: ${await page.getByRole("button", { name: /Change market/ }).innerText()}`);
   await page.getByRole("button", { name: "Start trading", exact: true }).click();
   await waitNotice(/Deposited 500 USDC/);
   await page.waitForFunction(() => /Available\s*\$[1-9]/.test(document.querySelector("section.lifecycle-panel")?.textContent ?? ""), null, { timeout: 30_000 });
-  step(`seat: ${await page.getByRole("button", { name: /Seat #\d+ active/ }).innerText()}`);
+  step(`seat: ${await page.getByRole("button", { name: /Delegated session live/ }).innerText()}`);
   await page.getByRole("button", { name: "Market", exact: true }).click();
   await page.locator("#order-amount").fill("400");
   await page.locator("#order-lev").fill("5");
