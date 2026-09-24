@@ -484,20 +484,21 @@ input[type="number"] {
 }
 .glass-range::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 22px;
-  height: 22px;
-  margin-top: -7px;
+  width: 18px;
+  height: 18px;
+  margin-top: -5px;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--t-up) 45%, white 55%);
   background:
     radial-gradient(circle at 35% 30%, rgb(255 255 255 / 0.95), rgb(255 255 255 / 0.35) 45%, rgb(255 255 255 / 0.12) 70%),
     color-mix(in srgb, var(--t-up) 45%, transparent);
   box-shadow: 0 2px 8px rgb(0 0 0 / 0.25), inset 0 -2px 4px color-mix(in srgb, var(--t-up) 35%, transparent), inset 0 1px 1px rgb(255 255 255 / 0.8);
-  transition: transform 120ms ease;
+  transition: transform 160ms cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 160ms ease, filter 160ms ease;
 }
 .glass-range::-moz-range-thumb {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
+  transition: transform 160ms cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 160ms ease, filter 160ms ease;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--t-up) 45%, white 55%);
   background:
@@ -505,7 +506,24 @@ input[type="number"] {
     color-mix(in srgb, var(--t-up) 45%, transparent);
   box-shadow: 0 2px 8px rgb(0 0 0 / 0.25), inset 0 -2px 4px color-mix(in srgb, var(--t-up) 35%, transparent), inset 0 1px 1px rgb(255 255 255 / 0.8);
 }
-.glass-range:active::-webkit-slider-thumb { transform: scale(1.12); }
+/* Pressed: the bead swells and catches more light. */
+.glass-range:active::-webkit-slider-thumb,
+.glass-range:focus-visible::-webkit-slider-thumb {
+  transform: scale(1.45);
+  filter: brightness(1.12) saturate(1.2);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.28), 0 0 0 4px color-mix(in srgb, var(--t-up) 18%, transparent),
+    inset 0 -3px 5px color-mix(in srgb, var(--t-up) 40%, transparent), inset 0 1px 2px rgb(255 255 255 / 0.95);
+}
+.glass-range:active::-moz-range-thumb,
+.glass-range:focus-visible::-moz-range-thumb {
+  transform: scale(1.45);
+  filter: brightness(1.12) saturate(1.2);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.28), 0 0 0 4px color-mix(in srgb, var(--t-up) 18%, transparent),
+    inset 0 -3px 5px color-mix(in srgb, var(--t-up) 40%, transparent), inset 0 1px 2px rgb(255 255 255 / 0.95);
+}
+@media (prefers-reduced-motion: reduce) {
+  .glass-range::-webkit-slider-thumb, .glass-range::-moz-range-thumb { transition: none; }
+}
 
 /* Scrolls sideways when narrow, with no visible scrollbar. */
 .no-scrollbar { scrollbar-width: none; }

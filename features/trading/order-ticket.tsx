@@ -158,9 +158,9 @@ export function OrderTicket({
         <div className="flex flex-col gap-1.5">
           <div className="flex items-baseline justify-between">
             <label htmlFor="order-lev" className={LABEL}>Size multiplier</label>
-            <span className="tnum text-[12px] font-semibold text-[var(--t-up)]">{ticket.leverage}×</span>
+            <span className="tnum text-[12px] font-semibold text-[var(--t-up)]">{ticket.leverage.toFixed(1)}×</span>
           </div>
-          <input id="order-lev" type="range" min={1} max={maxLeverage} step={1} value={ticket.leverage} onChange={(e) => set({ leverage: Number.parseInt(e.target.value, 10) })}
+          <input id="order-lev" type="range" min={1} max={maxLeverage} step={0.1} value={ticket.leverage} onChange={(e) => set({ leverage: Number(e.target.value) })}
             style={{ "--fill": `${maxLeverage > 1 ? ((ticket.leverage - 1) / (maxLeverage - 1)) * 100 : 100}%` } as CSSProperties} className={`glass-range w-full cursor-pointer ${FOCUS}`} />
           <div className="tnum flex justify-between text-[11px] text-[var(--t-text-3)]">
             {Array.from({ length: maxLeverage }, (_, i) => <span key={i}>{i + 1}×</span>)}
