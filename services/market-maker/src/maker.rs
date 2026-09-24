@@ -41,6 +41,8 @@ pub struct ErTx {
     pub net_ms: Option<u64>,
     /// The rollup's own share: `ms - net_ms`.
     pub er_ms: Option<u64>,
+    /// How long the sendTransaction HTTP call took to return.
+    pub send_ms: Option<u64>,
     pub ok: bool,
     pub at: u64,
     pub signature: String,
@@ -189,16 +191,25 @@ impl Maker {
         let at = now_ms();
         let started = Instant::now();
         self.rpc.send_transaction(&wire).await.ok()?; // a rejected quote is re-planned next tick
-        let processed = match watch {
-            Some(watch) => watch.processed(Duration::from_secs(3)).await,
-            None => None,
+        let send_ms = Some(started.elapsed().as_millis() as u64);
+        // First of: the websocket push, or an HTTP status poll. Pushes after a quiet
+        // spell can reach us ~40 ms after the rollup already reports the transaction
+        // processed; the poll shows when it really was.
+        let pushed = async {
+            match watch {
+                Some(watch) => watch.processed(Duration::from_secs(3)).await,
+                None => std::future::pending().await,
+            }
         };
+        let polled = async { self.rpc.poll_processed(&signature, Duration::from_secs(3)).await.map(|ok| (Instant::now(), ok)) };
+        let processed = tokio::select! { p = pushed => p, p = polled => p };
         let ms = processed.map(|(arrived, _)| arrived.saturating_duration_since(started).as_millis() as u64);
         Some(ErTx {
             kind,
             ms,
             net_ms,
             er_ms: ms.zip(net_ms).map(|(total, network)| total.saturating_sub(network)),
+            send_ms,
             ok: processed.is_some_and(|(_, ok)| ok),
             at,
             signature,

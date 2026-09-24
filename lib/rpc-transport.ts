@@ -41,8 +41,14 @@ export class SolanaRpcTransport implements L1Transport {
   }
   async request(method: string, params: unknown[]): Promise<unknown> {
     const id = ++this.id;
-    const response = await this.fetcher(this.endpoint, { method:'POST', headers:{'content-type':'application/json'},
+    const post = () => this.fetcher(this.endpoint, { method:'POST', headers:{'content-type':'application/json'},
       body:JSON.stringify({jsonrpc:'2.0',id,method,params}), signal:AbortSignal.timeout(15_000) });
+    let response = await post();
+    // 429 = rate limited before the request was processed: safe to retry, even a send.
+    for (let retry = 0; response.status === 429 && retry < 4; retry += 1) {
+      await this.wait(400 * 2 ** retry);
+      response = await post();
+    }
     if (!response.ok) throw new RpcFailure(method, response.status);
     const data = object(await response.json());
     if (data.id !== id || data.jsonrpc !== '2.0') throw new RpcFailure(method, 'invalid_envelope');
@@ -81,7 +87,11 @@ export class SolanaRpcTransport implements L1Transport {
   async confirm(signature: string): Promise<'confirmed'|'finalized'> {
     if (!/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(signature)) throw new Error('Invalid signature');
     for (let attempt=0; attempt<this.attempts; attempt++) {
-      const values = object(await this.request('getSignatureStatuses',[[signature],{searchTransactionHistory:true}])).value;
+      // The transaction is already sent: a rate-limited status read means "ask again", not "failed".
+      const result = await this.request('getSignatureStatuses',[[signature],{searchTransactionHistory:true}])
+        .catch((error: unknown) => { if (error instanceof RpcFailure && error.code === 429) return null; throw error; });
+      if (result === null) { if (attempt+1<this.attempts) await this.wait(500); continue; }
+      const values = object(result).value;
       if (!Array.isArray(values) || values.length !== 1) throw new RpcFailure('getSignatureStatuses','invalid_result');
       if (values[0] !== null) {
         const status = object(values[0]);

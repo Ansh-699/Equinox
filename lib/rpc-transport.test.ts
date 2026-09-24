@@ -37,6 +37,21 @@ function marketBytes(commit = 4n, event = 7n) {
   return bytes;
 }
 describe('production RPC transports', () => {
+  it('retries a rate-limited (429) request, then gives up after four retries', async () => {
+    let calls=0;
+    const limited = (after: number): typeof fetch => async (_input, init) => {
+      calls+=1;
+      if(calls<=after) return new Response('rate limited',{status:429});
+      return response(JSON.parse(String(init?.body)).id,{value:{blockhash:'11111111111111111111111111111111',lastValidBlockHeight:5}});
+    };
+    const waits: number[]=[];
+    expect(await new SolanaRpcTransport('https://rpc.test',limited(2),async(ms)=>{waits.push(ms);},1).latestBlockhash()).toMatchObject({lastValidBlockHeight:5});
+    expect(waits).toEqual([400,800]);
+    calls=0;
+    await expect(new SolanaRpcTransport('https://rpc.test',limited(99),async()=>{},1).latestBlockhash()).rejects.toThrow();
+    expect(calls).toBe(5);
+  });
+
   it('simulates, submits once, confirms, and validates the market owner', async () => {
     const calls: string[]=[];
     const fetcher: typeof fetch = async (_input, init) => {

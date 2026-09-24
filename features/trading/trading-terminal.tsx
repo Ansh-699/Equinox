@@ -361,27 +361,31 @@ export function TradingTerminal() {
     try { setNotice(await claimTestFunds(traderAuth, trader)); } finally { setFaucetPending(false); refreshWalletBalances(); }
   }
 
-  /** One click from a connected wallet to a funded seat: unlock the trading
-   * key (the only wallet prompt), then faucet → seat → deposit, all signed
+  /** One click from a connected wallet to a funded seat, and the path every
+   * Deposit takes: unlock the trading key (the only wallet prompt, once per
+   * device), then faucet if short → seat if missing → deposit, all signed
    * silently by the trading key. */
   const [onboarding, setOnboarding] = useState<string | null>(null);
-  const [autoStart, setAutoStart] = useState(false);
-  async function startTrading() {
+  const [autoStart, setAutoStart] = useState<bigint | null>(null);
+  // The book feed can lag a just-created seat; never create it twice in a session.
+  const seatCreatedFor = useRef<string | null>(null);
+  async function startTrading(amount: bigint = ONBOARDING_DEPOSIT) {
     if (!auth.walletAddress) { openWalletDrawer(); return; }
     if (publicDemoReadOnly) { setNotice("Read-only Devnet demo: onboarding is unavailable."); return; }
     if (!tradingKey.signer) {
       setOnboarding("Unlocking trading account…");
-      try { await tradingKey.unlock(); setAutoStart(true); }
+      try { await tradingKey.unlock(); setAutoStart(amount); }
       catch (error) { setNotice(`Trading account not unlocked: ${error instanceof Error ? error.message : String(error)}`); }
       finally { setOnboarding(null); }
       return;
     }
     if (!protocol || !trader || !walletCollateral) return;
-    const amount = ONBOARDING_DEPOSIT;
+    if (seatLoading) { setNotice("Loading your seat — try again in a moment."); return; }
+    const hasSeat = !!seat || seatCreatedFor.current === trader;
     try {
       let usdc = await readRpc.tokenBalance(walletCollateral).catch(() => 0n);
       const sol = await readRpc.solBalance(trader).catch(() => 0n);
-      if (!seat && (usdc < amount || sol < 10_000_000n)) {
+      if (usdc < amount || sol < 10_000_000n) {
         setOnboarding("1/3 · Funding…");
         setNotice("1/3 · Funding your trading account with test USDC and SOL…");
         const message = await claimTestFunds(traderAuth, trader);
@@ -393,9 +397,10 @@ export function TradingTerminal() {
         refreshWalletBalances();
         if (usdc < amount) { setNotice(message); return; }
       }
-      if (!seat) {
+      if (!hasSeat) {
         setOnboarding("2/3 · Creating seat…");
         if (!(await runLifecycle())) return;
+        seatCreatedFor.current = trader;
       }
       setOnboarding("3/3 · Depositing…");
       const accounts = resolveCustodyAccounts(trader, marketAddress, marketConfig, seatIndex);
@@ -406,10 +411,10 @@ export function TradingTerminal() {
     }
   }
   useEffect(() => {
-    if (!autoStart || !protocol || !tradingKey.signer) return;
+    if (autoStart === null || !protocol || !tradingKey.signer) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setAutoStart(false);
-    void startTrading();
+    setAutoStart(null);
+    void startTrading(autoStart);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoStart, protocol, tradingKey.signer]);
 
@@ -524,9 +529,13 @@ export function TradingTerminal() {
             seatActionLabel="Create V3 seat"
             onFaucet={publicV3Core ? () => void claimFunds() : undefined}
             onDeposit={(units) => guard("deposits", () => {
+              // Never guess the path: the market's location decides who signs.
+              if (!executionStatus) { setNotice("Checking where the market runs — try again in a moment."); return; }
+              // Deposits into the rollup always go through the trading key: never a wallet popup per step.
+              if (executionStatus.marketDelegated) { void startTrading(units); return; }
               const accounts = resolveCustodyAccounts(trader, marketAddress, marketConfig, seatIndex);
               if (!accounts) { setNotice("Sign in before depositing."); return; }
-              void deposit.submitDeposit(accounts, units, executionStatus?.marketDelegated ?? false);
+              void deposit.submitDeposit(accounts, units, false);
             })()}
             onWithdraw={(units) => guard("withdrawals", () => {
               const accounts = resolveCustodyAccounts(trader, marketAddress, marketConfig, seatIndex);
