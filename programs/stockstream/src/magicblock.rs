@@ -1782,13 +1782,13 @@ fn is_v3_commit_accounts(accounts: &[AccountView]) -> bool {
 }
 
 fn is_v3_core_commit_accounts(accounts: &[AccountView]) -> bool {
-    accounts.len() == 5
+    (accounts.len() == 5 || (accounts.len() == 6 && accounts[5].data_len() != v3::V3_MARKET_CORE_SIZE))
         && accounts[0].data_len() == v3::V3_MARKET_CORE_SIZE
         && unsafe { accounts[0].borrow_unchecked() }[0..8] == v3::V3_MARKET_CORE_DISCRIMINATOR
 }
 
 fn is_v3_member_commit_accounts(accounts: &[AccountView]) -> bool {
-    if accounts.len() != 6 || accounts[5].data_len() != v3::V3_MARKET_CORE_SIZE {
+    if !(accounts.len() == 6 || accounts.len() == 7) || accounts[5].data_len() != v3::V3_MARKET_CORE_SIZE {
         return false;
     }
     let bytes = unsafe { accounts[0].borrow_unchecked() };
@@ -1947,7 +1947,12 @@ fn commit_v3_member(
     sequence: u64,
     kind: CommitKind,
 ) -> ProgramResult {
-    if accounts.len() != 6
+    // Optional 7th account: the magic fee vault (core-paid, uncapped commit).
+    let paid = accounts.len() == 7;
+    if paid && matches!(kind, CommitKind::CommitAndUndelegate) {
+        return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+    }
+    if !(accounts.len() == 6 || paid)
         || !accounts[1].is_signer()
         || !accounts[2].is_signer()
         || !accounts[2].is_writable()
@@ -1973,8 +1978,7 @@ fn commit_v3_member(
         || core_bytes[8..10] != v3::V3_LAYOUT_VERSION.to_le_bytes()
         || core_bytes[v3::V3_CORE_DELEGATION_STATUS_OFFSET] != DelegationStatus::Delegated as u8
         || core_u64(core_bytes, v3::V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET)? != sequence
-        || core_bytes[v3::V3_CORE_MARKET_AUTHORITY_OFFSET..v3::V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
-            != accounts[1].address().to_bytes()
+        || !commit_signer_allowed(core_bytes, &accounts[1].address().to_bytes(), &kind)
     {
         return Err(custom(StockStreamError::MagicBlockSequenceReplay));
     }
@@ -2022,38 +2026,46 @@ fn commit_v3_member(
                 .try_into()
                 .map_err(|_| ProgramError::InvalidAccountData)?,
         ) as usize;
+        // Only a record from this snapshot's epoch means "already committed";
+        // leftovers from an older epoch are overwritten.
         let record = v3_record_offset(child_index)?;
         if count >= v3::V3_CHILD_COUNT
-            || core_bytes[record..record + v3::V3_CORE_CHILD_RECORD_SIZE]
-                .iter()
-                .any(|byte| *byte != 0)
+            || core_bytes[record..record + 8] == snapshot_epoch.to_le_bytes()
         {
             return Err(custom(StockStreamError::MagicBlockSequenceReplay));
         }
     }
 
-    let mut data_buf = [0u8; SCHEDULE_DATA_MAX_LEN];
-    let data_len = encode_schedule_intent_bundle_data(
-        &[2],
-        matches!(kind, CommitKind::CommitAndUndelegate),
-        &mut data_buf,
-    )
-    .map_err(custom)?;
-    let commit_accounts = [
-        InstructionAccount::writable_signer(accounts[2].address()),
-        InstructionAccount::writable(accounts[3].address()),
-        InstructionAccount::writable(accounts[0].address()),
-    ];
-    let commit_ix = InstructionView {
-        program_id: &MAGIC_PROGRAM_ID,
-        accounts: &commit_accounts,
-        data: &data_buf[..data_len],
-    };
-    let commit_views: [&AccountView; 3] = [&accounts[2], &accounts[3], &accounts[0]];
-    invoke_signed_with_bounds::<3, _>(&commit_ix, &commit_views, &[])?;
+    if paid {
+        schedule_core_paid_commit(program_id, &accounts[5], &accounts[3], &accounts[6], Some(&accounts[0]))?;
+    } else {
+        let mut data_buf = [0u8; SCHEDULE_DATA_MAX_LEN];
+        let data_len = encode_schedule_intent_bundle_data(
+            &[2],
+            matches!(kind, CommitKind::CommitAndUndelegate),
+            &mut data_buf,
+        )
+        .map_err(custom)?;
+        let commit_accounts = [
+            InstructionAccount::writable_signer(accounts[2].address()),
+            InstructionAccount::writable(accounts[3].address()),
+            InstructionAccount::writable(accounts[0].address()),
+        ];
+        let commit_ix = InstructionView {
+            program_id: &MAGIC_PROGRAM_ID,
+            accounts: &commit_accounts,
+            data: &data_buf[..data_len],
+        };
+        let commit_views: [&AccountView; 3] = [&accounts[2], &accounts[3], &accounts[0]];
+        invoke_signed_with_bounds::<3, _>(&commit_ix, &commit_views, &[])?;
+    }
 
     let core = unsafe { accounts[5].borrow_unchecked_mut() };
     if core[v3::V3_CORE_COMMIT_PHASE_OFFSET] == v3::V3_COMMIT_PHASE_IDLE {
+        // A new snapshot starts from an empty record table.
+        core[v3::V3_CORE_CHILD_RECORDS_OFFSET
+            ..v3::V3_CORE_CHILD_RECORDS_OFFSET + v3::V3_CHILD_COUNT * v3::V3_CORE_CHILD_RECORD_SIZE]
+            .fill(0);
         core[v3::V3_CORE_COMMIT_PHASE_OFFSET] = v3::V3_COMMIT_PHASE_SNAPSHOT;
         core[v3::V3_CORE_SNAPSHOT_EPOCH_OFFSET..v3::V3_CORE_SNAPSHOT_EPOCH_OFFSET + 8]
             .copy_from_slice(&snapshot_epoch.to_le_bytes());
@@ -2080,6 +2092,76 @@ fn commit_v3_member(
         ..v3::V3_CORE_EXPECTED_COMMIT_SEQUENCE_OFFSET + 8]
         .copy_from_slice(&sequence.saturating_add(1).to_le_bytes());
     Ok(())
+}
+
+/// The validator's magic fee vault for a V3 core: `["magic-fee-vault", validator]`
+/// under the delegation program (the validator is recorded in the core).
+fn is_core_fee_vault(core: &[u8], vault: &AccountView) -> bool {
+    let validator = &core[v3::V3_CORE_VALIDATOR_OFFSET..v3::V3_CORE_VALIDATOR_OFFSET + 32];
+    let (expected, _) = Address::find_program_address(&[b"magic-fee-vault", validator], &DELEGATION_PROGRAM_ID);
+    *vault.address() == expected && vault.is_writable()
+}
+
+/// Schedules a commit of `member` (or of the core itself when `None`) paid by
+/// the delegated V3 core through the validator's magic fee vault. Paid commits
+/// are not subject to MagicBlock's 10-commits-per-delegation sponsorship cap.
+pub(crate) fn schedule_core_paid_commit(
+    program_id: &Address,
+    core: &AccountView,
+    magic_context: &AccountView,
+    fee_vault: &AccountView,
+    member: Option<&AccountView>,
+) -> ProgramResult {
+    if *magic_context.address() != MAGIC_CONTEXT_ID || !magic_context.is_writable() || !core.is_writable() {
+        return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+    }
+    let instrument = {
+        let bytes = unsafe { core.borrow_unchecked() };
+        if bytes.len() != v3::V3_MARKET_CORE_SIZE
+            || bytes[0..8] != v3::V3_MARKET_CORE_DISCRIMINATOR
+            || !is_core_fee_vault(bytes, fee_vault)
+        {
+            return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+        }
+        Address::new_from_array(bytes[12..44].try_into().map_err(|_| ProgramError::InvalidAccountData)?)
+    };
+    let (derived, bump) =
+        Address::find_program_address(&[v3::V3_MARKET_CORE_SEED, instrument.as_ref()], program_id);
+    if derived != *core.address() {
+        return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+    }
+    let bump_slice = [bump];
+    let seeds = [Seed::from(v3::V3_MARKET_CORE_SEED), Seed::from(instrument.as_ref()), Seed::from(&bump_slice)];
+    let mut data_buf = [0u8; SCHEDULE_DATA_MAX_LEN];
+    // CPI accounts: [payer = core, magic context, fee vault, member]. The core
+    // commits itself as the payer (index 0) or a member at index 3.
+    let data_len = encode_schedule_intent_bundle_data(&[if member.is_some() { 3 } else { 0 }], false, &mut data_buf)
+        .map_err(custom)?;
+    let data = &data_buf[..data_len];
+    match member {
+        Some(member) => {
+            if !member.is_writable() {
+                return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+            }
+            let metas = [
+                InstructionAccount::writable_signer(core.address()),
+                InstructionAccount::writable(magic_context.address()),
+                InstructionAccount::writable(fee_vault.address()),
+                InstructionAccount::writable(member.address()),
+            ];
+            let ix = InstructionView { program_id: &MAGIC_PROGRAM_ID, accounts: &metas, data };
+            invoke_signed_with_bounds::<4, _>(&ix, &[core, magic_context, fee_vault, member], &[Signer::from(&seeds)])
+        }
+        None => {
+            let metas = [
+                InstructionAccount::writable_signer(core.address()),
+                InstructionAccount::writable(magic_context.address()),
+                InstructionAccount::writable(fee_vault.address()),
+            ];
+            let ix = InstructionView { program_id: &MAGIC_PROGRAM_ID, accounts: &metas, data };
+            invoke_signed_with_bounds::<3, _>(&ix, &[core, magic_context, fee_vault], &[Signer::from(&seeds)])
+        }
+    }
 }
 
 /// Commit-only write-back of one delegated V3 member (no undelegation, no
@@ -2117,12 +2199,17 @@ pub(crate) fn schedule_member_commit(
 /// is also the final undelegation request for the core; child undelegations are
 /// submitted independently through `commit_v3_member`.
 fn commit_v3_core(
-    _program_id: &Address,
+    program_id: &Address,
     accounts: &mut [AccountView],
     sequence: u64,
     kind: CommitKind,
 ) -> ProgramResult {
-    if accounts.len() != 5
+    // Optional 6th account: the magic fee vault (core-paid, uncapped commit).
+    let paid = accounts.len() == 6;
+    if paid && matches!(kind, CommitKind::CommitAndUndelegate) {
+        return Err(custom(StockStreamError::MagicBlockInvalidAccount));
+    }
+    if !(accounts.len() == 5 || paid)
         || !accounts[1].is_signer()
         || !accounts[2].is_signer()
         || !accounts[2].is_writable()
@@ -2173,9 +2260,7 @@ fn commit_v3_core(
                 return Err(custom(StockStreamError::MagicBlockSequenceReplay));
             }
         }
-        if bytes[v3::V3_CORE_MARKET_AUTHORITY_OFFSET..v3::V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
-            != accounts[1].address().to_bytes()
-        {
+        if !commit_signer_allowed(bytes, &accounts[1].address().to_bytes(), &kind) {
             return Err(custom(StockStreamError::MagicBlockSequenceReplay));
         }
     }
@@ -2191,25 +2276,29 @@ fn commit_v3_core(
         bytes[v3::V3_CORE_DELEGATION_STATUS_OFFSET] = DelegationStatus::Undelegating as u8;
         bytes[v3::V3_CORE_COMMIT_PHASE_OFFSET] = v3::V3_COMMIT_PHASE_UNDELEGATING;
     }
-    let mut data_buf = [0u8; SCHEDULE_DATA_MAX_LEN];
-    let data_len = encode_schedule_intent_bundle_data(
-        &[2],
-        matches!(kind, CommitKind::CommitAndUndelegate),
-        &mut data_buf,
-    )
-    .map_err(custom)?;
-    let commit_accounts = [
-        InstructionAccount::writable_signer(accounts[2].address()),
-        InstructionAccount::writable(accounts[3].address()),
-        InstructionAccount::writable(accounts[0].address()),
-    ];
-    let commit_ix = InstructionView {
-        program_id: &MAGIC_PROGRAM_ID,
-        accounts: &commit_accounts,
-        data: &data_buf[..data_len],
-    };
-    let commit_views: [&AccountView; 3] = [&accounts[2], &accounts[3], &accounts[0]];
-    invoke_signed_with_bounds::<3, _>(&commit_ix, &commit_views, &[])?;
+    if paid {
+        schedule_core_paid_commit(program_id, &accounts[0], &accounts[3], &accounts[5], None)?;
+    } else {
+        let mut data_buf = [0u8; SCHEDULE_DATA_MAX_LEN];
+        let data_len = encode_schedule_intent_bundle_data(
+            &[2],
+            matches!(kind, CommitKind::CommitAndUndelegate),
+            &mut data_buf,
+        )
+        .map_err(custom)?;
+        let commit_accounts = [
+            InstructionAccount::writable_signer(accounts[2].address()),
+            InstructionAccount::writable(accounts[3].address()),
+            InstructionAccount::writable(accounts[0].address()),
+        ];
+        let commit_ix = InstructionView {
+            program_id: &MAGIC_PROGRAM_ID,
+            accounts: &commit_accounts,
+            data: &data_buf[..data_len],
+        };
+        let commit_views: [&AccountView; 3] = [&accounts[2], &accounts[3], &accounts[0]];
+        invoke_signed_with_bounds::<3, _>(&commit_ix, &commit_views, &[])?;
+    }
     let bytes = unsafe { accounts[0].borrow_unchecked_mut() };
     if matches!(kind, CommitKind::CommitOnly) {
         bytes[v3::V3_CORE_LAST_COMMITTED_SEQUENCE_OFFSET
@@ -2227,6 +2316,18 @@ fn commit_v3_core(
             .fill(0);
     }
     Ok(())
+}
+
+/// Snapshot commits may be signed by the keeper; undelegation stays with the
+/// market authority.
+fn commit_signer_allowed(core: &[u8], signer: &[u8; 32], kind: &CommitKind) -> bool {
+    match kind {
+        CommitKind::CommitOnly => v3::is_v3_operator(core, signer),
+        CommitKind::CommitAndUndelegate => {
+            core[v3::V3_CORE_MARKET_AUTHORITY_OFFSET..v3::V3_CORE_MARKET_AUTHORITY_OFFSET + 32]
+                == signer[..]
+        }
+    }
 }
 
 fn core_u64(bytes: &[u8], offset: usize) -> Result<u64, ProgramError> {

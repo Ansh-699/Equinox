@@ -18,7 +18,7 @@ use stockstream::{
         append_event_record, authorize_trading_session_v3, cancel_all_v3, close_trader_seat,
         create_trader_seat, deposit_collateral_v3, derive_book_page_v3, derive_event_shard_v3,
         derive_market_core_v3, derive_seat_shard_v3, initialize_book_page_metadata, liquidate_v3,
-        place_order_v3, read_v3_risk_config, update_funding_v3, update_v3_risk_config,
+        place_order_v3, read_v3_risk_config, set_v3_keeper, update_funding_v3, update_v3_risk_config,
         validate_execution_bundle, validate_v3_oracle_snapshot_for_er, validate_v3_session_actor,
         validate_v3_withdrawal_readiness, withdraw_collateral_v3, PagedBookV3, V3RiskConfig,
         V3_BOOK_PAGES_PER_SIDE, V3_BOOK_PAGE_SIZE, V3_CORE_DELEGATION_STATUS_OFFSET,
@@ -365,6 +365,38 @@ fn v3_funding_recomputes_mark_from_pages_and_emits_event() {
     assert_eq!(u64::from_le_bytes(core[172..180].try_into().unwrap()), 20);
     let event = unsafe { accounts[V3_EVENT_START].view.borrow_unchecked() };
     assert_eq!(u16::from_le_bytes(event[44..46].try_into().unwrap()), 302);
+}
+
+#[test]
+fn v3_keeper_set_by_authority_may_run_funding_but_a_stranger_may_not() {
+    let mut accounts = bundle();
+    let authority = account(Address::new_from_array([79; 32]), 0, true);
+    let keeper = account(Address::new_from_array([80; 32]), 0, true);
+    let stranger = account(Address::new_from_array([81; 32]), 0, true);
+    {
+        let core = unsafe { accounts[0].view.borrow_unchecked_mut() };
+        core[44..76].copy_from_slice(authority.view.address().as_ref());
+        core[180] = 1;
+        core[181..189].copy_from_slice(&100i64.to_le_bytes());
+        core[189..197]
+            .copy_from_slice(&(stockstream::handlers::OFF_CHAIN_TEST_NOW as u64).to_le_bytes());
+    }
+    let funding = |signer: &TestAccount, accounts: &[TestAccount], accumulator| {
+        let mut call = views(accounts);
+        call.push(signer.view.clone());
+        update_funding_v3(&ID, &mut call, StockStreamInstruction::UpdateFunding { accumulator, timestamp: 20 })
+    };
+    // No keeper configured yet: only the authority may fund.
+    assert!(funding(&keeper, &accounts, 0).is_err());
+    // Only the authority may name the keeper.
+    let keeper_key = keeper.view.address().to_bytes();
+    assert!(set_v3_keeper(&ID, &mut [accounts[0].view.clone(), keeper.view.clone()], keeper_key).is_err());
+    set_v3_keeper(&ID, &mut [accounts[0].view.clone(), authority.view.clone()], keeper_key).unwrap();
+    assert!(funding(&stranger, &accounts, 0).is_err());
+    funding(&keeper, &accounts, 0).unwrap();
+    // Clearing the keeper revokes it again.
+    set_v3_keeper(&ID, &mut [accounts[0].view.clone(), authority.view.clone()], [0; 32]).unwrap();
+    assert!(funding(&keeper, &accounts, 0).is_err());
 }
 
 #[test]

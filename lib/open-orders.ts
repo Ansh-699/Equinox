@@ -6,6 +6,8 @@
  * closed whenever the aggregate is absent or a node is malformed.
  */
 
+import { fetchV3Aggregate } from "@/lib/v3-aggregate";
+
 export interface OpenOrderView {
   orderKey: bigint;
   side: "bid" | "ask";
@@ -75,10 +77,8 @@ export function createV3OpenOrdersAdapter(input: {
 }): OpenOrdersAdapter {
   return {
     async fetchOpenOrders({ seatIndex }) {
-      const endpoint = `${input.marketApiUrl.replace(/\/$/, "")}/v1/v3/markets/${encodeURIComponent(input.core)}?domain=l1`;
-      const response = await fetch(endpoint);
-      if (!response.ok) return { status: "unavailable", reason: OPEN_ORDERS_UNAVAILABLE_REASON };
-      const aggregate = await response.json() as V3AggregateResponse;
+      const aggregate = await fetchV3Aggregate(input.core).catch(() => null) as V3AggregateResponse | null;
+      if (!aggregate) return { status: "unavailable", reason: OPEN_ORDERS_UNAVAILABLE_REASON };
       if (aggregate.completeExecutionState !== true || !aggregate.orderBook) {
         return { status: "unavailable", reason: OPEN_ORDERS_UNAVAILABLE_REASON };
       }

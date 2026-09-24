@@ -90,6 +90,8 @@ Worker would spend Worker requests (about 86k/day for one open tab).
 | Variable | Default | |
 |---|---|---|
 | `MM_MAKER_KEYPAIR`, `MM_TAKER_KEYPAIR` | required | paths to solana-keygen JSON files; each key must already own a seat in the market |
+| `MM_KEEPER_KEYPAIR` | unset | the core's keeper key; turns on commits, funding and liquidation (see Keeper) |
+| `MM_COMMIT_EVERY_S`, `MM_FUNDING_EVERY_S` | `120`, `3600` | keeper pacing |
 | `MAGICBLOCK_RPC_URL` | deployment `magicBlock.rpc` | rollup RPC and websocket |
 | `MARKET_API_URL` | the StockStream Worker | permissionless Pyth snapshot refresh when the rollup price is older than 6 s |
 | `MM_STATUS_ADDR` | `0.0.0.0:8080` | status server (`/v1/mm/status`, `/healthz`) |
@@ -98,3 +100,33 @@ Worker would spend Worker requests (about 86k/day for one open tab).
 | `STOCKSTREAM_DEPLOYMENT` | compiled-in `config/stockstream-deployment.json` | another market |
 
 Stopping the service is safe: quotes expire on their own within 60 s.
+
+## Keeper
+
+With `MM_KEEPER_KEYPAIR` set, the same process also runs the market's keeper
+jobs (`src/keeper.rs`), signed by a key the market authority names on the core:
+
+```sh
+node scripts/v3-set-keeper.mjs <keeper-pubkey>   # opcode 64; `clear` revokes it
+```
+
+The program lets that key fund, liquidate and commit-only snapshot, nothing
+else (no custody, no risk settings, no undelegation). Fund it with ~1 devnet
+SOL for rollup fees.
+
+- **Commit** every `MM_COMMIT_EVERY_S`: the 26 child shards, then the core.
+  Trading pauses while the snapshot is open (~1.4 s from Singapore), so the
+  maker stands down. Commits are paid by the core through the validator's
+  magic fee vault, which lifts MagicBlock's 10-commits-per-delegation cap; keep
+  the core's rollup balance above rent with `node scripts/v3-topup-core.mjs 1`.
+  A failed commit closes its snapshot (opcode 65) so trading continues;
+  `node scripts/v3-set-keeper.mjs abort-snapshot` does the same by hand.
+- **Funding** every `MM_FUNDING_EVERY_S`: moves the accumulator by the book's
+  premium over the oracle (the program only lets it rise and caps the step).
+- **Liquidation** every 3 s: re-scores every seat with the program's own risk
+  code (the `stockstream` crate is a path dependency) and liquidates the ones
+  under maintenance margin.
+
+The status JSON gains a `keeper` object (commits, last sequence, pause length,
+funding steps, liquidations, errors).
+

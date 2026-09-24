@@ -78,6 +78,13 @@ pub const CLAIM_INBOX_DEPOSIT_V3: u8 = 61;
 pub const REQUEST_WITHDRAWAL_V3: u8 = 62;
 /// L1 payout of committed withdrawal requests. Data: `[63, seat_index:u16]`.
 pub const CLAIM_WITHDRAWAL_V3: u8 = 63;
+/// Market authority names (or clears, with all zeroes) the V3 keeper key that
+/// may run funding, liquidation and commit-only snapshots. Data: `[64, keeper:[u8;32]]`.
+pub const SET_V3_KEEPER: u8 = 64;
+/// Authority or keeper closes an unfinished commit snapshot so trading resumes
+/// (children already committed stay on L1; the next full snapshot supersedes them).
+/// Data: `[65]`. Accounts: `[core (writable), authority-or-keeper (signer)]`.
+pub const ABORT_V3_SNAPSHOT: u8 = 65;
 pub const COMMIT_MARKET: u8 = 14;
 pub const COMMIT_AND_UNDELEGATE: u8 = 15;
 /// Reserved: the real external-undelegate callback uses the delegation
@@ -278,6 +285,10 @@ pub enum StockStreamInstruction {
     ClaimWithdrawalV3 {
         seat_index: u16,
     },
+    SetV3Keeper {
+        keeper: [u8; 32],
+    },
+    AbortV3Snapshot,
     WithdrawCollateralV3 {
         seat_index: u16,
         amount: u64,
@@ -578,6 +589,10 @@ impl StockStreamInstruction {
             }),
             Some(CLAIM_WITHDRAWAL_V3) if data.len() == 3 => Ok(Self::ClaimWithdrawalV3 {
                 seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,
+            }),
+            Some(ABORT_V3_SNAPSHOT) if data.len() == 1 => Ok(Self::AbortV3Snapshot),
+            Some(SET_V3_KEEPER) if data.len() == 33 => Ok(Self::SetV3Keeper {
+                keeper: data[1..33].try_into().map_err(|_| ProgramError::InvalidInstructionData)?,
             }),
             Some(DEPOSIT_COLLATERAL_V3) if data.len() == 11 => Ok(Self::DepositCollateralV3 {
                 seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,

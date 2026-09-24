@@ -10,6 +10,8 @@ description = "Always-on devnet market maker for the StockStream V3 book in the 
 
 [dependencies]
 anyhow = "1"
+# The on-chain program as a library: the keeper uses its seat decoder and risk math.
+stockstream = { path = "../../programs/stockstream" }
 axum = "0.8"
 base64 = "0.22"
 bs58 = "0.5"

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Keypair, SystemProgram } from "@solana/web3.js";
-import { claimInboxDepositV3, depositToInboxV3, deriveDepositReceiptV3, deriveV3ExecutionAccounts, requestWithdrawalV3, claimWithdrawalV3, deriveWithdrawReceiptV3 } from "./index";
+import { claimInboxDepositV3, depositToInboxV3, deriveDepositReceiptV3, deriveMagicFeeVault, deriveV3ExecutionAccounts, requestWithdrawalV3, claimWithdrawalV3, deriveWithdrawReceiptV3 } from "./index";
 
 describe("deposit inbox encoders", () => {
   const core = Keypair.generate().publicKey.toBase58();
@@ -42,5 +42,18 @@ describe("V3 withdrawal outbox encoders", () => {
     const ix = claimWithdrawalV3({ core, seatShard: core, trader, destination: core, vault: core, vaultAuthority: core, mint: core, tokenProgram: core }, 5);
     expect([...ix.data]).toEqual([63, 5, 0]);
     expect(ix.keys[8].pubkey.equals(deriveWithdrawReceiptV3(core, trader))).toBe(true);
+  });
+});
+
+describe("core-paid withdrawal commit", () => {
+  it("appends the validator's magic fee vault as an 11th writable account", () => {
+    const vault = deriveMagicFeeVault("MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57");
+    // The live devnet vault for devnet-as, read from the rollup.
+    expect(vault.toBase58()).toBe("5SRuhQybZ3FqmymaxoipqnieGZ5bNnrQqYwUZSRoCCZQ");
+    const core = Keypair.generate().publicKey.toBase58();
+    const ix = requestWithdrawalV3({ core, seatShard: core, eventShards: [core, core, core, core], trader: core, oracleSnapshot: core, feeVault: vault }, 5, 1n);
+    expect(ix.keys).toHaveLength(11);
+    expect(ix.keys[10]).toMatchObject({ isWritable: true, isSigner: false });
+    expect(ix.keys[10].pubkey.equals(vault)).toBe(true);
   });
 });

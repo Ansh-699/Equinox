@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { fetchV3Aggregate } from "@/lib/v3-aggregate";
 
 export interface V3MarketReadiness {
   state: "not_configured" | "loading" | "available" | "unavailable";
@@ -72,11 +73,8 @@ export function useV3MarketState(marketApiUrl: string | undefined, core: string 
   useEffect(() => {
     if (!marketApiUrl || !core) return;
     let stopped = false;
-    void fetch(`${marketApiUrl.replace(/\/$/, "")}/v1/v3/markets/${encodeURIComponent(core)}?domain=l1`)
-      .then(async (response) => {
-        if (!response.ok) return null;
-        return response.json() as Promise<V3AggregateSummaryInput>;
-      })
+    void fetchV3Aggregate(core)
+      .then((aggregate) => aggregate as V3AggregateSummaryInput | null)
       .then((aggregate) => {
         if (stopped) return;
         setStatus(aggregate ? { state: "available", ...summarizeV3Aggregate(aggregate) } : { state: "unavailable", ...emptySummary() });

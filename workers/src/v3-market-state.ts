@@ -376,3 +376,14 @@ export async function fetchAuthoritativeV3Market(
     values[0]!, values.slice(1, 1 + bookPageCount) as Uint8Array[], values.slice(1 + bookPageCount, 5 + bookPageCount) as Uint8Array[], values.slice(5 + bookPageCount, 9 + bookPageCount) as Uint8Array[], addresses.core, response.context.slot,
   );
 }
+
+/** JSON-safe copy of an aggregate: bigints as strings, bytes as arrays. */
+export function v3JsonValue(value: unknown): unknown {
+  if (typeof value === 'bigint') return value.toString();
+  if (value instanceof Uint8Array) return Array.from(value);
+  if (Array.isArray(value)) return value.map(v3JsonValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, v3JsonValue(entry)]));
+  }
+  return value;
+}

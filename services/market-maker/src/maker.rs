@@ -74,6 +74,8 @@ pub struct Status {
     pub ping_ms: Option<u64>,
     /// Pyth trading status is OPEN; while closed the program refuses orders, so the bot waits.
     pub market_open: Option<bool>,
+    /// Funding, liquidation and commit jobs (absent when no keeper key is configured).
+    pub keeper: Option<crate::keeper::KeeperStatus>,
 }
 
 struct Bot {
@@ -94,6 +96,8 @@ pub struct Maker {
     next_take_ms: Mutex<u64>,
     last_closed_refresh_ms: Mutex<u64>,
     pub status: Arc<Mutex<Status>>,
+    /// Set by the keeper while a commit snapshot freezes trading.
+    pub paused: Arc<std::sync::atomic::AtomicBool>,
 }
 
 pub fn now_ms() -> u64 {
@@ -129,6 +133,7 @@ impl Maker {
             next_take_ms: Mutex::new(0),
             last_closed_refresh_ms: Mutex::new(0),
             status: Arc::new(Mutex::new(status)),
+            paused: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
     }
 
@@ -138,6 +143,10 @@ impl Maker {
 
     pub async fn run(self: Arc<Self>, tick_every: Duration) {
         loop {
+            if self.paused.load(std::sync::atomic::Ordering::SeqCst) {
+                tokio::time::sleep(tick_every).await;
+                continue;
+            }
             let result = self.tick().await;
             let mut status = self.status.lock().await;
             status.ticks += 1;

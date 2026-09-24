@@ -5,6 +5,9 @@
 //! - `MM_STATUS_ADDR`: status server bind address (default `0.0.0.0:8080`)
 //! - `MM_REGION`: label shown in the terminal (e.g. `SGP1`)
 //! - `MM_TICK_MS`: pause between ticks (default 400)
+//! - `MM_KEEPER_KEYPAIR`: the core's keeper key (opcode 64); enables funding,
+//!   liquidation and commits. `MM_COMMIT_EVERY_S` (default 120) and
+//!   `MM_FUNDING_EVERY_S` (default 3600) pace them.
 //! - `STOCKSTREAM_DEPLOYMENT`: deployment JSON path (default: the one compiled in)
 
 use std::sync::Arc;
@@ -13,6 +16,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use axum::{http::header, response::IntoResponse, routing::get, Router};
 use serde_json::Value;
+use stockstream_market_maker::keeper::Keeper;
 use stockstream_market_maker::maker::{Maker, Status};
 use stockstream_market_maker::solana::{b58, pubkey, Keypair};
 use stockstream_market_maker::v3::Bundle;
@@ -55,6 +59,22 @@ async fn main() -> Result<()> {
     let (maker_seat, taker_seat) = maker.seats();
     tracing::info!(core = %b58(&bundle.core), rpc = %rpc_url, maker_seat, taker_seat, "market maker starting");
 
+    let keeper = match env("MM_KEEPER_KEYPAIR") {
+        Some(_) => {
+            let seconds = |name: &str, default: u64| Duration::from_secs(env(name).and_then(|v| v.parse().ok()).unwrap_or(default));
+            let keeper = Keeper::new(&rpc_url, bundle.clone(), keypair("MM_KEEPER_KEYPAIR")?, maker.status.clone(), maker.paused.clone(), seconds("MM_COMMIT_EVERY_S", 120), seconds("MM_FUNDING_EVERY_S", 3_600))?;
+            tracing::info!(keeper = %b58(&keeper.pubkey()), "keeper enabled");
+            Some(Arc::new(keeper))
+        }
+        None => None,
+    };
+    let keeping = async {
+        match keeper {
+            Some(keeper) => keeper.run().await,
+            None => std::future::pending().await,
+        }
+    };
+
     let state = maker.status.clone();
     let app = Router::new()
         .route("/v1/mm/status", get({ let state = state.clone(); move || status(state.clone()) }))
@@ -69,6 +89,7 @@ async fn main() -> Result<()> {
     tokio::select! {
         result = axum::serve(listener, app) => result?,
         () = maker.run(tick) => {}
+        () = keeping => {}
         _ = tokio::signal::ctrl_c() => tracing::info!("interrupted; quotes expire on their own within 60 s"),
         _ = terminate.recv() => tracing::info!("terminated; quotes expire on their own within 60 s"),
     }

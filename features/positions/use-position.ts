@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { decodeTraderSeat, type TraderSeatView } from "@/lib/positions";
 import type { SolanaRpcTransport } from "@/lib/rpc-transport";
 import { resolveV3Seat } from "@/lib/v3-seat";
+import { fetchV3Aggregate } from "@/lib/v3-aggregate";
 
 const POLL_INTERVAL_MS = 8_000;
 
@@ -53,8 +54,8 @@ export function usePosition(rpc: SolanaRpcTransport | null, marketAddress: strin
     let stopped = false;
     const poll = () => {
       if (v3?.marketApiUrl && v3.core) {
-        void fetch(`${v3.marketApiUrl.replace(/\/$/, "")}/v1/v3/markets/${encodeURIComponent(v3.core)}?domain=l1`)
-          .then(async (response) => response.ok ? await response.json() as V3AggregateJson : null)
+        void fetchV3Aggregate(v3.core)
+          .then((aggregate) => aggregate as V3AggregateJson | null)
           .then((aggregate) => {
             if (stopped) return;
             const values = aggregate && Array.isArray(aggregate.positions) ? aggregate.positions : [];
