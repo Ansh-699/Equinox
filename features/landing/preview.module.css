@@ -348,93 +348,33 @@
 .preset { border-radius: 4px; background: var(--t-surface-3); padding: 1px 6px; font-size: 10px; color: var(--t-text-2); }
 .quickBuy { border-radius: 999px; background: var(--t-up-3); padding: 2px 10px; color: var(--t-on-fill); font-weight: 600; }
 
-/* Architecture: the path an order takes, services feeding each step */
-.lane {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 96px minmax(0, 1fr) 96px minmax(0, 1fr);
-  margin: auto 0;
-  padding: 0 0 24px;
-  list-style: none;
-}
+/* Architecture: a logo-only system picture (fixed dark, like the panel) */
 .archPad { flex: 1; }
-.laneItem { display: contents; }
-.stage { min-width: 0; }
-.stageNode {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: 76px;
-  padding: 0 16px;
-  border: 1px solid var(--t-border);
-  border-radius: 12px;
-  background: var(--t-surface);
-  transition: border-color 200ms ease;
-}
-@media (hover: hover) { .stageNode:hover { border-color: color-mix(in srgb, var(--t-accent) 55%, var(--t-border)); } }
-.stageNode img { flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%; object-fit: cover; }
-.stageNode > span { display: flex; min-width: 0; flex-direction: column; }
-.stageNode b { font-size: 14.5px; font-weight: 600; }
-.stageNode .muted { font-size: 12px; }
-.stageLive { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--t-up); }
-.stageLive::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
-
-.link { position: relative; height: 76px; }
-.link::before { content: ""; position: absolute; left: 6px; right: 6px; top: 50%; height: 1px; background: var(--t-border-strong); }
-.link::after {
-  content: "";
-  position: absolute;
-  right: 6px;
-  top: calc(50% - 3.5px);
-  width: 7px;
-  height: 7px;
-  border-top: 1px solid var(--t-border-strong);
-  border-right: 1px solid var(--t-border-strong);
-  transform: rotate(45deg);
-}
-.linkLabel {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: calc(50% - 22px);
-  text-align: center;
-  font-family: var(--font-data);
-  font-size: 10.5px;
-  color: var(--t-text-3);
-}
-.linkDot {
-  position: absolute;
-  top: calc(50% - 2.5px);
-  left: 6px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--t-accent);
-  opacity: 0;
-  animation: travel 2.4s ease-in-out infinite;
-}
-@keyframes travel {
-  0% { left: 6px; opacity: 0; }
-  15% { opacity: 1; }
-  85% { opacity: 1; }
-  100% { left: calc(100% - 14px); opacity: 0; }
-}
-
-.feeds { position: relative; margin-left: 33px; padding: 22px 0 0 18px; border-left: 1px solid var(--t-border); }
-.feedsLabel { display: block; margin-bottom: 8px; font-size: 10.5px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--t-text-3); }
-.feedChips { display: flex; flex-wrap: wrap; gap: 6px; }
-.feedChip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 10px 0 6px;
-  border: 1px solid var(--t-border);
-  border-radius: 999px;
-  font-size: 12px;
-  color: var(--t-text-2);
-}
-.feedChip img { width: 16px; height: 16px; border-radius: 4px; object-fit: cover; }
-.feedChip img[data-round="true"] { border-radius: 50%; }
+.archArt { display: block; width: 100%; max-width: 1040px; height: auto; margin: auto; padding: 8px 0 20px; }
+.archArt image { pointer-events: none; }
+.tile { fill: #151619; stroke: rgba(255, 255, 255, 0.12); stroke-width: 1; transition: stroke 200ms ease; }
+.node:hover .tile { stroke: rgba(155, 123, 255, 0.55); }
+.logoRing { fill: #0c0d10; stroke: rgba(255, 255, 255, 0.08); }
+.logoRingThin { fill: transparent; stroke: rgba(255, 255, 255, 0.35); stroke-width: 1.2; }
+.mono { filter: grayscale(1) brightness(1.15) contrast(1.1); }
+.candleUp { stroke: #2fbf86; fill: #2fbf86; }
+.candleDown { stroke: #e0525c; fill: #e0525c; }
+.candleUp line, .candleDown line { stroke-width: 1.2; }
+.link2 { fill: none; stroke-width: 1.6; }
+.arrowHead, .arrowHeadMuted, .arrowHeadBranch { fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.arrowHeadMuted { stroke: #7f86a8; }
+.arrowHeadBranch { stroke: #7c6cf0; }
+.branch { fill: none; stroke: #7c6cf0; stroke-width: 1.5; }
+.dashedUp { fill: none; stroke: #7f86a8; stroke-width: 1.4; stroke-dasharray: 4 5; animation: dashUp 1.2s linear infinite; }
+@keyframes dashUp { to { stroke-dashoffset: 9; } }
+.dashJoin { stroke: rgba(255, 255, 255, 0.3); stroke-width: 1.2; stroke-dasharray: 3 4; }
+.badge2 circle { fill: #101116; stroke-width: 1.4; }
+.badge2[data-tone="blue"] circle { stroke: #8aa8ff; }
+.badge2[data-tone="violet"] circle { stroke: #9b7bff; }
+.docOutline { fill: none; stroke: #d8dcf0; stroke-width: 1.2; stroke-linejoin: round; }
+.docLine { stroke: #d8dcf0; stroke-width: 1; }
+.layerTop { fill: #17161f; stroke: #7c6cf0; stroke-width: 1.2; stroke-linejoin: round; }
+.layerSide { fill: #1d1b2b; stroke: #5d52b8; stroke-width: 1; stroke-linejoin: round; }
 
 .summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .summary > div { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; font-size: 12px; }
@@ -475,12 +415,6 @@
   .asks { min-height: 0; }
   .feedRows, .cards, .summary, .pulse { grid-template-columns: minmax(0, 1fr); }
   .pulse > :last-child { display: block; }
-  .lane { grid-template-columns: minmax(0, 1fr); margin-top: 8px; }
-  .link { height: 44px; }
-  .link::before { left: 33px; right: auto; top: 4px; bottom: 4px; width: 1px; height: auto; }
-  .link::after { left: 30px; right: auto; top: auto; bottom: 4px; transform: rotate(135deg); }
-  .linkLabel { left: 48px; right: auto; top: calc(50% - 7px); text-align: left; }
-  .linkDot { left: 31px; animation-name: travelDown; }
   .feed .headNote { display: none; }
   .screenHead { flex-wrap: wrap; }
   .order { grid-template-columns: 1fr auto; row-gap: 8px; }
@@ -490,14 +424,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .panel, .screen, .draw, .dot::after, .navLine{ animation: none; transition: none; }
-  .linkDot { display: none; }
+  .traveller { display: none; }
+  .dashedUp { animation: none; }
   .panel { opacity: 1; transform: none; }
   .draw { stroke-dashoffset: 0; }
-}
-
-@keyframes travelDown {
-  0% { top: 4px; opacity: 0; }
-  15% { opacity: 1; }
-  85% { opacity: 1; }
-  100% { top: calc(100% - 12px); opacity: 0; }
 }
