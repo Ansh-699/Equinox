@@ -1,5 +1,4 @@
 "use client";
-/* eslint-disable @next/next/no-img-element -- static brand marks */
 
 // Marketing landing (Onyx design): sky-gradient hero, glass credibility pill,
 // one glass CTA, and the dark app panel that floats up over the fold. Every
@@ -7,20 +6,18 @@
 // illustrative is tagged in the panel.
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { DEMO_ORACLE_SNAPSHOT, DEMO_PROGRAM_ID, publicMarketApiUrl, publicV3Core } from "@/lib/demo-config";
 import { PERP_MARKETS } from "@/lib/markets";
 import { SolanaRpcTransport } from "@/lib/rpc-transport";
 import { useMarketClock } from "@/features/oracle/use-market-clock";
 import { useExecutionStatus } from "@/features/magicblock/use-execution-status";
 import { RESOLUTIONS, useCandles } from "@/features/trading/use-candles";
-import { tradesFrom } from "@/features/trading/use-v3-book";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { BrandMark } from "@/components/ui/brand-mark";
 import { Reveal } from "@/components/reveal";
-import { LandingHero, type ActivityRow, type PreviewMarket } from "./landing-hero";
+import { LandingHero } from "./landing-hero";
 import styles from "./landing.module.css";
-import { fetchV3Aggregate } from "@/lib/v3-aggregate";
 
 const LIVE_SYMBOL = PERP_MARKETS.find((m) => m.live)?.symbol ?? "TSLA-PERP";
 const HOURLY = RESOLUTIONS.find((r) => r.code === "60") ?? RESOLUTIONS[3];
@@ -31,42 +28,18 @@ const FEATURES = [
   { title: "Collateral never leaves L1", body: "USDC sits in the program vault on Solana. The rollup only holds the book and positions while it trades, and the vault reconciles to the lamport on return." },
 ] as const;
 
-function sampleActivity(price: number): ActivityRow[] {
-  const now = Date.now();
-  const rows: [ActivityRow["side"], ActivityRow["role"], number, number, number][] = [
-    ["long", "Taker", 4, 0.999, 1], ["short", "Maker", 2, 1.002, 4], ["long", "Maker", 10, 0.997, 11],
-    ["short", "Taker", 3, 1.001, 26], ["long", "Taker", 1, 0.995, 58], ["short", "Maker", 6, 1.004, 84],
-  ];
-  return rows.map(([side, role, size, k, mins]) => ({ side, role, size, price: price * k, t: now - mins * 60_000 }));
-}
-
 export function LandingView() {
   const rpc = useMemo(() => new SolanaRpcTransport(process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://rpc.magicblock.app/devnet"), []);
   const clock = useMarketClock(DEMO_ORACLE_SNAPSHOT ? rpc : null, publicV3Core || null, DEMO_ORACLE_SNAPSHOT);
   const live = clock?.oracle ? { price: clock.oracle.price, publishTime: Number(clock.lastVerifiedOracleTimestamp) } : null;
   const { candles } = useCandles(publicMarketApiUrl, LIVE_SYMBOL, HOURLY, live);
   const execution = useExecutionStatus(publicMarketApiUrl, LIVE_SYMBOL);
-  const [fills, setFills] = useState<ActivityRow[]>([]);
-
-  // One read of the market's event shards for the Activity preview.
-  useEffect(() => {
-    if (!publicV3Core) return;
-    void fetchV3Aggregate(publicV3Core)
-      .then((data) => data as { eventShards?: Parameters<typeof tradesFrom>[0] } | null)
-      .then((data) => {
-        if (!data) return;
-        setFills(tradesFrom(data.eventShards).map((t, i) => ({ side: i % 2 ? "short" : "long", role: "Taker", size: t.size, price: t.price, t: t.time * 1000 })));
-      })
-      .catch(() => undefined);
-  }, []);
 
   const week = candles.slice(-24 * 7);
   const price = clock?.oracle?.price ?? week.at(-1)?.c ?? null;
   const day = candles.slice(-24);
   const changePct = day.length >= 2 && day[0].o > 0 ? ((day[day.length - 1].c - day[0].o) / day[0].o) * 100 : null;
   const liveMarket = PERP_MARKETS.find((m) => m.symbol === LIVE_SYMBOL);
-  const markets: PreviewMarket[] = PERP_MARKETS.map((m) => ({ symbol: m.symbol, name: m.displayName, live: m.live, price: m.live ? price : null, changePct: m.live ? changePct : null }))
-    .sort((a, b) => Number(b.live) - Number(a.live));
 
   return (
     <div className={styles.bleed}>
@@ -79,9 +52,6 @@ export function LandingView() {
       <div className={styles.skyZone}>
         <LandingHero
           demo={{ symbol: LIVE_SYMBOL, name: liveMarket?.displayName ?? "Tesla", price, candles: week, maxLeverage: liveMarket?.maximumLeverage ?? 5, initialMarginBps: liveMarket?.initialMarginBps ?? 2_000 }}
-          markets={markets}
-          activity={fills.length ? fills : sampleActivity(price ?? 250)}
-          realActivity={fills.length > 0}
         />
       </div>
 

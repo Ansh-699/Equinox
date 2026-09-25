@@ -100,11 +100,6 @@
   letter-spacing: 0.08em;
 }
 
-.logoGlyph {
-  font-size: 1.5rem;
-  line-height: 1;
-}
-
 /* credibility pill — dark translucent glass with a divider (reference-exact) */
 .credPill {
   display: inline-flex;
@@ -158,7 +153,6 @@
 .d2 { animation-delay: 180ms; }
 .d3 { animation-delay: 280ms; }
 .d4 { animation-delay: 380ms; }
-.d5 { animation-delay: 480ms; }
 
 @keyframes heroUp {
   to {
@@ -167,189 +161,12 @@
   }
 }
 
-/* ---------- the liquid-glass CTA — lift, sheen & detached-shadow
-   choreography (physical glass floating above the page) ---------- */
-
-.heroCta {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin-top: 18px;
-  padding: 9px 30px;
-  border-radius: 100px;
-  font-size: 0.88rem;
-  font-weight: 700;
-  color: #0d3f7a;
-  text-decoration: none;
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(214, 236, 255, 0.55) 40%, rgba(158, 205, 250, 0.45) 100%);
-  backdrop-filter: blur(12px) saturate(130%);
-  -webkit-backdrop-filter: blur(12px) saturate(130%);
-  /* rest elevation: tight close shadow + glossy inner edges */
-  box-shadow:
-    0 8px 20px rgba(20, 60, 120, 0.25),
-    inset 0 1px 0 rgba(255, 255, 255, 0.65),
-    inset 0 -2px 6px rgba(255, 255, 255, 0.15);
-  overflow: visible;
-  transform: translateY(0) scale(1);
-  transition:
-    transform 300ms cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 300ms cubic-bezier(0.22, 1, 0.36, 1),
-    filter 300ms ease;
-  will-change: transform, box-shadow;
-}
-
-/* diagonal light sheen that sweeps once on hover — animated via
-   background-position so it can never escape the pill (the button keeps
-   overflow: visible for the detached ::after shadow below) */
-.heroCta::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(120deg, transparent 30%, rgba(255, 255, 255, 0.55) 50%, transparent 70%);
-  background-size: 250% 100%;
-  background-position: 120% 0;
-  transition: background-position 700ms ease;
-  pointer-events: none;
-}
-
-/* detached floating shadow beneath — the "gap" that sells the float */
-.heroCta::after {
-  content: "";
-  position: absolute;
-  left: 10%;
-  right: 10%;
-  bottom: -14px;
-  height: 16px;
-  background: radial-gradient(ellipse at center, rgba(10, 40, 90, 0.45) 0%, transparent 60%);
-  opacity: 0.6;
-  transform: translateY(6px) scaleX(0.9);
-  transition: opacity 300ms ease, transform 300ms cubic-bezier(0.22, 1, 0.36, 1);
-  pointer-events: none;
-  z-index: -1;
-}
-
-/* HOVER: lift, brighten, bigger softer shadow; sheen sweeps; under-shadow
-   drops lower and spreads — opposing motion = floating */
-.heroCta:hover {
-  text-decoration: none;
-  transform: translateY(-6px) scale(1.03);
-  filter: brightness(1.05);
-  box-shadow:
-    0 20px 40px rgba(20, 60, 120, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.75),
-    inset 0 -2px 8px rgba(255, 255, 255, 0.2);
-}
-
-.heroCta:hover::before {
-  background-position: -120% 0;
-}
-
-.heroCta:hover::after {
-  opacity: 0.85;
-  transform: translateY(12px) scaleX(1.05);
-}
-
-/* PRESS: settle slightly */
-.heroCta:active {
-  transform: translateY(-2px) scale(0.99);
-  box-shadow:
-    0 10px 22px rgba(20, 60, 120, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
-}
-
-/* ---------- segmented glass nav pill ---------- */
-
-.pillNav {
-  position: relative;
-  display: inline-flex;
-  gap: 2px;
-  margin-top: 20px;
-  padding: 4px;
-  isolation: isolate;
-  transform: translateZ(0); /* own layer — see hover-artifact note above */
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  background: rgba(255, 255, 255, 0.16);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-}
-
-/* the sliding white chip behind the active tab */
-.pillIndicator {
-  position: absolute;
-  top: 4px;
-  bottom: 4px;
-  left: 0;
-  border-radius: 999px;
-  background: #fff;
-  box-shadow: 0 4px 12px rgba(20, 60, 120, 0.25);
-  transition:
-    transform 300ms cubic-bezier(0.22, 1, 0.36, 1),
-    width 300ms cubic-bezier(0.22, 1, 0.36, 1);
-  pointer-events: none;
-}
-
-.pillNav button,
-.pillNav a {
-  padding: 6px 15px;
-  border-radius: 999px;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 0.8rem;
-  font-weight: 650;
-  color: rgba(255, 255, 255, 0.7); /* white over the sky; indicator carries the active state */
-  text-decoration: none;
-  position: relative;
-  z-index: 1;
-  transition: color 140ms ease;
-}
-
-.pillNav button:hover,
-.pillNav a:hover {
-  color: #fff;
-  text-decoration: none;
-}
-
-.pillNav button:focus-visible {
-  outline: 2px solid #fff;
-  outline-offset: 2px;
-}
-
-.pillNav button[data-primary="true"] {
-  color: #0b1220;
-}
-
-.docsLink {
-  opacity: 0.9;
-}
-
 /* ---------- floating panel zone ---------- */
 
 .panelZone {
   position: relative;
   z-index: 2;
   padding: 4px 16px 0;
-}
-
-.panelFallback {
-  max-width: 1060px;
-  margin: 0 auto;
-  padding: 60px 20px;
-  text-align: center;
-  border-radius: 22px;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  background: rgba(13, 16, 22, 0.92);
-  color: #9aa3b5;
-}
-
-.panelFallback a {
-  color: #7dd3fc;
 }
 
 /* ---------- light lower sections ---------- */
@@ -493,26 +310,6 @@
   color: var(--text);
 }
 
-/* ---------- footer ---------- */
-
-.footer {
-  max-width: 1060px;
-  margin: 56px auto 0;
-  padding-top: 20px;
-  border-top: 1px solid var(--glass-border);
-  text-align: center;
-  font-size: 0.8rem;
-}
-
-.footerLinks {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 10px 24px;
-  margin-bottom: 12px;
-  font-size: 0.85rem;
-}
-
 /* ---------- motion safety ---------- */
 
 @media (prefers-reduced-motion: reduce) {
@@ -521,19 +318,9 @@
     opacity: 1;
     transform: none;
   }
-  .heroCta,
-  .heroCta::before,
-  .heroCta::after,
-  .pillIndicator,
   .previewCard,
   .featureCard {
     transition: none;
-  }
-  .heroCta:hover {
-    transform: none;
-  }
-  .heroCta:hover::before {
-    background-position: 120% 0;
   }
 }
 
@@ -562,28 +349,6 @@
   align-items: center;
   gap: 7px;
   white-space: nowrap;
-}
-
-.credLogo {
-  border-radius: 50%;
-}
-
-.credLogoRound {
-  border-radius: 50%;
-  object-fit: cover;
-}
-
-/* CTA label inside the LiquidGlass wrapper (the lib draws the glass) */
-.ctaInner {
-  color: #fff;
-  font-size: 0.95rem;
-  font-weight: 700;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.ctaInner:hover {
-  text-decoration: none;
 }
 
 /* ---------- dark mega-footer (Space-style) ---------- */
@@ -675,12 +440,6 @@
   /* diagonal hatch like the reference */
   -webkit-mask-image: repeating-linear-gradient(115deg, #000 0 7px, transparent 7px 10px);
   mask-image: repeating-linear-gradient(115deg, #000 0 7px, transparent 7px 10px);
-}
-
-.megaMarkGem {
-  width: clamp(120px, 16vw, 220px);
-  height: auto;
-  transform: translateY(28%);
 }
 
 .megaMarkText {
