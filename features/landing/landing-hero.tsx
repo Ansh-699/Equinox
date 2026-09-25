@@ -14,6 +14,8 @@ import { ChromeCta } from "./chrome-cta";
 import demoStyles from "./TradeDemo.module.css";
 import styles from "./landing.module.css";
 
+const SPONSORS = [["MagicBlock", "/landing/magicblock.jpg"], ["PreStocks", "/landing/prestocks.png"], ["Meteora", "/landing/meteora.svg"]] as const;
+
 export interface PreviewMarket { symbol: string; name: string; price: number | null; changePct: number | null; live: boolean }
 export interface ActivityRow { side: "long" | "short"; role: "Maker" | "Taker"; size: number; price: number; t: number }
 
@@ -251,12 +253,21 @@ export function LandingHero({ demo, markets, activity, realActivity }: { demo: P
             <span className={styles.credInner}>
               <span className={styles.credItem}>Built on Solana <img src="/landing/Solana-Round-Logo-PNG.png" alt="Solana" width={16} height={16} className={styles.credLogo} /></span>
               <span className={styles.credDivider} aria-hidden />
-              <span className={styles.credItem}>Powered by MagicBlock <img src="/landing/magicblock.jpg" alt="MagicBlock" width={16} height={16} className={styles.credLogoRound} /></span>
+              <span className={styles.credItem}>
+                Powered by
+                <span className={styles.sponsors}>
+                  {SPONSORS.map(([name, src]) => (
+                    <span key={name} className={styles.sponsor} data-name={name} role="img" aria-label={name}>
+                      <img src={src} alt="" width={20} height={20} />
+                    </span>
+                  ))}
+                </span>
+              </span>
             </span>
           </div>
         </div>
 
-        <h1 className={`${styles.heroTitle} ${styles.heroItem} ${styles.d2}`}>Perpetual futures on US stocks<br />at rollup speed.</h1>
+        <h1 className={`${styles.heroTitle} ${styles.heroItem} ${styles.d2}`}>Perpetual futures on tokenized assets<br />at rollup speed.</h1>
 
         <p className={`${styles.heroSub} ${styles.heroItem} ${styles.d3}`}>
           Orders match in a MagicBlock Ephemeral Rollup, prices come from Pyth, and your collateral never leaves Solana.

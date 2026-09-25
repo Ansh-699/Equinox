@@ -552,13 +552,16 @@
   color: #fff;
   font-size: 0.86rem;
   font-weight: 650;
-  white-space: nowrap;
+  flex-wrap: wrap;
+  justify-content: center;
+  row-gap: 6px;
 }
 
 .credItem {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  white-space: nowrap;
 }
 
 .credLogo {
@@ -687,4 +690,64 @@
   line-height: 1;
   color: #fff;
   transform: translateY(30%);
+}
+
+/* Sponsor logos after "Powered by": name shows as a small tooltip on hover. */
+.sponsors {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: 3px;
+}
+
+.sponsor {
+  position: relative;
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  transition: transform 160ms ease;
+}
+
+.sponsor img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.sponsor::after {
+  content: attr(data-name);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(10, 20, 45, 0.85);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, 3px);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.sponsor:hover {
+  transform: translateY(-1px);
+}
+
+.sponsor:hover::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sponsor, .sponsor::after { transition: none; }
+}
+
+/* Wrapped credibility pill: a divider would dangle at the line end. */
+@media (max-width: 640px) {
+  .credInner .credDivider { display: none; }
 }
