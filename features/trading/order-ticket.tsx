@@ -76,7 +76,6 @@ export function OrderTicket({
   blocker,
   warning = null,
   pending,
-  footnote,
   onSubmit,
 }: {
   ticket: Ticket;
@@ -91,7 +90,6 @@ export function OrderTicket({
   blocker: string | null;
   warning?: string | null;
   pending: boolean;
-  footnote: string;
   onSubmit: () => void;
 }) {
   const set = (patch: Partial<Ticket>) => onChange({ ...ticket, ...patch });
@@ -209,11 +207,6 @@ export function OrderTicket({
             <label className="flex items-center gap-1.5"><input type="checkbox" checked={ticket.postOnly} onChange={(e) => set({ postOnly: e.target.checked })} className="accent-[var(--t-up)]" /> Post-only</label>
           )}
           <label className="flex items-center gap-1.5"><input type="checkbox" checked={ticket.reduceOnly} onChange={(e) => set({ reduceOnly: e.target.checked })} className="accent-[var(--t-up)]" /> Reduce-only</label>
-          {!isMarket && (
-            <label className="ml-auto flex items-center gap-1.5">Expires
-              <input type="number" min={0} inputMode="numeric" placeholder="GTC" value={ticket.expiresInMinutes} onChange={(e) => set({ expiresInMinutes: e.target.value })} className={`tnum h-[26px] w-[64px] rounded-[4px] border border-[var(--t-border-strong)] bg-[var(--t-surface)] px-2 text-[12px] text-[var(--t-text)] ${FOCUS}`} aria-label="Expires in minutes (empty for GTC)" /> min
-            </label>
-          )}
         </div>
 
         <div className="flex flex-col">
@@ -238,7 +231,6 @@ export function OrderTicket({
         >
           {pending ? <span className="inline-flex items-center justify-center gap-2"><Spinner className="h-4 w-4" /> Placing in the rollup…</span> : blocker ?? ctaLabel}
         </button>
-        <p className="text-[11.5px] text-[var(--t-text-3)]">{footnote}</p>
       </div>
     </section>
   );

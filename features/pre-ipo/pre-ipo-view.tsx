@@ -81,14 +81,14 @@ export function PreIpoView() {
         <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--t-text-3)]">Pre-IPO · PreStocks</p>
         <h1 className="mt-1 text-[24px] font-semibold tracking-tight text-[var(--t-text)]">Go long or short private companies</h1>
         <p className="mt-1 max-w-[76ch] text-[13px] text-[var(--t-text-2)]">
-          Perpetuals on PreStocks pre-IPO tokens, up to 5×, in the MagicBlock rollup. Each market&apos;s price is the PreStocks token&apos;s on-chain price, posted to Solana every few seconds by a bounded reporter (at most 0.5% + 0.1%/s per update), so shorting or leveraging a private company tracks the token PreStocks holders trade.
+          Perps on PreStocks pre-IPO tokens, up to 5×, matched in the MagicBlock rollup and settled in USDC.
         </p>
         <ol aria-label="How a pre-IPO perp is priced and traded" className="mt-4 grid gap-2 text-[12px] sm:grid-cols-2 lg:grid-cols-4">
           {[
-            ["PreStocks token", "An SPL token per private company (OPENAI, SPACEX, ANTHROPIC) trades on Solana; PreStocks also publishes a reference mark."],
-            ["Bounded reporter", "Our service reads the token's on-chain price each second and posts it to the market's oracle account on Solana, capped at 0.5% + 0.1%/s per update."],
-            ["MagicBlock rollup", "The perp's order book, margin and liquidations run in the rollup, which reads that oracle account; orders fill in milliseconds."],
-            ["USDC settlement", "Collateral sits in the program vault on Solana. PnL settles in USDC; you never hold the PreStocks token itself."],
+            ["PreStocks token", "One token per company, traded on Solana."],
+            ["Price feed", "Its price is posted on-chain every few seconds."],
+            ["MagicBlock rollup", "Orders fill in milliseconds."],
+            ["USDC settlement", "PnL settles in USDC; no token held."],
           ].map(([title, body], index) => (
             <li key={title} className="rounded-[8px] border border-[var(--t-border)] bg-[var(--t-surface)] p-3">
               <span className="text-[10.5px] font-semibold text-[var(--t-text-3)]">{index + 1} · {title}</span>

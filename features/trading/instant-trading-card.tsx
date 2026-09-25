@@ -1,6 +1,5 @@
 "use client";
 
-import { Zap } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import { PanelHead, primaryBtn } from "./lifecycle-panel";
 
@@ -19,16 +18,12 @@ export function InstantTradingCard({ tradingAddress, unlocking, onEnable, wallet
   disabled: boolean;
 }) {
   const on = tradingAddress !== null;
+  const leftover = walletSeat && walletSeat.available > 0n;
   return (
     <section aria-label="Instant trading">
       <PanelHead title="Instant trading" badge={on ? "on" : "off"} tone={on ? "ok" : "muted"} />
-      <div className="space-y-2.5 p-3">
-        {on ? (
-          <p className="flex items-start gap-2 text-[11.5px] leading-relaxed text-[var(--t-text-2)]">
-            <Zap className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--t-up)]" />
-            <span>Trading account <span className="font-mono text-[var(--t-text)]">{tradingAddress.slice(0, 4)}…{tradingAddress.slice(-4)}</span> signs deposits, orders and withdrawals silently. Withdrawals pay out to your wallet.</span>
-          </p>
-        ) : (
+      {on && !leftover ? null : <div className="space-y-2.5 p-3">
+        {on ? null : (
           <>
             <p className="text-[11.5px] leading-relaxed text-[var(--t-text-2)]">One wallet signature unlocks your in-app trading account. After that every rollup action signs silently — no popups, orders confirm at rollup speed.</p>
             <button type="button" className={primaryBtn()} onClick={onEnable} disabled={unlocking || disabled}>
@@ -36,7 +31,7 @@ export function InstantTradingCard({ tradingAddress, unlocking, onEnable, wallet
             </button>
           </>
         )}
-        {walletSeat && walletSeat.available > 0n ? (
+        {leftover ? (
           <div className="rounded-[4px] border border-[var(--t-border)] bg-[var(--t-surface)] p-2.5 text-[11.5px] text-[var(--t-text-2)]">
             <p>Your wallet&apos;s own margin account #{walletSeat.index} still holds <span className="tnum text-[var(--t-text)]">{usd(walletSeat.available)}</span>.</p>
             <button type="button" onClick={onWithdrawWalletSeat} disabled={walletSeatBusy || disabled}
@@ -45,7 +40,7 @@ export function InstantTradingCard({ tradingAddress, unlocking, onEnable, wallet
             </button>
           </div>
         ) : null}
-      </div>
+      </div>}
     </section>
   );
 }
