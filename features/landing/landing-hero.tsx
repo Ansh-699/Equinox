@@ -251,7 +251,14 @@ export function LandingHero({ demo, markets, activity, realActivity }: { demo: P
         <div className={`${styles.heroItem} ${styles.d1}`}>
           <div className={styles.credPill} style={{ padding: "9px 20px" }}>
             <span className={styles.credInner}>
-              <span className={styles.credItem}>Built on Solana <img src="/landing/Solana-Round-Logo-PNG.png" alt="Solana" width={16} height={16} className={styles.credLogo} /></span>
+              <span className={styles.credItem}>
+                Built on
+                <span className={styles.sponsors}>
+                  <span className={styles.sponsor} data-name="Solana" role="img" aria-label="Solana">
+                    <img src="/landing/Solana-Round-Logo-PNG.png" alt="" width={20} height={20} />
+                  </span>
+                </span>
+              </span>
               <span className={styles.credDivider} aria-hidden />
               <span className={styles.credItem}>
                 Powered by
