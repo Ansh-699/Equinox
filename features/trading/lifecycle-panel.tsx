@@ -201,11 +201,7 @@ export function LifecyclePanel({
         ) : walletAddress ? (
           <button type="button" className={primaryBtn()} onClick={onSeatAndScratch}>{seatActionLabel}</button>
         ) : null}
-        <p className={HINT}>
-          {rollupLive
-            ? "Your session is delegated to the MagicBlock rollup: your in-app trading account signs deposits, orders and withdrawals with no wallet popups, and USDC stays in the vault on Solana."
-            : "Your margin account holds this market's collateral and position. It opens on Solana; trading starts once the market is delegated to the MagicBlock rollup."}
-        </p>
+        {!rollupLive && <p className={HINT}>Trading starts once this market is delegated to the MagicBlock rollup.</p>}
 
         <div className="flex flex-col gap-1.5">
           <label htmlFor="custody-amount" className="text-[12px] text-[var(--t-text-2)]">Deposit / withdraw amount</label>

@@ -68,7 +68,7 @@ export function TradingTerminal() {
   const orderPending = ordersInFlight > 0;
   const txToasts = useTxToasts();
   const [cancelPending, setCancelPending] = useState(false);
-  const [notice, setNotice] = useState("Orders run in the MagicBlock rollup against an on-chain verified price, with USDC custody in the vault on Solana.");
+  const [notice, setNotice] = useState("");
   const [sessionActionReason, setSessionActionReason] = useState<SessionActionResult["reason"]>(null);
   const [marketSymbol, setMarketSymbol] = useState(process.env.NEXT_PUBLIC_EQUINOX_MARKET_SYMBOL ?? PRIMARY_MARKET.symbol);
   const [latestLifecycleEventKind, setLatestLifecycleEventKind] = useState<string | null>(null);
@@ -592,10 +592,9 @@ export function TradingTerminal() {
             blocker={blocker}
             warning={orderCheck?.warn ?? null}
             pending={sessionOrder.pending}
-            footnote={canTrade ? `Session key active — orders sign locally, no wallet popup.` : walletTrading ? "Orders sign with your wallet and route to the MagicBlock rollup while the market is delegated." : "Sign in, then Start trading: one wallet signature and the in-app trading account signs every order silently."}
             onSubmit={submitOrder}
           />
-          <div className="notice flex items-start gap-2 border-b border-[var(--t-border)] px-3 py-2.5 text-[11.5px] leading-snug text-[var(--t-text-2)]" role="status">
+          <div className={`notice flex items-start gap-2 border-b border-[var(--t-border)] px-3 py-2.5 text-[11.5px] leading-snug text-[var(--t-text-2)] ${notice || busy ? "" : "hidden"}`} role="status">
             {busy ? <Spinner className="mt-px h-3.5 w-3.5 text-[var(--t-up)]" /> : null}
             <span>{notice}</span>
             {sessionActionReason ? <span className="text-[var(--t-down)]"> [{sessionActionReason}]</span> : null}
