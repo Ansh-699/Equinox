@@ -3,7 +3,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, Compass, Menu, Settings, WalletCards, X, Zap } from "lucide-react";
+import { BookOpen, ChevronDown, Compass, Menu, Settings, WalletCards, X, Zap } from "lucide-react";
 import { WalletDrawer } from "@/components/wallet/wallet-drawer";
 import type { AppAuth } from "@/components/app-providers";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -45,6 +45,8 @@ const ACCOUNT_NAV = [
 ] as const satisfies readonly { id: ActiveSection; href: string; label: string }[];
 const ACCOUNT_SECTIONS: readonly ActiveSection[] = ["portfolio", "activity", "settings", "diagnostics"];
 
+/** The docs site (docs-site/, its own Worker): architecture and every flow, with diagrams. */
+export const DOCS_URL = "https://equinox-docs.ansht.workers.dev";
 const ICON_LINK = "hidden h-8 w-8 items-center justify-center rounded text-[var(--t-text-2)] transition-colors hover:bg-[var(--t-surface-3)] hover:text-[var(--t-text)] sm:inline-flex";
 
 /** Terminal top bar (SlipStream TerminalNav): identity and sections on the
@@ -100,6 +102,9 @@ export function TopBar({ active, auth }: { active: ActiveSection; auth: AppAuth 
       </nav>
 
       <div className="ml-auto flex shrink-0 items-center gap-0.5">
+        <a href={DOCS_URL} target="_blank" rel="noopener noreferrer" className="mr-1 hidden h-8 items-center gap-1.5 rounded px-2.5 text-[13px] font-medium text-[var(--t-text-2)] transition-colors hover:bg-[var(--t-surface-3)] hover:text-[var(--t-text)] sm:inline-flex">
+          <BookOpen className="h-4 w-4" strokeWidth={1.75} />Docs
+        </a>
         <a href={`https://explorer.solana.com/address/${DEMO_PROGRAM_ID}?cluster=devnet`} target="_blank" rel="noopener noreferrer" className={ICON_LINK} aria-label="Program on Solana Explorer" title="Program on Explorer">
           <Compass className="h-4 w-4" strokeWidth={1.75} />
         </a>
@@ -155,6 +160,9 @@ export function TopBar({ active, auth }: { active: ActiveSection; auth: AppAuth 
                 </Link>
               </li>
             ))}
+            <li>
+              <a href={DOCS_URL} target="_blank" rel="noopener noreferrer" onClick={() => setMenu(false)} className="block rounded-[8px] px-3 py-2.5 text-[14px] font-medium text-[var(--t-text-2)] hover:bg-[var(--t-surface-3)]">Docs ↗</a>
+            </li>
           </ul>
         </nav>
       ) : null}

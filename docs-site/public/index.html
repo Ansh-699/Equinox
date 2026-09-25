@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Equinox Docs</title>
+  <meta name="description" content="How Equinox works end to end: perpetual futures on tokenized assets, matched in a MagicBlock Ephemeral Rollup with custody on Solana." />
+  <link rel="icon" href="/equinox.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Poppins:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/docs.css" />
+  <!-- Before first paint: honour a stored light-theme choice without a flash. -->
+  <script>try { if (localStorage.getItem("equinox-docs-theme") === "light") document.documentElement.dataset.theme = "light"; } catch {}</script>
+  <script type="module" src="/docs.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <button class="iconbtn menubtn" id="menu" type="button" aria-label="Sections">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+    </button>
+    <a class="brand" href="/"><img src="/equinox.png" alt="" />Equinox</a>
+    <span class="badge">Docs</span>
+    <span class="spacer"></span>
+    <a class="iconbtn" href="https://github.com/Ansh-699/Equinox" target="_blank" rel="noopener noreferrer" aria-label="Source on GitHub" title="Source on GitHub">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.2c-3.3.7-4-1.4-4-1.4-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.7 18.3 5 18.3 5c.7 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 6 .4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5Z" /></svg>
+    </a>
+    <button class="iconbtn" id="theme" type="button" aria-label="Toggle light and dark" title="Toggle light and dark">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>
+    </button>
+    <a class="openapp" href="https://equinox.ansht.workers.dev/trade">Open app</a>
+  </header>
+
+  <div class="layout">
+    <nav class="sidebar" aria-label="Sections">
+      <h4>Start</h4>
+      <a href="#overview">Overview</a>
+      <a href="#topology">Where everything runs</a>
+      <h4>Protocol</h4>
+      <a href="#accounts">Market accounts</a>
+      <a href="#onboarding">Onboarding</a>
+      <a href="#orders">Order lifecycle</a>
+      <a href="#order-states">Order states</a>
+      <a href="#pricing">Prices and oracles</a>
+      <a href="#risk">Margin, funding, liquidation</a>
+      <a href="#commits">Commits to Solana</a>
+      <a href="#withdrawals">Withdrawals</a>
+      <h4>Products</h4>
+      <a href="#pre-ipo">Pre-IPO and baskets</a>
+      <a href="#launchpad">Launchpad to perp</a>
+      <h4>Services</h4>
+      <a href="#market-maker">Market-maker service</a>
+      <a href="#market-api">Market API</a>
+      <a href="#frontend">Frontend data flow</a>
+      <h4>Reference</h4>
+      <a href="#latency">Latency budget</a>
+      <a href="#opcodes">Instructions</a>
+      <a href="#trust">Trust model and limits</a>
+    </nav>
+
+    <main>
+      <div class="content">
+        <div class="hero">
+          <div class="eyebrow">Equinox documentation</div>
+          <h1>How Equinox works, end to end</h1>
+          <p class="lede">Perpetual futures on tokenized assets. Orders match in a MagicBlock Ephemeral Rollup in milliseconds, prices are verified on Solana, and USDC never leaves the program vault on Solana.</p>
+          <div class="logos">
+            <span><img src="/solana.png" alt="" />Solana</span>
+            <span><img src="/magicblock.jpg" alt="" />MagicBlock</span>
+            <span><img src="/pyth.png" alt="" />Pyth</span>
+            <span><img src="/prestocks.png" alt="" />PreStocks</span>
+            <span><img src="/meteora.svg" alt="" />Meteora</span>
+          </div>
+          <div class="facts">
+            <div class="fact"><b class="up">2–15 ms</b><span>order executed in the rollup</span></div>
+            <div class="fact"><b>27</b><span>accounts delegated per market</span></div>
+            <div class="fact"><b>4</b><span>live markets on devnet</span></div>
+            <div class="fact"><b>1</b><span>wallet prompt, then silent signing</span></div>
+          </div>
+        </div>
+
+        <!-- 1 -->
+        <section id="overview">
+          <h2><span class="num">01</span>Overview</h2>
+          <p class="sub">Three products share one program and one USDC mint: stock perps (TSLA), pre-IPO perps (OpenAI, SpaceX, Anthropic) and a launchpad whose graduated tokens can become perps.</p>
+          <figure>
+            <div class="diagram"></div>
+            <script type="text/plain" class="mermaid-src">
+flowchart LR
+  APP["Equinox app<br/>trading key signs"] -- "orders<br/>2–15 ms" --> ER["MagicBlock rollup<br/>order books, seats,<br/>matching, risk"]
+  ER -- "commits" --> L1["Solana<br/>Equinox program,<br/>USDC vault,<br/>oracle snapshots"]
+  APP -- "deposits,<br/>withdrawals" --> L1
+  MM["Market maker<br/>quotes, keeper,<br/>reporter"] -- "quotes" --> ER
+  MM -- "price posts" --> L1
+  PRE["PreStocks"] --> MM
+  MET["Meteora pools"] --> MM
+  PYTH["Pyth Lazer"] --> API["Market API"]
+  API -- "verified price" --> L1
+            </script>
+            <figcaption><b>System map.</b> State lives on Solana; each market is delegated to the rollup, which trades on a working copy and commits it back.</figcaption>
+          </figure>
+          <p>The split is deliberate. Everything that has to be fast (placing, cancelling and matching orders, margin checks, funding, liquidation) runs in the rollup against a delegated copy of the market. Everything that has to be safe (the USDC, the verified prices, the final state) lives on Solana L1. The rollup commits its state back to L1 on a schedule, and custody moves between the two only through explicit inbox and outbox receipts.</p>
+        </section>
+
+        <!-- 2 -->
+        <section id="topology">
+          <h2><span class="num">02</span>Where everything runs</h2>
+          <p class="sub">Four runtimes, placed so the latency-sensitive hop (market maker to rollup) is about 2 ms.</p>
+          <figure>
+            <div class="diagram"></div>
+            <script type="text/plain" class="mermaid-src">
+flowchart TB
+  subgraph CF["Cloudflare"]
+    WEB["Frontend Worker<br/>vinext build of the Next.js app"]
+    API["Market API Worker<br/>placed in azure southeastasia"]
+    D1[("D1<br/>markets, faucet, launches")]
+    API --- D1
+  end
+  subgraph AZ["Azure VM, Singapore"]
+    SVC["stockstream-mm<br/>Rust, tokio, systemd"]
+    CADDY["Caddy, HTTPS<br/>/v1/mm/status, stream, candles"]
+    CADDY --- SVC
+  end
+  subgraph MB["MagicBlock, Singapore"]
+    DEVAS["devnet-as validator<br/>10 ms blocks"]
+  end
+  subgraph SOL["Solana devnet"]
+    PROG["Equinox program<br/>8Ucdsd3e…xFZ"]
+  end
+  BROWSER(["Browser"]) --> WEB
+  BROWSER -- "websocket, zstd" --> DEVAS
+  BROWSER -- "SSE tx stream" --> CADDY
+  BROWSER --> API
+  SVC -- "~2 ms" --> DEVAS
+  SVC --> PROG
+  API --> PROG
+  DEVAS <--> PROG
+            </script>
+            <figcaption><b>Deployment topology.</b> The browser reads the rollup directly; nothing sits between a trader and the order book.</figcaption>
+          </figure>
+        </section>
+
+        <!-- 3 -->
+        <section id="accounts">
+          <h2><span class="num">03</span>Market accounts</h2>
+          <p class="sub">Each market is a core account plus 26 children. The whole 27-account bundle is delegated to the rollup; custody and prices stay on L1.</p>
+          <figure>
+            <div class="diagram"></div>
+            <script type="text/plain" class="mermaid-src">
+flowchart LR
+  subgraph BUNDLE["Delegated bundle, 27 accounts"]
+    CORE["Market core<br/>params, epoch, keeper,<br/>reporter, funding index"]
+    subgraph PAGES["18 book pages"]
+      BIDS["9 bid pages<br/>paged PATRICIA tree"]
+      ASKS["9 ask pages<br/>paged PATRICIA tree"]
+    end
+    subgraph SEATS["4 seat shards"]
+      S["128 seats<br/>collateral, position,<br/>open orders"]
+    end
+    subgraph EVENTS["4 event shards"]
+      E["fills, sequence,<br/>timestamps"]
+    end
+    CORE --- PAGES
+    CORE --- SEATS
+    CORE --- EVENTS
+  end
+  subgraph L1ONLY["Stays on Solana"]
+    SNAP["OracleSnapshotV3<br/>price, confidence,<br/>publish time, session"]
+    VAULT[("USDC vault")]
+    INBOX["Inbox and outbox<br/>receipts"]
+  end
+  SNAP -. "cloned read-only" .-> CORE
+  VAULT --- INBOX
+            </script>
+            <figcaption><b>One market.</b> Each child account's header binds it to its (core, kind, index) address, so the program checks identity from the header instead of re-deriving 26 addresses per order.</figcaption>
+          </figure>
+          <p>All four markets share one exchange and one test-USDC mint, so the same USDC works everywhere. Margin is isolated: a trader has one seat per market.</p>
+        </section>
+
+        <!-- 4 -->
+        <section id="onboarding">
+          <h2><span class="num">04</span>Onboarding</h2>
+          <p class="sub">One wallet signature, then everything is signed by an in-app trading key. "Start trading" funds, seats and deposits in one go.</p>
+          <figure>
+            <div class="diagram"></div>
+            <script type="text/plain" class="mermaid-src">
+sequenceDiagram
+  actor T as Trader
+  participant W as Wallet
+  participant A as Equinox app
+  participant F as Market API
+  participant L as Solana L1
+  participant R as MagicBlock rollup
+  T->>A: Connect and Start trading
+  A->>W: signMessage("Equinox trading key v1 …")
+  W-->>A: ed25519 signature
+  Note over A: trading key = ed25519 seed<br/>SHA-256(signature)<br/>same wallet, same key, any device
+  A->>F: POST /v1/faucet (if short)
+  F->>L: send test USDC and a little SOL
+  A->>R: open seat in the market's seat shard
+  A->>L: deposit into vault, inbox receipt (60)
+  L-->>A: receipt confirmed
+  A->>R: claim receipt (61), credit the seat
+  R-->>A: margin account funded
+  Note over T,R: No further wallet prompts: orders,<br/>deposits and withdrawals sign silently
+            </script>
+            <figcaption><b>First session.</b> Signatures are deterministic, so the trading key can be re-derived instead of backed up.</figcaption>
+          </figure>
+          <div class="callout"><p>Devnet trade-off: the trading key is kept in the browser's local storage. A production deployment would use embedded wallets or scoped session keys. Withdrawals always pay out to the connected wallet, never to the trading key.</p></div>
+        </section>
+
+        <!-- 5 -->
+        <section id="orders">
+          <h2><span class="num">05</span>Order lifecycle</h2>
+          <p class="sub">The order path is pre-warmed (delegation status, blockhash, price age), so a click only signs and sends.</p>
+          <figure>
+            <div class="diagram"></div>
+            <script type="text/plain" class="mermaid-src">
+sequenceDiagram
+  actor T as Trader
+  participant A as Equinox app
+  participant R as MagicBlock rollup
+  participant P as Equinox program (in rollup)
+  participant M as Market maker
+  T->>A: Place order
+  A->>A: build and sign with trading key (local)
+  A->>R: sendTransaction
+  R->>P: place order (3)
+  P->>P: price fresh? (at most 10 s, session open)
+  P->>P: initial margin check on the seat
+  P->>P: match against the book, price-time priority
+  P->>P: write fills to the event shard, update seats
+  R-->>A: executed in a 10 ms block (2-15 ms)
+  R-->>A: websocket push: book pages, seat shard
+  A-->>T: toast with time and explorer link
+  R-->>M: book changed
+  M->>R: requote (33) in place
+            </script>
+            <figcaption><b>One order.</b> From India the round trip is about 110–130 ms, almost all of it the network hop to Singapore; the rollup itself takes 2–15 ms.</figcaption>
+          </figure>
+          <p>Order types: limit and market (IOC), post-only, reduce-only, with a self-trade policy. Replace (33) moves a resting order in one instruction, which is how the market maker requotes without leaving gaps.</p>
+        </section>
+
+        <!-- 6 -->
+        <section id="order-states">
+          <h2><span class="num">06</span>Order states</h2>
+          <figure>
+            <div class="diagram"></div>
+            <script type="text/plain" class="mermaid-src">
+stateDiagram-v2
+  [*] --> Checked: place (3)
+  Checked --> Rejected: stale price, closed session,<br/>margin, post-only would cross
+  Checked --> Matching
+  Matching --> Filled: fully crossed
+  Matching --> Resting: remainder, limit order
+  Matching --> Done: remainder, IOC
+  Resting --> PartiallyFilled: taker crosses part
+  PartiallyFilled --> Filled
+  PartiallyFilled --> Resting
+  Resting --> Resting: replace (33)
+  Resting --> Cancelled: cancel (4), cancel-all (5)
+  Resting --> Expired: past expiry
+  Filled --> [*]
+  Cancelled --> [*]
+  Done --> [*]
+  Rejected --> [*]
+  Expired --> [*]
+            </script>
+            <figcaption><b>Order state machine</b> as enforced by the program.</figcaption>
+          </figure>
+        </section>
+
+        <!-- 7 -->
+        <section id="pricing">
+          <h2><span class="num">07</span>Prices and oracles</h2>
+          <p class="sub">Every market has one L1 <code>OracleSnapshotV3</code>. Two ways write it: a verified Pyth update, or a bounded price reporter.</p>
+          <figure>
+            <div class="diagram"></div>
+            <script type="text/plain" class="mermaid-src">
+flowchart LR
+  subgraph PYTHPATH["Stock perps: TSLA"]
+    PL["Pyth Lazer<br/>signed update"] --> API["Market API<br/>/v1/oracle/refresh"]
+    API -- "Ed25519-verified<br/>Pyth update (58)" --> SNAP1["TSLA snapshot"]
+  end
+  subgraph REPPATH["Pre-IPO and launched tokens"]
+    PS["PreStocks token price<br/>within ±50% of mark"] --> REP["Reporter<br/>market-maker service"]
+    DAMM["Meteora DAMM v2<br/>sqrt_price × lot"] --> REP
+    REP -- "report price (67)<br/>every ≥ 4 s or > 0.2% move" --> SNAP2["OPENAI, SPACEX,<br/>ANTHROPIC snapshots"]
+  end
+  SNAP1 -. "cloned" .-> ROLL["Rollup: orders,<br/>margin, liquidation"]
+  SNAP2 -. "cloned" .-> ROLL
+            </script>
+            <figcaption><b>Two price paths, one snapshot format.</b> The rollup reads a clone of the L1 snapshot; it can't invent a price.</figcaption>
+          </figure>
+          <h3>Rules the program enforces</h3>
+          <ul>
+            <li>Orders need a price at most 10 seconds old and an open session. Pyth's <code>OverNight</code> session trades; <code>Closed</code> (weekends, US holidays) refuses new orders.</li>
+            <li>A reporter post may move the price by at most 0.5% plus 0.1% per elapsed second, capped at 10% per post; the reporter walks large moves in over several posts.</li>
+            <li>Pyth-priced markets have no reporter and refuse reporter posts. The reporter key is named per market by the authority (66).</li>
+          </ul>
+        </section>
+
+        <!-- 8 -->
+        <section id="risk">
+          <h2><span class="num">08</span>Margin, funding, liquidation</h2>
+          <figure>
+            <div class="diagram"></div>
+            <script type="text/plain" class="mermaid-src">
+flowchart TB
+  K["Keeper<br/>market-maker service"]
+  K -- "every 3 s" --> SCAN["Scan every seat<br/>with the program's own risk code"]
+  SCAN -- "below maintenance" --> LIQ["liquidate (7)"]
+  SCAN -- "healthy" --> OK["nothing to do"]
+  K -- "hourly" --> FUND["funding (6)"]
+  FUND --> IDX["funding index moves<br/>book above oracle: longs pay"]
+            </script>
+            <figcaption><b>Keeper jobs.</b> The keeper is a named key (64); it can run funding, liquidation and commits but can't move collateral.</figcaption>
+          </figure>
+          <ul>
+            <li>Initial margin is 20% (5× maximum); margin is isolated per market seat.</li>
+            <li>Funding accrues from the gap between the book and the oracle, capped by elapsed time; the program only lets the accumulator move forward.</li>
+            <li>Liquidation uses the same risk code as order placement, so the keeper can't liquidate a healthy seat.</li>
+          </ul>
+        </section>
+
+        <!-- 9 -->
+        <section id="commits">
+          <h2><span class="num">09</span>Commits to Solana</h2>
+          <p class="sub">The rollup's state becomes Solana state at each commit. Trading pauses for about 1.2 seconds while the bundle is written back.</p>
+          <figure>
+            <div class="diagram"></div>
+            <script type="text/plain" class="mermaid-src">
+sequenceDiagram
+  participant K as Keeper
+  participant R as MagicBlock rollup
+  participant V as Magic fee vault
+  participant L as Solana L1
+  loop every 30 minutes
+    K->>R: commit (14): snapshot the market epoch
+    R->>R: freeze trading on this market
+    R->>L: commit 26 child shards
+    R->>L: commit the core
+    V-->>R: fees paid by the core past the<br/>10 sponsored commits per delegation
+    L-->>K: new epoch visible on L1
+    R->>R: resume trading (~1.2 s pause)
+  end
+  alt a commit fails
+    K->>R: abort snapshot (65), trading resumes
+  end
+            </script>
+            <figcaption><b>Sharded commit.</b> Children first, core last, so L1 never sees a core that points at shards from a different epoch.</figcaption>
+          </figure>
+        </section>
+
+        <!-- 10 -->
+        <section id="withdrawals">
+          <h2><span class="num">10</span>Withdrawals</h2>
+          <p class="sub">Two steps: a risk-checked request in the rollup, then a claim on L1 that pays only the seat owner's USDC account.</p>
+          <figure>
+            <div class="diagram"></div>
+            <script type="text/plain" class="mermaid-src">
+sequenceDiagram
+  actor T as Trader
+  participant A as Equinox app
+  participant R as MagicBlock rollup
+  participant L as Solana L1
+  T->>A: Withdraw
+  A->>R: request withdrawal (62)
+  alt live price available
+    R->>R: margin check at the live price
+  else no live price (weekend, outage)
+    R->>R: flat seat: withdraw freely
+    R->>R: open position: check at last verified<br/>price moved 25% against it
+  end
+  R-->>A: outbox receipt written
+  A->>L: claim receipt (63)
+  L->>L: vault pays the seat owner's<br/>USDC account
+  L-->>T: USDC in the wallet
+            </script>
+            <figcaption><b>Withdrawals never wait for a live price.</b> Custody only ever moves through inbox (60/61) and outbox (62/63) receipts.</figcaption>
+          </figure>
+        </section>
+
+        <!-- 11 -->
+        <section id="pre-ipo">
+          <h2><span class="num">11</span>Pre-IPO and baskets</h2>
+          <p class="sub">OPENAI, SPACEX and ANTHROPIC perps priced from PreStocks tokens. A basket buys several legs with one click.</p>
+          <figure>
+            <div class="diagram"></div>
+            <script type="text/plain" class="mermaid-src">
+sequenceDiagram
+  actor T as Trader
+  participant A as Equinox app
+  participant F as Market API
+  participant R1 as Rollup: OPENAI
+  participant R2 as Rollup: ANTHROPIC
+  T->>A: Buy "AI labs" $1000 at 2×
+  A->>A: plan legs: price, whole shares, margin
+  A->>F: faucet if short
+  par leg 1
+    A->>R1: seat if missing, margin top-up, IOC order
+  and leg 2
+    A->>R2: seat if missing, margin top-up, IOC order
+  end
+  R1-->>A: filled in ~80 ms
+  R2-->>A: filled in ~80 ms
+  A-->>T: per-leg results with links
+            </script>
+            <figcaption><b>A basket.</b> Legs run in parallel, each in its own isolated-margin seat. One wallet prompt in total.</figcaption>
+          </figure>
+        </section>
+
+        <!-- 12 -->
+        <section id="launchpad">
+          <h2><span class="num">12</span>Launchpad to perp</h2>
+          <p class="sub">Stock-themed tokens launch on Meteora Dynamic Bonding Curves priced in USDC. A graduated token can be listed as an Equinox perp.</p>
+          <figure>
+            <div class="diagram"></div>
+            <script type="text/plain" class="mermaid-src">
+flowchart LR
+  C["Create launch<br/>1B tokens, USD-priced curve"] --> N["New pairs<br/>buys fill the curve"]
+  N -- "≥ 60% of the target" --> FS["Final stretch"]
+  FS -- "100%" --> G["Graduate<br/>liquidity migrates to DAMM v2,<br/>part locked for good"]
+  G --> LIST["list-market.sh<br/>create market, name reporter,<br/>fund bots, delegate"]
+  LIST --> PERP["Equinox perp<br/>priced from the DAMM v2 pool,<br/>long or short up to 5×"]
+            </script>
+            <figcaption><b>Launch lifecycle.</b> The Launch page's Pulse board shows each stage live from the chain: holders, top-10 and creator share, fees, transactions.</figcaption>
+          </figure>
+        </section>
+
+        <!-- 13 -->
+        <section id="market-maker">
+          <h2><span class="num">13</span>Market-maker service</h2>
+          <p class="sub">One Rust process on the Singapore VM, about 2 ms from the rollup, running every market in the deployment manifest.</p>
+          <figure>
+            <div class="diagram"></div>
+            <script type="text/plain" class="mermaid-src">
+flowchart TB
+  subgraph SVC["stockstream-mm, per market"]
+    TICK(["tick, every 400 ms"]) --> READ["read book pages and seats<br/>one getMultipleAccounts"]
+    READ --> PLAN["plan 20 post-only rungs a side<br/>1 bp to ~1% from mid"]
+    PLAN --> ACT["replace (33) in place<br/>side moving away goes first"]
+    ACT --> TAKE["taker seat crosses the touch"]
+    REP["reporter, every 1 s"] --> POST["post price if ≥ 4 s old<br/>or moved > 0.2%"]
+    KEEP["keeper"] --> JOBS["liquidation scan 3 s<br/>funding hourly<br/>commit every 30 min"]
+    POST --> CANDLE["1-minute candles"]
+    HTTP["HTTPS: status, tx stream, candles"]
+    CANDLE --> HTTP
+    ACT -- "confirmed txs" --> HTTP
+  end
+  ACT --> R["MagicBlock rollup"]
+  TAKE --> R
+  JOBS --> R
+  POST --> L["Solana L1"]
+  HTTP --> WEB["Browsers"]
+            </script>
+            <figcaption><b>One service, three roles.</b> The live transaction feed in the app is this service's own stream of confirmed rollup transactions.</figcaption>
+          </figure>
+        </section>
+
+        <!-- 14 -->
+        <section id="market-api">
+          <h2><span class="num">14</span>Market API</h2>
+          <p class="sub">A Cloudflare Worker with D1, placed next to the rollup (azure southeastasia).</p>
+          <div class="table"><table>
+            <thead><tr><th>Endpoint</th><th>What it does</th></tr></thead>
+            <tbody>
+              <tr><td><code>POST /v1/oracle/refresh</code></td><td>Verifies a Pyth Lazer update and posts it on L1 (TSLA).</td></tr>
+              <tr><td><code>GET /v1/markets/{symbol}/candles</code></td><td>Pyth price history for the chart.</td></tr>
+              <tr><td><code>GET /v1/markets/{symbol}/execution-status</code></td><td>Where the market lives (rollup or L1), last committed sequence. Cached per market for 2 s.</td></tr>
+              <tr><td><code>POST /v1/faucet</code></td><td>Test USDC and a little SOL, once per wallet per day.</td></tr>
+              <tr><td><code>GET /v1/pre-ipo</code></td><td>PreStocks tokens, proxied (their API has no CORS).</td></tr>
+              <tr><td><code>GET · POST /v1/launches</code></td><td>Registry of launches; the pool must be owned by Meteora DBC.</td></tr>
+            </tbody>
+          </table></div>
+        </section>
+
+        <!-- 15 -->
+        <section id="frontend">
+          <h2><span class="num">15</span>Frontend data flow</h2>
+          <figure>
+            <div class="diagram"></div>
+            <script type="text/plain" class="mermaid-src">
+flowchart LR
+  subgraph ROLL["MagicBlock rollup"]
+    ACC["26 bundle accounts"]
+  end
+  ACC -- "accountSubscribe, base64+zstd<br/>~100 KB/s per terminal" --> DEC["decode only changed payloads<br/>cache pages by bytes"]
+  DEC --> RENDER["render at most every 50 ms"]
+  RENDER --> UI["Order book, positions,<br/>open orders"]
+  MMS["Market-maker service"] -- "SSE /v1/mm/stream" --> FEED["Live transactions panel"]
+  API["Market API"] -- "status, candles" --> CHART["Chart, market status"]
+  KEY["Trading key"] -- "signed tx" --> ROLL
+            </script>
+            <figcaption><b>What the terminal streams.</b> Compressed pushes cut the feed from ~1.8 MB/s to ~100 KB/s, and unchanged pushes are skipped.</figcaption>
+          </figure>
+        </section>
+
+        <!-- 16 -->
+        <section id="latency">
+          <h2><span class="num">16</span>Latency budget</h2>
+          <div class="table"><table>
+            <thead><tr><th>Step</th><th>Typical</th></tr></thead>
+            <tbody>
+              <tr><td>Sign with the trading key (in the browser)</td><td class="mono">&lt; 1 ms</td></tr>
+              <tr><td>Browser to rollup, India to Singapore</td><td class="mono">~50 ms each way</td></tr>
+              <tr><td>Executed in a rollup block</td><td class="mono">2–15 ms</td></tr>
+              <tr><td>Order visible in your book after the click</td><td class="mono">~180 ms</td></tr>
+              <tr><td>Market maker to rollup</td><td class="mono">~2 ms</td></tr>
+              <tr><td>Rollup cost: requote / taker order</td><td class="mono">~90k / ~53k CU</td></tr>
+              <tr><td>Commit pause, every 30 min</td><td class="mono">~1.2 s</td></tr>
+            </tbody>
+          </table></div>
+        </section>
+
+        <!-- 17 -->
+        <section id="opcodes">
+          <h2><span class="num">17</span>Instructions</h2>
+          <div class="table"><table>
+            <thead><tr><th>Area</th><th>Instruction (opcode)</th><th>Where</th></tr></thead>
+            <tbody>
+              <tr><td>Orders</td><td>place 3 · cancel 4 · cancel-all 5 · replace 33</td><td>rollup</td></tr>
+              <tr><td>Custody in</td><td>deposit to inbox 60 → claim 61</td><td>L1 → rollup</td></tr>
+              <tr><td>Custody out</td><td>request 62 → claim 63</td><td>rollup → L1</td></tr>
+              <tr><td>Prices</td><td>Pyth update 58 · reporter post 67</td><td>L1</td></tr>
+              <tr><td>Keeper</td><td>funding 6 · liquidate 7 · commit 14</td><td>rollup</td></tr>
+              <tr><td>Admin</td><td>set keeper 64 · abort snapshot 65 · set price reporter 66</td><td>authority only</td></tr>
+            </tbody>
+          </table></div>
+        </section>
+
+        <!-- 18 -->
+        <section id="trust">
+          <h2><span class="num">18</span>Trust model and limits</h2>
+          <figure>
+            <div class="diagram"></div>
+            <script type="text/plain" class="mermaid-src">
+flowchart LR
+  OP["Rollup operator"] -- "can" --> O1["order and match trades"]
+  OP -. "cannot" .-> X1["move collateral"]
+  OP -. "cannot" .-> X2["settle at a price it chose"]
+  KEEP["Keeper key"] -- "can" --> O2["funding, liquidation,<br/>commits"]
+  KEEP -. "cannot" .-> X3["liquidate a healthy seat"]
+  REPK["Reporter key"] -- "can" --> O3["post prices within<br/>0.5% + 0.1%/s, max 10%"]
+  REPK -. "cannot" .-> X4["price a Pyth market"]
+            </script>
+            <figcaption><b>Who can do what.</b> Every role is bounded by the program, and every post is public on L1.</figcaption>
+          </figure>
+          <h3>Known limits</h3>
+          <ul>
+            <li>Taking a market out of the rollup (undelegation) is blocked by the deployed MagicBlock delegation program; it isn't needed for trading, custody or commits.</li>
+            <li>No L1 escape hatch yet if the rollup were permanently down. Funds stay in the L1 vault.</li>
+            <li>Pre-IPO and launched-token prices come from a bounded reporter key, not a signed oracle network.</li>
+            <li>Devnet only: test USDC, not real funds.</li>
+          </ul>
+        </section>
+
+        <footer>Equinox · Solana devnet · <a href="https://github.com/Ansh-699/Equinox" target="_blank" rel="noopener noreferrer">Source on GitHub</a> · <a href="https://equinox.ansht.workers.dev">Open the app</a></footer>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
