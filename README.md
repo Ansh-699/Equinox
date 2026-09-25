@@ -14,10 +14,10 @@
 </p>
 
 <p align="center">
-  <a href="https://equinox.ansht.workers.dev"><b>Open the app</b></a> ·
-  <a href="https://equinox-docs.ansht.workers.dev"><b>Docs and diagrams</b></a> ·
-  <a href="docs/architecture.md">Architecture</a> ·
-  <a href="docs/status/current.md">Devnet status</a>
+  <a href="https://equinox.ansht.workers.dev"><b>Open the app</b> <sup>↗</sup></a> ·
+  <a href="https://equinox-docs.ansht.workers.dev/"><b>Demo and docs</b> <sup>↗</sup></a> ·
+  <a href="docs/architecture.md">Architecture <sup>→</sup></a> ·
+  <a href="docs/status/current.md">Devnet status <sup>→</sup></a>
 </p>
 
 <p align="center">
