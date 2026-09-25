@@ -15,8 +15,8 @@ it record prior findings; its top dated summary takes precedence.
 | Operational guides | `devnet-configuration.md`, `pyth-ops.md`, `accessibility.md` |
 | Compatibility notes | `sbpf-compatibility.md` |
 | Historical integration notes | `magicblock.md` |
-| Authoritative live evidence | `status/current.md`, `status/devnet-lifecycle-evidence-20260919.json`, `status/magicblock-commit-simulation-20260919.json`, `status/magicblock-v3-commit-size-evidence-20260920.json`, `status/v3-recovery-evidence-20260920.json`, `status/v3-sharded-commit-evidence-20260920.json` |
+| Live status | `status/current.md` (and `status/devnet-e2e-lifecycle-20260923.json`, read by the demo config) |
 
 When a historical document conflicts with `status/current.md`, the status
-snapshot and its linked evidence win. New live claims must include a command,
-signature/slot where applicable, and a dated evidence artifact.
+snapshot wins. New live claims should include the command and the
+signature or slot that shows them.
