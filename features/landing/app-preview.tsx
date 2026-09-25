@@ -14,6 +14,7 @@ import { MM_SERVICE_URL, V3_MARKETS, marketBase, marketLogo, marketPair } from "
 import type { ErTxSample } from "@/lib/er-latency";
 import type { Candle } from "@/features/trading/use-candles";
 import { useV3Book, type BookLevel } from "@/features/trading/use-v3-book";
+import { ArchitectureScreen } from "./architecture-screen";
 import css from "./preview.module.css";
 
 export interface PerpDemoData {
@@ -30,6 +31,7 @@ const TABS = [
   { id: "pre-ipo", label: "Pre-IPO" },
   { id: "launch", label: "Launch" },
   { id: "portfolio", label: "Portfolio" },
+  { id: "architecture", label: "Architecture" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 
@@ -83,7 +85,8 @@ function useMakerFeed(enabled: boolean) {
     return () => { stopped = true; clearInterval(timer); clearInterval(meter); stream.close(); };
   }, [enabled]);
 
-  return { rows, prices, rate };
+  const times = rows.flatMap((r) => (r.blockMs ?? r.ms) ?? []).sort((a, b) => a - b);
+  return { rows, prices, rate, blockMs: times.length ? times[Math.floor(times.length / 2)] : null };
 }
 
 function MarketLogo({ symbol, size = 22 }: { symbol: string; size?: number }) {
@@ -175,6 +178,7 @@ export function AppPreview({ demo }: { demo: PerpDemoData }) {
           {tab === "pre-ipo" && <PreIpoScreen prices={feed.prices} />}
           {tab === "launch" && <LaunchScreen />}
           {tab === "portfolio" && <PortfolioScreen price={demo.price} />}
+          {tab === "architecture" && <ArchitectureScreen rate={feed.rate} blockMs={feed.blockMs} />}
         </div>
         <Feed rows={feed.rows} />
       </div>
@@ -388,31 +392,61 @@ function PreIpoScreen({ prices }: { prices: Record<string, { price: number; rest
 
 /* --------------------------------------------------------------- Launch */
 
-const LAUNCH_STEPS = [
-  { title: "New pair", body: "Mint 1B tokens on a Meteora Dynamic Bonding Curve, priced in USDC.", fill: 12 },
-  { title: "Final stretch", body: "Past 60% of the USDC it needs, a launch moves up the board.", fill: 68 },
-  { title: "Graduated", body: "Liquidity migrates to a Meteora DAMM v2 pool, part locked for good.", fill: 100 },
-  { title: "Equinox perp", body: "The pool price is posted on-chain; the token trades long or short up to 5×.", fill: 100 },
-] as const;
+/** Example launches in the Launch page's Pulse layout (devnet only has test tokens). */
+interface ExampleLaunch { symbol: string; name: string; theme: string; mc: number; progress: number; age: string; holders: number; txs: number; preset: string; hue: number }
+const PULSE: { title: string; hint: string; rows: ExampleLaunch[] }[] = [
+  { title: "New pairs", hint: "On the bonding curve", rows: [
+    { symbol: "GIGA", name: "Gigafactory", theme: "TSLA", mc: 214, progress: 0.04, age: "2m", holders: 3, txs: 4, preset: "Price discovery", hue: 12 },
+    { symbol: "CUDA", name: "Cuda Cores", theme: "NVDA", mc: 318, progress: 0.19, age: "9m", holders: 8, txs: 11, preset: "Earnings window", hue: 95 },
+  ] },
+  { title: "Final stretch", hint: "≥ 60% to graduation", rows: [
+    { symbol: "VISION", name: "Vision Pro", theme: "AAPL", mc: 1_420, progress: 0.72, age: "31m", holders: 24, txs: 58, preset: "Steady pair", hue: 210 },
+    { symbol: "OPTIMUS", name: "Optimus Bot", theme: "TSLA", mc: 1_760, progress: 0.88, age: "48m", holders: 37, txs: 91, preset: "Quick graduate", hue: 280 },
+  ] },
+  { title: "Graduated", hint: "Migrated to Meteora DAMM v2", rows: [
+    { symbol: "BLKWL", name: "Blackwell", theme: "NVDA", mc: 2_140, progress: 1, age: "2h", holders: 61, txs: 204, preset: "Earnings window", hue: 150 },
+    { symbol: "MAG7", name: "Magnificent Seven", theme: "AAPL", mc: 2_380, progress: 1, age: "5h", holders: 88, txs: 312, preset: "Price discovery", hue: 330 },
+  ] },
+];
+const THRESHOLD_USD = 480;
+const compactUsd = (n: number) => (n >= 1_000 ? `$${(n / 1_000).toFixed(2)}K` : `$${n.toFixed(0)}`);
 
 function LaunchScreen() {
   return (
     <div className={css.pad}>
       <div className={css.screenHead}>
-        <div><h3>From launch to perp</h3><p className={css.muted}>Stock-themed tokens on bonding curves, live from the chain.</p></div>
+        <div><h3>Pulse</h3><p className={css.muted}>Stock-themed tokens on Meteora bonding curves, priced in USDC.</p></div>
         <span className={css.chip}><img src="/landing/meteora.svg" alt="" width={14} height={14} />Meteora DBC</span>
+        <Link href="/launch" className={css.smallCta}>Create a launch</Link>
       </div>
-      <div className={css.steps}>
-        {LAUNCH_STEPS.map((s, i) => (
-          <div key={s.title} className={`${css.step} glass-card`}>
-            <span className={css.stepNo}>{i + 1}</span>
-            <b>{s.title}</b>
-            <p className={css.muted}>{s.body}</p>
-            <span className={css.progress} data-done={s.fill === 100}><span style={{ width: `${s.fill}%` }} /></span>
-          </div>
+      <div className={css.pulse}>
+        {PULSE.map((col) => (
+          <section key={col.title} className={css.pulseCol} aria-label={col.title}>
+            <div className={css.pulseHead}><b>{col.title}</b><span className={`${css.count} tnum`}>{col.rows.length}</span><span className={css.pulseHint}>{col.hint}</span></div>
+            {col.rows.map((r) => {
+              const graduated = r.progress >= 1;
+              return (
+                <article key={r.symbol} className={css.launchRow}>
+                  <span className={css.avatar} style={{ background: `linear-gradient(135deg, hsl(${r.hue} 70% 55%), hsl(${(r.hue + 60) % 360} 70% 40%))` }}>{r.symbol.slice(0, 2)}</span>
+                  <span className={css.launchMain}>
+                    <span className={css.launchTop}><b>{r.symbol}</b><span className={css.muted}>{r.name}</span><span className={css.mc}>MC <b className="tnum">{compactUsd(r.mc)}</b></span></span>
+                    <span className={`${css.launchMeta} tnum`}><span className={css.age}>{r.age}</span><span>{r.holders} holders</span><span>TX {r.txs}</span><span className={css.theme}>{r.theme}</span></span>
+                    <span className={css.curve}>
+                      <span className={css.curveBar} data-done={graduated}><span style={{ width: `${Math.round(r.progress * 100)}%` }} /></span>
+                      <span className={`${css.muted} tnum`}>{graduated ? "graduated" : `${Math.round(r.progress * 100)}% · ${compactUsd(r.progress * THRESHOLD_USD)}/${compactUsd(THRESHOLD_USD)}`}</span>
+                    </span>
+                    <span className={css.launchFoot}>
+                      <span className={css.preset}>{r.preset}</span>
+                      {graduated ? <span className={css.accentText}>DAMM v2 · perp-ready</span> : <span className={css.quickBuy}>⚡ $25</span>}
+                    </span>
+                  </span>
+                </article>
+              );
+            })}
+          </section>
         ))}
       </div>
-      <Link href="/launch" className={css.place} data-side="long">Create a launch</Link>
+      <p className={css.fine}>Example launches. A graduated pool can be listed as an Equinox perp priced from that pool.</p>
     </div>
   );
 }
