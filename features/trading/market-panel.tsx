@@ -117,26 +117,26 @@ export function MarketBar({
   const up = day ? day.change >= 0 : null;
 
   return (
-    <section aria-label="Market summary" className="flex h-[56px] shrink-0 items-center gap-5 border-b border-[var(--t-border)] px-3">
+    <section aria-label="Market summary" className="flex h-[56px] shrink-0 items-center gap-3 border-b sm:gap-5 border-[var(--t-border)] px-3">
       <MarketPicker symbol={marketSymbol} onChange={onMarketSymbolChange} />
       <div className="flex shrink-0 items-baseline gap-2.5">
         <span className={`tnum text-[22px] font-semibold leading-none tracking-tight ${price === null ? "text-[var(--t-text-3)]" : up === null ? "text-[var(--t-text)]" : up ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
           {price === null ? "—" : price.toFixed(2)}
         </span>
         {day && up !== null && (
-          <span className={`tnum text-[12px] font-medium ${up ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
+          <span className={`tnum hidden text-[12px] font-medium sm:inline ${up ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
             {up ? "+" : "−"}${Math.abs(day.change).toFixed(2)} ({up ? "+" : "−"}{Math.abs(day.changePct).toFixed(2)}%)
           </span>
         )}
       </div>
-      <div className="h-7 w-px shrink-0 bg-[var(--t-border)]" />
+      <div className="hidden h-7 w-px shrink-0 bg-[var(--t-border)] sm:block" />
       <div role="group" aria-label="Market stats" tabIndex={0} className="flex min-w-0 items-center gap-6 overflow-x-auto [scrollbar-width:none]">
         <Stat label="24h High" value={day ? day.high.toFixed(2) : "—"} />
         <Stat label="24h Low" value={day ? day.low.toFixed(2) : "—"} />
         <Stat label="Session" value={oracle ? (oracle.tradingOpen ? "Open" : "Closed") : "—"} tone={oracle ? (oracle.tradingOpen ? "up" : "down") : undefined} />
       </div>
       {stale ? (
-        <div role="status" className="ml-auto shrink-0 rounded border border-[var(--t-warn)]/40 bg-[var(--t-warn)]/10 px-2.5 py-1 text-[11px] font-medium text-[var(--t-warn)]">
+        <div role="status" className="ml-auto hidden shrink-0 rounded border sm:block border-[var(--t-warn)]/40 bg-[var(--t-warn)]/10 px-2.5 py-1 text-[11px] font-medium text-[var(--t-warn)]">
           On-chain price is {oracleAgeSeconds > 3600 ? `${Math.floor(oracleAgeSeconds / 3600)}h` : oracleAgeSeconds > 60 ? `${Math.floor(oracleAgeSeconds / 60)}m` : `${oracleAgeSeconds}s`} old — refreshed when you trade
         </div>
       ) : null}
