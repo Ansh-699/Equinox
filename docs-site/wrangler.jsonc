@@ -1,0 +1,7 @@
+// Equinox docs: a static site on Workers static assets.
+// Deploy: npx wrangler deploy --config docs-site/wrangler.jsonc
+{
+  "name": "equinox-docs",
+  "compatibility_date": "2026-09-22",
+  "assets": { "directory": "./public", "not_found_handling": "single-page-application" }
+}
