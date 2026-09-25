@@ -1,0 +1,13 @@
+[
+  "7JuUhGGGcu2t2De6VQecNCqhWPwu8QzmztWXW9kYNKFz true true",
+  "4RvdEGaUyChj3AketeBZoY1EotNtPveMFUXL8DVetrAp false true",
+  "FEfmQfWDBS3hSPiwWVh27SXQuZc3rgT2b7LP7q3JgAnm false true",
+  "SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2 false false",
+  "GjogZhfDKAkmMGCve492bUh8B6qskP8tZyF4yFK6NSTn false true",
+  "62oFGiY9JnEH5RFSRQAn2w85zzTevmuDBA4oJsko49Er false true",
+  "7obCnEkXA1J5UQ24kbxzGE291WsSvQub51e1sFz5nAqj false true",
+  "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh false false",
+  "11111111111111111111111111111111 false false",
+  "2QtGrh5xcTTndFTxUD7hEShSQdfAhyT8Z4nPGyTF9VSj false true",
+  "HeCYvjmtyJPTxHU28PHuNkcWsZuJ719UDoPjkbm3BTWh false false",
+]

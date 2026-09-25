@@ -97,6 +97,7 @@ browser through the Worker would spend Worker requests.
 | `MM_MAKER_KEYPAIR`, `MM_TAKER_KEYPAIR` | required | paths to solana-keygen JSON files; each key must already own a seat in the market |
 | `MM_KEEPER_KEYPAIR` | unset | the core's keeper key; turns on commits, funding and liquidation (see Keeper) |
 | `MM_COMMIT_EVERY_S`, `MM_FUNDING_EVERY_S` | `120`, `3600` | source defaults; deployed pacing is set separately |
+| `MM_CORE_MIN_SOL`, `MM_CORE_TOPUP_SOL` | `0.05`, `0.3` | top up a core's rollup balance (commit fees) from the keeper key |
 | `MAGICBLOCK_RPC_URL` | deployment `magicBlock.rpc` | rollup RPC and websocket |
 | `MARKET_API_URL` | the Equinox Worker | permissionless Pyth snapshot refresh when the rollup price is older than 6 s |
 | `MM_STATUS_ADDR` | `0.0.0.0:8080` | status server (`/v1/mm/status`, `/healthz`) |
@@ -122,8 +123,10 @@ SOL for rollup fees.
 - **Commit** every `MM_COMMIT_EVERY_S`: the 26 child shards, then the core.
   Trading pauses while the snapshot is open (~1.4 s from Singapore), so the
   maker stands down. Commits are paid by the core through the validator's
-  magic fee vault, which lifts MagicBlock's 10-commits-per-delegation cap; keep
-  the core's rollup balance above rent with `node scripts/v3-topup-core.mjs 1`.
+  magic fee vault, which lifts MagicBlock's 10-commits-per-delegation cap.
+  Every 10 minutes the service checks each core's rollup balance and, below
+  `MM_CORE_MIN_SOL` (0.05), sends `MM_CORE_TOPUP_SOL` (0.3) from the keeper key
+  (`src/topup.rs`); `node scripts/v3-topup-core.mjs 1` does it by hand.
   A failed commit closes its snapshot (opcode 65) so trading continues;
   `node scripts/v3-set-keeper.mjs abort-snapshot` does the same by hand.
 - **Funding** every `MM_FUNDING_EVERY_S`: moves the accumulator by the book's

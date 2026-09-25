@@ -7,7 +7,8 @@
 //! - `MM_TICK_MS`: pause between ticks (default 400)
 //! - `MM_KEEPER_KEYPAIR`: the core's keeper key (opcode 64); enables funding,
 //!   liquidation and commits. `MM_COMMIT_EVERY_S` (default 120) and
-//!   `MM_FUNDING_EVERY_S` (default 3600) pace them.
+//!   `MM_FUNDING_EVERY_S` (default 3600) pace them. `MM_CORE_MIN_SOL` (0.05)
+//!   and `MM_CORE_TOPUP_SOL` (0.3) keep each core funded for commit fees.
 //! - `EQUINOX_DEPLOYMENT`: deployment JSON path (default: the one compiled in);
 //!   its `markets` list names every market (the first is primary). Markets with
 //!   `oracle.kind = "prestocks"` (a PreStocks token) or `"meteora"` (a graduated
@@ -94,25 +95,44 @@ async fn main() -> Result<()> {
     let prestocks = Arc::new(equinox_market_maker::reporter::PreStocksFeed::default());
     let history = Arc::new(PriceHistory::open(Some(std::path::PathBuf::from(env("MM_DATA_DIR").unwrap_or_else(|| "/var/lib/stockstream".into())).join("candles"))));
     for (market, token) in markets {
-        // A market whose bots have no seat yet still gets its reporter and keeper.
-        let maker = match Maker::new(&rpc_url, market_api.clone(), market.clone(), keypair("MM_MAKER_KEYPAIR")?, keypair("MM_TAKER_KEYPAIR")?, state.clone(), live.clone()).await {
-            Ok(maker) => {
-                let maker = Arc::new(maker);
-                let (maker_seat, taker_seat) = maker.seats();
-                tracing::info!(market = %market.symbol, core = %b58(&market.bundle.core), maker_seat, taker_seat, "making");
-                jobs.push(Box::pin(maker.clone().run(tick)));
-                Some(maker)
-            }
-            Err(error) => {
-                tracing::warn!(market = %market.symbol, "not making: {error:#}");
-                None
-            }
-        };
+        // The maker starts in the background and retries until it can: a
+        // restart that lands in a network blip (a DNS failure while the VM agent
+        // reconfigures networking) used to leave a market unquoted until the next
+        // restart, and a market whose bots have no seat yet starts once they do.
+        // The keeper pauses the maker during commits through `paused`.
+        let paused = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        {
+            let (rpc_url, market_api, market, state, live, paused) = (rpc_url.clone(), market_api.clone(), market.clone(), state.clone(), live.clone(), paused.clone());
+            jobs.push(Box::pin(async move {
+                let mut wait = Duration::from_secs(2);
+                loop {
+                    let attempt = async { Maker::new(&rpc_url, market_api.clone(), market.clone(), keypair("MM_MAKER_KEYPAIR")?, keypair("MM_TAKER_KEYPAIR")?, state.clone(), live.clone()).await };
+                    match attempt.await {
+                        Ok(mut maker) => {
+                            maker.paused = paused.clone();
+                            let maker = Arc::new(maker);
+                            let (maker_seat, taker_seat) = maker.seats();
+                            tracing::info!(market = %market.symbol, core = %b58(&market.bundle.core), maker_seat, taker_seat, "making");
+                            maker.run(tick).await;
+                            return;
+                        }
+                        Err(error) => {
+                            tracing::warn!(market = %market.symbol, retry_in_s = wait.as_secs(), "not making yet: {error:#}");
+                            tokio::time::sleep(wait).await;
+                            wait = (wait * 2).min(Duration::from_secs(60));
+                        }
+                    }
+                }
+            }));
+        }
         if env("MM_KEEPER_KEYPAIR").is_some() {
-            let paused = maker.as_ref().map_or_else(Default::default, |m| m.paused.clone());
             let keeper = Arc::new(Keeper::new(&rpc_url, &market, keypair("MM_KEEPER_KEYPAIR")?, state.clone(), paused, seconds("MM_COMMIT_EVERY_S", 120), seconds("MM_FUNDING_EVERY_S", 3_600))?);
             tracing::info!(market = %market.symbol, keeper = %b58(&keeper.pubkey()), "keeper enabled");
             jobs.push(Box::pin(keeper.run()));
+            // Keep the core able to pay commit fees: below 0.05 SOL in the rollup, send 0.3 SOL.
+            let topup = Arc::new(equinox_market_maker::topup::CoreTopUp::new(&rpc_url, &l1_url, &send_url, keypair("MM_KEEPER_KEYPAIR")?, market.bundle.core, market.symbol.clone(),
+                env("MM_CORE_MIN_SOL").and_then(|v| v.parse().ok()).unwrap_or(0.05), env("MM_CORE_TOPUP_SOL").and_then(|v| v.parse().ok()).unwrap_or(0.3))?);
+            jobs.push(Box::pin(topup.run(Duration::from_secs(600))));
             if let Some(token) = token {
                 let reporter = Arc::new(Reporter::new(&l1_url, &send_url, prestocks.clone(), history.clone(), keypair("MM_KEEPER_KEYPAIR")?, program, market.bundle.core, market.bundle.oracle_snapshot, token.clone(), market.symbol.clone(), state.clone())?);
                 tracing::info!(market = %market.symbol, ?token, "reporting price");

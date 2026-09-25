@@ -148,7 +148,7 @@ funds the bots, delegates, and the reporter prices it from the pool.
 |---|---|
 | New pre-IPO or launch market | `scripts/list-market.sh …` (see its header; ~1.3 devnet SOL); it also registers the market with the market API, without which the terminal can't locate the book |
 | Name or clear a keeper / reporter, abort a snapshot | `node scripts/v3-set-keeper.mjs …` |
-| Top up a core's commit-fee lamports | `node scripts/v3-topup-core.mjs 1` |
+| Top up a core's commit-fee lamports | automatic (the service, from the keeper key); by hand: `node scripts/v3-topup-core.mjs 1` |
 | Service deploy | build `services/market-maker` in its Dockerfile on the VM, install, `systemctl restart stockstream-mm` |
 | Live checks | `npx tsx scripts/e2e/{onboarding,deposit,preipo,basket,speed}.mts`, `SITE=…/launch npx tsx scripts/e2e/launch.mts` |
 
