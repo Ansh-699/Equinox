@@ -10,4 +10,5 @@ pub mod quotes;
 pub mod reporter;
 pub mod rpc;
 pub mod solana;
+pub mod topup;
 pub mod v3;

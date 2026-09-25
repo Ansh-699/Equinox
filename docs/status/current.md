@@ -53,6 +53,6 @@ git (`git log -- docs/status`).
 - **No L1 escape hatch**: if the rollup were down for good, a withdrawal's
   first step (in the rollup) could not run. The vault's USDC stays on Solana.
 - **Balances to watch** (devnet SOL): faucet `AmHAkH…` (sends SOL only above
-  0.2 SOL), keeper/reporter `7JuUhGG…` (~0.3 SOL/day), each core's rollup
-  lamports (`node scripts/v3-topup-core.mjs 1`), the authority for upgrades
-  and new markets.
+  0.2 SOL), keeper/reporter `7JuUhGG…` (~0.3 SOL/day for posts, plus the cores'
+  commit fees: the service tops each core up from it automatically), the
+  authority for upgrades and new markets.
