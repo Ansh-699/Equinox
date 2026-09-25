@@ -26,14 +26,14 @@ export interface PerpDemoData {
   initialMarginBps: number;
 }
 
-const TABS = [
+export const PREVIEW_TABS = [
   { id: "trade", label: "Trade" },
   { id: "pre-ipo", label: "Pre-IPO" },
   { id: "launch", label: "Launch" },
   { id: "portfolio", label: "Portfolio" },
   { id: "architecture", label: "Architecture" },
 ] as const;
-type TabId = (typeof TABS)[number]["id"];
+export type TabId = (typeof PREVIEW_TABS)[number]["id"];
 
 /** Auto-tour: each tab shows this long, once, while the window is in view. */
 const TOUR_MS = 6_000;
@@ -94,13 +94,11 @@ function MarketLogo({ symbol, size = 22 }: { symbol: string; size?: number }) {
   return src ? <img src={src} alt="" width={size} height={size} className={css.logo} /> : <span className={css.logo} style={{ width: size, height: size }} />;
 }
 
-export function AppPreview({ demo }: { demo: PerpDemoData }) {
+/** The selected tab lives in the hero, shared with the pill tabs above the window. */
+export function AppPreview({ demo, tab, setTab, touring, stopTour }: { demo: PerpDemoData; tab: TabId; setTab: (id: TabId) => void; touring: boolean; stopTour: () => void }) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
-  const [tab, setTab] = useState<TabId>("trade");
   const [revealed, setRevealed] = useState(false);
   const [inView, setInView] = useState(false);
-  const [touring, setTouring] = useState(true);
 
   useEffect(() => {
     const el = panelRef.current;
@@ -118,21 +116,13 @@ export function AppPreview({ demo }: { demo: PerpDemoData }) {
   useEffect(() => {
     if (!touring || !inView || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const timer = setTimeout(() => {
-      const next = TABS.findIndex((t) => t.id === tab) + 1;
-      if (next >= TABS.length) { setTab("trade"); setTouring(false); } else setTab(TABS[next].id);
+      const next = PREVIEW_TABS.findIndex((t) => t.id === tab) + 1;
+      if (next >= PREVIEW_TABS.length) { setTab("trade"); stopTour(); } else setTab(PREVIEW_TABS[next].id);
     }, TOUR_MS);
     return () => clearTimeout(timer);
-  }, [tab, touring, inView]);
+  }, [tab, touring, inView, setTab, stopTour]);
 
-  const choose = (id: TabId) => { setTouring(false); setTab(id); };
-  const onKey = (e: React.KeyboardEvent) => {
-    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-    e.preventDefault();
-    const idx = TABS.findIndex((t) => t.id === tab);
-    const next = (idx + (e.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length;
-    choose(TABS[next].id);
-    tabRefs.current[next]?.focus();
-  };
+  const choose = (id: TabId) => { stopTour(); setTab(id); };
 
   const feed = useMakerFeed(revealed);
   // The book streams once the window is on screen (kept across tabs: no reconnect on return).
@@ -144,17 +134,13 @@ export function AppPreview({ demo }: { demo: PerpDemoData }) {
       <header className={css.appBar}>
         <span className={css.brand}><BrandMark size={20} darkSurface />Equinox</span>
         <span className={css.badge}>Devnet preview</span>
-        <nav className={css.nav} role="tablist" aria-label="App preview" onKeyDown={onKey}>
-          {TABS.map((t, i) => (
+        <nav className={css.nav} aria-label="App preview sections">
+          {PREVIEW_TABS.map((t) => (
             <button
               key={t.id}
-              ref={(el) => { tabRefs.current[i] = el; }}
               type="button"
-              role="tab"
-              id={`preview-tab-${t.id}`}
-              aria-selected={tab === t.id}
+              aria-current={tab === t.id ? "true" : undefined}
               aria-controls="preview-screen"
-              tabIndex={tab === t.id ? 0 : -1}
               className={css.navTab}
               onClick={() => choose(t.id)}
             >
@@ -172,7 +158,7 @@ export function AppPreview({ demo }: { demo: PerpDemoData }) {
         </span>
       </header>
 
-      <div id="preview-screen" role="tabpanel" aria-labelledby={`preview-tab-${tab}`} className={css.screens}>
+      <div id="preview-screen" role="tabpanel" aria-labelledby={`tab-${tab}`} className={css.screens}>
         <div key={tab} className={css.screen}>
           {tab === "trade" && <TradeScreen demo={demo} bids={book.bids} asks={book.asks} live={book.status === "live"} active={revealed} />}
           {tab === "pre-ipo" && <PreIpoScreen prices={feed.prices} />}

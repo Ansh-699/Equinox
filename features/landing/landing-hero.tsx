@@ -4,14 +4,42 @@
 // Landing hero (Onyx design): wordmark, credibility pill, headline, one CTA,
 // then the floating app window (app-preview.tsx) rising over the fold.
 
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BrandMark } from "@/components/ui/brand-mark";
-import { AppPreview, type PerpDemoData } from "./app-preview";
+import { AppPreview, PREVIEW_TABS, type PerpDemoData, type TabId } from "./app-preview";
 import { ChromeCta } from "./chrome-cta";
 import styles from "./landing.module.css";
 
 const SPONSORS = [["MagicBlock", "/landing/magicblock.jpg"], ["PreStocks", "/landing/prestocks.png"], ["Meteora", "/landing/meteora.svg"]] as const;
 
 export function LandingHero({ demo }: { demo: PerpDemoData }) {
+  const [tab, setTab] = useState<TabId>("trade");
+  const [touring, setTouring] = useState(true);
+  const stopTour = useCallback(() => setTouring(false), []);
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const [indicator, setIndicator] = useState<{ x: number; w: number } | null>(null);
+
+  // Sliding white chip: glide the indicator to the active tab (transform + width only).
+  useEffect(() => {
+    const measure = () => {
+      const el = tabRefs.current[PREVIEW_TABS.findIndex((t) => t.id === tab)];
+      if (el) setIndicator({ x: el.offsetLeft, w: el.offsetWidth });
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [tab]);
+
+  const choose = (id: TabId) => { setTouring(false); setTab(id); };
+  function onTabKey(e: React.KeyboardEvent) {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    e.preventDefault();
+    const idx = PREVIEW_TABS.findIndex((t) => t.id === tab);
+    const next = (idx + (e.key === "ArrowRight" ? 1 : PREVIEW_TABS.length - 1)) % PREVIEW_TABS.length;
+    choose(PREVIEW_TABS[next].id);
+    tabRefs.current[next]?.focus();
+  }
+
   return (
     <div>
       <section className={styles.hero}>
@@ -57,10 +85,32 @@ export function LandingHero({ demo }: { demo: PerpDemoData }) {
         <div className={`${styles.heroItem} ${styles.d4}`}>
           <ChromeCta href="/trade" label="Launch App" />
         </div>
+
+        <div className={`${styles.heroItem} ${styles.d5}`}>
+          <div className={styles.pillNav} role="tablist" aria-label="App preview" onKeyDown={onTabKey}>
+            {indicator && <span className={styles.pillIndicator} aria-hidden style={{ transform: `translateX(${indicator.x}px)`, width: indicator.w }} />}
+            {PREVIEW_TABS.map((t, i) => (
+              <button
+                key={t.id}
+                ref={(el) => { tabRefs.current[i] = el; }}
+                type="button"
+                role="tab"
+                id={`tab-${t.id}`}
+                aria-selected={tab === t.id}
+                aria-controls="preview-screen"
+                tabIndex={tab === t.id ? 0 : -1}
+                data-primary={tab === t.id}
+                onClick={() => choose(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </section>
 
       <section className={styles.panelZone}>
-        <AppPreview demo={demo} />
+        <AppPreview demo={demo} tab={tab} setTab={setTab} touring={touring} stopTour={stopTour} />
       </section>
     </div>
   );

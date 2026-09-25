@@ -57,7 +57,7 @@
   white-space: nowrap;
   transition: color 150ms ease;
 }
-.navTab:hover, .navTab[aria-selected="true"] { color: var(--t-text); }
+.navTab:hover, .navTab[aria-current="true"] { color: var(--t-text); }
 .navTab:focus-visible { outline: 2px solid var(--t-accent); outline-offset: -2px; border-radius: 4px; }
 /* Active underline; during the tour it fills left to right as a timer. */
 .navLine {
@@ -401,7 +401,7 @@
   .panel { border-radius: 12px; }
   .badge, .speed, .launch { display: none; } /* the hero CTA sits right above */
   .brand { font-size: 0; gap: 0; }
-  .nav { margin-left: 4px; gap: 16px; }
+  .nav { display: none; } /* the pill tabs above drive it on phones */
   .screens { min-height: 0; }
   .grid { grid-template-columns: minmax(0, 1fr); }
   .bookCol { border-left: 0; border-top: 1px solid var(--t-border); }
