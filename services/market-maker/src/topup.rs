@@ -85,13 +85,23 @@ impl CoreTopUp {
         result["value"].as_u64().context("getBalance: no value")
     }
 
+    async fn l1_balance(&self, key: &Pubkey) -> Result<u64> {
+        // The normal Devnet endpoint supports getBalance. Some gateways only
+        // expose account reads, so retain that route as a fallback.
+        if let Ok(balance) = Self::balance(&self.l1, key).await {
+            return Ok(balance);
+        }
+        let result = self.l1.call("getAccountInfo", json!([b58(key), { "encoding": "base64", "commitment": "confirmed" }])).await?;
+        result["value"]["lamports"].as_u64().context("getAccountInfo: no keeper balance")
+    }
+
     async fn check(&self) -> Result<()> {
         let before = Self::balance(&self.rollup, &self.core).await.context("reading the core's rollup balance")?;
         if before >= self.min {
             return Ok(());
         }
         let payer = self.key.pubkey();
-        let available = Self::balance(&self.l1, &payer).await.context("reading the keeper's balance")?;
+        let available = self.l1_balance(&payer).await.context("reading the keeper's balance")?;
         // Keep enough behind for the keeper's own fees and price posts.
         if available < self.amount + LAMPORTS_PER_SOL / 10 {
             anyhow::bail!("core is low ({before} lamports) but the keeper {} holds only {available}; fund it", b58(&payer));

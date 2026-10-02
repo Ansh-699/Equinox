@@ -101,8 +101,20 @@ async fn main() -> Result<()> {
         // restart, and a market whose bots have no seat yet starts once they do.
         // The keeper pauses the maker during commits through `paused`.
         let paused = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        // Pyth-priced markets refresh their L1 price from this host when PYTH_PRO_API_KEY is set
+        // (the Worker's shared egress IPs are rate-limited by the public devnet RPC).
+        let refresher = match (env("PYTH_PRO_API_KEY"), env("MM_KEEPER_KEYPAIR")) {
+            (Some(api_key), Some(_)) if token.is_none() => {
+                let feed_id = deployment["markets"].as_array().and_then(|list| list.iter().find(|m| m["symbol"] == market.symbol.as_str())).and_then(|m| m["oracle"]["feedId"].as_u64()).or_else(|| deployment["oracle"]["feedId"].as_u64());
+                let channel = deployment["oracle"]["channel"].as_str().unwrap_or("fixed_rate@50ms").to_string();
+                let feed_id = feed_id.ok_or_else(|| anyhow!("{} has no Pyth feed id", market.symbol))?;
+                tracing::info!(market = %market.symbol, feed_id, "Pyth price refreshed from this host");
+                Some(Arc::new(equinox_market_maker::pyth_refresh::PythRefresher::new(&l1_url, &send_url, api_key, keypair("MM_KEEPER_KEYPAIR")?, program, market.bundle.core, market.bundle.oracle_snapshot, u32::try_from(feed_id)?, channel)?))
+            }
+            _ => None,
+        };
         {
-            let (rpc_url, market_api, market, state, live, paused) = (rpc_url.clone(), market_api.clone(), market.clone(), state.clone(), live.clone(), paused.clone());
+            let (rpc_url, market_api, market, state, live, paused, refresher) = (rpc_url.clone(), market_api.clone(), market.clone(), state.clone(), live.clone(), paused.clone(), refresher.clone());
             jobs.push(Box::pin(async move {
                 let mut wait = Duration::from_secs(2);
                 loop {
@@ -110,6 +122,7 @@ async fn main() -> Result<()> {
                     match attempt.await {
                         Ok(mut maker) => {
                             maker.paused = paused.clone();
+                            maker.l1_refresher = refresher.clone();
                             let maker = Arc::new(maker);
                             let (maker_seat, taker_seat) = maker.seats();
                             tracing::info!(market = %market.symbol, core = %b58(&market.bundle.core), maker_seat, taker_seat, "making");

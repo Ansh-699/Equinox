@@ -28,6 +28,7 @@ const POST_WHEN_MOVED_BPS: i128 = 20;
 /// One PreStocks request serves every market; it is asked at most this often
 /// (successful or not): their prices move slowly and the API rate-limits.
 const API_EVERY: Duration = Duration::from_secs(15);
+const REPORT_EVERY: Duration = Duration::from_secs(4);
 
 /// PreStocks' price list, shared by every reporter.
 #[derive(Default)]
@@ -142,6 +143,7 @@ impl Reporter {
             PriceSource::MeteoraPool { pool, lot } => format!("Meteora DAMM v2 {} × {lot}", b58(pool)),
         }, ..ReporterStatus::default() });
         let mut blockhash: Option<(Instant, [u8; 32])> = None;
+        let mut retry_delay = REPORT_EVERY;
         loop {
             let result = async {
                 let (mark, token) = match &self.source {
@@ -192,6 +194,7 @@ impl Reporter {
             let Some(reporter) = status.market(&self.symbol).reporter.as_mut() else { continue };
             match result {
                 Ok((mark, token, posted)) => {
+                    retry_delay = REPORT_EVERY;
                     reporter.mark_price = Some(mark);
                     reporter.token_price = token;
                     reporter.premium_pct = token.map(|t| ((t / mark - 1.0) * 1_000.0).round() / 10.0);
@@ -205,6 +208,7 @@ impl Reporter {
                     }
                 }
                 Err(error) => {
+                    retry_delay = (retry_delay * 2).min(Duration::from_secs(60));
                     reporter.errors += 1;
                     reporter.last_error = Some(format!("{error:#}").chars().take(300).collect());
                     blockhash = None;
@@ -212,7 +216,7 @@ impl Reporter {
                 }
             }
             drop(status);
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            tokio::time::sleep(retry_delay).await;
         }
     }
 }

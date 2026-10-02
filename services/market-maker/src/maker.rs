@@ -20,7 +20,7 @@ use crate::v3::{cancel_order, place_order, replace_order, resting_orders, seat_p
 
 const QUOTE_TTL_S: u64 = 60;
 /// Refresh the rollup price past this age: browsers take the fast path up to 7 s.
-const MAX_SNAPSHOT_AGE_S: u64 = 3;
+const MAX_SNAPSHOT_AGE_S: u64 = 5;
 const MAX_ACTIONS_PER_TICK: usize = 12;
 const JITTER_RUNGS_PER_TICK: usize = 2;
 const TAKE_EVERY_MS: (u64, u64) = (700, 2_200);
@@ -132,6 +132,8 @@ pub struct Maker {
     rpc_url: String,
     http: reqwest::Client,
     market_api: Option<String>,
+    /// When set, Pyth refreshes are sent from this host instead of through the market API.
+    pub l1_refresher: Option<Arc<crate::pyth_refresh::PythRefresher>>,
     market: MarketConfig,
     bundle: Bundle,
     maker: Bot,
@@ -139,7 +141,7 @@ pub struct Maker {
     socket: Mutex<Option<Arc<SignatureSocket>>>,
     client_order_id: Mutex<u64>,
     next_take_ms: Mutex<u64>,
-    last_closed_refresh_ms: Mutex<u64>,
+    next_oracle_refresh_ms: Mutex<u64>,
     pub status: Arc<Mutex<Status>>,
     /// Set by the keeper while a commit snapshot freezes trading.
     pub paused: Arc<std::sync::atomic::AtomicBool>,
@@ -190,6 +192,7 @@ impl Maker {
                 .timeout(Duration::from_secs(12))
                 .build()?,
             market_api,
+            l1_refresher: None,
             market,
             bundle,
             maker: Bot { key: maker, seat: maker_seat },
@@ -197,7 +200,7 @@ impl Maker {
             socket: Mutex::new(None),
             client_order_id: Mutex::new(now_ms() * 1_000),
             next_take_ms: Mutex::new(0),
-            last_closed_refresh_ms: Mutex::new(0),
+            next_oracle_refresh_ms: Mutex::new(0),
             status,
             paused: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             feed,
@@ -302,6 +305,9 @@ impl Maker {
     }
 
     async fn refresh_oracle(&self) -> Result<()> {
+        if let Some(refresher) = &self.l1_refresher {
+            return refresher.refresh().await;
+        }
         let Some(api) = &self.market_api else { return Err(anyhow!("rollup price is stale and MARKET_API_URL is not set")) };
         let response = self.http.post(format!("{}/v1/oracle/refresh", api.trim_end_matches('/'))).send().await?;
         let ok = response.status().is_success();
@@ -310,6 +316,18 @@ impl Maker {
             return Err(anyhow!("oracle refresh failed: {}", body.chars().take(200).collect::<String>()));
         }
         Ok(())
+    }
+
+    async fn refresh_oracle_if_due(&self, now: u64) -> Result<()> {
+        let mut next = self.next_oracle_refresh_ms.lock().await;
+        if now < *next {
+            return Ok(());
+        }
+        // Reserve the next attempt before the HTTP call so a stalled refresh
+        // cannot turn the 400 ms quote loop into an RPC retry storm.
+        *next = now.saturating_add(CLOSED_REFRESH_EVERY_MS);
+        drop(next);
+        self.refresh_oracle().await
     }
 
     async fn tick(&self) -> Result<()> {
@@ -340,18 +358,14 @@ impl Maker {
         } else if !snapshot.open {
             // Outside US trading hours every order would be refused: send nothing, and
             // only occasionally ask for a fresh price so the reopen is noticed.
-            let mut last = self.last_closed_refresh_ms.lock().await;
-            if now.saturating_sub(*last) >= CLOSED_REFRESH_EVERY_MS {
-                *last = now;
-                if let Err(error) = self.refresh_oracle().await {
-                    tracing::warn!(market = %self.market.symbol, "closed-session price refresh failed: {error:#}");
-                }
+            if let Err(error) = self.refresh_oracle_if_due(now).await {
+                tracing::warn!(market = %self.market.symbol, "closed-session price refresh failed: {error:#}");
             }
             return Ok(());
         }
         if !self.market.reporter_priced && now_s.saturating_sub(published) > MAX_SNAPSHOT_AGE_S {
             // Permissionless refresh through the market API; quote once the rollup has the new price.
-            return self.refresh_oracle().await;
+            return self.refresh_oracle_if_due(now).await;
         }
 
         let reads: Vec<_> = self.bundle.book_pages.iter().chain(&self.bundle.seat_shards).copied().collect();

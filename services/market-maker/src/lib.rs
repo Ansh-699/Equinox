@@ -6,6 +6,7 @@ pub mod candles;
 pub mod feed;
 pub mod keeper;
 pub mod maker;
+pub mod pyth_refresh;
 pub mod quotes;
 pub mod reporter;
 pub mod rpc;
