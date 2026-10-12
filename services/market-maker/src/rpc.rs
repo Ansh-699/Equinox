@@ -124,6 +124,16 @@ pub struct SignatureSocket {
     waiters: Waiters,
     next_id: AtomicU64,
     alive: Arc<AtomicBool>,
+    // The reader owns the socket's read half; without aborting it on drop the
+    // TCP connection outlived every short-lived socket (the keeper opens one per
+    // step) and leaked until the process hit its open-file limit.
+    reader: tokio::task::AbortHandle,
+}
+
+impl Drop for SignatureSocket {
+    fn drop(&mut self) {
+        self.reader.abort();
+    }
 }
 
 impl SignatureSocket {
@@ -136,8 +146,10 @@ impl SignatureSocket {
         let acks: Acks = Arc::default();
         let waiters: Waiters = Arc::default();
         let alive = Arc::new(AtomicBool::new(true));
-        let socket = Arc::new(Self { sink: Mutex::new(sink), acks: acks.clone(), waiters: waiters.clone(), next_id: AtomicU64::new(1), alive: alive.clone() });
-        tokio::spawn(async move {
+        let task_alive = alive.clone();
+        let (task_acks, task_waiters) = (acks.clone(), waiters.clone());
+        let reader = tokio::spawn(async move {
+            let (acks, waiters, alive) = (task_acks, task_waiters, task_alive);
             while let Some(Ok(message)) = source.next().await {
                 let Message::Text(text) = message else { continue };
                 let arrived = Instant::now();
@@ -157,7 +169,7 @@ impl SignatureSocket {
             }
             alive.store(false, Ordering::SeqCst);
         });
-        Ok(socket)
+        Ok(Arc::new(Self { sink: Mutex::new(sink), acks, waiters, next_id: AtomicU64::new(1), alive, reader: reader.abort_handle() }))
     }
 
     pub fn is_alive(&self) -> bool {
@@ -195,5 +207,26 @@ impl Watch<'_> {
                 None
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Dropping a socket must close its connection (the fd leak of Oct 2026).
+    #[tokio::test]
+    async fn dropped_socket_closes_its_connection() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(tcp).await.unwrap();
+            // Ends (None or Err) only once the client side has gone away.
+            while let Some(Ok(_)) = ws.next().await {}
+        });
+        let socket = SignatureSocket::connect(&url).await.unwrap();
+        drop(socket);
+        tokio::time::timeout(Duration::from_secs(3), server).await.expect("connection still open after drop").unwrap();
     }
 }
