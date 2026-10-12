@@ -10,7 +10,7 @@ import { decodeOracleSnapshot, type OracleSnapshotView } from "./oracle-snapshot
 import { signAndSerializeTransaction } from "./transactions";
 import type { Signer } from "./signer";
 
-export const FRESH_SECONDS = 3;
+export const FRESH_SECONDS = 5;
 const REFRESH_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 1_200;
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));

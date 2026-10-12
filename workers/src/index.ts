@@ -1,6 +1,4 @@
 import { applyCors, preflight } from "./cors";
-import type { RefreshResult } from "./oracle-refresh";
-import { runOracleRefresh } from "./oracle-runner";
 import { fetchCandles, parseCandleQuery } from "./candles";
 import { signAndSerializeTransaction } from "./transactions";
 import { CLAIM_INTERVAL_MS, FAUCET_TOKENS, faucetInstructions, SOL_TOP_UP_BELOW, verifyFaucetSignature } from "./faucet";
@@ -145,16 +143,17 @@ export async function runIngestionTick(env: Env, fetcher: typeof fetch = fetch):
 }
 
 /** Every open terminal polls execution status every few seconds, and each
- * answer costs a D1 read plus L1 and rollup reads (~1 s). Viewers of a market
- * share one in-flight or ≤2 s-old answer per isolate; failures aren't kept. */
-const STATUS_SHARE_MS = 2_000;
+ * answer costs a D1 read plus L1 and rollup reads. Delegation status changes
+ * rarely, so reuse a recent answer to stay within the shared devnet RPC budget. */
+const STATUS_SHARE_MS = 10_000;
 const sharedStatus = new Map<string, { at: number; value: ReturnType<typeof fetchExecutionStatus> }>();
 export function sharedExecutionStatus(env: Env, symbol: string, stream: DurableObjectStub<MarketStream>, now = Date.now()): ReturnType<typeof fetchExecutionStatus> {
   const hit = sharedStatus.get(symbol);
   if (hit && now - hit.at < STATUS_SHARE_MS) return hit.value;
   const value = fetchExecutionStatus(env, symbol, stream);
   sharedStatus.set(symbol, { at: now, value });
-  value.then((outcome) => { if (outcome === undefined) sharedStatus.delete(symbol); }, () => sharedStatus.delete(symbol));
+  // Keep a failed read for the same short window too, or every viewer retries
+  // an already rate-limited RPC immediately.
   return value;
 }
 
@@ -276,7 +275,9 @@ async function claimFaucet(request: Request, env: Env): Promise<Response> {
     if ("error" in identity) return json({ error: identity.error }, 401);
   }
   const previous = await env.DB.prepare("SELECT claimed_at AS claimedAt FROM faucet_claims WHERE wallet = ?").bind(wallet).first<{ claimedAt: number }>();
-  if (previous && Date.now() - previous.claimedAt < CLAIM_INTERVAL_MS) return json({ error: "already claimed today" }, 429);
+  if (previous && Date.now() - previous.claimedAt < CLAIM_INTERVAL_MS) {
+    return json({ error: "already claimed today", retryAfterSeconds: Math.ceil((previous.claimedAt + CLAIM_INTERVAL_MS - Date.now()) / 1000) }, 429);
+  }
   const signing = await resolveKeeperSigning(env);
   if (signing.state !== "signer-ready" || !signing.signer) return json({ error: "faucet signer unavailable" }, 503);
   const l1 = new SolanaL1Transport(env.SOLANA_RPC_URL);
@@ -292,7 +293,7 @@ async function claimFaucet(request: Request, env: Env): Promise<Response> {
   const outcome = await l1.confirmTransaction(signature, { targetCommitment: "confirmed", lastValidBlockHeight: value.lastValidBlockHeight, timeoutMs: 30_000, pollIntervalMs: 500 });
   if (outcome.status !== "confirmed" && outcome.status !== "finalized") return json({ error: `faucet transfer ${outcome.status}`, signature }, 502);
   await env.DB.prepare("INSERT INTO faucet_claims (wallet, claimed_at) VALUES (?, ?) ON CONFLICT(wallet) DO UPDATE SET claimed_at = excluded.claimed_at").bind(wallet, Date.now()).run();
-  return json({ signature, tokens: FAUCET_TOKENS.toString(), sol: BigInt(balance.value) < SOL_TOP_UP_BELOW });
+  return json({ signature, tokens: FAUCET_TOKENS.toString(), sol: sendSol });
 }
 
 /** The market maker runs as its own service (services/market-maker) on a VM
@@ -306,14 +307,6 @@ async function marketMakerStatus(env: Env): Promise<Response> {
 }
 
 const PUBLIC_POST_ROUTES = new Set(["/v1/oracle/refresh", "/v1/faucet", "/v1/launches"]);
-let inflightRefresh: Promise<RefreshResult> | null = null;
-/** One refresh per isolate at a time; concurrent callers share its result. */
-function refreshSnapshotOnce(env: Env): Promise<RefreshResult> {
-  inflightRefresh ??= runOracleRefresh(env).finally(() => { inflightRefresh = null; });
-  return inflightRefresh;
-}
-
-
 const worker = {
   async fetch(request: Request, env: Env): Promise<Response> {
     const publicPost = PUBLIC_POST_ROUTES.has(new URL(request.url).pathname);
@@ -355,7 +348,7 @@ const worker = {
     if (request.method === "GET" && url.pathname === "/v1/mm/status") return marketMakerStatus(env);
 
     if (request.method === "POST" && url.pathname === "/v1/oracle/refresh") {
-      const result = await refreshSnapshotOnce(env);
+      const result = await bindings(env).MARKET_STREAM.getByName("TSLA-ORACLE-REFRESH").refreshOracle();
       return json(result, result.status === "failed" ? 503 : 200);
     }
 
@@ -599,7 +592,13 @@ const worker = {
       if (request.method === "GET" && action === "stream") return stream.fetch(request);
       if (request.method === "GET" && action === "snapshot") return stream.fetch(new Request("https://internal.invalid/snapshot"));
       if (request.method === "GET" && action === "execution-status") {
-        const outcome = await sharedExecutionStatus(env, symbol, stream);
+        let outcome: Awaited<ReturnType<typeof fetchExecutionStatus>>;
+        try { outcome = await sharedExecutionStatus(env, symbol, stream); }
+        catch (error) {
+          const detail = error instanceof Error ? error.message : "unknown error";
+          console.warn("execution-status RPC unavailable", (env.SOLANA_RPC_URL ? detail.replaceAll(env.SOLANA_RPC_URL, "[rpc]") : detail).slice(0, 200));
+          return json({ error: "rpc_unavailable" }, 503);
+        }
         if (!outcome) return json({ error: "rpc_not_configured" }, 503);
         if (outcome === "not_found") return json({ error: "market_not_found" }, 404);
         return json(outcome);

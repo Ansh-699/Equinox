@@ -1,5 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { PrivateSessionRepository } from './private-sessions';
+import { runOracleRefresh } from './oracle-runner';
+import type { RefreshResult } from './oracle-refresh';
 import type { MarketEvent, MarketSnapshot } from './types';
 type Domain = 'l1' | 'er';
 type State = { domain: Domain; sequence: number; resynchronizing: number; snapshot_json: string | null };
@@ -12,6 +14,23 @@ type PrivateContext = { wallet: string; seatIndex: number };
 type Attachment = { pending: number; private?: PrivateContext };
 
 export class MarketStream extends DurableObject<Env> {
+  private oracleRefresh: Promise<RefreshResult> | null = null;
+  private recentOracleRefresh: { at: number; result: RefreshResult } | null = null;
+
+  /** All Worker isolates share one TSLA refresh through this named object. */
+  async refreshOracle(): Promise<RefreshResult> {
+    const recent = this.recentOracleRefresh;
+    if (recent && Date.now() - recent.at < 1_000) return recent.result;
+    if (this.oracleRefresh) return this.oracleRefresh;
+    const pending = runOracleRefresh(this.env).then((result) => {
+      if (result.status !== 'failed') this.recentOracleRefresh = { at: Date.now(), result };
+      return result;
+    });
+    this.oracleRefresh = pending;
+    try { return await pending; }
+    finally { if (this.oracleRefresh === pending) this.oracleRefresh = null; }
+  }
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.blockConcurrencyWhile(async () => {
