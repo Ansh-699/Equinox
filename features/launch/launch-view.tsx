@@ -7,7 +7,7 @@ import { openWalletDrawer, TopBar } from "@/components/layout/top-bar";
 import { useAppAuth } from "@/components/app-providers";
 import { useTradingKey } from "@/features/wallet/use-trading-key";
 import { tradingKeySigner } from "@/lib/trading-key";
-import { claimTestFunds } from "@/lib/faucet-client";
+import { requestTestFunds } from "@/lib/faucet-client";
 import { publicMarketApiUrl } from "@/lib/demo-config";
 import { Badge, BUTTON_PRIMARY, FOCUS_RING, InfoTip } from "@/components/ui/primitives";
 import { LaunchMonitor, TokenAvatar } from "./launch-monitor";
@@ -106,7 +106,8 @@ export function LaunchView() {
       const creator = new PublicKey(signer.address!);
       // Rent for the config, pool and mint (~0.02 SOL): the faucet tops up SOL and test USDC.
       if ((await connection.getBalance(creator)) < 30_000_000) {
-        await claimTestFunds({ privyAuthenticated: false, getAccessToken: async () => null, signMessage: (_a: string, bytes: Uint8Array) => signer.signMessage(bytes) }, signer.address!);
+        const claim = await requestTestFunds({ privyAuthenticated: false, getAccessToken: async () => null, signMessage: (_a: string, bytes: Uint8Array) => signer.signMessage(bytes) }, signer.address!);
+        if (!claim.ok && (await connection.getBalance(creator)) < 30_000_000) throw new Error(claim.message);
         for (let i = 0; i < 20 && (await connection.getBalance(creator)) < 30_000_000; i += 1) await new Promise((r) => setTimeout(r, 1_000));
         if ((await connection.getBalance(creator)) < 30_000_000) throw new Error("your trading account has no devnet SOL for rent and the faucet couldn't send any (it may be empty); try again in a while");
       }

@@ -51,7 +51,7 @@ const ICON_LINK = "hidden h-8 w-8 items-center justify-center rounded text-[var(
 
 /** Terminal top bar (SlipStream TerminalNav): identity and sections on the
  * left; utilities, theme and wallet on the right. */
-export function TopBar({ active, auth }: { active: ActiveSection; auth: AppAuth }) {
+export function TopBar({ active, auth, onTradeClick }: { active: ActiveSection; auth: AppAuth; onTradeClick?: () => void }) {
   // Sign in / Choose wallet / address+Log out are mutually exclusive: activating
   // one unmounts it. Move focus to whichever replaces it so keyboard users are
   // never stranded on <body> (tests/browser/keyboard-only.spec.ts).
@@ -89,6 +89,7 @@ export function TopBar({ active, auth }: { active: ActiveSection; auth: AppAuth 
           <Link
             key={item.id}
             href={item.href}
+            onClick={item.id === "trade" ? onTradeClick : undefined}
             aria-current={active === item.id ? "page" : undefined}
             className={`relative flex items-center text-[14px] font-medium transition-colors ${
               active === item.id
@@ -154,7 +155,7 @@ export function TopBar({ active, auth }: { active: ActiveSection; auth: AppAuth 
           <ul className="grid grid-cols-2 gap-1">
             {[...NAV, ...ACCOUNT_NAV].map((item) => (
               <li key={item.id}>
-                <Link href={item.href} onClick={() => setMenu(false)} aria-current={active === item.id ? "page" : undefined}
+                <Link href={item.href} onClick={() => { setMenu(false); if (item.id === "trade") onTradeClick?.(); }} aria-current={active === item.id ? "page" : undefined}
                   className={`block rounded-[8px] px-3 py-2.5 text-[14px] font-medium ${active === item.id ? "bg-[var(--t-surface-3)] text-[var(--t-text)]" : "text-[var(--t-text-2)] hover:bg-[var(--t-surface-3)]"}`}>
                   {item.label}
                 </Link>

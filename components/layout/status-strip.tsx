@@ -73,7 +73,7 @@ export function ProtocolStatusStrip({ authenticated, v3, delegated = null, oracl
         <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${oracleOnline ? "bg-[var(--t-up)]" : "bg-[var(--t-text-2)]"}`} />
         <span className={oracleOnline ? "text-[var(--t-up)]" : "text-[var(--t-text-2)]"}>{oracleOnline ? (priceSource === "pyth" ? "Pyth price verified" : "Reporter price on-chain") : "Waiting for a verified price"}</span>
       </span>
-      <span className="hidden sm:inline">Devnet · worthless test tokens</span>
+      <span className="hidden sm:inline">Solana devnet</span>
       <span className="hidden md:inline">Wallet: <span className="text-[var(--t-text-2)]">{authenticated ? "signed in" : "signed out"}</span></span>
       <span className="hidden lg:inline">Rollup session: <span className="text-[var(--t-text-2)]">{delegated ? "live on MagicBlock" : v3.delegationStatus === null ? "checking…" : ["on Solana L1", "live on MagicBlock", "closing", "back on Solana L1"][v3.delegationStatus] ?? String(v3.delegationStatus)}</span></span>
       <div className="ml-auto flex items-center gap-4">

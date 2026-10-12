@@ -35,7 +35,7 @@ export function sizeTicket(ticket: Ticket, markPrice: number | null, initialMarg
 }
 
 const FOCUS = "focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]";
-const INPUT = `tnum h-[34px] w-full rounded-[4px] border border-[var(--t-border-strong)] bg-[var(--t-surface)] px-[10px] pr-14 text-[14px] text-[var(--t-text)] placeholder:text-[var(--t-text-3)] ${FOCUS}`;
+const INPUT = `tnum h-[44px] w-full rounded-[4px] border border-[var(--t-border-strong)] bg-[var(--t-surface)] px-[10px] pr-14 text-[16px] text-[var(--t-text)] placeholder:text-[var(--t-text-3)] sm:h-[34px] sm:text-[14px] ${FOCUS}`;
 const SUFFIX = "pointer-events-none absolute right-[10px] top-1/2 -translate-y-1/2 text-[12px] text-[var(--t-text-3)]";
 const LABEL = "text-[13px] text-[var(--t-text-2)]";
 const ROW = "flex h-[22px] items-center justify-between border-b border-[var(--t-surface-2)] last:border-b-0";
@@ -61,7 +61,7 @@ export function orderGuard(input: { kind: Ticket["kind"]; side: Ticket["side"]; 
 
 /** Max slippage presets, in basis points (0.1% … 1%). */
 const SLIPPAGE_BPS = [10, 25, 50, 100] as const;
-const CHIP = `tnum h-[26px] rounded-[4px] border border-[var(--t-border-strong)] bg-[var(--t-surface)] text-[12px] text-[var(--t-text-2)] hover:text-[var(--t-text)] ${FOCUS}`;
+const CHIP = `tnum h-[36px] rounded-[4px] border border-[var(--t-border-strong)] bg-[var(--t-surface)] text-[12px] text-[var(--t-text-2)] hover:text-[var(--t-text)] sm:h-[26px] ${FOCUS}`;
 
 /** Order entry (SlipStream OrderForm) for a Equinox perp. */
 export function OrderTicket({
@@ -102,7 +102,7 @@ export function OrderTicket({
 
   return (
     <section aria-label="Place order" className="order-panel flex flex-col border-b border-[var(--t-border)] bg-[var(--t-bg)]">
-      <div className="flex h-[40px] items-stretch gap-4 border-b border-[var(--t-border)] px-3" role="group" aria-label="Order type">
+      <div className="flex h-[44px] items-stretch gap-4 border-b border-[var(--t-border)] px-3 sm:h-[40px]" role="group" aria-label="Order type">
         {(["market", "limit"] as const).map((kind) => (
           <button
             key={kind}

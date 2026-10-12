@@ -10,12 +10,11 @@ import { refreshWalletBalances } from "@/features/portfolio/use-wallet-balances"
 import type { AccountSummary } from "@/features/portfolio/use-account-summary";
 import { AccountOverview, BalanceHero } from "@/features/account/account-overview";
 import { PositionCard } from "@/features/account/position-card";
-import { ActivityFeed } from "@/features/account/activity-list";
+import { FillsList } from "@/features/activity/fills-list";
+import { useRecentFills } from "@/features/activity/use-recent-fills";
 import { NetworkList } from "@/features/account/settings-list";
-import { useMarketEvents } from "@/features/activity/use-market-events";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, SegmentedTabs } from "@/components/ui/primitives";
-import { publicMarketApiUrl } from "@/lib/demo-config";
 import { claimTestFunds } from "@/lib/faucet-client";
 
 // Privy's own modal only for methods it can serve (email/Google); browser
@@ -41,9 +40,10 @@ function readTab(): TabId {
 
 /** Only mounted while the Activity tab is showing, so the drawer does not
  * hold a market socket open otherwise. */
-function DrawerActivity() {
-  const { events, status } = useMarketEvents(publicMarketApiUrl, "TSLA-PERP");
-  return <ActivityFeed events={events} limit={10} emptyText={status === "unavailable" ? "Market events are unavailable right now." : "No market events yet."} />;
+function DrawerActivity({ summary }: { summary: AccountSummary }) {
+  const { fills, status } = useRecentFills();
+  const mySeats = Object.fromEntries(Object.entries(summary.seats ?? {}).flatMap(([symbol, seat]) => seat ? [[symbol, seat.index]] : []));
+  return <FillsList fills={fills} mySeats={mySeats} limit={10} empty={status === "unavailable" ? "Rollup fills are unavailable. Retrying…" : "Waiting for recent fills…"} />;
 }
 
 /** Slide-over account hub: connect (installed Solana wallets, one signature
@@ -176,7 +176,7 @@ export function WalletDrawer({ auth, open, onClose, summary }: { auth: AppAuth; 
                   <div role="tabpanel" aria-label={TABS.find((t) => t.id === tab)?.label} className="mt-4">
                     {tab === "overview" ? <AccountOverview summary={summary} /> : null}
                     {tab === "positions" ? <PositionCard seat={summary.seat} unavailable={summary.seatUnavailable} compact /> : null}
-                    {tab === "activity" ? <DrawerActivity /> : null}
+                    {tab === "activity" ? <DrawerActivity summary={summary} /> : null}
                     {tab === "settings" ? (
                       <div className="space-y-4">
                         {auth.wallets.length > 1 ? (

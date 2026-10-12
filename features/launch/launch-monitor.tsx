@@ -54,10 +54,16 @@ export function LaunchMonitor({ refreshKey, quickBuyUsd }: { refreshKey: number;
       const list = await fetch(`${publicMarketApiUrl.replace(/\/$/, "")}/v1/launches`).then((r) => r.json() as Promise<{ launches: Launch[] }>).catch(() => ({ launches: [] }));
       const withState = await Promise.all(list.launches.map(async (launch): Promise<Row> => {
         const view = await readPool(connection, launch.pool).catch(() => null);
-        const stats = view ? await readLaunchStats(connection, { pool: launch.pool, baseMint: launch.baseMint, creator: view.creator, dammPool: view.dammPool }).catch(() => null) : null;
-        return { ...launch, view, stats };
+        return { ...launch, view, stats: null };
       }));
       if (!stopped) setRows(withState);
+      // Holder and transaction scans are slower than the curve reads. Show
+      // names and graduation stages first, then fill in each card's metrics.
+      await Promise.all(withState.map(async (row) => {
+        if (!row.view) return;
+        const stats = await readLaunchStats(connection, { pool: row.pool, baseMint: row.baseMint, creator: row.view.creator, dammPool: row.view.dammPool }).catch(() => null);
+        if (!stopped) setRows((current) => current?.map((item) => item.pool === row.pool ? { ...item, stats } : item) ?? current);
+      }));
     };
     void load();
     const timer = setInterval(() => void load(), 12_000);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { isReporterPriced, v3MarketFor } from "@/lib/v3-markets";
 
 export interface Candle { t: number; o: number; h: number; l: number; c: number }
 export interface Resolution { label: string; code: string; seconds: number; lookback: number }
@@ -29,9 +30,16 @@ export function useCandles(marketApiUrl: string | undefined, symbol: string, res
     const id = ++request.current;
     try {
       const to = Math.floor(Date.now() / 1000);
-      const response = await fetch(`${marketApiUrl.replace(/\/$/, "")}/v1/markets/${encodeURIComponent(symbol)}/candles?resolution=${resolution.code}&from=${to - resolution.lookback}&to=${to}`);
+      // Reporter posts can pause during an L1 outage. Keep the last verified
+      // history visible instead of showing an empty chart after 12 hours.
+      const lookback = isReporterPriced(v3MarketFor(symbol)) ? Math.max(resolution.lookback, 36 * 60 * 60) : resolution.lookback;
+      const response = await fetch(`${marketApiUrl.replace(/\/$/, "")}/v1/markets/${encodeURIComponent(symbol)}/candles?resolution=${resolution.code}&from=${to - lookback}&to=${to}`);
       const data = await response.json() as { s?: string; errmsg?: string; t?: number[]; o?: number[]; h?: number[]; l?: number[]; c?: number[] };
       if (id !== request.current) return;
+      if (data.s === "no_data") {
+        setSeries((previous) => ({ code: resolution.code, candles: previous?.code === resolution.code ? previous.candles : NO_CANDLES, error: null }));
+        return;
+      }
       if (data.s !== "ok" || !Array.isArray(data.t)) {
         const error = data.errmsg ?? "no data";
         setSeries((previous) => ({ code: resolution.code, candles: previous?.code === resolution.code ? previous.candles : NO_CANDLES, error }));

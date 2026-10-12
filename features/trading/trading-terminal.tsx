@@ -39,11 +39,11 @@ import { OpenOrdersPanel } from "@/features/orders/open-orders-panel";
 import { createV3OpenOrdersAdapter, unimplementedOpenOrdersAdapter } from "@/lib/open-orders";
 import type { TransactionPreview } from "@/lib/execution-boundary";
 import { recordSignature } from "@/lib/last-signature";
-import { claimTestFunds } from "@/lib/faucet-client";
+import { requestTestFunds } from "@/lib/faucet-client";
 import { publicMarketApiUrl } from "@/lib/demo-config";
 import { isReporterPriced, MM_SERVICE_URL, PRIMARY_MARKET, V3_MARKETS, v3MarketFor } from "@/lib/v3-markets";
 import { MARKET_BY_SYMBOL } from "@/lib/markets";
-import { SolanaRpcTransport } from "@/lib/rpc-transport";
+import { RpcFailure, SolanaRpcTransport } from "@/lib/rpc-transport";
 import { marketStreamEvents } from "@/lib/market-stream-events";
 import { buildV3OrderInstructions } from "./v3-order";
 import { firstFreeSeat, seatFromPositions } from "./rollup-seat";
@@ -54,6 +54,7 @@ const ONBOARDING_DEPOSIT = 100_000_000n; // 100 test USDC
 /** Pre-IPO shares trade in the hundreds to thousands of dollars: 500 test USDC buys at least one at 5×. */
 const PRE_IPO_ONBOARDING_DEPOSIT = 500_000_000n;
 const publicDemoReadOnly = process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_EQUINOX_DEMO_READ_ONLY !== "false";
+const DEFAULT_TRADE_SYMBOL = V3_MARKETS.find((market) => market.symbol === "ANTHROPIC-PERP")?.symbol ?? PRIMARY_MARKET.symbol;
 
 interface MarketEvent { kind: string; sequence?: number; payload: { kind?: string } }
 
@@ -70,7 +71,20 @@ export function TradingTerminal() {
   const [cancelPending, setCancelPending] = useState(false);
   const [notice, setNotice] = useState("");
   const [sessionActionReason, setSessionActionReason] = useState<SessionActionResult["reason"]>(null);
-  const [marketSymbol, setMarketSymbol] = useState(process.env.NEXT_PUBLIC_EQUINOX_MARKET_SYMBOL ?? PRIMARY_MARKET.symbol);
+  const [marketSymbol, setMarketSymbol] = useState(DEFAULT_TRADE_SYMBOL);
+  const selectMarket = useCallback((symbol: string) => {
+    setMarketSymbol(symbol);
+    const url = new URL(window.location.href);
+    if (symbol === DEFAULT_TRADE_SYMBOL) url.searchParams.delete("market");
+    else url.searchParams.set("market", symbol);
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }, []);
+  useEffect(() => {
+    // Deep links select a market after hydration; a plain /trade starts on Anthropic.
+    const requested = new URLSearchParams(window.location.search).get("market");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- URL state is only available after hydration.
+    if (requested && V3_MARKETS.some((market) => market.symbol === requested)) setMarketSymbol(requested);
+  }, []);
   const [latestLifecycleEventKind, setLatestLifecycleEventKind] = useState<string | null>(null);
   const lifecycleEventRef = useRef<{ sequence: number; kind: string } | null>(null);
   const [nowUnixSeconds, setNowUnixSeconds] = useState(0);
@@ -83,12 +97,6 @@ export function TradingTerminal() {
     tick();
     const interval = setInterval(tick, 5_000);
     return () => clearInterval(interval);
-  }, []);
-  // Deep links (`/trade?market=OPENAI-PERP`, e.g. from the Pre-IPO page) pick the market after hydration.
-  useEffect(() => {
-    const wanted = new URLSearchParams(window.location.search).get("market");
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- one read of the URL on mount
-    if (wanted && V3_MARKETS.some((market) => market.symbol === wanted)) setMarketSymbol(wanted);
   }, []);
   // The live V3 market (its core, snapshot and price source) drives every read and write.
   const v3 = v3MarketFor(marketSymbol);
@@ -148,14 +156,15 @@ export function TradingTerminal() {
   const book = useV3Book(marketApiUrl, v3.core || undefined, executionStatus ? executionStatus.marketDelegated : true);
   // While delegated, the rollup is the source of truth for seats (the L1 copy
   // is frozen), so resolve the wallet's seat from the live bundle.
-  const fromRollup = !!executionStatus?.marketDelegated && !!trader && book.updatedAt !== null;
+  const rollupActive = executionStatus?.marketDelegated ?? (book.updatedAt !== null && book.domain === "er");
+  const fromRollup = rollupActive && !!trader && book.updatedAt !== null;
   const rollupSeat = useMemo(() => (fromRollup ? seatFromPositions(book.positions, trader!) : null), [fromRollup, book.positions, trader]);
   const seatIndex = fromRollup ? rollupSeat?.index ?? firstFreeSeat(book.positions) : l1SeatIndex;
   const seat = fromRollup ? rollupSeat?.view ?? null : position.seat;
   // A signed-in trader whose seat has not been read yet (never "no seat" while unknown).
-  const seatLoading = !!trader && (executionStatus === null || (executionStatus.marketDelegated && book.updatedAt === null));
+  const seatLoading = !!trader && (executionStatus === null && book.updatedAt === null || (rollupActive && book.updatedAt === null));
   // Nothing to trade with yet (no seat, or an empty one): the ticket's button starts trading instead of placing an order.
-  const needsFunding = auth.authenticated && !!executionStatus?.marketDelegated && !seatLoading
+  const needsFunding = auth.authenticated && rollupActive && !seatLoading
     && (!seat || (seat.availableCollateral === 0n && seat.basePosition === 0n && seat.openOrderCount === 0));
   const walletSeatView = useMemo(() => (fromRollup && tradingKey.signer && auth.walletAddress ? seatFromPositions(book.positions, auth.walletAddress) : null), [fromRollup, tradingKey.signer, auth.walletAddress, book.positions]);
   const walletSeat = walletSeatView ? { index: walletSeatView.index, available: walletSeatView.view.availableCollateral } : null;
@@ -451,19 +460,32 @@ export function TradingTerminal() {
     if (seatLoading) { setNotice("Loading your margin account — try again in a moment."); return; }
     const hasSeat = !!seat || seatCreatedFor.current === trader;
     try {
-      let usdc = await readRpc.tokenBalance(walletCollateral).catch(() => 0n);
-      const sol = await readRpc.solBalance(trader).catch(() => 0n);
+      const readUsdc = () => readRpc.tokenBalance(walletCollateral).catch((error: unknown) => {
+        if (error instanceof RpcFailure && error.code === 429) throw error;
+        return 0n;
+      });
+      let usdc = await readUsdc();
+      const sol = await readRpc.solBalance(trader);
       if (usdc < amount || sol < 10_000_000n) {
         setOnboarding("1/3 · Getting test USDC and SOL…");
         setNotice("1/3 · Funding your trading account with test USDC and SOL…");
-        const message = await claimTestFunds(traderAuth, trader);
+        const claim = await requestTestFunds(traderAuth, trader);
         refreshWalletBalances();
+        if (!claim.ok) {
+          usdc = await readUsdc();
+          const currentSol = await readRpc.solBalance(trader);
+          if (usdc < amount || currentSol < 10_000_000n) { setNotice(claim.message); return; }
+        }
         for (let attempt = 0; attempt < 30 && usdc < amount; attempt += 1) {
           await new Promise((resolve) => setTimeout(resolve, 1_000));
-          usdc = await readRpc.tokenBalance(walletCollateral).catch(() => 0n);
+          usdc = await readUsdc();
         }
         refreshWalletBalances();
-        if (usdc < amount) { setNotice(message); return; }
+        if (usdc < amount) { setNotice("Test USDC has not reached your trading account yet. Check the wallet balance and try again."); return; }
+        if ((await readRpc.solBalance(trader)) < 10_000_000n) {
+          setNotice("Your trading account needs a little Devnet SOL for fees. Top it up and try again.");
+          return;
+        }
       }
       if (!hasSeat) {
         setOnboarding("2/3 · Opening margin account…");
@@ -473,6 +495,10 @@ export function TradingTerminal() {
       setOnboarding("3/3 · Depositing into the rollup…");
       const accounts = resolveCustodyAccounts(trader, marketAddress, marketConfig, seatIndex, v3);
       if (accounts) await deposit.submitDeposit(accounts, amount, executionStatus?.marketDelegated ?? false);
+    } catch (error) {
+      setNotice(error instanceof RpcFailure && error.code === 429
+        ? "Solana Devnet RPC is rate limited. Wait a minute and try again."
+        : error instanceof Error ? error.message : String(error));
     } finally {
       setOnboarding(null);
       refreshWalletBalances();
@@ -496,7 +522,7 @@ export function TradingTerminal() {
     ?? (withdraw.pending || walletWithdraw.pending ? "Withdrawing…" : null)
     ?? (orderPending || sessionOrder.pending ? "Placing your order in the rollup…" : null)
     ?? (cancelPending ? "Cancelling in the rollup…" : null);
-  const blocker = busy && !orderPending ? busy : needsFunding ? null : marketClosed && auth.authenticated ? "Market closed — US session only" : !auth.authenticated
+  const blocker = busy && !orderPending ? busy : needsFunding ? null : auth.authenticated && (!marketClock?.oracle || snapshotStale) ? "Waiting for a verified price" : marketClosed && auth.authenticated ? "Market closed — US session only" : !auth.authenticated
     ? null
     : !sized
       ? ticket.kind === "limit" && !(Number(ticket.price) > 0) ? "Enter a limit price" : markPrice === null ? "Waiting for the verified price" : "Enter an amount"
@@ -530,10 +556,10 @@ export function TradingTerminal() {
 
   return (
     <div className="terminal flex min-h-screen flex-col xl:h-screen xl:overflow-hidden">
-      <TopBar active="trade" auth={auth} />
+      <TopBar active="trade" auth={auth} onTradeClick={() => setMarketSymbol(DEFAULT_TRADE_SYMBOL)} />
       <MarketBar
         marketSymbol={marketSymbol}
-        onMarketSymbolChange={setMarketSymbol}
+        onMarketSymbolChange={selectMarket}
         marketApiUrl={candlesApiUrl}
         live={live}
         price={indexPrice}
@@ -544,7 +570,7 @@ export function TradingTerminal() {
       <main id="main-content" tabIndex={-1} className="flex min-h-0 flex-1 flex-col outline-none xl:flex-row">
         {/* Chart + activity. Owns the slack at xl; fixed height while stacked. */}
         <div className="tk-col order-2 flex min-h-0 min-w-0 flex-col xl:order-none xl:flex-1">
-          <div className="h-[560px] shrink-0 overflow-hidden xl:h-auto xl:min-h-0 xl:flex-1">
+          <div className="h-[420px] shrink-0 overflow-hidden sm:h-[560px] xl:h-auto xl:min-h-0 xl:flex-1">
             <MarketPanel marketSymbol={marketSymbol} marketApiUrl={candlesApiUrl} live={live} depth={book} />
           </div>
           <ActivityDrawer
@@ -574,7 +600,7 @@ export function TradingTerminal() {
         </div>
 
         {/* Depth. */}
-        <div className="tk-col order-3 flex h-[560px] w-full shrink-0 flex-col xl:order-none xl:h-auto xl:w-[320px]">
+        <div className="tk-col order-3 flex h-[420px] w-full shrink-0 flex-col sm:h-[560px] xl:order-none xl:h-auto xl:w-[320px]">
           <OrderBookDisplay book={book} symbol={marketSymbol} marketClosed={marketClosed} onPickPrice={pickBookPrice} own={ownLevels} />
         </div>
 

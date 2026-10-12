@@ -7,10 +7,11 @@ const LOW_SOL_LAMPORTS = 10_000_000n;
 
 /** Where the account's dollars sit: wallet, trading account and vault seat. */
 export function balanceParts(summary: AccountSummary) {
+  const margin = Object.values(summary.seats ?? {}).reduce((total, seat) => total + (seat ? seat.available + seat.reserved : 0n), 0n);
   return [
     { id: "wallet", label: "Wallet", value: summary.wallet?.usdc ?? 0n, color: "var(--t-link)" },
     { id: "trading", label: "Trading account", value: summary.trading?.usdc ?? 0n, color: "var(--t-warn)" },
-    { id: "vault", label: "In vault", value: summary.seat ? summary.seat.available + summary.seat.reserved : 0n, color: "var(--t-up)" },
+    { id: "vault", label: "In markets", value: margin, color: "var(--t-up)" },
   ];
 }
 
@@ -22,7 +23,7 @@ export function BalanceHero({ summary, size = "md" }: { summary: AccountSummary;
     <div>
       <div className="text-[11px] font-medium uppercase tracking-[0.06em] text-[var(--t-text-3)]">Total balance</div>
       <div className={`tnum mt-1 font-semibold tracking-tight text-[var(--t-text)] ${size === "lg" ? "text-[34px]" : "text-[28px]"}`}>
-        {summary.totalUsdc === null ? <Skeleton className="h-[30px] w-36" /> : formatUsdUnits(summary.totalUsdc)}
+        {summary.totalUsdc === null ? summary.seatUnavailable ? "—" : <Skeleton className="h-[30px] w-36" /> : formatUsdUnits(summary.totalUsdc)}
       </div>
       <div className="mt-3 flex h-2 overflow-hidden rounded-full bg-[var(--t-surface-3)]" role="img" aria-label={parts.map((p) => `${p.label} ${formatUsdUnits(p.value)}`).join(", ")}>
         {total > 0n ? parts.map((part) => (part.value > 0n ? <div key={part.id} style={{ width: `${Number((part.value * 10_000n) / total) / 100}%`, background: part.color }} /> : null)) : null}
@@ -73,17 +74,17 @@ export function AccountOverview({ summary }: { summary: AccountSummary }) {
         </div>
       ) : null}
       <div>
-        <h3 className="mb-2 text-[12px] font-semibold text-[var(--t-text-2)]">Vault · TSLA-PERP</h3>
-        {summary.seat === undefined && summary.seatUnavailable ? (
+        <h3 className="mb-2 text-[12px] font-semibold text-[var(--t-text-2)]">Margin accounts · all markets</h3>
+        {summary.seats === undefined && summary.seatUnavailable ? (
           <p className="rounded-[8px] border border-[var(--t-border)] px-3 py-3 text-[12px] text-[var(--t-text-2)]">Couldn&apos;t read the vault right now. Retrying every few seconds.</p>
-        ) : summary.seat === undefined ? (
+        ) : summary.seats === undefined ? (
           <div className="grid grid-cols-2 gap-2"><StatTile label="Available" value="" loading /><StatTile label="In orders" value="" loading /></div>
-        ) : summary.seat === null ? (
+        ) : Object.values(summary.seats).every((seat) => !seat) ? (
           <p className="rounded-[8px] border border-dashed border-[var(--t-border-strong)] px-3 py-3 text-[12px] leading-relaxed text-[var(--t-text-2)]">No margin account yet. Press <b className="text-[var(--t-text)]">Start trading</b> on the Trade page: it funds your trading account, opens a margin account and deposits in one go.</p>
         ) : (
           <div className="grid grid-cols-2 gap-2">
-            <StatTile label="Available" value={formatUsdUnits(summary.seat.available)} hint="Free to trade" tone="up" />
-            <StatTile label="In orders" value={formatUsdUnits(summary.seat.reserved)} hint={`${summary.seat.openOrderCount} open order${summary.seat.openOrderCount === 1 ? "" : "s"}`} />
+            <StatTile label="Available" value={formatUsdUnits(Object.values(summary.seats).reduce((total, seat) => total + (seat?.available ?? 0n), 0n))} hint="Free to trade" tone="up" />
+            <StatTile label="In orders" value={formatUsdUnits(Object.values(summary.seats).reduce((total, seat) => total + (seat?.reserved ?? 0n), 0n))} hint="Across all markets" />
           </div>
         )}
       </div>

@@ -82,7 +82,7 @@ const MIN_RENDER_GAP_MS = 50;
  * trade pushes all 26 bundle accounts (~12 KB each, mostly empty slots), which
  * as plain base64 was ~2 MB/s per open terminal and fell behind on the main
  * thread; compressed it is ~1 KB a push. */
-function decodeAccount(data: string, encoding: string): Uint8Array {
+export function decodeAccount(data: string, encoding: string): Uint8Array {
   const bytes = decodeBase64(data);
   return encoding === "base64+zstd" ? zstdDecompress(bytes) : bytes;
 }

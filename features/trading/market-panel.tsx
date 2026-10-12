@@ -133,11 +133,11 @@ export function MarketBar({
       <div role="group" aria-label="Market stats" tabIndex={0} className="flex min-w-0 items-center gap-6 overflow-x-auto [scrollbar-width:none]">
         <Stat label="24h High" value={day ? day.high.toFixed(2) : "—"} />
         <Stat label="24h Low" value={day ? day.low.toFixed(2) : "—"} />
-        <Stat label="Session" value={oracle ? (oracle.tradingOpen ? "Open" : "Closed") : "—"} tone={oracle ? (oracle.tradingOpen ? "up" : "down") : undefined} />
+        <Stat label="Session" value={stale ? "Price unavailable" : oracle ? (oracle.tradingOpen ? "Open" : "Closed") : "—"} tone={stale ? "down" : oracle ? (oracle.tradingOpen ? "up" : "down") : undefined} />
       </div>
       {stale ? (
         <div role="status" className="ml-auto hidden shrink-0 rounded border sm:block border-[var(--t-warn)]/40 bg-[var(--t-warn)]/10 px-2.5 py-1 text-[11px] font-medium text-[var(--t-warn)]">
-          On-chain price is {oracleAgeSeconds > 3600 ? `${Math.floor(oracleAgeSeconds / 3600)}h` : oracleAgeSeconds > 60 ? `${Math.floor(oracleAgeSeconds / 60)}m` : `${oracleAgeSeconds}s`} old — refreshed when you trade
+          On-chain price is {oracleAgeSeconds > 3600 ? `${Math.floor(oracleAgeSeconds / 3600)}h` : oracleAgeSeconds > 60 ? `${Math.floor(oracleAgeSeconds / 60)}m` : `${oracleAgeSeconds}s`} old — waiting for a verified update
         </div>
       ) : null}
     </section>

@@ -10,8 +10,8 @@ import { marketPair, V3_MARKETS } from "@/lib/v3-markets";
 import { MarketIcon } from "@/components/ui/market-icon";
 import { useTradingKey } from "@/features/wallet/use-trading-key";
 import { tradingKeySigner } from "@/lib/trading-key";
-import { claimTestFunds } from "@/lib/faucet-client";
-import { SolanaRpcTransport } from "@/lib/rpc-transport";
+import { requestTestFunds } from "@/lib/faucet-client";
+import { RpcFailure, SolanaRpcTransport } from "@/lib/rpc-transport";
 import { deriveCollateralTokenAccount } from "@/lib/token-accounts";
 import deployment from "@/config/equinox-deployment.json";
 import { rollupExplorer } from "@/features/trading/er-tx-panel";
@@ -176,7 +176,7 @@ export function PreIpoView() {
               </tbody>
             </table>
           </div>
-          <p className="mt-2.5 text-[11.5px] text-[var(--t-text-3)]">Tokens trade on Solana mainnet (Swap opens Jupiter). Perps use devnet test USDC. The mark is PreStocks&apos; reference price for the company.</p>
+          <p className="mt-2.5 text-[11.5px] text-[var(--t-text-3)]">PreStocks mark and on-chain token prices are shown side by side.</p>
         </section>
       </main>
     </div>
@@ -221,18 +221,24 @@ function BasketPanel() {
       const legs = await planBasket(basket, notional, leverage, rpc);
       const needed = BigInt(Math.ceil(legs.reduce((sum, leg) => sum + leg.marginUsd, 0) * 1e6));
       const ata = deriveCollateralTokenAccount(signer.address!, deployment.collateralMint, "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
-      const balance = () => rpc.tokenBalance(String(ata)).catch(() => 0n);
+      const balance = () => rpc.tokenBalance(String(ata)).catch((error: unknown) => {
+        if (error instanceof RpcFailure && error.code === 429) throw error;
+        return 0n;
+      });
       if ((await balance()) < needed) {
         setProgress("Funding your trading account with test USDC…");
-        const message = await claimTestFunds({ privyAuthenticated: false, getAccessToken: async () => null, signMessage: (_a: string, bytes: Uint8Array) => signer.signMessage(bytes) }, signer.address!);
+        const claim = await requestTestFunds({ privyAuthenticated: false, getAccessToken: async () => null, signMessage: (_a: string, bytes: Uint8Array) => signer.signMessage(bytes) }, signer.address!);
+        if (!claim.ok && (await balance()) < needed) throw new Error(claim.message);
         // Wait until the faucet's USDC is visible before any leg deposits it.
         for (let attempt = 0; attempt < 30 && (await balance()) < needed; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 1_000));
-        if ((await balance()) < needed) throw new Error(`${message} This basket needs $${(Number(needed) / 1e6).toFixed(0)} margin: lower the size or raise the leverage.`);
+        if ((await balance()) < needed) throw new Error(`Test USDC has not reached your trading account yet. This basket needs $${(Number(needed) / 1e6).toFixed(0)} margin: lower the size or raise the leverage.`);
       }
       const filled = await tradeBasket(legs, side, leverage, signer, setProgress);
       setResult({ ok: true, legs: filled, ms: Math.round(performance.now() - started) });
     } catch (error) {
-      setResult({ ok: false, legs: [], message: error instanceof Error ? error.message : String(error) });
+      setResult({ ok: false, legs: [], message: error instanceof RpcFailure && error.code === 429
+        ? "Solana Devnet RPC is rate limited. Wait a minute and try again."
+        : error instanceof Error ? error.message : String(error) });
     } finally {
       setProgress(null);
     }

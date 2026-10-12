@@ -256,7 +256,7 @@ const Row = memo(function Row({
   const totalText = fmtAmt(total);
   const priceRef = useNumericTint(price, priceText);
 
-  const rowRef = useRef<HTMLDivElement>(null);
+  const rowRef = useRef<HTMLButtonElement>(null);
   const waveRef = useRef<HTMLSpanElement>(null);
   const previous = useRef({ price, size });
   const runningWave = useRef<Animation[]>([]);
@@ -289,10 +289,13 @@ const Row = memo(function Row({
     ].filter((animation): animation is Animation => animation !== undefined);
   }, [price, size, slot]);
   return (
-    <div
+    <button
+      type="button"
       ref={rowRef}
-      className={`relative grid h-5 shrink-0 grid-cols-3 items-center border-b border-[var(--t-border)]/40 px-3 py-0.5 text-[12px] leading-tight last:border-b-0 ${onPick ? "cursor-pointer hover:bg-[var(--t-surface-3)]" : ""}`}
+      className={`relative grid h-8 w-full shrink-0 grid-cols-3 items-center border-b border-[var(--t-border)]/40 px-3 py-0.5 text-left text-[12px] leading-tight last:border-b-0 sm:h-5 ${onPick ? "cursor-pointer hover:bg-[var(--t-surface-3)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--t-up)]" : ""}`}
       onClick={onPick ? () => onPick(price) : undefined}
+      disabled={!onPick}
+      aria-label={`${side === "bid" ? "Bid" : "Ask"} ${priceText} dollars, ${sizeText} shares${onPick ? "; use this limit price" : ""}`}
       title={mine ? "Your order rests at this price" : onPick ? "Use this price" : undefined}
       data-mine={mine || undefined}
     >
@@ -316,7 +319,7 @@ const Row = memo(function Row({
       </span>
       <span className="relative text-right tnum text-[var(--t-text)]">{sizeText}</span>
       <span className="relative text-right tnum text-[var(--t-text-2)]">{totalText}</span>
-    </div>
+    </button>
   );
 });
 
