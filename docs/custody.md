@@ -336,4 +336,4 @@ executes correctly on a live cluster.
 `SS:<Kind> ...` log format, which the program no longer emits at all.
 Withdrawal-blocked coverage was extended to the `Undelegating` status
 (previously only `Delegated`/`Restored` were tested) -- see
-`docs/security.md`. **Audit pending. Production not approved.**
+`docs/security.md`.

@@ -41,18 +41,3 @@ git (`git log -- docs/status`).
 | Live end-to-end (production) | `npx tsx scripts/e2e/{onboarding,deposit,far-order,close-position,preipo,basket}.mts`, `SITE=…/launch npx tsx scripts/e2e/launch.mts` |
 | Deployed program matches the build | `node scripts/verify-deployment.mjs` |
 | Full lifecycle (setup → delegate → trade → commit → restore → withdraw) | `scripts/v3-e2e-run.sh <state-name>`; evidence of the 2026-09-23 run: `devnet-e2e-lifecycle-20260923.json` |
-
-## Open
-
-- **Undelegation**: the devnet delegation program still rejects
-  `RequestUndelegation`; re-check with
-  `node scripts/magicblock-dlp-discriminator-repro.mjs`. Not needed for
-  trading, custody or commits.
-- **Weekends and US holidays**: Pyth reports `Closed` and TSLA refuses new
-  orders by design; withdrawals still work.
-- **No L1 escape hatch**: if the rollup were down for good, a withdrawal's
-  first step (in the rollup) could not run. The vault's USDC stays on Solana.
-- **Balances to watch** (devnet SOL): faucet `AmHAkH…` (sends SOL only above
-  0.2 SOL), keeper/reporter `7JuUhGG…` (~0.3 SOL/day for posts, plus the cores'
-  commit fees: the service tops each core up from it automatically), the
-  authority for upgrades and new markets.

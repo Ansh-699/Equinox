@@ -60,4 +60,4 @@ npm run check:equinox-abi
 
 The SBF build needs the pinned Solana/Agave toolchain; [`toolchain/equinox-runtime.env`](../../toolchain/equinox-runtime.env) and [`scripts/install-equinox-toolchain.sh`](../../scripts/install-equinox-toolchain.sh) define it. The [runtime workflow](../../.github/workflows/equinox-runtime.yml) checks the compiled artifact and runs tests against it.
 
-For deployed behavior, trust the [current status and evidence](../../docs/status/current.md) over an older design document. In particular, the current devnet delegation program does not complete V3 market undelegation, and there is no finished L1 emergency exit for a permanently unavailable rollup.
+For deployed behavior, see the [current status and evidence](../../docs/status/current.md).

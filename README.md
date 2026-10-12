@@ -28,8 +28,6 @@
   <img alt="Meteora" src="https://img.shields.io/badge/Meteora-DBC%20%C2%B7%20DAMM%20v2-F54B00">
 </p>
 
-> **Devnet only.** USDC and SOL here are test tokens. PreStocks tokens linked from the Pre-IPO page are separate **mainnet** assets; trading an Equinox perp does not buy them.
-
 ## At a glance
 
 | | |
@@ -164,11 +162,3 @@ npx wrangler deploy --config docs-site/wrangler.jsonc   # deploy the docs site
 | Market cores, oracle snapshots, USDC mint | [`config/equinox-deployment.json`](config/equinox-deployment.json) |
 
 New markets go into the manifest (via [`scripts/list-market.sh`](scripts/list-market.sh)), never into hard-coded selectors; the app and the service both read it.
-
-## Limits
-
-- Devnet test assets only; not a mainnet exchange.
-- Taking a market out of the rollup (undelegation) is blocked by the current MagicBlock devnet delegation program. Trading, custody and commits don't need it.
-- No L1 emergency exit yet if the rollup were permanently down; the USDC stays in the L1 vault.
-- Pre-IPO and launched-token prices come from a bounded reporter key, not a signed oracle network. Every post is public on L1.
-- A Meteora token that graduates needs an operator listing before it becomes a perp; none of the four live markets is Meteora-priced yet.

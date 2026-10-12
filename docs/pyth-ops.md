@@ -170,7 +170,7 @@ TradingStatus::Open + PreMarket / PostMarket / OverNight
 
 Until the payload expansion (§3) verifies and ships `tradingStatus`, the
 on-chain program cannot distinguish halt/corporate-action from a routine
-closed session — this is a known capability gap, not a solved feature.
+closed session.
 
 ## 5b. Equity-market calendar limitations (operational handling still required)
 

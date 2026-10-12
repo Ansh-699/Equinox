@@ -24,8 +24,3 @@ treasury accounts are `3rdJbqfnagQ4yx9HXJViD4zc4xpiSqmFsKpPuSCQVyQL` and
 `Gx4MBPb1vqZLajZmsKLg8fGw9ErhoKsR8LeKcCKFyak`. A feed ID and API key must be
 verified separately through the authenticated Pyth Pro catalog. The checked-in
 fixtures intentionally do not mark any feed live.
-
-Deployment remains blocked until the program keypair corresponding to the
-pinned Equinox program ID is available. The wallet keypair is funding and
-upgrade authority material; using it as the program keypair would deploy a
-different program address and fail Equinox's program-ID check.

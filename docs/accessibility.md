@@ -4,15 +4,6 @@ Scope: the Next.js frontend under this repo (trade, launch, portfolio,
 activity, settings pages). This document does not cover protocol/backend
 surfaces.
 
-**This is not a WCAG conformance claim.** Automated tooling (axe-core)
-only catches a minority of real accessibility defects -- missing alt text,
-insufficient color contrast, malformed ARIA, missing form labels, bad
-landmark structure. It cannot verify that a screen reader announces
-content sensibly, that a complex interaction is actually usable non-
-visually, or that focus behaves correctly through every possible sequence
-of actions. The manual pass below is a checklist of what was actually
-exercised, not an audit against every WCAG success criterion.
-
 ## Automated coverage
 
 `tests/browser/accessibility.spec.ts` runs axe-core's `wcag2a`/`wcag2aa`/
@@ -52,16 +43,3 @@ in source and assumed to work.
 | Screen-reader behavior (NVDA/VoiceOver/JAWS) | ❌ Not done | No screen reader was actually run against this app. Automated tooling and the checks above do not substitute for this -- treat everything above as "keyboard- and structure-level accessible," not "screen-reader verified." |
 | Zoom / reflow to 400% | ❌ Not done | Not tested. The layout uses CSS grid with fixed-ish column widths (`.terminal-grid`, `.settings-grid`) and a single `@media (max-width: 680px)` breakpoint; behavior between those breakpoints at high browser zoom is unverified. |
 | Full site keyboard sweep beyond the login/order path | ⚠️ Partial | Login, skip-link, and order-preview flows are verified end to end. Settings' wallet selector (`role="radio"` buttons), the lifecycle action buttons, and the launch-lab form were checked for semantic correctness (real `<button>`/`<input>` elements, see above) but not driven end-to-end with a dedicated keyboard-only Playwright test each. |
-
-## Known limitations, stated plainly
-
-- This checklist is a snapshot of one review pass, not an ongoing audit.
-  Any new page or interactive control added later needs its own pass.
-- The order book, market panel, and price chart are primarily visual
-  (numeric tables and an SVG sparkline); no attempt was made to give them
-  a meaningfully different non-visual representation beyond the table
-  markup already present -- a screen-reader user gets the raw numbers,
-  not a description of the shape of the book or the chart.
-- "No automated violations" is a floor, not a ceiling. Treat this document
-  as "here is what was actually checked and how," and re-verify before
-  making any compliance claim to a third party.

@@ -6,6 +6,12 @@
   <title>Equinox Docs</title>
   <meta name="description" content="How Equinox works end to end: perpetual futures on tokenized assets, matched in a MagicBlock Ephemeral Rollup with custody on Solana." />
   <link rel="icon" href="/equinox.png" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Equinox Docs: how it works, end to end" />
+  <meta property="og:description" content="Architecture and every flow of Equinox, with diagrams: MagicBlock rollup, Solana custody, Pyth and PreStocks prices, Meteora launches." />
+  <meta property="og:image" content="https://equinox.ansht.workers.dev/og.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:image" content="https://equinox.ansht.workers.dev/og.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Poppins:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -55,7 +61,7 @@
       <h4>Reference</h4>
       <a href="#latency">Latency budget</a>
       <a href="#opcodes">Instructions</a>
-      <a href="#trust">Trust model and limits</a>
+      <a href="#trust">Trust model</a>
     </nav>
 
     <main>
@@ -117,7 +123,7 @@ flowchart TB
     API --- D1
   end
   subgraph AZ["Azure VM, Singapore"]
-    SVC["stockstream-mm<br/>Rust, tokio, systemd"]
+    SVC["Equinox market maker<br/>Rust, tokio, systemd"]
     CADDY["Caddy, HTTPS<br/>/v1/mm/status, stream, candles"]
     CADDY --- SVC
   end
@@ -206,7 +212,6 @@ sequenceDiagram
             </script>
             <figcaption><b>First session.</b> Signatures are deterministic, so the trading key can be re-derived instead of backed up.</figcaption>
           </figure>
-          <div class="callout"><p>Devnet trade-off: the trading key is kept in the browser's local storage. A production deployment would use embedded wallets or scoped session keys. Withdrawals always pay out to the connected wallet, never to the trading key.</p></div>
         </section>
 
         <!-- 5 -->
@@ -436,7 +441,7 @@ flowchart LR
             <div class="diagram"></div>
             <script type="text/plain" class="mermaid-src">
 flowchart TB
-  subgraph SVC["stockstream-mm, per market"]
+  subgraph SVC["Equinox market maker, per market"]
     TICK(["tick, every 400 ms"]) --> READ["read book pages and seats<br/>one getMultipleAccounts"]
     READ --> PLAN["plan 20 post-only rungs a side<br/>1 bp to ~1% from mid"]
     PLAN --> ACT["replace (33) in place<br/>side moving away goes first"]
@@ -531,7 +536,7 @@ flowchart LR
 
         <!-- 18 -->
         <section id="trust">
-          <h2><span class="num">18</span>Trust model and limits</h2>
+          <h2><span class="num">18</span>Trust model</h2>
           <figure>
             <div class="diagram"></div>
             <script type="text/plain" class="mermaid-src">
@@ -546,13 +551,6 @@ flowchart LR
             </script>
             <figcaption><b>Who can do what.</b> Every role is bounded by the program, and every post is public on L1.</figcaption>
           </figure>
-          <h3>Known limits</h3>
-          <ul>
-            <li>Taking a market out of the rollup (undelegation) is blocked by the deployed MagicBlock delegation program; it isn't needed for trading, custody or commits.</li>
-            <li>No L1 escape hatch yet if the rollup were permanently down. Funds stay in the L1 vault.</li>
-            <li>Pre-IPO and launched-token prices come from a bounded reporter key, not a signed oracle network.</li>
-            <li>Devnet only: test USDC, not real funds.</li>
-          </ul>
         </section>
 
         <footer>Equinox · Solana devnet · <a href="https://github.com/Ansh-699/Equinox" target="_blank" rel="noopener noreferrer">Source on GitHub</a> · <a href="https://equinox.ansht.workers.dev">Open the app</a></footer>

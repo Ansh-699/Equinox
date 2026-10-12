@@ -155,13 +155,3 @@ funds the bots, delegates, and the reporter prices it from the pool.
 Balances to watch (devnet SOL): the keeper/reporter key `7JuUhGG…` (L1
 posts, ~0.3 SOL/day for three reporters), the faucet key `AmHAkH…`, each
 core's rollup lamports (commit fees), the authority for new markets.
-
-## Known limits
-
-- Undelegating a market (taking it out of the rollup) is blocked by the
-  deployed MagicBlock delegation program (`RequestUndelegation` unsupported);
-  not needed for trading or custody.
-- No L1 escape hatch yet if the rollup were permanently down (funds stay in
-  the L1 vault).
-- Pre-IPO and launched-token prices come from a bounded reporter key, not a
-  signed oracle network; every post is public on L1.

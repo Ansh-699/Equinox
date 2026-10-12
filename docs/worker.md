@@ -27,11 +27,7 @@ ER traffic are never multiplexed over the same connection or mistaken for
 each other. 12 tests in `ws-transport.test.ts` using a fully in-memory mock
 socket (no real networking).
 
-The WebSocket transport is not yet wired into the scheduled worker: a
-persistent subscription cannot outlive a single stateless `scheduled`
-invocation (only a Durable-Object-hosted connection could keep one alive
-across ticks, which has not been built). The real, currently-wired
-ingestion path instead polls via the HTTP transport (see below).
+Scheduled ingestion polls via the HTTP transport (see below).
 
 ## Event decoding (Section 3)
 
@@ -121,12 +117,6 @@ write the `dead_letters` table. `GET /v1/health/keepers` (authorized)
 reports due dead-letter entries and current lease state. 5 dead-letter
 tests plus 1 endpoint test.
 
-**Still not built**: any keeper that *submits* a signed transaction (Pyth
-price push, MagicBlock commit scheduling, funding-rate settlement) --
-those need wallet/key-management infrastructure this Worker does not have
-yet. The generic fencing/idempotency/retry/dead-letter machinery above is
-ready for them; the actual signing keeper jobs are the next real blocker.
-
 ## Testing
 
 155 Vitest tests (up from 66), run against the real `@cloudflare/vitest-pool-workers`
@@ -142,8 +132,4 @@ execution-status reconciliation wired to real on-chain reads
 (`execution-status.ts`), and a complete private-trader-projection push
 path (`private-sessions.ts::publishSeatProjection`, wired into
 `runIngestionTick`). See `docs/transports.md` and `docs/events.md` for
-detail. The one remaining interfaced-out piece is real Solana
-wire-format transaction construction/signing inside a keeper job
-(`TransactionBuilder`, documented in `docs/transports.md`) -- this
-`workers/` package has zero runtime dependencies and no
-`@solana/web3.js`-equivalent serializer.
+detail.

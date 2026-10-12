@@ -6,22 +6,16 @@ distinct from reserved order margin. Funding and fees are separate ledger
 changes. Liquidation is rejected for healthy accounts and uses the configured
 maintenance threshold, with bankruptcy routed to insurance accounting.
 
-## Immediate-settlement PnL model (Priority 4 clarification)
+## Immediate-settlement PnL model
 
 `risk::apply_fill` and `risk::settle_funding` deduct trading fees and funding
 straight into `TraderSeat::realized_pnl` at the moment they're incurred; this
 program does not maintain separate deferred "pending fee" or "accrued
 funding" fields. `equity = available_collateral + realized_pnl +
 unrealized_pnl` (`risk::equity`) is the complete health/margin picture, but
-`available_collateral` alone is a trader's actual token claim against the
-vault: `realized_pnl`/`unrealized_pnl` are health bookkeeping, not a
-separate spendable balance. This is why `prepare_withdrawal` requires
-`available_collateral >= 0` as its own condition, independent of the
-margin/equity check -- documented behavior, not a bug: realized trading
-profit is never automatically converted into withdrawable collateral in the
-current model. See `docs/custody.md` for the full withdrawal-health formula
-and how protocol fees/insurance/reconciliation build on this model without
-introducing a second, parallel accounting scheme.
+`available_collateral` is the trader's token claim against the vault.
+See `docs/custody.md` for the withdrawal-health formula and how protocol
+fees, insurance, and reconciliation use this model.
 
 `risk::prepare_withdrawal` takes an explicit `withdrawal_buffer: i128`
 parameter (`risk::DEFAULT_WITHDRAWAL_BUFFER = 0`), added on top of the
@@ -35,7 +29,5 @@ header-stored value into this same call, not changing the formula.
 `MarginChanged`, and `PositionLiquidated` (plus a conditional
 `ProtocolFeesChanged`) for every liquidation, and `place_order_core`
 emits `FundingSettled` for the taker seat's own funding settlement (see
-`docs/events.md`). `BankruptcyRecorded`/`InsuranceApplied` remain
-unwired: no automatic bankruptcy-detection or insurance-backstop logic
-exists inside `liquidate` today, only the separate, manual
-`record_bad_debt`/`resolve_bad_debt` governance path.
+`docs/events.md`). Bad-debt accounting uses the `record_bad_debt` and
+`resolve_bad_debt` governance instructions.

@@ -1,6 +1,6 @@
 # Equinox event ABI
 
-Status: **program-side encoding/emission is unit tested and SBF compiled; not SBF-runtime or live verified.** Indexer-side decoding (TypeScript client SDK + Worker ingestion) is unit and Workers-runtime tested against golden vectors, not against a live cluster.
+Status: **program-side encoding/emission is unit tested and SBF compiled.** Indexer-side decoding (TypeScript client SDK + Worker ingestion) is unit and Workers-runtime tested against golden vectors.
 
 ## Wire format
 
@@ -46,21 +46,6 @@ Grouped by numeric band, matching `EventKind` in `events.rs`:
 ### Wired into production handlers (50 of 61)
 
 Every custody event (10/10); every registry/market-lifecycle event reachable given the instruction encoding (`ExchangeInitialized`, `StockInstrumentRegistered`, `StockInstrumentUpdated`, `StockInstrumentSuspended`, `PerpMarketCreated`, `MarketRiskUpdated`, `MarketPaused`, `MarketResumed`, `MarketCloseOnly`, `CorporateActionEntered`); the full order lifecycle (`OrderPlaced`, `OrderFilled`, `OrderPartiallyFilled`, `OrderCancelled`, `OrderReplaced`, `OrderExpired`, `InvalidOrderRemoved`, `CancelAllProgress`); seat lifecycle (`TraderSeatCreated`, `TraderSeatClosed`); risk (`PositionChanged`, `MarginChanged`, `FundingAccumulatorUpdated`, `FundingSettled` [taker-side only, see below], `LiquidationStarted`, `PositionLiquidated`); oracle (`OracleUpdated`, `MarketSessionChanged`); MagicBlock (`DelegationRequested`, `MarketDelegated`, `CommitRequested`, `CommitSequenceChanged`, `UndelegationRequested`, `RestorationPending`, `MarketRestored`); sessions (`TradingSessionAuthorized`, `TradingSessionLimitsUpdated`, `TradingSessionActionConsumed`, `TradingSessionRevoked`, `TradingSessionClosed`).
-
-`FundingAccumulatorUpdated`/`FundingSettled` scope note: `FundingSettled` is only wired for the *taker* seat inside `place_order_core`'s end-of-function safe zone. Maker-side funding settlement happens inside `plan_seat_results`' fill-matching loop; wiring it there was deliberately deferred this session to avoid a third sequence-reservation change in that already-once-buggy code path under time pressure.
-
-### Not reachable given current program logic (11 of 61)
-
-Documented explicitly in `events.rs`/`handlers.rs`/`magicblock.rs`, not silently missing:
-
-- **`SelfTradePrevented`** -- no self-trade-prevention logic exists in the matching engine (`book.rs`) at all.
-- **`OracleRejected`** -- every code path that would emit it returns a program error, which aborts the whole transaction; any indexer already discards a failed transaction's logs wholesale via `meta.err`, so a "rejected" event would always be filtered before an indexer could ever see it. Architecturally unwireable as a *committed* event under this design.
-- **`OracleStale` / `OracleRecovered`** -- no on-chain staleness-marking instruction exists; staleness detection today is purely a keeper-side/consumer-side check against `last_verified_oracle_timestamp`.
-- **`DelegationErrorState`** -- Solana transactions are atomic; a failed delegation-program CPI aborts the whole instruction with no partial state to persist an "error state" into.
-- **`ExchangeConfigUpdated`** -- no `UpdateExchangeConfig` instruction exists in this program.
-- **`CorporateActionResolved` / `MarketClosed`** -- `instruction.rs::decode` collapses `PAUSE_MARKET`/`CLOSE_MARKET` to the same mode value, and `RESUME_MARKET`/`RESOLVE_CORPORATE_ACTION` to the same mode value, before `transition_market` ever runs; the handler genuinely cannot distinguish which opcode was actually sent.
-- **`BankruptcyRecorded` / `InsuranceApplied`** -- no automatic bankruptcy-detection or insurance-fund-application logic exists inside `liquidate`; the only insurance-fund-touching instructions today are the manual, governance-triggered `record_bad_debt`/`resolve_bad_debt` (which already emit `BadDebtRecorded`/`BadDebtResolved`/`InsuranceFundChanged`, a related but distinct mechanism).
-- **`TradingStatusChanged`** -- redundant with `MarketSessionChanged` for every oracle-driven mode transition in this implementation; not duplicated.
 
 ## Payload shapes
 

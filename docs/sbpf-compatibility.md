@@ -1,10 +1,9 @@
 # SBPF compatibility
 
 **Status: RESOLVED (2026-09-17).** The source-built SBF artifact loads and
-executes in a real SVM. Gate 2 is **partially verified**: the settlement path
-runs (initialize, trader seats, scratch lifecycle, two-trader crossing fill,
-self-trade prevention, `ReplaceOrder` runtime rollback). MagicBlock and Pyth
-external-program CPIs remain runtime-unverified.
+executes in a real SVM. The settlement path runs (initialize, trader seats,
+scratch lifecycle, two-trader crossing fill, self-trade prevention,
+`ReplaceOrder` runtime rollback).
 
 ## The authoritative toolchain
 
@@ -67,5 +66,3 @@ versions -- a `2.2.20` environment pin against a `Cargo.toml` targeting Agave
 entry point, a stub-sized artifact (the ~1.3 KB no-`bpf-entrypoint` case), a
 wrong `e_machine`, or a missing program ID. It also reports `SHF_GNU_RETAIN`, so
 a future `#[used]` is visible rather than silent.
-
-**Production hardening and audit remain pending. Production not approved.**

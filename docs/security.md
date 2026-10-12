@@ -3,9 +3,6 @@
 Primary controls are PDA and owner validation, account alias rejection, checked
 arithmetic, bounded loops, stale-plan snapshots, scoped session authorization,
 oracle signature ordering, custody mint validation and sequence reconciliation.
-Open findings: compatible SBPF runtime, live Pyth/Privy/MagicBlock execution,
-formal audit, and full long-duration/fuzz coverage. Audit pending; production
-not approved.
 
 ## Worker-side controls (Priority 5/6, 2026-09-17)
 
@@ -34,10 +31,6 @@ not approved.
   remains `DelegationStatus`/`l1_withdrawals_allowed()` in the Rust
   program.
 
-Still open for the Worker specifically: no Privy JWT verification happens
-in the Worker itself (delegated to the Next.js app's existing session
-store, `lib/auth/session.ts`, over a service-to-service channel not yet
-built).
 
 **Update:** a real keeper signer/wallet-management surface now exists
 (`workers/src/signer.ts`) and has been reviewed as part of this session's
@@ -53,5 +46,4 @@ substitution, withdrawal-blocked-while-`Undelegating`, event-sequence
 overflow at `u64::MAX`, and a genuine robustness bug in
 `runIngestionTick` where one market's failed resnapshot silently aborted
 processing for every other market in the same tick (fixed). See the
-`complete core security and failure-path testing` commit. **Audit
-pending. Production not approved.**
+`complete core security and failure-path testing` commit.

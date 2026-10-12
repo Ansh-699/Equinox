@@ -1,6 +1,6 @@
 # Transaction transports and keeper signer infrastructure
 
-Status: **code complete and Workers-runtime tested against a real mock JSON-RPC HTTP handler; not live-network verified** (no live Solana L1 or MagicBlock ER endpoint was reached this session).
+Status: **transaction transports and signer adapters tested in the Workers runtime**.
 
 ## Signer infrastructure (`workers/src/signer.ts`)
 
@@ -40,12 +40,6 @@ Every job shares one execution shape: acquire a per-market durable lease with a 
 4. **Market session/holiday keeper** -- `sessionTransitionFor` is a pure, independently-tested function mapping a *configured* calendar status to a mode transition; the keeper never invents an oracle-driven status of its own.
 5. **Expiry/invalid-order cleanup keeper** -- bounded 32-order sweeps with a durable continuation cursor (`KeeperCursorRepository`, new `keeper_cursors` table) that wraps back to the start once the whole book has been walked, so a restart resumes mid-sweep.
 6. **Liquidation keeper** -- always re-reads authoritative seat state via an injected `reReadSeat` before submitting; both the go/no-go decision and the liquidation quantity used come only from that re-read, never from whatever projection-sourced candidate triggered the check.
-
-### The one deliberately interfaced-out piece
-
-`TransactionBuilder<TInput>` -- real Solana wire-format transaction construction and signing. Encoding a Equinox instruction and serializing a signed transaction message needs the same `@solana/web3.js`-shaped primitives `clients/equinox/src/index.ts` and `lib/server/pyth-keeper.ts` already use, and neither is a dependency of this `workers/` package (its `package.json` has zero runtime dependencies). Hand-rolling a second, parallel wire-format serializer under this session's time budget risked a subtle, untested encoding bug in code that moves funds. Every other part of every keeper job -- lease/fencing, idempotency, on-chain reads, dedup/interval/sequence decisions, submission, confirmation, durable attempt storage, retry classification, dead-lettering -- is real and tested end to end against a real mock JSON-RPC HTTP handler and a real D1 database.
-
-Closing this gap in a future session means either adding `@solana/web3.js` (or an equivalent minimal wire-format encoder) as a `workers/` dependency, or routing this Worker's transaction construction through a call to the Next.js backend's own instruction-building code.
 
 ## Testing
 

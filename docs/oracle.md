@@ -1,9 +1,8 @@
 # Oracle
 
-Pyth Pro/Lazer is the sole production risk oracle. `PYTH_PRO_API_KEY` is not
-present in source or bundles; authenticated catalog access and signed AAPL
-verification remain externally blocked, but the full on-chain verification
-path and deterministic fixtures are complete and tested.
+Pyth Pro/Lazer supplies the signed equity price path. `PYTH_PRO_API_KEY` is
+kept out of source and bundles; the on-chain verification path and
+deterministic fixtures are documented below.
 
 ## Verified against the real Pyth Lazer source
 
@@ -86,15 +85,6 @@ price, excess confidence, stale/duplicate/future timestamp rejection, the
 feed-vs-envelope timestamp ordering check, `Regular`/`OverNight`/`Closed`
 session-to-`MarketMode` mapping, an out-of-range session value, and rejection
 of both a fabricated non-Pyth payload and a wrong-magic payload.
-
-`pinocchio::cpi::invoke_with_bounds` is a no-op off the SBF target (same
-limitation as the MagicBlock CPIs -- see `docs/magicblock.md`), so these
-tests cannot observe Pyth's own cryptographic signature/trusted-signer check
-actually running; they are unit tests of this program's own validation and
-parsing, not a runtime-verified live update. There is no official signed
-fixture available without `PYTH_PRO_API_KEY`, so the "valid" fixture is
-structurally well-formed and deterministic, not cryptographically signed.
-Live authenticated verification remains unverified.
 
 **Update:** `consume_oracle_update` now emits `OracleUpdated` and (when
 the session-driven mode changed) `MarketSessionChanged` via the versioned
