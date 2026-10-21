@@ -13,7 +13,7 @@ use rand::Rng;
 use serde::Serialize;
 use tokio::sync::Mutex;
 
-use crate::quotes::{jitter, ladder, plan_quotes, QuoteAction, Side};
+use crate::quotes::{jitter, ladder, plan_quotes, taker_side, QuoteAction, Side};
 use crate::rpc::{Rpc, SignatureSocket};
 use crate::solana::{b58, set_compute_unit_limit, sign_transaction, Instruction, Keypair};
 use crate::v3::{cancel_order, place_order, replace_order, resting_orders, seat_positions, snapshot, Bundle, OrderInput};
@@ -382,13 +382,7 @@ impl Maker {
             let targets = ladder(index, inventory, &mut rng);
             let mut actions: Vec<_> = plan_quotes(&resting, &targets, index, now_s).into_iter().take(MAX_ACTIONS_PER_TICK).collect();
             jitter(&resting, &targets, &mut actions, now_s, JITTER_RUNGS_PER_TICK, MAX_ACTIONS_PER_TICK, &mut rng);
-            // Lean against the taker's inventory; otherwise a coin flip.
-            let side = match taker_position {
-                p if p > 30 => Side::Ask,
-                p if p < -30 => Side::Bid,
-                _ if rng.gen_bool(0.5) => Side::Bid,
-                _ => Side::Ask,
-            };
+            let side = taker_side(taker_position, index, rng.gen_bool(0.5));
             let take = (side, rng.gen_range(1..=2u64), rng.gen_range(TAKE_EVERY_MS.0..TAKE_EVERY_MS.1));
             (actions, take)
         };

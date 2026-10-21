@@ -14,6 +14,22 @@ impl Side {
     }
 }
 
+/// The taker leans against its inventory past this much exposure. Sized in
+/// dollars, not shares: each taker seat holds $5,000 and initial margin is 20%,
+/// so $10,000 stays well inside it at any price (30 ANTHROPIC shares did not).
+pub const TAKER_LEAN_NOTIONAL_USD: i128 = 10_000;
+
+/// The demo taker's side: flatten once over the lean threshold, else the coin flip.
+pub fn taker_side(position: i128, index: i64, coin_bid: bool) -> Side {
+    let notional = position.abs() * index as i128 / 100_000;
+    match position {
+        p if notional > TAKER_LEAN_NOTIONAL_USD && p > 0 => Side::Ask,
+        _ if notional > TAKER_LEAN_NOTIONAL_USD => Side::Bid,
+        _ if coin_bid => Side::Bid,
+        _ => Side::Ask,
+    }
+}
+
 /// Twenty rungs a side, enough to fill the book panel: 1 bp at the touch
 /// (≈2 bp spread), ≈1% deep.
 pub const LADDER_BPS: [i128; 20] = [1, 2, 3, 4, 6, 8, 11, 14, 18, 23, 28, 34, 40, 47, 55, 63, 72, 82, 93, 105];
@@ -156,6 +172,16 @@ mod tests {
 
     const INDEX: i64 = 38_000_000;
     const NOW: u64 = 1_000;
+
+    #[test]
+    fn taker_leans_by_dollars_not_shares() {
+        // 25 ANTHROPIC at $1,020 is $25,500 of exposure: must flatten, whatever the coin says.
+        assert_eq!(taker_side(25, 102_000_000, true), Side::Ask);
+        assert_eq!(taker_side(-25, 102_000_000, false), Side::Bid);
+        // 25 TSLA at $380 is $9,500: still under the threshold, so the coin decides.
+        assert_eq!(taker_side(25, INDEX, true), Side::Bid);
+        assert_eq!(taker_side(25, INDEX, false), Side::Ask);
+    }
 
     fn fixed() -> StepRng {
         StepRng::new(0, 0)
