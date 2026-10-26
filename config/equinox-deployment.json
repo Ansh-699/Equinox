@@ -53,20 +53,6 @@
       }
     },
     {
-      "symbol": "SPACEX-PERP",
-      "name": "SpaceX",
-      "kind": "pre-ipo",
-      "core": "EgTMHNhRkqZYtQoGvhej5WJhoYympbPKEffWeqfdJwWJ",
-      "oracleSnapshot": "2PqWAy9aPJaU9iKWMkVHGCrQmJjKL7SXWeeYx38WwMMp",
-      "lookupTable": "1pcJQtjNt9gsNwNJGPXS5YZEyv3MGtcC2FyeLLCk4Nq",
-      "oracle": {
-        "kind": "prestocks",
-        "token": "SPACEX",
-        "mint": "PreANxuXjsy2pvisWWMNB6YaJNzr7681wJJr2rHsfTh",
-        "feedId": 4000000002
-      }
-    },
-    {
       "symbol": "ANTHROPIC-PERP",
       "name": "Anthropic",
       "kind": "pre-ipo",

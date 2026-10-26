@@ -3,7 +3,7 @@
 Equinox is an on-chain exchange for equity-like assets on Solana:
 
 1. **Trade stocks**: TSLA-PERP, a perpetual priced by Pyth.
-2. **Trade pre-IPO companies**: OPENAI-, SPACEX- and ANTHROPIC-PERP, priced
+2. **Trade pre-IPO companies**: OPENAI- and ANTHROPIC-PERP, priced
    from PreStocks tokens, with one-click baskets.
 3. **Launch equity-like tokens** on Meteora Dynamic Bonding Curves priced in
    dollars; a launch that graduates to a DAMM v2 pool can be listed as a
@@ -71,7 +71,6 @@ Risk rules that matter for users:
 |---|---|---|
 | TSLA-PERP | Pyth `Equity.US.TSLA/USD` (feed 1435) | `9Vea9MVZ…` |
 | OPENAI-PERP | PreStocks OPENAI token (feed id 4000000001, reserved) | `2QtGrh5x…` |
-| SPACEX-PERP | PreStocks SPACEX token (4000000002) | `EgTMHNhR…` |
 | ANTHROPIC-PERP | PreStocks ANTHROPIC token (4000000003) | `5Z4DPNgm…` |
 
 All four share one exchange and one test-USDC mint, so a trader's USDC works

@@ -35,7 +35,7 @@
 | **Order executed in the rollup** | 2–15 ms (10 ms blocks) |
 | **Click to order visible in the book** (from India) | ~180 ms |
 | **Wallet prompts** | one, to derive the trading key; everything after signs silently |
-| **Markets** | TSLA-PERP (Pyth) · OPENAI-, SPACEX-, ANTHROPIC-PERP (PreStocks) |
+| **Markets** | TSLA-PERP (Pyth) · OPENAI-, ANTHROPIC-PERP (PreStocks) |
 | **Accounts delegated per market** | 27: core, 18 book pages, 4 seat shards, 4 event shards |
 | **Rollup cost** | ~90k CU per requote, ~53k CU per taker order |
 
@@ -44,7 +44,7 @@
 | | |
 |---|---|
 | **Trade** | Market and limit perp orders (IOC, post-only, reduce-only) on a live price-time order book, with isolated margin per market and one-click close. |
-| **Pre-IPO** | Trade OpenAI, SpaceX and Anthropic perps priced from PreStocks tokens, or buy a basket (e.g. *AI labs*) in one click. |
+| **Pre-IPO** | Trade OpenAI and Anthropic perps priced from PreStocks tokens, or buy a basket (e.g. *AI labs*) in one click. |
 | **Launch** | Create stock-themed tokens on Meteora Dynamic Bonding Curves priced in USDC, trade them on the Pulse board, and graduate them to DAMM v2. A graduated pool can price a new perp. |
 | **Account** | Connect a Solana wallet or Privy, claim test funds, deposit, watch positions and every rollup transaction live, and withdraw to your wallet. |
 

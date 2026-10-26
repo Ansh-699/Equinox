@@ -94,7 +94,10 @@
       "vars": {
         "ENVIRONMENT": "production",
         "PYTH_PRO_FEED_ID": "1435",
-        "PYTH_PRO_MIN_CHANNEL": "fixed_rate@50ms"
+        "PYTH_PRO_MIN_CHANNEL": "fixed_rate@50ms",
+        "MM_STATUS_URL": "https://api.ansht.in/v1/mm/status",
+        // Set to the real frontend origin(s) at cutover; no localhost in production.
+        "CORS_ALLOWED_ORIGINS": "https://equinox.ansht.workers.dev"
       },
       "secrets": {
         "required": ["INGESTION_TOKEN", "PRIVY_APP_ID", "PRIVY_APP_SECRET", "PYTH_PRO_API_KEY"]

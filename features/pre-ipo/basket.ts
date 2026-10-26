@@ -16,7 +16,6 @@ export interface Basket { id: string; name: string; blurb: string; legs: readonl
 /** Equal-weight baskets of pre-IPO perps. */
 export const BASKETS: readonly Basket[] = [
   { id: "ai", name: "AI labs", blurb: "OpenAI and Anthropic, half each.", legs: [{ symbol: "OPENAI-PERP", weight: 0.5 }, { symbol: "ANTHROPIC-PERP", weight: 0.5 }] },
-  { id: "frontier", name: "Frontier", blurb: "OpenAI, Anthropic and SpaceX, a third each.", legs: [{ symbol: "OPENAI-PERP", weight: 1 / 3 }, { symbol: "ANTHROPIC-PERP", weight: 1 / 3 }, { symbol: "SPACEX-PERP", weight: 1 / 3 }] },
 ];
 
 export interface LegResult { symbol: string; quantity: bigint; price: number; ms: number; signature?: string }

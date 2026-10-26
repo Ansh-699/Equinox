@@ -11,7 +11,7 @@ git (`git log -- docs/status`).
   (`deployedArtifactSha256`). Rollup cost per order: replace ~90k CU, taker
   order ~53k CU.
 - **Markets** (all delegated to MagicBlock `devnet-as`):
-  TSLA-PERP (Pyth), OPENAI-, SPACEX- and ANTHROPIC-PERP (PreStocks via the
+  TSLA-PERP (Pyth), OPENAI- and ANTHROPIC-PERP (PreStocks via the
   bounded reporter). Every market must also be registered with the market
   API (`scripts/preipo-market.sh` does it); otherwise the terminal cannot
   locate its book.
