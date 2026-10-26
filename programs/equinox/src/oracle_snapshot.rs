@@ -11,6 +11,10 @@ pub const ORACLE_SNAPSHOT_SIZE: usize = 128;
 pub const ORACLE_SNAPSHOT_DISCRIMINATOR: [u8; 8] = *b"STKORS03";
 pub const ORACLE_SNAPSHOT_VERSION: u16 = 3;
 
+/// A price is rejected when its confidence exceeds `price / MAX_CONFIDENCE_DIVISOR`
+/// (1%). One constant for every oracle path; the reporter posts 0.5%.
+pub const MAX_CONFIDENCE_DIVISOR: u64 = 100;
+
 pub const OFFSET_VERSION: usize = 8;
 pub const OFFSET_INITIALIZED: usize = 10;
 pub const OFFSET_CORE: usize = 12;
@@ -65,7 +69,7 @@ pub fn validate(bytes: &[u8], core: &Address, now: u64) -> ProgramResult {
     );
     if sequence == 0
         || price <= 0
-        || confidence > price.unsigned_abs() / 5
+        || confidence > price.unsigned_abs() / crate::oracle_snapshot::MAX_CONFIDENCE_DIVISOR
         || timestamp > now.saturating_add(2)
         || now > timestamp.saturating_add(10)
     {
@@ -175,7 +179,7 @@ pub fn write_verified(
     now: u64,
 ) -> ProgramResult {
     if price <= 0
-        || confidence > price.unsigned_abs() / 5
+        || confidence > price.unsigned_abs() / crate::oracle_snapshot::MAX_CONFIDENCE_DIVISOR
         || publish_timestamp > now.saturating_add(2)
         || now > publish_timestamp.saturating_add(10)
         || !matches!(session, 0..=4)
@@ -239,13 +243,17 @@ mod tests {
         let mut bytes = [0u8; ORACLE_SNAPSHOT_SIZE];
         initialize(&mut bytes, &core, 1435, 2, -5).unwrap();
         bytes[OFFSET_PRICE..OFFSET_PRICE + 8].copy_from_slice(&100_i64.to_le_bytes());
-        bytes[OFFSET_CONFIDENCE..OFFSET_CONFIDENCE + 8].copy_from_slice(&10_u64.to_le_bytes());
+        bytes[OFFSET_CONFIDENCE..OFFSET_CONFIDENCE + 8].copy_from_slice(&1_u64.to_le_bytes());
         bytes[OFFSET_PUBLISH_TIMESTAMP..OFFSET_PUBLISH_TIMESTAMP + 8]
             .copy_from_slice(&1_000_u64.to_le_bytes());
         bytes[OFFSET_SEQUENCE..OFFSET_SEQUENCE + 8].copy_from_slice(&1_u64.to_le_bytes());
         bytes[OFFSET_AUTHENTICATED] = 1;
         bytes[OFFSET_TRADING_STATUS] = STATUS_OPEN;
         assert!(validate_for_core(&bytes, &core, 1435, 2, -5, 1_005).is_ok());
+        // Confidence is capped at price / MAX_CONFIDENCE_DIVISOR: exactly 1% passes, above it fails.
+        bytes[OFFSET_CONFIDENCE..OFFSET_CONFIDENCE + 8].copy_from_slice(&2_u64.to_le_bytes());
+        assert!(validate_for_core(&bytes, &core, 1435, 2, -5, 1_005).is_err());
+        bytes[OFFSET_CONFIDENCE..OFFSET_CONFIDENCE + 8].copy_from_slice(&1_u64.to_le_bytes());
         assert!(validate_for_core(&bytes, &core, 922, 2, -5, 1_005).is_err());
         assert!(validate_for_core(&bytes, &core, 1435, 2, -5, 1_011).is_err());
         bytes[OFFSET_TRADING_STATUS] = STATUS_HALTED;

@@ -141,7 +141,7 @@ pub(crate) fn update_oracle_snapshot_v3(
             )
         || verified.price <= 0
         || verified.confidence < 0
-        || verified.confidence as u64 > verified.price.unsigned_abs() / 5
+        || verified.confidence as u64 > verified.price.unsigned_abs() / crate::oracle_snapshot::MAX_CONFIDENCE_DIVISOR
         || timestamp > now as u64 + 2
         || now as u64 > timestamp.saturating_add(crate::v3::V3_MAX_ORACLE_AGE_SECONDS)
     {

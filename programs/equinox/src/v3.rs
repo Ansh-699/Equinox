@@ -234,7 +234,7 @@ pub fn validate_v3_oracle_freshness(bytes: &[u8], now: u64) -> ProgramResult {
         || bytes[V3_CORE_MODE_OFFSET] != 1
         || bytes[V3_CORE_ORACLE_SESSION_OFFSET] > 2
         || price <= 0
-        || confidence > price.unsigned_abs() / 5
+        || confidence > price.unsigned_abs() / crate::oracle_snapshot::MAX_CONFIDENCE_DIVISOR
         || timestamp > now.saturating_add(2)
         || now > timestamp.saturating_add(V3_MAX_ORACLE_AGE_SECONDS)
     {

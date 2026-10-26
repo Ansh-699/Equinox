@@ -33,10 +33,7 @@ use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
 
 use crate::instruction::EquinoxInstruction;
 
-pub const ID: Address = Address::new_from_array([
-    1, 234, 74, 20, 133, 113, 141, 20, 242, 15, 253, 116, 227, 98, 23, 21, 74, 231, 252, 113, 229,
-    226, 164, 31, 131, 3, 31, 153, 255, 39, 114, 192,
-]);
+include!(concat!(env!("OUT_DIR"), "/program_id.rs"));
 
 // The Phase 2 `#[used] static EQUINOX_ARENA_VALIDATOR` that used to live
 // here is gone: `handlers::place_order_core` now calls `Arena::validate`

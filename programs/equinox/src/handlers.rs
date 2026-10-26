@@ -1801,7 +1801,7 @@ fn consume_oracle_update(
         || i32::from(verified.exponent) != header.price_exponent
         || verified.price <= 0
         || verified.confidence < 0
-        || verified.confidence as u64 > verified.price.unsigned_abs() / 5
+        || verified.confidence as u64 > verified.price.unsigned_abs() / crate::oracle_snapshot::MAX_CONFIDENCE_DIVISOR
         || now < 0
         || timestamp > now as u64 + 2
         || now as u64 > timestamp.saturating_add(10)
@@ -1959,7 +1959,7 @@ fn consume_oracle_update_v3(
             )
         || verified.price <= 0
         || verified.confidence < 0
-        || verified.confidence as u64 > verified.price.unsigned_abs() / 5
+        || verified.confidence as u64 > verified.price.unsigned_abs() / crate::oracle_snapshot::MAX_CONFIDENCE_DIVISOR
         || now < 0
         || timestamp > now as u64 + 2
         || now as u64 > timestamp.saturating_add(10)

@@ -116,7 +116,7 @@ pub fn decode_price_only(
         || stored_decimals != expected_exponent.wrapping_neg()
         || price <= 0
         || confidence == 0
-        || confidence > price.unsigned_abs() / 5
+        || confidence > price.unsigned_abs() / crate::oracle_snapshot::MAX_CONFIDENCE_DIVISOR
         || publish_time < 0
         || publish_time as u64 > now.saturating_add(2)
         || now > (publish_time as u64).saturating_add(10)
