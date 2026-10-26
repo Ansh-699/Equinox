@@ -223,3 +223,30 @@ it("operator mint refuses callers without the operator bearer token", async () =
     const response = await worker.handle(new Request("https://api.test/v1/operator/mint", { method: "POST", body: JSON.stringify({ wallet: "x", tokens: "1" }) }), { INGESTION_TOKEN: "secret" } as unknown as Env);
     expect(response.status).toBe(401);
 });
+
+const route = (env: Partial<Env>, path: string, init: RequestInit = {}) =>
+  import("./index").then(({ default: worker }) => worker.handle(new Request(`https://api.test${path}`, init), env as Env));
+const bearer = { authorization: "Bearer secret" };
+
+it("production serves neither the faucet nor the operator mint, even to the operator", async () => {
+  const production = { ...bindings, ENVIRONMENT: "production", INGESTION_TOKEN: "secret" } as Env;
+  const body = JSON.stringify({ wallet: "x", tokens: "1" });
+  expect((await route(production, "/v1/faucet", { method: "POST", body })).status).toBe(404);
+  expect((await route(production, "/v1/operator/mint", { method: "POST", body, headers: bearer })).status).toBe(404);
+  // Outside production the operator route is still reachable (it refuses a bad body, not the route).
+  const development = { ...bindings, ENVIRONMENT: "development", INGESTION_TOKEN: "secret" } as Env;
+  expect((await route(development, "/v1/operator/mint", { method: "POST", body: "{}", headers: bearer })).status).toBe(400);
+});
+
+it("the env-presence diagnostic needs the operator bearer token", async () => {
+  const withToken = { ...bindings, INGESTION_TOKEN: "secret" } as Env;
+  expect((await route(withToken, "/debug/env-presence")).status).toBe(401);
+  expect((await route(withToken, "/debug/env-presence", { headers: bearer })).status).toBe(200);
+});
+
+it("launch registration is rate limited per caller", async () => {
+  const open = { ...bindings, SOLANA_RPC_URL: "https://rpc.test" } as Env;
+  const post = () => route(open, "/v1/launches", { method: "POST", body: "{}", headers: { "cf-connecting-ip": "203.0.113.9" } });
+  for (let i = 0; i < 10; i++) expect((await post()).status).toBe(400);
+  expect((await post()).status).toBe(429);
+});

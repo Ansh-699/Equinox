@@ -339,12 +339,17 @@ const worker = {
     if (url.pathname === "/v1/launches" && env.DB && env.SOLANA_RPC_URL) {
       if (request.method === "GET") return json({ launches: await listLaunches(env.DB) });
       if (request.method === "POST") {
+        const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
+        if (!await new ProtocolRepository(env.DB).allow(`launch:${ip}`, 10, 60_000, Date.now())) return json({ error: "rate_limited" }, 429);
         const result = await registerLaunch(env.DB, new SolanaL1Transport(env.SOLANA_RPC_URL), await request.json().catch(() => null));
         return json(result.body, result.status);
       }
     }
-    if (request.method === "POST" && url.pathname === "/v1/faucet") return claimFaucet(request, env);
-    if (request.method === "POST" && url.pathname === "/v1/operator/mint") return operatorMint(request, env);
+    // Test-collateral routes: never served in production (real collateral cannot be minted).
+    if (env.ENVIRONMENT !== "production") {
+      if (request.method === "POST" && url.pathname === "/v1/faucet") return claimFaucet(request, env);
+      if (request.method === "POST" && url.pathname === "/v1/operator/mint") return operatorMint(request, env);
+    }
     if (request.method === "GET" && url.pathname === "/v1/mm/status") return marketMakerStatus(env);
 
     if (request.method === "POST" && url.pathname === "/v1/oracle/refresh") {
@@ -359,6 +364,7 @@ const worker = {
     // Local e2e diagnostics: which server-only bindings the runtime sees
     // (presence booleans only -- never values).
     if (request.method === "GET" && url.pathname === "/debug/env-presence") {
+      if (!isAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
       return json({
         SOLANA_RPC_URL: !!env.SOLANA_RPC_URL,
         SOLANA_WS_URL: !!env.SOLANA_WS_URL,
