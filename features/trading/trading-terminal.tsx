@@ -19,6 +19,7 @@ import { SessionPolicyPanel } from "@/features/sessions/session-policy-panel";
 import type { SessionActionResult } from "@/lib/session-relay-status";
 import type { OrderTree } from "@/clients/equinox/src";
 import { useExecutionStatus } from "@/features/magicblock/use-execution-status";
+import { deriveExecutionDisplay, fetchExecutionStatus } from "@/lib/execution-status";
 import { useV3MarketState } from "@/features/magicblock/use-v3-market-state";
 import { usePosition } from "@/features/positions/use-position";
 import { useMarketClock } from "@/features/oracle/use-market-clock";
@@ -119,6 +120,12 @@ export function TradingTerminal() {
   const session = useTradingSession(protocol, trader, marketAddress, l1SeatIndex);
   const handleSessionResult = (result: SessionActionResult) => { setNotice(result.detail ? `${result.message}: ${result.detail}` : result.message); setSessionActionReason(result.reason); };
   const executionStatus = useExecutionStatus(marketApiUrl, marketSymbol);
+  // Start trading runs for seconds (funding, then seat, then deposit) inside a closure that keeps
+  // the click-time status; a click before the first poll kept null and refused or took the L1 path.
+  const executionStatusRef = useRef(executionStatus);
+  useEffect(() => { executionStatusRef.current = executionStatus; }, [executionStatus]);
+  const currentExecutionStatus = async () => executionStatusRef.current
+    ?? await fetchExecutionStatus(marketApiUrl, marketSymbol).then((response) => response && deriveExecutionDisplay(response));
   const v3MarketState = useV3MarketState(marketApiUrl, v3.core);
   const sessionOrder = useSessionOrder(protocol?.rpc ?? null, session.status, auth, handleSessionResult, session.advanceNonce, executionStatus);
   const canTrade = session.status !== null && isSessionUsable(session.status);
@@ -257,7 +264,7 @@ export function TradingTerminal() {
       if (v3Core) {
         // Seats are created wherever the bundle lives: on L1, or inside the
         // MagicBlock rollup while delegated. Never mid-transition.
-        const domain = executionStatus?.orderRoutingDomain;
+        const domain = (await currentExecutionStatus())?.orderRoutingDomain;
         if (domain !== "l1" && domain !== "er") {
           setNotice("Can't open a margin account right now: the market is moving between Solana and the rollup. Try again in a few seconds.");
           return false;
@@ -494,7 +501,7 @@ export function TradingTerminal() {
       }
       setOnboarding("3/3 · Depositing into the rollup…");
       const accounts = resolveCustodyAccounts(trader, marketAddress, marketConfig, seatIndex, v3);
-      if (accounts) await deposit.submitDeposit(accounts, amount, executionStatus?.marketDelegated ?? false);
+      if (accounts) await deposit.submitDeposit(accounts, amount, (await currentExecutionStatus())?.marketDelegated ?? false);
     } catch (error) {
       setNotice(error instanceof RpcFailure && error.code === 429
         ? "Solana Devnet RPC is rate limited. Wait a minute and try again."
@@ -639,11 +646,12 @@ export function TradingTerminal() {
             onboarding={onboarding ?? (tradingKey.unlocking ? "Waiting for wallet signature…" : null)}
             busy={busy}
             seatActionLabel="Open margin account"
-            onDeposit={(units) => guard("deposits", () => {
+            onDeposit={(units) => guard("deposits", async () => {
               // Never guess the path: the market's location decides who signs.
-              if (!executionStatus) { setNotice("Checking where the market runs — try again in a moment."); return; }
+              const status = await currentExecutionStatus();
+              if (!status) { setNotice("Checking where the market runs — try again in a moment."); return; }
               // Deposits into the rollup always go through the trading key: never a wallet popup per step.
-              if (executionStatus.marketDelegated) { void startTrading(units); return; }
+              if (status.marketDelegated) { void startTrading(units); return; }
               const accounts = resolveCustodyAccounts(trader, marketAddress, marketConfig, seatIndex, v3);
               if (!accounts) { setNotice("Sign in before depositing."); return; }
               void deposit.submitDeposit(accounts, units, false);
