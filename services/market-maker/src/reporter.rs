@@ -7,6 +7,7 @@
 //! each post at 0.5% + 0.1% per elapsed second (≤ 10%), so a large move is
 //! walked in over a few posts rather than jumped.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -29,11 +30,27 @@ const POST_WHEN_MOVED_BPS: i128 = 20;
 /// (successful or not): their prices move slowly and the API rate-limits.
 const API_EVERY: Duration = Duration::from_secs(15);
 const REPORT_EVERY: Duration = Duration::from_secs(4);
+/// PreStocks intermittently omits `tokenPrice` (about 1 list in 10, sometimes for minutes).
+/// Falling back to the mark each time swung OPENAI-PERP between ~1075 and ~1490 all day,
+/// so a recently seen token price is reused; only a lasting absence falls back to the mark.
+const TOKEN_PRICE_HOLD: Duration = Duration::from_secs(30 * 60);
+
+/// The token price to use: a fresh one (remembered), else one seen within `TOKEN_PRICE_HOLD`.
+pub fn held_token_price(seen: &mut HashMap<String, (Instant, f64)>, token: &str, fresh: Option<f64>, now: Instant) -> Option<f64> {
+    match fresh.filter(|price| price.is_finite() && *price > 0.0) {
+        Some(price) => {
+            seen.insert(token.to_string(), (now, price));
+            Some(price)
+        }
+        None => seen.get(token).filter(|(at, _)| now.saturating_duration_since(*at) <= TOKEN_PRICE_HOLD).map(|(_, price)| *price),
+    }
+}
 
 /// PreStocks' price list, shared by every reporter.
 #[derive(Default)]
 pub struct PreStocksFeed {
     last: Mutex<Option<(Instant, Option<Value>)>>,
+    token_prices: Mutex<HashMap<String, (Instant, f64)>>,
     http: reqwest::Client,
 }
 
@@ -50,7 +67,8 @@ impl PreStocksFeed {
         let rows = last.as_ref().and_then(|(_, rows)| rows.as_ref()).ok_or_else(|| anyhow!("PreStocks API unavailable"))?;
         let row = rows.as_array().into_iter().flatten().find(|r| r["symbol"].as_str() == Some(token)).ok_or_else(|| anyhow!("PreStocks has no {token}"))?;
         let mark = row["markPrice"].as_f64().filter(|m| *m > 0.0).ok_or_else(|| anyhow!("PreStocks {token} has no mark price"))?;
-        Ok((mark, row["tokenPrice"].as_f64()))
+        let token_price = held_token_price(&mut *self.token_prices.lock().await, token, row["tokenPrice"].as_f64(), Instant::now());
+        Ok((mark, token_price))
     }
 }
 
@@ -224,6 +242,19 @@ impl Reporter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_missing_token_price_is_held_then_expires() {
+        let (mut seen, start) = (HashMap::new(), Instant::now());
+        assert_eq!(held_token_price(&mut seen, "OPENAI", Some(1470.0), start), Some(1470.0));
+        // PreStocks drops the field for a list or two: keep the token price, not the mark.
+        assert_eq!(held_token_price(&mut seen, "OPENAI", None, start + Duration::from_secs(60)), Some(1470.0));
+        assert_eq!(held_token_price(&mut seen, "OPENAI", Some(f64::NAN), start + Duration::from_secs(61)), Some(1470.0));
+        // Other tokens are separate.
+        assert_eq!(held_token_price(&mut seen, "ANTHROPIC", None, start), None);
+        // Gone for longer than the hold: fall back to the mark.
+        assert_eq!(held_token_price(&mut seen, "OPENAI", None, start + TOKEN_PRICE_HOLD + Duration::from_secs(1)), None);
+    }
 
     #[test]
     fn reads_a_damm_v2_pool_price() {
