@@ -38,6 +38,12 @@ const MAX_PRICE_AGE_S: u64 = 7;
 /// A shard digest plus the Magic commit CPI exceeds the 200k default.
 const COMMIT_COMPUTE_UNITS: u32 = 1_400_000;
 const COMPUTE_UNITS: u32 = 600_000;
+const FUNDING_RETRY: Duration = Duration::from_secs(60);
+
+/// When to try funding again: the normal cadence after a success, soon after a failure.
+pub fn funding_delay(succeeded: bool, every: Duration) -> Duration {
+    if succeeded { every } else { FUNDING_RETRY.min(every) }
+}
 
 #[derive(Clone, Default, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -139,8 +145,9 @@ impl Keeper {
             }))
             .await;
             if Instant::now() >= next_funding {
-                next_funding = Instant::now() + self.funding_every;
                 let funded = self.funding().await;
+                // A failed step (stale price, 429) retries in a minute instead of skipping the hour.
+                next_funding = Instant::now() + funding_delay(funded.is_ok(), self.funding_every);
                 self.record("funding", funded.map(|step| {
                     move |k: &mut KeeperStatus| {
                         if let Some(step) = step {
@@ -358,6 +365,14 @@ impl Keeper {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_funding_retries_soon() {
+        let hour = Duration::from_secs(3_600);
+        assert_eq!(funding_delay(true, hour), hour);
+        assert_eq!(funding_delay(false, hour), Duration::from_secs(60));
+        assert_eq!(funding_delay(false, Duration::from_secs(10)), Duration::from_secs(10));
+    }
 
     #[test]
     fn funding_step_follows_the_program_rules() {
