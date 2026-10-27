@@ -42,7 +42,8 @@ export function DiagnosticsView() {
 
   useEffect(() => {
     let stopped = false;
-    if (publicV3Core) l1.accountBytes(publicV3Core).then((bytes) => { if (!stopped) setCore(decodeV3MarketCore(bytes)); }).catch(() => {});
+    // The core is delegated: on L1 its owner is the delegation program, so read the live copy in the rollup.
+    if (publicV3Core) er.accountBytes(publicV3Core).then((bytes) => { if (!stopped) setCore(decodeV3MarketCore(bytes)); }).catch(() => {});
     l1.currentSlot().then((slot) => { if (!stopped) { setL1Slot(slot); setNow(Math.floor(Date.now() / 1000)); } }).catch(() => {});
     er.currentSlot().then((slot) => { if (!stopped) setErSlot(slot); }).catch(() => {});
     return () => { stopped = true; };
