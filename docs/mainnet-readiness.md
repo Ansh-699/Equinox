@@ -12,7 +12,7 @@ GATE: FAIL target=equinox-mainnet blockers=10 warnings=5 skipped=0 unverified=1
 
 ## 0. Progress since the first gate (cheap code blockers)
 
-Code and tests are in the working tree, not deployed to devnet and not committed.
+Committed on `main` (not pushed); the program change is not yet deployed to devnet.
 
 | Gate | Change | Verification |
 | --- | --- | --- |
@@ -22,9 +22,8 @@ Code and tests are in the working tree, not deployed to devnet and not committed
 | 15 program ID | `programs/equinox/build.rs` reads `EQUINOX_PROGRAM_ID` (base58, default = devnet ID). Mainnet build: `EQUINOX_PROGRAM_ID=<id> cargo build-sbf --manifest-path programs/equinox/Cargo.toml --features bpf-entrypoint` | `tests/program_id.rs` passes for default, SPL Token ID and System Program ID overrides; bad input fails the build |
 
 Still open in these gates: the production Worker environment in
-`workers/wrangler.jsonc` points at the devnet D1 database id and sets no
-`CORS_ALLOWED_ORIGINS` (closed by default, which is safe, but each real origin
-must be added); a mainnet program also needs the clients' and
+`workers/wrangler.jsonc` points at the devnet D1 database id (its CORS allowlist
+and status URL are now set); a mainnet program also needs the clients' and
 `config/equinox-deployment.json` IDs updated; the health check still needs to be
 scheduled (cron or uptime monitor) with `ALERT_WEBHOOK_URL`; and the new 1%
 confidence cap only takes effect after the program is upgraded.
@@ -42,11 +41,28 @@ committing, and the health check passes with `SKIP_MARKETS=SPACEX-PERP`. Backups
 The `/etc/stockstream/rpc-proxy-url` file still points at the retired
 4.194.209.138 VM and is unused.
 
-Open: SPACEX has no PreStocks price. It alerts, its commits fail on core rent, and
-the market maker keeps trying to top up its core from the keeper wallet (0.75 SOL
-per top-up on devnet; observed for OPENAI at 13:56 UTC). Remove SPACEX from the
-deployment or list it in `SKIP_MARKETS` and stop its top-ups. On mainnet that top-up
-loop moves real SOL (H4).
+SPACEX (no PreStocks price) was removed from the deployment, the Frontier basket
+and the docs; the VM runs with `EQUINOX_DEPLOYMENT=/etc/stockstream/equinox-deployment.json`
+(the same list) until the new binary is installed.
+
+**Bug sweep (2026-10-27), market maker, committed, not yet deployed to the VM:**
+- TSLA was quoted about 20% of the time: the open-session Pyth refresh was gated
+  at the closed-session 30 s rate, while quoting needs a price under 5 s and
+  funding/liquidation under 7 s (measured snapshot age cycling 3 to 35 s). Now 3 s
+  while open, held under the quote limit by a compile-time assert.
+- 27% of reporter posts failed with `429` on the public send RPC. Sends (reporter,
+  Pyth refresh, core top-up) now retry once on the keyed RPC.
+- RPC error messages carried the request URL, which put the Helius API key in the
+  journal. Errors are now URL-free (test).
+- A failed funding step skipped the whole hour; a closed session now waits for
+  the next period (elapsed time catches up), a stale price retries in 10 s.
+- CI (`.github/workflows/tests.yml`) now runs lint, frontend, Worker, script and
+  market-maker tests.
+
+**Open, needs the owner:** the Worker's `SOLANA_RPC_URL` secret gets `429` from
+its RPC, so `/v1/markets/*/execution-status` returns 503 and the terminal shows
+"Withdrawals paused: Execution status unavailable". Set that secret to the keyed
+RPC. Journal lines from before the fix still contain the Helius key; rotate it.
 
 ## 1. Baseline evidence (what passes today)
 
