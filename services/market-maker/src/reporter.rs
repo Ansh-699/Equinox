@@ -118,6 +118,13 @@ pub fn allowed_move_bps(elapsed_s: u64) -> i128 {
     i128::from(elapsed_s.saturating_mul(10).saturating_add(50).min(1_000)) - 5
 }
 
+/// Wait before the next check: a full interval after a post, else only until the snapshot is due.
+/// Sleeping the full interval after a skip let it reach ~10 s (4 s + 4 s + confirmation),
+/// past the 8 s the terminal accepts, so deposits and orders failed as "price is stale".
+pub fn next_check(posted: bool, age_s: u64) -> Duration {
+    if posted { REPORT_EVERY } else { Duration::from_secs(POST_WHEN_AGE_S.saturating_sub(age_s).max(1)) }
+}
+
 /// The index: token price kept within ±50% of the mark (mark alone when there is no token price).
 pub fn index_usd(mark: f64, token: Option<f64>) -> f64 {
     token.filter(|t| t.is_finite() && *t > 0.0).map_or(mark, |t| t.clamp(mark * 0.5, mark * 1.5))
@@ -205,14 +212,14 @@ impl Reporter {
                 } else {
                     None
                 };
-                Ok::<_, anyhow::Error>((mark, token, posted))
+                Ok::<_, anyhow::Error>((mark, token, posted, now_s.saturating_sub(previous_publish)))
             }
             .await;
             let mut status = self.status.lock().await;
             let Some(reporter) = status.market(&self.symbol).reporter.as_mut() else { continue };
             match result {
-                Ok((mark, token, posted)) => {
-                    retry_delay = REPORT_EVERY;
+                Ok((mark, token, posted, age_s)) => {
+                    retry_delay = next_check(posted.is_some(), age_s);
                     reporter.mark_price = Some(mark);
                     reporter.token_price = token;
                     reporter.premium_pct = token.map(|t| ((t / mark - 1.0) * 1_000.0).round() / 10.0);
@@ -242,6 +249,14 @@ impl Reporter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_next_check_lands_when_the_snapshot_is_due() {
+        assert_eq!(next_check(true, 0), REPORT_EVERY);
+        assert_eq!(next_check(false, 3), Duration::from_secs(1));
+        assert_eq!(next_check(false, 1), Duration::from_secs(3));
+        assert_eq!(next_check(false, 9), Duration::from_secs(1));
+    }
 
     #[test]
     fn a_missing_token_price_is_held_then_expires() {
