@@ -7,11 +7,11 @@ const { page, step, waitNotice, connect, close } = await launch();
 try {
   await connect();
   await page.getByRole("button", { name: "Start trading", exact: true }).click();
-  await waitNotice(/Deposited 100 USDC/);
+  await waitNotice(/Deposited \d+ USDC/);
   await page.waitForFunction(() => /Available\s*\$[1-9]/.test(document.querySelector("section.lifecycle-panel")?.textContent ?? ""), null, { timeout: 30_000 });
 
   await page.getByRole("button", { name: "Market", exact: true }).click();
-  await page.locator("#order-amount").fill("80");
+  await page.locator("#order-amount").fill("220"); // $1,100 at 5×: one share of any market
   await page.locator("#order-lev").fill("5");
   await page.locator('section[aria-label="Place order"] button').filter({ hasText: /Place order/ }).click();
   await waitNotice(/Order accepted by the MagicBlock rollup/, 30_000);
@@ -22,8 +22,8 @@ try {
   const mid = Number((await page.locator("#book-panel .text-\\[19px\\]").innerText()).replace(/[^0-9.]/g, ""));
   await page.getByRole("button", { name: "Limit", exact: true }).click();
   await page.locator("#order-price").fill((mid * 0.985).toFixed(2));
-  await page.locator("#order-lev").fill("1");
-  await page.locator("#order-amount").fill("380"); // one share at 1×, ~$75 margin
+  await page.locator("#order-lev").fill("5");
+  await page.locator("#order-amount").fill("220"); // the same size again: fits the $500 deposit
   await page.locator('section[aria-label="Place order"] button').filter({ hasText: /Place order/ }).click();
   await waitNotice(/Order accepted by the MagicBlock rollup/, 30_000);
   await page.getByRole("tab", { name: "Open Orders" }).click();

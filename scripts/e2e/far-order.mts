@@ -8,7 +8,7 @@ const { page, step, waitNotice, connect, close } = await launch();
 try {
   await connect();
   await page.getByRole("button", { name: "Start trading", exact: true }).click();
-  await waitNotice(/Deposited 100 USDC/);
+  await waitNotice(/Deposited \d+ USDC/);
   await page.waitForFunction(() => /Available\s*\$[1-9]/.test(document.querySelector("section.lifecycle-panel")?.textContent ?? ""), null, { timeout: 30_000 });
 
   const mid = Number((await page.locator("#book-panel .text-\\[19px\\]").innerText()).replace(/[^0-9.]/g, ""));
@@ -16,7 +16,8 @@ try {
   await page.getByRole("button", { name: "Limit", exact: true }).click();
   await page.getByRole("button", { name: /Short/ }).click();
   await page.locator("#order-price").fill(price).catch(async () => page.getByLabel(/Limit price/).fill(price));
-  await page.locator("#order-amount").fill("200");
+  await page.locator("#order-lev").fill("5");
+  await page.locator("#order-amount").fill("300"); // one share of any market at 5×
   await page.locator('section[aria-label="Place order"] button').filter({ hasText: /Place order/ }).click();
   const placedAt = Date.now();
   const mine = page.locator("#book-panel [data-mine]");
@@ -28,7 +29,7 @@ try {
   await mine.first().waitFor({ state: "detached", timeout: 15_000 });
   step("own ask gone after cancel");
   await page.waitForTimeout(5_000);
-  const levels = await page.locator("#book-panel .grid.h-5").count();
+  const levels = await page.locator(`#book-panel button[aria-label*=" dollars, "]`).count();
   step(`book levels 5 s after cancel: ${levels}`);
   if (levels < 30) throw new Error(`maker ladder looks broken: only ${levels} levels`);
   console.log("PASS far-order");

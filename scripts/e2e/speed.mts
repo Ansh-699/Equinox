@@ -7,7 +7,7 @@ const { page, step, waitNotice, connect, close } = await launch();
 try {
   await connect();
   await page.getByRole("button", { name: "Start trading", exact: true }).click();
-  await waitNotice(/Deposited 100 USDC/);
+  await waitNotice(/Deposited \d+ USDC/);
   await page.waitForFunction(() => /Available\s*\$[1-9]/.test(document.querySelector("section.lifecycle-panel")?.textContent ?? ""), null, { timeout: 30_000 });
   await page.getByRole("button", { name: "Limit", exact: true }).click();
   await page.getByRole("tab", { name: "Open Orders" }).click().catch(() => undefined);
@@ -26,7 +26,7 @@ try {
   for (let i = 0; i < 5; i += 1) {
     const price = (300 + i).toFixed(2); // far below the book: rests
     await page.locator("#order-price").fill(price);
-    await page.locator("#order-amount").fill("80");
+    await page.locator("#order-amount").fill("300");
     await page.locator("#order-lev").fill("5");
     const button = page.locator('section[aria-label="Place order"] button.w-full').last();
     await page.evaluate((p) => { (window as unknown as { __t: { price: string } }).__t.price = p; }, price);

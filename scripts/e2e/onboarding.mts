@@ -7,12 +7,12 @@ const { page, prompts, step, waitNotice, connect, walletUsdc, close } = await la
 try {
   await connect();
   await page.getByRole("button", { name: "Start trading", exact: true }).click();
-  await waitNotice(/Deposited 100 USDC/);
+  await waitNotice(/Deposited \d+ USDC/);
   step(`seat: ${await page.getByRole("button", { name: /Delegated session live/ }).innerText()}`);
   await page.waitForFunction(() => /Available\s*\$[1-9]/.test(document.querySelector("section.lifecycle-panel")?.textContent ?? ""), null, { timeout: 30_000 });
 
   await page.getByRole("button", { name: "Market", exact: true }).click();
-  await page.locator("#order-amount").fill("80");
+  await page.locator("#order-amount").fill("300");
   await page.locator("#order-lev").fill("5");
   await page.locator('section[aria-label="Place order"] button').filter({ hasText: /Place order/ }).click();
   await waitNotice(/Order accepted by the MagicBlock rollup/, 30_000);
