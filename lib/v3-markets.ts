@@ -25,7 +25,6 @@ export const MM_SERVICE_URL = (process.env.NEXT_PUBLIC_MM_STATUS_URL ?? "").repl
 const LOGOS: Record<string, string> = {
   TSLA: "/logos/tesla.svg",
   OPENAI: "/logos/openai.png",
-  SPACEX: "/logos/spacex.png",
   ANTHROPIC: "/logos/anthropic.png",
 };
 /** Base asset of a perp: "ANTHROPIC-PERP" → "ANTHROPIC". */

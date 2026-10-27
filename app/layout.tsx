@@ -8,7 +8,7 @@ import "./globals.css";
 const poppins = Poppins({ variable: "--font-poppins", weight: ["400", "500", "600", "700"], subsets: ["latin"], display: "swap" });
 const plexMono = IBM_Plex_Mono({ variable: "--font-plex-mono", weight: ["400", "500", "600"], subsets: ["latin"], display: "swap" });
 
-const DESCRIPTION = "Perpetual futures on tokenized assets at rollup speed: TSLA and pre-IPO OpenAI, SpaceX, Anthropic, matched in 2–15 ms on a MagicBlock Ephemeral Rollup, with USDC custody on Solana.";
+const DESCRIPTION = "Perpetual futures on tokenized assets at rollup speed: TSLA and pre-IPO OpenAI and Anthropic, matched in 2–15 ms on a MagicBlock Ephemeral Rollup, with USDC custody on Solana.";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://equinox.ansht.workers.dev"),

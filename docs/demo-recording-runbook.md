@@ -1,6 +1,6 @@
 # Equinox demo recording
 
-Record the live TSLA trade on a weekday while Pyth reports an open session. US holidays and weekends close TSLA by design; OpenAI, SpaceX, and Anthropic pre-IPO markets remain available around the clock. Use the production site: https://equinox.ansht.workers.dev.
+Record the live TSLA trade on a weekday while Pyth reports an open session. US holidays and weekends close TSLA by design; OpenAI and Anthropic pre-IPO markets remain available around the clock. Use the production site: https://equinox.ansht.workers.dev.
 
 ## Before recording
 

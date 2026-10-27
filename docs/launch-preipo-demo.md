@@ -5,7 +5,7 @@ Use this as a live walkthrough or a recording script for the Pre-IPO and Launch 
 ## Prepare the stage
 
 1. Open `/pre-ipo`, `/trade`, `/launch`, and `/portfolio` in the same browser session. Connect a devnet wallet and unlock the Equinox trading account before recording. Keep enough test USDC and SOL for the actions below.
-2. On `/pre-ipo`, confirm the three perp cards show prices and that the **AI labs** basket shows a margin estimate. On `/trade?market=OPENAI-PERP`, confirm the market is active and the book has bids and asks. If the price or book is unavailable, use the read-only portion and do not submit the basket.
+2. On `/pre-ipo`, confirm the two perp cards show prices and that the **AI labs** basket shows a margin estimate. On `/trade?market=OPENAI-PERP`, confirm the market is active and the book has bids and asks. If the price or book is unavailable, use the read-only portion and do not submit the basket.
 3. On `/launch`, confirm **ORCHARD** appears under New pairs, **TENSOR** under Final stretch, and **GIGA** under Graduated. These are seeded devnet launches; check their actual state before narrating it. A missing or moved row should be described by its current stage, never as a fixed percentage.
 4. Set browser zoom to 100%, close unrelated tabs and notifications, and rehearse the exact order size. Use a small size that the account can support. Record the explorer links or transaction signatures after successful actions.
 
@@ -15,7 +15,7 @@ The **Action** column is what you do on screen. The **Say** column is the voiceo
 
 | Time | Action | Say |
 | --- | --- | --- |
-| 0:00–0:10 | Start on `/pre-ipo`, with the heading and three perp cards in view. | “Equinox brings pre-IPO token prices into a fast perpetual futures market. Here are OpenAI, SpaceX, and Anthropic, traded with test USDC on Solana devnet.” |
+| 0:00–0:10 | Start on `/pre-ipo`, with the heading and two perp cards in view. | “Equinox brings pre-IPO token prices into a fast perpetual futures market. Here are OpenAI and Anthropic, traded with test USDC on Solana devnet.” |
 | 0:10–0:24 | Move the cursor across one card’s **PreStocks mark**, **Token on-chain**, and **Token vs mark** rows. Pause on the premium or discount. | “The PreStocks mark gives a reference value. The token trades at its own on-chain price, which may be above or below that mark. We show both, so the price source is visible before anyone trades.” |
 | 0:24–0:38 | Click **Trade** on OpenAI. Point to its price, book, and buy/sell ticket. Then return to `/pre-ipo`. | “Equinox turns that token price into a perp market. Orders match on MagicBlock’s rollup; traders take long or short exposure without buying the underlying token.” |
 | 0:38–0:54 | Scroll to **Baskets**. Select **AI labs**, **Long**, a modest USD size, and your rehearsed leverage. Point to OpenAI and Anthropic legs, then **Margin needed**. | “For a broader view, I can trade the AI labs basket. Equinox plans two orders, one for OpenAI and one for Anthropic, with margin calculated separately for each market.” |
@@ -51,7 +51,7 @@ The **Action** column is what you do on screen. The **Say** column is the voiceo
 
 ## Short version for a 30-second clip
 
-1. **0–8s:** Pre-IPO cards: “OpenAI, SpaceX, and Anthropic perp markets anchored to PreStocks token prices.”
+1. **0–8s:** Pre-IPO cards: “OpenAI and Anthropic perp markets anchored to PreStocks token prices.”
 2. **8–17s:** AI labs basket: show the two legs, margin, and receipt if available. “One action, two isolated positions.”
 3. **17–26s:** Pulse board: New pairs → Final stretch → Graduated; quick buy or show a confirmed transaction. “A USDC curve becomes a DAMM v2 pool.”
 4. **26–30s:** GIGA state and Equinox logo. “Graduated pools can become the price source for new perps.”

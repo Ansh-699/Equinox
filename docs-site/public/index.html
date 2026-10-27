@@ -88,7 +88,7 @@
         <!-- 1 -->
         <section id="overview">
           <h2><span class="num">01</span>Overview</h2>
-          <p class="sub">Three products share one program and one USDC mint: stock perps (TSLA), pre-IPO perps (OpenAI, SpaceX, Anthropic) and a launchpad whose graduated tokens can become perps.</p>
+          <p class="sub">Three products share one program and one USDC mint: stock perps (TSLA), pre-IPO perps (OpenAI, Anthropic) and a launchpad whose graduated tokens can become perps.</p>
           <figure>
             <div class="diagram"></div>
             <script type="text/plain" class="mermaid-src">
@@ -290,7 +290,7 @@ flowchart LR
   subgraph REPPATH["Pre-IPO and launched tokens"]
     PS["PreStocks token price<br/>within ±50% of mark"] --> REP["Reporter<br/>market-maker service"]
     DAMM["Meteora DAMM v2<br/>sqrt_price × lot"] --> REP
-    REP -- "report price (67)<br/>every ≥ 4 s or > 0.2% move" --> SNAP2["OPENAI, SPACEX,<br/>ANTHROPIC snapshots"]
+    REP -- "report price (67)<br/>every ≥ 4 s or > 0.2% move" --> SNAP2["OPENAI,<br/>ANTHROPIC snapshots"]
   end
   SNAP1 -. "cloned" .-> ROLL["Rollup: orders,<br/>margin, liquidation"]
   SNAP2 -. "cloned" .-> ROLL
@@ -389,7 +389,7 @@ sequenceDiagram
         <!-- 11 -->
         <section id="pre-ipo">
           <h2><span class="num">11</span>Pre-IPO and baskets</h2>
-          <p class="sub">OPENAI, SPACEX and ANTHROPIC perps priced from PreStocks tokens. A basket buys several legs with one click.</p>
+          <p class="sub">OPENAI and ANTHROPIC perps priced from PreStocks tokens. A basket buys several legs with one click.</p>
           <figure>
             <div class="diagram"></div>
             <script type="text/plain" class="mermaid-src">

@@ -48,7 +48,7 @@ export function ArchitectureScreen({ rate }: { rate: number | null; blockMs?: nu
           <linearGradient id="arch-sol" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stopColor="#00ffa3" /><stop offset="1" stopColor="#dc1fff" /></linearGradient>
           <clipPath id="arch-eq"><circle cx={115} cy={130} r={26} /></clipPath>
           <clipPath id="arch-mb"><circle cx={437} cy={116} r={22} /></clipPath>
-          {[385, 437, 489].map((x) => <clipPath key={x} id={`arch-pre-${x}`}><circle cx={x} cy={330} r={14} /></clipPath>)}
+          {[411, 463].map((x) => <clipPath key={x} id={`arch-pre-${x}`}><circle cx={x} cy={330} r={14} /></clipPath>)}
           {[97, 165, 233].map((y) => <clipPath key={y} id={`arch-src-${y}`}><rect x={905} y={y - 16} width={32} height={32} rx={8} /></clipPath>)}
         </defs>
 
@@ -92,10 +92,9 @@ export function ArchitectureScreen({ rate }: { rate: number | null; blockMs?: nu
         <path d="M437 298 V256" className={css.dashedUp} />
         <path d="M431 263 L437 255 L443 263" className={css.arrowHeadMuted} />
         <g className={css.node}>
-          <Tile x={345} y={300} w={184} h={60} name="Pre-IPO markets: OpenAI, SpaceX, Anthropic" />
-          <line x1={401} x2={421} y1={330} y2={330} className={css.dashJoin} />
-          <line x1={453} x2={473} y1={330} y2={330} className={css.dashJoin} />
-          {([[385, "/logos/openai.png", "OpenAI"], [437, "/logos/spacex.png", "SpaceX"], [489, "/logos/anthropic.png", "Anthropic"]] as const).map(([x, src, name]) => (
+          <Tile x={345} y={300} w={184} h={60} name="Pre-IPO markets: OpenAI, Anthropic" />
+          <line x1={427} x2={447} y1={330} y2={330} className={css.dashJoin} />
+          {([[411, "/logos/openai.png", "OpenAI"], [463, "/logos/anthropic.png", "Anthropic"]] as const).map(([x, src, name]) => (
             <g key={x}>
               <image href={src} x={x - 14} y={316} width={28} height={28} clipPath={`url(#arch-pre-${x})`} className={css.mono} />
               <circle cx={x} cy={330} r={14} className={css.logoRingThin}><title>{name}</title></circle>
