@@ -19,6 +19,8 @@ use crate::solana::{b58, Pubkey};
 pub struct Rpc {
     http: reqwest::Client,
     url: String,
+    /// Where `send_transaction` retries when `url` refuses (e.g. a public RPC's 429).
+    fallback: Option<String>,
 }
 
 impl Rpc {
@@ -28,19 +30,32 @@ impl Rpc {
             .pool_max_idle_per_host(32)
             .tcp_nodelay(true)
             .build()?;
-        Ok(Self { http, url: url.to_string() })
+        Ok(Self { http, url: url.to_string(), fallback: None })
+    }
+
+    /// A sender that retries a refused send once on `fallback` (when it differs).
+    pub fn with_fallback(mut self, fallback: &str) -> Self {
+        self.fallback = (fallback != self.url).then(|| fallback.to_string());
+        self
     }
 
     pub async fn call(&self, method: &str, params: Value) -> Result<Value> {
+        self.call_at(&self.url, method, params).await
+    }
+
+    async fn call_at(&self, url: &str, method: &str, params: Value) -> Result<Value> {
+        // without_url: keyed RPC URLs carry their API key in the query string; keep it out of logs.
         let body: Value = self
             .http
-            .post(&self.url)
+            .post(url)
             .json(&json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params }))
             .send()
             .await
+            .map_err(reqwest::Error::without_url)
             .with_context(|| format!("{method}: request failed"))?
             .json()
             .await
+            .map_err(reqwest::Error::without_url)
             .with_context(|| format!("{method}: invalid response"))?;
         if let Some(error) = body.get("error") {
             bail!("{method}: {error}");
@@ -82,9 +97,11 @@ impl Rpc {
     }
 
     pub async fn send_transaction(&self, wire: &[u8]) -> Result<String> {
-        let result = self
-            .call("sendTransaction", json!([B64.encode(wire), { "encoding": "base64", "skipPreflight": true, "maxRetries": 0 }]))
-            .await?;
+        let params = json!([B64.encode(wire), { "encoding": "base64", "skipPreflight": true, "maxRetries": 0 }]);
+        let result = match (self.call("sendTransaction", params.clone()).await, &self.fallback) {
+            (Err(_), Some(fallback)) => self.call_at(fallback, "sendTransaction", params).await?,
+            (result, _) => result?,
+        };
         result.as_str().map(str::to_string).ok_or_else(|| anyhow!("sendTransaction: no signature"))
     }
 
@@ -213,6 +230,32 @@ impl Watch<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A JSON-RPC endpoint that answers every call with `reply`.
+    async fn rpc_server(reply: Value) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let app = axum::Router::new().route("/", axum::routing::post(move || async move { axum::Json(reply) }));
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        url
+    }
+
+    #[tokio::test]
+    async fn refused_send_retries_on_the_fallback() {
+        let refused = rpc_server(json!({ "jsonrpc": "2.0", "id": 1, "error": { "code": 429, "message": "Connection rate limits exceeded" } })).await;
+        let keyed = rpc_server(json!({ "jsonrpc": "2.0", "id": 1, "result": "sig" })).await;
+        assert!(Rpc::new(&refused).unwrap().send_transaction(&[1]).await.is_err());
+        assert_eq!(Rpc::new(&refused).unwrap().with_fallback(&keyed).send_transaction(&[1]).await.unwrap(), "sig");
+    }
+
+    #[tokio::test]
+    async fn errors_do_not_leak_the_url() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/?api-key=SECRET", listener.local_addr().unwrap());
+        drop(listener); // nothing listens: the request fails
+        let error = Rpc::new(&url).unwrap().call("getHealth", json!([])).await.unwrap_err();
+        assert!(!format!("{error:#}").contains("SECRET"), "{error:#}");
+    }
 
     /// Dropping a socket must close its connection (the fd leak of Oct 2026).
     #[tokio::test]

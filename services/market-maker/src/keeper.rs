@@ -38,7 +38,8 @@ const MAX_PRICE_AGE_S: u64 = 7;
 /// A shard digest plus the Magic commit CPI exceeds the 200k default.
 const COMMIT_COMPUTE_UNITS: u32 = 1_400_000;
 const COMPUTE_UNITS: u32 = 600_000;
-const FUNDING_RETRY: Duration = Duration::from_secs(60);
+/// Not a multiple of the ~30 s Pyth refresh, so retries do not keep landing in the same stale phase.
+const FUNDING_RETRY: Duration = Duration::from_secs(10);
 
 /// When to try funding again: the normal cadence after a success, soon after a failure.
 pub fn funding_delay(succeeded: bool, every: Duration) -> Duration {
@@ -272,7 +273,11 @@ impl Keeper {
         keys.extend(&self.bundle.book_pages);
         let accounts = self.rpc.multiple_accounts(&keys).await?;
         let (Some(core), Some(snap)) = (&accounts[0], &accounts[1]) else { bail!("core or oracle snapshot missing") };
-        let Some(oracle) = self.fresh_price(snap).await else { bail!("price is stale or the market is closed") };
+        // Closed session: nothing to do now; the next step's `elapsed` covers this time.
+        if snapshot(snap).is_some_and(|s| !s.open) {
+            return Ok(None);
+        }
+        let Some(oracle) = self.fresh_price(snap).await else { bail!("price is stale") };
         let config = read_v3_risk_config(core).map_err(|e| anyhow!("risk config: {e:?}"))?;
         let now_s = now_ms() / 1_000;
         let (bid, ask) = best_prices(accounts[2..].iter().flatten().map(Vec::as_slice), now_s, oracle / 2);
@@ -370,7 +375,7 @@ mod tests {
     fn failed_funding_retries_soon() {
         let hour = Duration::from_secs(3_600);
         assert_eq!(funding_delay(true, hour), hour);
-        assert_eq!(funding_delay(false, hour), Duration::from_secs(60));
+        assert_eq!(funding_delay(false, hour), Duration::from_secs(10));
         assert_eq!(funding_delay(false, Duration::from_secs(10)), Duration::from_secs(10));
     }
 

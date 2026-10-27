@@ -28,6 +28,10 @@ const RECENT_TXS: usize = 60;
 const COMPUTE_UNITS: u32 = 600_000;
 /// While the market is closed the price is refreshed this rarely, just to notice the reopen.
 const CLOSED_REFRESH_EVERY_MS: u64 = 30_000;
+/// While it is open, often enough that the snapshot rarely ages past MAX_SNAPSHOT_AGE_S
+/// (gating the open session at the closed rate left TSLA unquoted ~80% of the time).
+const OPEN_REFRESH_EVERY_MS: u64 = 3_000;
+const _: () = assert!(OPEN_REFRESH_EVERY_MS < MAX_SNAPSHOT_AGE_S * 1_000);
 /// Reporter-priced markets: quote while the price is younger than this (the
 /// reporter posts every few seconds; orders accept up to 10 s).
 const REPORTED_MAX_AGE_S: u64 = 7;
@@ -318,14 +322,14 @@ impl Maker {
         Ok(())
     }
 
-    async fn refresh_oracle_if_due(&self, now: u64) -> Result<()> {
+    async fn refresh_oracle_if_due(&self, now: u64, every_ms: u64) -> Result<()> {
         let mut next = self.next_oracle_refresh_ms.lock().await;
         if now < *next {
             return Ok(());
         }
         // Reserve the next attempt before the HTTP call so a stalled refresh
         // cannot turn the 400 ms quote loop into an RPC retry storm.
-        *next = now.saturating_add(CLOSED_REFRESH_EVERY_MS);
+        *next = now.saturating_add(every_ms);
         drop(next);
         self.refresh_oracle().await
     }
@@ -358,14 +362,14 @@ impl Maker {
         } else if !snapshot.open {
             // Outside US trading hours every order would be refused: send nothing, and
             // only occasionally ask for a fresh price so the reopen is noticed.
-            if let Err(error) = self.refresh_oracle_if_due(now).await {
+            if let Err(error) = self.refresh_oracle_if_due(now, CLOSED_REFRESH_EVERY_MS).await {
                 tracing::warn!(market = %self.market.symbol, "closed-session price refresh failed: {error:#}");
             }
             return Ok(());
         }
         if !self.market.reporter_priced && now_s.saturating_sub(published) > MAX_SNAPSHOT_AGE_S {
             // Permissionless refresh through the market API; quote once the rollup has the new price.
-            return self.refresh_oracle_if_due(now).await;
+            return self.refresh_oracle_if_due(now, OPEN_REFRESH_EVERY_MS).await;
         }
 
         let reads: Vec<_> = self.bundle.book_pages.iter().chain(&self.bundle.seat_shards).copied().collect();

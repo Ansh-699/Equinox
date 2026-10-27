@@ -132,7 +132,7 @@ pub struct Reporter {
 impl Reporter {
     #[allow(clippy::too_many_arguments)]
     pub fn new(l1_url: &str, send_url: &str, feed: Arc<PreStocksFeed>, history: Arc<crate::candles::PriceHistory>, key: Keypair, program: Pubkey, core: Pubkey, snapshot: Pubkey, source: PriceSource, symbol: String, status: Arc<Mutex<Status>>) -> Result<Self> {
-        Ok(Self { l1: Rpc::new(l1_url)?, sender: Rpc::new(send_url)?, history, feed, key, program, core, snapshot, source, symbol, status })
+        Ok(Self { l1: Rpc::new(l1_url)?, sender: Rpc::new(send_url)?.with_fallback(l1_url), history, feed, key, program, core, snapshot, source, symbol, status })
     }
 
     /// `offset` staggers several reporters so their posts do not land together.

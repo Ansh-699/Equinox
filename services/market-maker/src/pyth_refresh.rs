@@ -97,7 +97,7 @@ impl PythRefresher {
     pub fn new(l1_url: &str, send_url: &str, api_key: String, key: Keypair, program: Pubkey, core: Pubkey, snapshot: Pubkey, feed_id: u32, channel: String) -> Result<Self> {
         Ok(Self {
             l1: Rpc::new(l1_url)?,
-            sender: Rpc::new(send_url)?,
+            sender: Rpc::new(send_url)?.with_fallback(l1_url),
             http: reqwest::Client::builder().http1_only().connect_timeout(Duration::from_secs(5)).timeout(Duration::from_secs(8)).build()?,
             api_key,
             key,

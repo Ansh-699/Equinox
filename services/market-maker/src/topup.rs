@@ -68,7 +68,7 @@ pub struct CoreTopUp {
 impl CoreTopUp {
     pub fn new(rollup_url: &str, l1_url: &str, send_url: &str, key: Keypair, core: Pubkey, symbol: String, min_sol: f64, amount_sol: f64) -> Result<Self> {
         let lamports = |sol: f64| (sol * LAMPORTS_PER_SOL as f64) as u64;
-        Ok(Self { rollup: Rpc::new(rollup_url)?, l1: Rpc::new(l1_url)?, sender: Rpc::new(send_url)?, key, core, symbol, min: lamports(min_sol), amount: lamports(amount_sol) })
+        Ok(Self { rollup: Rpc::new(rollup_url)?, l1: Rpc::new(l1_url)?, sender: Rpc::new(send_url)?.with_fallback(l1_url), key, core, symbol, min: lamports(min_sol), amount: lamports(amount_sol) })
     }
 
     pub async fn run(self: Arc<Self>, every: Duration) {
