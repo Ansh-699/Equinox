@@ -42,10 +42,19 @@ it('enforces rate limits across service instances and resets after expiration', 
 it('cleanup retains ambiguous pending submissions and fencing history', async () => {
   const repo = new ProtocolRepository(db);
   await repo.reserve('pending', 'a', 'hash', 1, 1);
+  await repo.reserve('ingest:1', 'a', 'hash', 1, 1);
+  await repo.reserve('cleanup:1', 'a', 'hash', 1, 1);
+  await repo.reserve('ingest:2', 'a', 'hash', 1_000_000, 1);
+  await repo.reserve('funding:market-a:1', 'a', 'hash', 1, 1);
   await repo.allow('expired-rate', 1, 1, 1);
   await repo.acquire('retained-fence', 'a', 1, 1);
   await repo.cleanup(10_000);
   expect((await repo.operation('pending'))?.status).toBe('pending');
+  // Time-bucketed cron keys cannot recur, so their expired pending rows are dropped; live ones stay.
+  expect(await repo.operation('ingest:1')).toBeNull();
+  expect(await repo.operation('cleanup:1')).toBeNull();
+  expect((await repo.operation('ingest:2'))?.status).toBe('pending');
+  expect((await repo.operation('funding:market-a:1'))?.status).toBe('pending');
   expect(await db.prepare("SELECT * FROM rate_limits WHERE key='expired-rate'").first()).toBeNull();
   expect((await repo.acquire('retained-fence', 'b', 1, 10_001))?.fence).toBe(2);
 });

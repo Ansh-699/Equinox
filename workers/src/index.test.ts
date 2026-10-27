@@ -1,6 +1,6 @@
 import { SELF, applyD1Migrations, env } from 'cloudflare:test';
 import { beforeAll, expect, it, vi } from 'vitest';
-import { fetchExecutionStatus, fetchV3MarketSnapshot, runIngestionTick, runKeeperOrchestrationTick } from './index';
+import worker, { fetchExecutionStatus, fetchV3MarketSnapshot, runIngestionTick, runKeeperOrchestrationTick } from './index';
 import { eventLogLine } from './test-event-fixtures';
 import { getBase58Decoder, getBase58Encoder } from '@solana/kit';
 import { EQUINOX_PROGRAM_ID } from '../../clients/equinox/src/constants';
@@ -249,4 +249,12 @@ it("launch registration is rate limited per caller", async () => {
   const post = () => route(open, "/v1/launches", { method: "POST", body: "{}", headers: { "cf-connecting-ip": "203.0.113.9" } });
   for (let i = 0; i < 10; i++) expect((await post()).status).toBe(400);
   expect((await post()).status).toBe(429);
+});
+
+it("the cron leaves ingestion off unless INGESTION=on (it cannot finish in a Free-plan cron's 10 ms of CPU)", async () => {
+  const fetcher = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("no network in this test"));
+  await worker.scheduled({} as ScheduledController, { ...bindings, SOLANA_RPC_URL: "https://l1.fixture.test" } as Env);
+  fetcher.mockRestore();
+  const ingest = await bindings.DB!.prepare("SELECT COUNT(*) AS n FROM operation_keys WHERE key LIKE 'ingest:%'").first<{ n: number }>();
+  expect(ingest?.n).toBe(0);
 });

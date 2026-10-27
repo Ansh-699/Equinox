@@ -87,7 +87,9 @@ export class ProtocolRepository {
       this.db.prepare('DELETE FROM application_sessions WHERE expires_at<=?').bind(now),
       this.db.prepare('DELETE FROM rate_limits WHERE expires_at<=?').bind(now),
       // Pending outcomes are ambiguous: expiry must not authorize a duplicate submission.
-      this.db.prepare("DELETE FROM operation_keys WHERE expires_at<=? AND status!='pending'").bind(now),
+      // The cron's own keys carry their time bucket and can never be requested again, so
+      // theirs go too; kept, every killed cron run added a row this scan re-read each minute.
+      this.db.prepare("DELETE FROM operation_keys WHERE expires_at<=? AND (status!='pending' OR key LIKE 'ingest:%' OR key LIKE 'cleanup:%')").bind(now),
     ]);
   }
 }

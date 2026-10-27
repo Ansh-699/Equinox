@@ -637,7 +637,9 @@ const worker = {
       },
     });
     if (env.SOLANA_RPC_URL) {
-      await runDurableKeeper(repository, {
+      // Opt-in: on the Workers Free plan a cron run gets 10 ms of CPU and ingestion
+      // never finished inside it (exceededCpu every minute; 4 of ~5,500 runs completed).
+      if (env.INGESTION === "on") await runDurableKeeper(repository, {
         leaseKey: keeperLeaseKey('ingestion'), holder: 'scheduled-worker',
         idempotencyKey: `ingest:${Math.floor(now / 15_000)}`,
         requestHash: `ingest:${Math.floor(now / 15_000)}`,

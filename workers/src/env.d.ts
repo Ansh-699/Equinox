@@ -5,6 +5,7 @@ interface Env {
   MM_STATUS_URL?: string;
   /** "on" enables the transaction-submitting keeper jobs in the scheduled handler. */
   KEEPER_ORCHESTRATION?: string;
+  INGESTION?: string;
   PYTH_PRO_FEED_ID?: string;
   PYTH_PRO_MIN_CHANNEL?: string;
 }
