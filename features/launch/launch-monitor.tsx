@@ -7,16 +7,31 @@ import { ChefHat, Clock, Copy, Crown, ExternalLink, Search, Users, Zap } from "l
 import { Connection, PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { useAppAuth } from "@/components/app-providers";
+import { useActiveWalletSigner } from "@/components/wallet-signer-context";
 import { useTradingKey } from "@/features/wallet/use-trading-key";
 import { tradingKeySigner } from "@/lib/trading-key";
 import { publicMarketApiUrl } from "@/lib/demo-config";
 import { V3_MARKETS } from "@/lib/v3-markets";
-import { buildGraduateTransaction, buildSwapTransaction, LAUNCH_PRESETS, readPool, type PoolView } from "./dbc-launch";
+import { buildGraduateTransaction, buildSwapTransaction, explorerUrl, LAUNCH_PRESETS, NETWORKS, readPool, type LaunchNetwork, type PoolView } from "./dbc-launch";
 import { readLaunchStats, type LaunchStats } from "./launch-stats";
 import { formatCompactUsd } from "./format";
 
-const RPC = process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://rpc.magicblock.app/devnet";
-const explorer = (address: string, kind: "address" | "tx" = "address") => `https://explorer.solana.com/${kind}/${address}?cluster=devnet`;
+/** Who signs launch transactions: on devnet the in-app trading account (no
+ * prompts, faucet-funded); on mainnet the connected wallet, so real funds
+ * never move into a browser-held key. */
+export function useLaunchSigner(network: LaunchNetwork) {
+  const auth = useAppAuth();
+  const tradingKey = useTradingKey(auth);
+  const wallet = useActiveWalletSigner();
+  return async (): Promise<{ address: string; signTransaction(bytes: Uint8Array): Promise<Uint8Array> }> => {
+    if (network === "mainnet") {
+      if (!wallet.address) throw new Error("connect a wallet first");
+      return { address: wallet.address, signTransaction: (bytes) => wallet.signTransaction(bytes, NETWORKS.mainnet.chain) };
+    }
+    const signer = tradingKey.signer ?? tradingKeySigner(await tradingKey.unlock());
+    return { address: signer.address!, signTransaction: (bytes) => signer.signTransaction(bytes) };
+  };
+}
 const age = (ms: number) => {
   const s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
   return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : s < 86_400 ? `${Math.floor(s / 3600)}h` : `${Math.floor(s / 86_400)}d`;
@@ -36,12 +51,12 @@ const COLUMNS: { stage: Stage; title: string; hint: string }[] = [
 
 /** Pulse: every Equinox launch in three live columns by lifecycle stage, read
  * from the chain (curve, holders, fees, transactions). Buys, sells and
- * graduation are signed by the in-app trading account; a graduated token links
- * to its Equinox perp once listed. */
-export function LaunchMonitor({ refreshKey, quickBuyUsd }: { refreshKey: number; quickBuyUsd: number }) {
+ * graduation are signed per `useLaunchSigner`; a graduated token links to its
+ * Equinox perp once listed. */
+export function LaunchMonitor({ refreshKey, quickBuyUsd, network }: { refreshKey: number; quickBuyUsd: number; network: LaunchNetwork }) {
   const auth = useAppAuth();
-  const tradingKey = useTradingKey(auth);
-  const connection = useMemo(() => new Connection(RPC, "confirmed"), []);
+  const launchSigner = useLaunchSigner(network);
+  const connection = useMemo(() => new Connection(NETWORKS[network].rpc, "confirmed"), [network]);
   const [rows, setRows] = useState<Row[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ pool: string; text: string; href?: string; ok?: boolean } | null>(null);
@@ -51,7 +66,7 @@ export function LaunchMonitor({ refreshKey, quickBuyUsd }: { refreshKey: number;
   useEffect(() => {
     let stopped = false;
     const load = async () => {
-      const list = await fetch(`${publicMarketApiUrl.replace(/\/$/, "")}/v1/launches`).then((r) => r.json() as Promise<{ launches: Launch[] }>).catch(() => ({ launches: [] }));
+      const list = await fetch(`${publicMarketApiUrl.replace(/\/$/, "")}/v1/launches?network=${network}`).then((r) => r.json() as Promise<{ launches: Launch[] }>).catch(() => ({ launches: [] }));
       const withState = await Promise.all(list.launches.map(async (launch): Promise<Row> => {
         const view = await readPool(connection, launch.pool).catch(() => null);
         return { ...launch, view, stats: null };
@@ -68,27 +83,27 @@ export function LaunchMonitor({ refreshKey, quickBuyUsd }: { refreshKey: number;
     void load();
     const timer = setInterval(() => void load(), 12_000);
     return () => { stopped = true; clearInterval(timer); };
-  }, [connection, refreshKey, tick]);
+  }, [connection, network, refreshKey, tick]);
   // Ages tick every few seconds without refetching.
   useEffect(() => { const t = setInterval(() => setClock((n) => n + 1), 5_000); return () => clearInterval(t); }, []);
 
-  /** Signs and sends one launch transaction with the trading account. */
+  /** Signs and sends one launch transaction. */
   async function act(pool: string, label: string, build: (owner: PublicKey) => Promise<{ transaction: { serialize(o: { requireAllSignatures: boolean }): Uint8Array; recentBlockhash?: string }; lastValidBlockHeight: number }>) {
     if (!auth.walletAddress) { setNotice({ pool, text: "Connect a wallet first (top right)." }); return; }
     setBusy(pool);
     setNotice({ pool, text: `${label}…` });
     try {
-      const signer = tradingKey.signer ?? tradingKeySigner(await tradingKey.unlock());
-      const built = await build(new PublicKey(signer.address!));
+      const signer = await launchSigner();
+      const built = await build(new PublicKey(signer.address));
       const signed = await signer.signTransaction(built.transaction.serialize({ requireAllSignatures: false }));
       const signature = await connection.sendRawTransaction(signed);
       const outcome = await connection.confirmTransaction({ signature, blockhash: built.transaction.recentBlockhash!, lastValidBlockHeight: built.lastValidBlockHeight }, "confirmed");
       if (outcome.value.err) throw new Error(JSON.stringify(outcome.value.err));
-      setNotice({ pool, text: `${label} · done`, href: explorer(signature, "tx"), ok: true });
+      setNotice({ pool, text: `${label} · done`, href: explorerUrl(network, signature, "tx"), ok: true });
       setTick((t) => t + 1);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setNotice({ pool, text: `${label} failed: ${/insufficient/i.test(message) ? "not enough test USDC or SOL in your trading account (Start trading on the Trade page funds it)" : message}` });
+      setNotice({ pool, text: `${label} failed: ${!/insufficient/i.test(message) ? message : network === "mainnet" ? "not enough USDC or SOL in your wallet" : "not enough test USDC or SOL in your trading account (Start trading on the Trade page funds it)"}` });
     } finally {
       setBusy(null);
     }
@@ -98,7 +113,7 @@ export function LaunchMonitor({ refreshKey, quickBuyUsd }: { refreshKey: number;
     await act(row.pool, `Selling ${row.symbol}`, async (owner) => {
       const balance = await connection.getTokenAccountBalance(getAssociatedTokenAddressSync(new PublicKey(row.baseMint), owner)).catch(() => null);
       const amount = Number(balance?.value.uiAmount ?? 0);
-      if (!(amount > 0)) throw new Error(`your trading account holds no ${row.symbol}`);
+      if (!(amount > 0)) throw new Error(`${network === "mainnet" ? "your wallet" : "your trading account"} holds no ${row.symbol}`);
       return buildSwapTransaction(connection, { owner, pool: new PublicKey(row.pool), side: "sell", amount, slippageBps: 300 });
     });
   }
@@ -111,7 +126,7 @@ export function LaunchMonitor({ refreshKey, quickBuyUsd }: { refreshKey: number;
       {COLUMNS.map((column) => (
         <PulseColumn key={column.stage} title={column.title} hint={column.hint} rows={rows === null ? null : byStage(column.stage)}>
           {(row) => (
-            <PulseCard key={row.pool} row={row} stage={column.stage} quickBuyUsd={quickBuyUsd} busy={busy === row.pool}
+            <PulseCard key={row.pool} row={row} network={network} stage={column.stage} quickBuyUsd={quickBuyUsd} busy={busy === row.pool}
               notice={notice?.pool === row.pool ? notice : null}
               onBuy={() => void act(row.pool, `Buying $${quickBuyUsd} of ${row.symbol}`, (owner) => buildSwapTransaction(connection, { owner, pool: new PublicKey(row.pool), side: "buy", amount: quickBuyUsd, slippageBps: 300 }))}
               onSell={() => void sellAll(row)}
@@ -195,8 +210,8 @@ function Metric({ icon: Icon, value, title, tone }: { icon: typeof Users; value:
   return <span title={title} className={`inline-flex items-center gap-1 ${color}`}><Icon className="h-3 w-3" aria-hidden /><span className="sr-only">{title}: </span>{value}</span>;
 }
 
-function PulseCard({ row, stage, quickBuyUsd, busy, notice, onBuy, onSell, onGraduate }: {
-  row: Row; stage: Stage; quickBuyUsd: number; busy: boolean; notice: { text: string; href?: string; ok?: boolean } | null;
+function PulseCard({ row, network, stage, quickBuyUsd, busy, notice, onBuy, onSell, onGraduate }: {
+  row: Row; network: LaunchNetwork; stage: Stage; quickBuyUsd: number; busy: boolean; notice: { text: string; href?: string; ok?: boolean } | null;
   onBuy: () => void; onSell: () => void; onGraduate: () => void;
 }) {
   const { view, stats } = row;
@@ -235,7 +250,7 @@ function PulseCard({ row, stage, quickBuyUsd, busy, notice, onBuy, onSell, onGra
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-1.5 pl-[72px] text-[11.5px]">
         <span className="rounded bg-[var(--t-surface-3)] px-1.5 py-0.5 text-[10px] text-[var(--t-text-2)]">{preset?.label ?? row.preset}</span>
-        {view?.dammPool ? <a className="inline-flex items-center gap-0.5 text-[var(--t-link)] hover:underline" href={explorer(view.dammPool)} target="_blank" rel="noopener noreferrer">DAMM v2 <ExternalLink className="h-3 w-3" /></a> : null}
+        {view?.dammPool ? <a className="inline-flex items-center gap-0.5 text-[var(--t-link)] hover:underline" href={explorerUrl(network, view.dammPool)} target="_blank" rel="noopener noreferrer">DAMM v2 <ExternalLink className="h-3 w-3" /></a> : null}
         {stage === "graduated" ? (perp
           ? <Link className="font-semibold text-[var(--t-up)] hover:underline" href={`/trade?market=${perp.symbol}`}>Trade {perp.symbol}</Link>
           : <span className="text-[var(--t-text-3)]">Perp listing queued</span>) : null}
@@ -249,7 +264,7 @@ function PulseCard({ row, stage, quickBuyUsd, busy, notice, onBuy, onSell, onGra
             </>
           ) : null}
           {ready ? <button type="button" disabled={busy} onClick={onGraduate} className="rounded-full bg-[var(--t-up-3)] px-3 py-1 font-semibold text-[var(--t-on-fill)] hover:bg-[var(--t-up-2)] disabled:opacity-50">Graduate to DAMM v2</button> : null}
-          <a className="text-[var(--t-text-3)] hover:text-[var(--t-text)]" href={explorer(row.pool)} target="_blank" rel="noopener noreferrer" aria-label={`${row.symbol} pool on the explorer`}><ExternalLink className="h-3.5 w-3.5" /></a>
+          <a className="text-[var(--t-text-3)] hover:text-[var(--t-text)]" href={explorerUrl(network, row.pool)} target="_blank" rel="noopener noreferrer" aria-label={`${row.symbol} pool on the explorer`}><ExternalLink className="h-3.5 w-3.5" /></a>
         </span>
       </div>
       {notice ? (

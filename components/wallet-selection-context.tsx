@@ -121,7 +121,7 @@ export function WalletSelectionProvider({ children }: { children: React.ReactNod
 
   const signer = useMemo<ActiveWalletSigner>(() => {
     if (!auth.authenticated || !selectedAddress) return { address: null, signTransaction: async () => { throw new Error("No wallet selected"); } };
-    return { address: selectedAddress, signTransaction: (bytes) => identity.signWith(selectedAddress, bytes) };
+    return { address: selectedAddress, signTransaction: (bytes, chain) => identity.signWith(selectedAddress, bytes, chain) };
   }, [auth.authenticated, selectedAddress, identity]);
 
   const selection = useMemo<WalletSelection>(() => ({

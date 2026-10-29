@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext } from "react";
+import type { SolanaChain } from "@/lib/execution-boundary";
 
 export interface DiscoveredWallet {
   address: string;
@@ -42,7 +43,7 @@ export interface PrivyIdentity {
   getAccessToken: () => Promise<string | null>;
   /** Signs with a SPECIFIC wallet by address -- never "the active one" at
    * this layer, since this layer doesn't know about selection. */
-  signWith: (address: string, bytes: Uint8Array) => Promise<Uint8Array>;
+  signWith: (address: string, bytes: Uint8Array, chain?: SolanaChain) => Promise<Uint8Array>;
 }
 
 export const disabledIdentity: PrivyIdentity = {

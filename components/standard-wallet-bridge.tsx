@@ -76,9 +76,9 @@ export function DirectWalletBridge({ children }: { children: React.ReactNode }) 
       if (!standard || standard.account.address !== address) throw new Error("Only the connected browser wallet can sign messages");
       return signMessageWith(standard.wallet, standard.account, bytes);
     },
-    signWith: async (address, bytes) => {
+    signWith: async (address, bytes, chain) => {
       if (!standard || standard.account.address !== address) throw new Error(`Wallet ${address} is not connected`);
-      return signTransactionWith(standard.wallet, standard.account, bytes);
+      return signTransactionWith(standard.wallet, standard.account, bytes, chain);
     },
   }), [installed, standard, connect, disconnect]);
   return <PrivyIdentityContext.Provider value={identity}>{children}</PrivyIdentityContext.Provider>;

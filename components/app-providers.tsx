@@ -130,11 +130,11 @@ function PrivyIdentityBridge({ children }: { children: React.ReactNode }) {
       if (authenticated) await privyLogout();
     },
     getAccessToken: async () => { try { return await getAccessToken(); } catch { return null; } },
-    signWith: async (address, bytes) => {
-      if (standard?.account.address === address) return signTransactionWith(standard.wallet, standard.account, bytes);
+    signWith: async (address, bytes, chain = "solana:devnet") => {
+      if (standard?.account.address === address) return signTransactionWith(standard.wallet, standard.account, bytes, chain);
       const wallet = embedded.find((candidate) => candidate.address === address);
       if (!wallet) throw new Error(`Wallet ${address} is not connected`);
-      const signer = new PrivyWalletSigner(signSolanaTransaction, wallet, "solana:devnet");
+      const signer = new PrivyWalletSigner(signSolanaTransaction, wallet, chain);
       return signer.signTransaction(bytes);
     },
   }), [ready, authenticated, user?.id, user?.email?.address, user?.google?.email, installed, standard, connect, disconnect, embedded, generateSiwsMessage, loginWithSiws, authError, login, privyLogout, getAccessToken, signSolanaTransaction]);

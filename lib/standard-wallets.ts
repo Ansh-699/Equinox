@@ -2,6 +2,7 @@
 
 import { getWallets } from "@wallet-standard/app";
 import type { Wallet, WalletAccount } from "@wallet-standard/base";
+import type { SolanaChain } from "@/lib/execution-boundary";
 
 /** A Solana wallet discovered through the Wallet Standard (Phantom, Solflare, Backpack, …). */
 export interface SolanaWalletOption { name: string; icon: string; wallet: Wallet }
@@ -43,8 +44,8 @@ export async function signMessageWith(wallet: Wallet, account: WalletAccount, me
   return result.signature;
 }
 
-export async function signTransactionWith(wallet: Wallet, account: WalletAccount, transaction: Uint8Array): Promise<Uint8Array> {
-  const [result] = await feature<SignTransactionFeature>(wallet, "solana:signTransaction")!.signTransaction({ account, transaction, chain: "solana:devnet" });
+export async function signTransactionWith(wallet: Wallet, account: WalletAccount, transaction: Uint8Array, chain: SolanaChain = "solana:devnet"): Promise<Uint8Array> {
+  const [result] = await feature<SignTransactionFeature>(wallet, "solana:signTransaction")!.signTransaction({ account, transaction, chain });
   return result.signedTransaction;
 }
 

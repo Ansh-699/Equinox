@@ -51,7 +51,7 @@ const ICON_LINK = "hidden h-8 w-8 items-center justify-center rounded text-[var(
 
 /** Terminal top bar (SlipStream TerminalNav): identity and sections on the
  * left; utilities, theme and wallet on the right. */
-export function TopBar({ active, auth, onTradeClick }: { active: ActiveSection; auth: AppAuth; onTradeClick?: () => void }) {
+export function TopBar({ active, auth, onTradeClick, network = "Devnet" }: { active: ActiveSection; auth: AppAuth; onTradeClick?: () => void; network?: "Devnet" | "Mainnet" }) {
   // Sign in / Choose wallet / address+Log out are mutually exclusive: activating
   // one unmounts it. Move focus to whichever replaces it so keyboard users are
   // never stranded on <body> (tests/browser/keyboard-only.spec.ts).
@@ -82,7 +82,7 @@ export function TopBar({ active, auth, onTradeClick }: { active: ActiveSection; 
         <BrandMark size={28} />
         <span className="text-[20px] font-semibold tracking-[-0.03em] text-[var(--t-text)]">Equinox</span>
       </Link>
-      <span className="ml-2.5 hidden rounded-[5px] border border-[var(--t-border)] px-1.5 py-px text-[10.5px] font-medium text-[var(--t-text-3)] xl:inline">Devnet</span>
+      <span className="ml-2.5 hidden rounded-[5px] border border-[var(--t-border)] px-1.5 py-px text-[10.5px] font-medium text-[var(--t-text-3)] xl:inline">{network}</span>
 
       <nav aria-label="Primary navigation" className="ml-7 hidden h-full min-w-0 items-stretch gap-5 md:flex">
         {NAV.map((item) => (

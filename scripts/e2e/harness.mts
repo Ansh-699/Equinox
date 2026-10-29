@@ -16,21 +16,22 @@ export async function launch() {
   const browser = await chromium.launch({ channel: "chrome" });
   const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
   const prompts: string[] = [];
+  const chains: string[] = []; // the chain each transaction prompt named
   await page.exposeFunction("__e2eSignMessage", async (bytes: number[]) => { prompts.push("signMessage"); return Array.from(new Uint8Array(await signBytes(signingKey.privateKey, Uint8Array.from(bytes)))); });
-  await page.exposeFunction("__e2eSignTx", (bytes: number[]) => { prompts.push("signTransaction"); const tx = VersionedTransaction.deserialize(Uint8Array.from(bytes)); tx.sign([wallet]); return Array.from(tx.serialize()); });
+  await page.exposeFunction("__e2eSignTx", (bytes: number[], chain?: string) => { prompts.push("signTransaction"); chains.push(chain ?? ""); const tx = VersionedTransaction.deserialize(Uint8Array.from(bytes)); tx.sign([wallet]); return Array.from(tx.serialize()); });
   await page.addInitScript("globalThis.__name = (f) => f;"); // tsx helper leaking into the serialized script
   await page.addInitScript(({ address, pk }) => {
-    const account = { address, publicKey: Uint8Array.from(pk), chains: ["solana:devnet"], features: ["solana:signTransaction", "solana:signMessage"] };
-    const w = window as unknown as Record<string, (b: number[]) => Promise<number[]>>;
+    const account = { address, publicKey: Uint8Array.from(pk), chains: ["solana:devnet", "solana:mainnet"], features: ["solana:signTransaction", "solana:signMessage"] };
+    const w = window as unknown as Record<string, (b: number[], chain?: string) => Promise<number[]>>;
     const injected = {
-      version: "1.0.0", name: "E2E Wallet", chains: ["solana:devnet"], accounts: [account],
+      version: "1.0.0", name: "E2E Wallet", chains: ["solana:devnet", "solana:mainnet"], accounts: [account],
       icon: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=",
       features: {
         "standard:connect": { version: "1.0.0", connect: async () => ({ accounts: [account] }) },
         "standard:disconnect": { version: "1.0.0", disconnect: async () => undefined },
         "standard:events": { version: "1.0.0", on: () => () => undefined },
         "solana:signMessage": { version: "1.0.0", signMessage: async (...inputs: { message: Uint8Array }[]) => Promise.all(inputs.map(async (i) => ({ signedMessage: i.message, signature: Uint8Array.from(await w.__e2eSignMessage(Array.from(i.message))) }))) },
-        "solana:signTransaction": { version: "1.0.0", supportedTransactionVersions: ["legacy", 0], signTransaction: async (...inputs: { transaction: Uint8Array }[]) => Promise.all(inputs.map(async (i) => ({ signedTransaction: Uint8Array.from(await w.__e2eSignTx(Array.from(i.transaction))) }))) },
+        "solana:signTransaction": { version: "1.0.0", supportedTransactionVersions: ["legacy", 0], signTransaction: async (...inputs: { transaction: Uint8Array; chain?: string }[]) => Promise.all(inputs.map(async (i) => ({ signedTransaction: Uint8Array.from(await w.__e2eSignTx(Array.from(i.transaction), i.chain)) }))) },
       },
     };
     const register = (api: { register: (w: unknown) => void }) => api.register(injected);
@@ -68,5 +69,5 @@ export async function launch() {
   };
   const walletUsdc = async () => (await L1.getTokenAccountBalance(getAssociatedTokenAddressSync(MINT, wallet.publicKey)).catch(() => null))?.value.uiAmountString ?? "0";
   const close = async () => { clearInterval(watcher); await browser.close(); };
-  return { page, wallet, prompts, step, notice, waitNotice, connect: () => connect(page), walletUsdc, close };
+  return { page, wallet, prompts, chains, step, notice, waitNotice, connect: () => connect(page), walletUsdc, close };
 }

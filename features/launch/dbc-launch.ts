@@ -2,9 +2,17 @@ import { Connection, Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import BN from "bn.js";
 import deployment from "@/config/equinox-deployment.json";
 
-/** Launches are priced in dollars: the quote token is Equinox's test USDC
- * (the same collateral the perps use), not SOL. Equity is priced in USD. */
-export const QUOTE_MINT = new PublicKey(deployment.collateralMint);
+/** Where a launch lives. Both price equity in dollars: devnet curves in
+ * Equinox's test USDC (the perps' collateral) and signed by the in-app trading
+ * account; mainnet curves in USDC and signed by the connected wallet itself. */
+export type LaunchNetwork = "devnet" | "mainnet";
+export const NETWORKS = {
+  devnet: { rpc: process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://rpc.magicblock.app/devnet", quoteMint: new PublicKey(deployment.collateralMint), chain: "solana:devnet", explorerQuery: "?cluster=devnet" },
+  // PublicNode answers browsers (api.mainnet-beta refuses them) but disables
+  // getProgramAccounts, so mainnet cards show no holder figures.
+  mainnet: { rpc: "https://solana-rpc.publicnode.com", quoteMint: new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"), chain: "solana:mainnet", explorerQuery: "" },
+} as const;
+export const explorerUrl = (network: LaunchNetwork, address: string, kind: "address" | "tx" = "address") => `https://explorer.solana.com/${kind}/${address}${NETWORKS[network].explorerQuery}`;
 export const QUOTE_DECIMALS = 6;
 export const BASE_DECIMALS = 6;
 
@@ -61,6 +69,7 @@ export interface LaunchInput {
   uri: string;
   preset: LaunchPreset;
   creator: PublicKey;
+  quoteMint: PublicKey;
 }
 
 // Loaded on demand: the SDK pulls in Anchor, which only the launch flow needs.
@@ -118,14 +127,14 @@ export async function buildLaunchTransaction(connection: Connection, input: Laun
   const client = new sdk.DynamicBondingCurveClient(connection, "confirmed");
   const transaction: Transaction = await client.partner.createConfigAndPool({
     ...curve,
-    config: config.publicKey, feeClaimer: input.creator, leftoverReceiver: input.creator, payer: input.creator, quoteMint: QUOTE_MINT,
+    config: config.publicKey, feeClaimer: input.creator, leftoverReceiver: input.creator, payer: input.creator, quoteMint: input.quoteMint,
     preCreatePoolParam: { name: input.name, symbol: input.symbol, uri: input.uri, poolCreator: input.creator, baseMint: baseMint.publicKey },
   });
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
   transaction.feePayer = input.creator;
   transaction.recentBlockhash = blockhash;
   transaction.partialSign(config, baseMint);
-  const pool = sdk.deriveDbcPoolAddress(QUOTE_MINT, baseMint.publicKey, config.publicKey);
+  const pool = sdk.deriveDbcPoolAddress(input.quoteMint, baseMint.publicKey, config.publicKey);
   return { transaction, lastValidBlockHeight, config: config.publicKey, baseMint: baseMint.publicKey, pool };
 }
 
@@ -160,7 +169,7 @@ export async function readPool(connection: Connection, pool: PublicKey | string)
     price, marketCap: price * TOTAL_SUPPLY, raisedUsd: raised, thresholdUsd,
     progress: thresholdUsd > 0 ? Math.min(1, raised / thresholdUsd) : 0,
     graduated: Boolean(state.isMigrated),
-    dammPool: state.isMigrated && dammConfig ? sdk.deriveDammV2PoolAddress(dammConfig, state.baseMint, QUOTE_MINT).toBase58() : null,
+    dammPool: state.isMigrated && dammConfig && config ? sdk.deriveDammV2PoolAddress(dammConfig, state.baseMint, config.quoteMint).toBase58() : null,
     feesUsd: state.metrics ? (Number(state.metrics.totalTradingQuoteFee.toString()) + Number(state.metrics.totalProtocolQuoteFee.toString())) / 10 ** QUOTE_DECIMALS : 0,
   };
 }
@@ -198,5 +207,5 @@ export async function buildGraduateTransaction(connection: Connection, input: { 
   migration.transaction.feePayer = input.payer;
   migration.transaction.recentBlockhash = blockhash;
   migration.transaction.partialSign(migration.firstPositionNftKeypair, migration.secondPositionNftKeypair);
-  return { transaction: migration.transaction, lastValidBlockHeight, dammPool: sdk.deriveDammV2PoolAddress(dammConfig, fields.baseMint, QUOTE_MINT) };
+  return { transaction: migration.transaction, lastValidBlockHeight, dammPool: sdk.deriveDammV2PoolAddress(dammConfig, fields.baseMint, config.quoteMint) };
 }

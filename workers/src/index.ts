@@ -22,7 +22,7 @@ import { ProtocolKeeperOrchestrator, type OrchestratorRunSummary } from './keepe
 import { EQUINOX_PROGRAM_ID } from '../../clients/equinox/src/constants';
 import { handleV3MarketRoute } from './v3-routes';
 import { fetchPreIpoTokens } from './pre-ipo';
-import { listLaunches, registerLaunch } from './launches';
+import { launchNetwork, listLaunches, MAINNET_RPC_URL, registerLaunch } from './launches';
 import { getBase58Decoder } from '@solana/kit';
 import { deriveSeatShardV3 } from './v3-pdas';
 import { decodeV3Core, decodeV3SeatShard } from './v3-market-state';
@@ -337,11 +337,12 @@ const worker = {
       return response;
     }
     if (url.pathname === "/v1/launches" && env.DB && env.SOLANA_RPC_URL) {
-      if (request.method === "GET") return json({ launches: await listLaunches(env.DB) });
+      if (request.method === "GET") return json({ launches: await listLaunches(env.DB, launchNetwork(url.searchParams.get("network"))) });
       if (request.method === "POST") {
         const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
         if (!await new ProtocolRepository(env.DB).allow(`launch:${ip}`, 10, 60_000, Date.now())) return json({ error: "rate_limited" }, 429);
-        const result = await registerLaunch(env.DB, new SolanaL1Transport(env.SOLANA_RPC_URL), await request.json().catch(() => null));
+        const devnetRpc = env.SOLANA_RPC_URL;
+        const result = await registerLaunch(env.DB, (network) => new SolanaL1Transport(network === "mainnet" ? MAINNET_RPC_URL : devnetRpc), await request.json().catch(() => null));
         return json(result.body, result.status);
       }
     }

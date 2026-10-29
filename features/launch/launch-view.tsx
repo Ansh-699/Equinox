@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { Check, Loader2, Plus, Rocket, X, Zap } from "lucide-react";
 import { openWalletDrawer, TopBar } from "@/components/layout/top-bar";
@@ -10,14 +11,12 @@ import { tradingKeySigner } from "@/lib/trading-key";
 import { requestTestFunds } from "@/lib/faucet-client";
 import { publicMarketApiUrl } from "@/lib/demo-config";
 import { Badge, BUTTON_PRIMARY, FOCUS_RING, InfoTip } from "@/components/ui/primitives";
-import { LaunchMonitor, TokenAvatar } from "./launch-monitor";
-import { buildLaunchTransaction, describePreset, LAUNCH_PRESETS, TOTAL_SUPPLY, type LaunchPreset } from "./dbc-launch";
+import { LaunchMonitor, TokenAvatar, useLaunchSigner } from "./launch-monitor";
+import { buildLaunchTransaction, describePreset, explorerUrl, LAUNCH_PRESETS, NETWORKS, TOTAL_SUPPLY, type LaunchNetwork, type LaunchPreset } from "./dbc-launch";
 import { formatCompactUsd, formatTinyUsd } from "./format";
 
-const RPC = process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://rpc.magicblock.app/devnet";
 const STOCKS = ["TSLA", "AAPL", "NVDA"] as const;
 const INPUT = `h-[38px] w-full rounded-[8px] border border-[var(--t-border-strong)] bg-[var(--t-bg)] px-3 text-[13.5px] text-[var(--t-text)] ${FOCUS_RING}`;
-const explorer = (address: string, kind: "address" | "tx" = "address") => `https://explorer.solana.com/${kind}/${address}?cluster=devnet`;
 
 type Result = { pool: string; mint: string; config: string; signature: string };
 
@@ -67,12 +66,14 @@ function StepHead({ n, title, hint }: { n: number; title: string; hint?: string 
 
 const feeLabel = (p: LaunchPreset) => (p.startingFeeBps === p.endingFeeBps ? `${p.startingFeeBps / 100}% flat fee` : `${p.startingFeeBps / 100}% → ${p.endingFeeBps / 100}% fee`);
 
-/** Meteora DBC launchpad for stock-themed tokens, signed by the trading account. */
-export function LaunchView() {
+/** Meteora DBC launchpad for stock-themed tokens, on devnet or mainnet (see NETWORKS). */
+export function LaunchView({ network = "devnet" }: { network?: LaunchNetwork }) {
   const auth = useAppAuth();
   const tradingKey = useTradingKey(auth);
+  const launchSigner = useLaunchSigner(network);
+  const presets = LAUNCH_PRESETS.filter((p) => network === "devnet" || p.id !== "devnet");
   const [refreshKey, setRefreshKey] = useState(0);
-  const [quickBuy, setQuickBuy] = useState(25);
+  const [quickBuy, setQuickBuy] = useState(network === "mainnet" ? 1 : 25);
   const [createOpen, setCreateOpen] = useState(false);
   useEffect(() => {
     if (!createOpen) return;
@@ -90,7 +91,7 @@ export function LaunchView() {
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
   const summary = describePreset(preset);
-  const connection = useMemo(() => new Connection(RPC, "confirmed"), []);
+  const connection = useMemo(() => new Connection(NETWORKS[network].rpc, "confirmed"), [network]);
   const symbolValid = /^[A-Z0-9]{2,10}$/.test(symbol);
 
   async function launch() {
@@ -101,19 +102,20 @@ export function LaunchView() {
     setStatus(null);
     setPhase("fund");
     try {
-      // Signed by the trading account (one wallet prompt the first time on this device).
-      const signer = tradingKey.signer ?? tradingKeySigner(await tradingKey.unlock());
-      const creator = new PublicKey(signer.address!);
-      // Rent for the config, pool and mint (~0.02 SOL): the faucet tops up SOL and test USDC.
+      const signer = await launchSigner();
+      const creator = new PublicKey(signer.address);
+      // Rent for the config, pool and mint (~0.02 SOL): on devnet the faucet tops up SOL and test USDC.
       if ((await connection.getBalance(creator)) < 30_000_000) {
-        const claim = await requestTestFunds({ privyAuthenticated: false, getAccessToken: async () => null, signMessage: (_a: string, bytes: Uint8Array) => signer.signMessage(bytes) }, signer.address!);
+        if (network === "mainnet") throw new Error("your wallet needs about 0.03 SOL for the launch's rent");
+        const key = tradingKeySigner(await tradingKey.unlock());
+        const claim = await requestTestFunds({ privyAuthenticated: false, getAccessToken: async () => null, signMessage: (_a: string, bytes: Uint8Array) => key.signMessage(bytes) }, signer.address);
         if (!claim.ok && (await connection.getBalance(creator)) < 30_000_000) throw new Error(claim.message);
         for (let i = 0; i < 20 && (await connection.getBalance(creator)) < 30_000_000; i += 1) await new Promise((r) => setTimeout(r, 1_000));
         if ((await connection.getBalance(creator)) < 30_000_000) throw new Error("your trading account has no devnet SOL for rent and the faucet couldn't send any (it may be empty); try again in a while");
       }
       setPhase("build");
       const built = await buildLaunchTransaction(connection, {
-        name: name.trim(), symbol, uri: uri.trim() || `${location.origin}/brand/equinox-dark.png`, preset, creator,
+        name: name.trim(), symbol, uri: uri.trim() || `${location.origin}/brand/equinox-dark.png`, preset, creator, quoteMint: NETWORKS[network].quoteMint,
       });
       setPhase("sign");
       const signed = await signer.signTransaction(built.transaction.serialize({ requireAllSignatures: false }));
@@ -123,7 +125,7 @@ export function LaunchView() {
       if (outcome.value.err) throw new Error(`launch failed: ${JSON.stringify(outcome.value.err)}`);
       setResult({ pool: built.pool.toBase58(), mint: built.baseMint.toBase58(), config: built.config.toBase58(), signature });
       // List it on the Launch page for everyone (display registry; the chain is the truth).
-      await fetch(`${publicMarketApiUrl.replace(/\/$/, "")}/v1/launches`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pool: built.pool.toBase58(), baseMint: built.baseMint.toBase58(), symbol, name: name.trim(), preset: preset.id }) }).catch(() => undefined);
+      await fetch(`${publicMarketApiUrl.replace(/\/$/, "")}/v1/launches`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pool: built.pool.toBase58(), baseMint: built.baseMint.toBase58(), symbol, name: name.trim(), preset: preset.id, network }) }).catch(() => undefined);
       setRefreshKey((k) => k + 1);
       setPhase("done");
     } catch (error) {
@@ -136,13 +138,14 @@ export function LaunchView() {
 
   return (
     <div className="terminal min-h-screen">
-      <TopBar active="launch" auth={auth} />
+      <TopBar active="launch" auth={auth} network={network === "mainnet" ? "Mainnet" : "Devnet"} />
       <main id="main-content" tabIndex={-1} className="mx-auto max-w-[1600px] px-4 py-5 outline-none">
         <header className="flex flex-wrap items-center gap-3">
           <div className="mr-auto">
             <div className="flex items-center gap-2">
               <h1 className="text-[24px] font-semibold tracking-tight text-[var(--t-text)]">Pulse</h1>
-              <Badge tone="up"><Rocket className="h-3 w-3" /> Launchpad · devnet</Badge>
+              <Badge tone="up"><Rocket className="h-3 w-3" /> Launchpad · {network}</Badge>
+              <Link href={network === "mainnet" ? "/launch" : "/launch/mainnet"} className="text-[12px] text-[var(--t-link)] hover:underline">{network === "mainnet" ? "Devnet" : "Mainnet"} →</Link>
             </div>
             <p className="text-[12.5px] text-[var(--t-text-3)]">Stock-themed tokens on Meteora bonding curves, priced in USDC, live from the chain.</p>
           </div>
@@ -154,7 +157,7 @@ export function LaunchView() {
         </header>
 
         <div className="mt-4">
-          <LaunchMonitor refreshKey={refreshKey} quickBuyUsd={quickBuy} />
+          <LaunchMonitor refreshKey={refreshKey} quickBuyUsd={quickBuy} network={network} />
         </div>
 
         <section aria-label="How launches connect to Equinox perps" className="mt-4 rounded-[10px] border border-[var(--t-border)] bg-[var(--t-surface)] p-4">
@@ -180,7 +183,7 @@ export function LaunchView() {
             <div className="flex items-center justify-between border-b border-[var(--t-border)] px-4 py-3">
               <h2 className="text-[14px] font-semibold text-[var(--t-text)]">Create a launch</h2>
               <span className="flex items-center gap-2">
-                <Badge tone="muted">~0.02 SOL rent, covered</Badge>
+                <Badge tone="muted">{network === "mainnet" ? "~0.03 SOL rent" : "~0.02 SOL rent, covered"}</Badge>
                 <button type="button" onClick={() => setCreateOpen(false)} aria-label="Close" className="rounded p-1 text-[var(--t-text-2)] hover:bg-[var(--t-surface-3)] hover:text-[var(--t-text)]"><X className="h-4 w-4" /></button>
               </span>
             </div>
@@ -189,7 +192,7 @@ export function LaunchView() {
               <section className="space-y-3">
                 <StepHead n={1} title="Pick a curve" />
                 <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Curve preset">
-                  {LAUNCH_PRESETS.map((p) => {
+                  {presets.map((p) => {
                     const on = p.id === preset.id;
                     return (
                       <button key={p.id} type="button" role="radio" aria-checked={on} onClick={() => setPreset(p)}
@@ -262,22 +265,24 @@ export function LaunchView() {
                       return (
                         <li key={step.id} className={`flex items-center gap-2 text-[12.5px] ${state === "todo" ? "text-[var(--t-text-3)]" : "text-[var(--t-text)]"}`}>
                           {state === "done" ? <Check className="h-4 w-4 text-[var(--t-up)]" /> : state === "active" ? <Loader2 className="h-4 w-4 animate-spin text-[var(--t-up)]" /> : <span className="grid h-4 w-4 place-items-center"><span className="h-1.5 w-1.5 rounded-full bg-[var(--t-text-3)]" /></span>}
-                          {step.label}
+                          {step.id === "fund" && network === "mainnet" ? "Check SOL for rent" : step.label}
                         </li>
                       );
                     })}
                   </ol>
                 ) : null}
-                <p className="text-[11px] leading-relaxed text-[var(--t-text-3)]">Signed by your in-app trading account (one wallet prompt the first time). You keep the creator fees and the creator share of liquidity. Devnet SOL for rent is topped up from the faucet.</p>
+                <p className="text-[11px] leading-relaxed text-[var(--t-text-3)]">{network === "mainnet"
+                  ? "Signed by your wallet. Rent (about 0.03 SOL) and every buy use your own SOL and USDC. You keep the creator fees and the creator share of liquidity."
+                  : "Signed by your in-app trading account (one wallet prompt the first time). You keep the creator fees and the creator share of liquidity. Devnet SOL for rent is topped up from the faucet."}</p>
                 {status ? <p role="status" className="rounded-[8px] bg-[var(--t-down-soft)] px-3 py-2 text-[12px] text-[var(--t-down)]">{status}</p> : null}
                 {result ? (
                   <div role="status" className="space-y-2 rounded-[10px] border border-[var(--t-up)] bg-[var(--t-up-soft)] p-3 text-[12.5px]">
-                    <p className="flex items-center gap-1.5 font-semibold text-[var(--t-up)]"><Check className="h-4 w-4" /> {symbol} is live on devnet</p>
+                    <p className="flex items-center gap-1.5 font-semibold text-[var(--t-up)]"><Check className="h-4 w-4" /> {symbol} is live on {network}</p>
                     <p className="text-[var(--t-text-2)]">It&apos;s now in the launches list. Be the first buyer to start it up the curve.</p>
                     <div className="flex flex-wrap gap-x-3 gap-y-1">
-                      <a className="text-[var(--t-link)] hover:underline" href={explorer(result.pool)} target="_blank" rel="noopener noreferrer">Pool ↗</a>
-                      <a className="text-[var(--t-link)] hover:underline" href={explorer(result.mint)} target="_blank" rel="noopener noreferrer">Token mint ↗</a>
-                      <a className="text-[var(--t-link)] hover:underline" href={explorer(result.signature, "tx")} target="_blank" rel="noopener noreferrer">Transaction ↗</a>
+                      <a className="text-[var(--t-link)] hover:underline" href={explorerUrl(network, result.pool)} target="_blank" rel="noopener noreferrer">Pool ↗</a>
+                      <a className="text-[var(--t-link)] hover:underline" href={explorerUrl(network, result.mint)} target="_blank" rel="noopener noreferrer">Token mint ↗</a>
+                      <a className="text-[var(--t-link)] hover:underline" href={explorerUrl(network, result.signature, "tx")} target="_blank" rel="noopener noreferrer">Transaction ↗</a>
                     </div>
                   </div>
                 ) : null}
