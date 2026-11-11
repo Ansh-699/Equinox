@@ -5,14 +5,13 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ChefHat, Clock, Copy, Crown, ExternalLink, Search, Users, Zap } from "lucide-react";
 import { Connection, PublicKey } from "@solana/web3.js";
-import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { useAppAuth } from "@/components/app-providers";
 import { useActiveWalletSigner } from "@/components/wallet-signer-context";
 import { useTradingKey } from "@/features/wallet/use-trading-key";
 import { tradingKeySigner } from "@/lib/trading-key";
 import { publicMarketApiUrl } from "@/lib/demo-config";
 import { V3_MARKETS } from "@/lib/v3-markets";
-import { buildGraduateTransaction, buildSwapTransaction, explorerUrl, LAUNCH_PRESETS, NETWORKS, readPool, type LaunchNetwork, type PoolView } from "./dbc-launch";
+import { buildGraduateTransaction, buildSwapTransaction, confirmSignature, heldTokens, explorerUrl, LAUNCH_PRESETS, NETWORKS, readPool, type LaunchNetwork, type PoolView } from "./dbc-launch";
 import { readLaunchStats, type LaunchStats } from "./launch-stats";
 import { formatCompactUsd } from "./format";
 
@@ -97,8 +96,7 @@ export function LaunchMonitor({ refreshKey, quickBuyUsd, network }: { refreshKey
       const built = await build(new PublicKey(signer.address));
       const signed = await signer.signTransaction(built.transaction.serialize({ requireAllSignatures: false }));
       const signature = await connection.sendRawTransaction(signed);
-      const outcome = await connection.confirmTransaction({ signature, blockhash: built.transaction.recentBlockhash!, lastValidBlockHeight: built.lastValidBlockHeight }, "confirmed");
-      if (outcome.value.err) throw new Error(JSON.stringify(outcome.value.err));
+      await confirmSignature(connection, signature);
       setNotice({ pool, text: `${label} · done`, href: explorerUrl(network, signature, "tx"), ok: true });
       setTick((t) => t + 1);
     } catch (error) {
@@ -111,8 +109,7 @@ export function LaunchMonitor({ refreshKey, quickBuyUsd, network }: { refreshKey
 
   async function sellAll(row: Row) {
     await act(row.pool, `Selling ${row.symbol}`, async (owner) => {
-      const balance = await connection.getTokenAccountBalance(getAssociatedTokenAddressSync(new PublicKey(row.baseMint), owner)).catch(() => null);
-      const amount = Number(balance?.value.uiAmount ?? 0);
+      const amount = await heldTokens(connection, new PublicKey(row.baseMint), owner);
       if (!(amount > 0)) throw new Error(`${network === "mainnet" ? "your wallet" : "your trading account"} holds no ${row.symbol}`);
       return buildSwapTransaction(connection, { owner, pool: new PublicKey(row.pool), side: "sell", amount, slippageBps: 300 });
     });

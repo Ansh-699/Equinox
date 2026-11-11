@@ -12,7 +12,7 @@ import { requestTestFunds } from "@/lib/faucet-client";
 import { publicMarketApiUrl } from "@/lib/demo-config";
 import { Badge, BUTTON_PRIMARY, FOCUS_RING, InfoTip } from "@/components/ui/primitives";
 import { LaunchMonitor, TokenAvatar, useLaunchSigner } from "./launch-monitor";
-import { buildLaunchTransaction, describePreset, explorerUrl, LAUNCH_PRESETS, NETWORKS, TOTAL_SUPPLY, type LaunchNetwork, type LaunchPreset } from "./dbc-launch";
+import { buildLaunchTransaction, confirmSignature, describePreset, explorerUrl, LAUNCH_PRESETS, NETWORKS, TOTAL_SUPPLY, type LaunchNetwork, type LaunchPreset } from "./dbc-launch";
 import { formatCompactUsd, formatTinyUsd } from "./format";
 
 const STOCKS = ["TSLA", "AAPL", "NVDA"] as const;
@@ -121,8 +121,7 @@ export function LaunchView({ network = "devnet" }: { network?: LaunchNetwork }) 
       const signed = await signer.signTransaction(built.transaction.serialize({ requireAllSignatures: false }));
       setPhase("confirm");
       const signature = await connection.sendRawTransaction(signed);
-      const outcome = await connection.confirmTransaction({ signature, blockhash: built.transaction.recentBlockhash!, lastValidBlockHeight: built.lastValidBlockHeight }, "confirmed");
-      if (outcome.value.err) throw new Error(`launch failed: ${JSON.stringify(outcome.value.err)}`);
+      await confirmSignature(connection, signature);
       setResult({ pool: built.pool.toBase58(), mint: built.baseMint.toBase58(), config: built.config.toBase58(), signature });
       // List it on the Launch page for everyone (display registry; the chain is the truth).
       await fetch(`${publicMarketApiUrl.replace(/\/$/, "")}/v1/launches`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pool: built.pool.toBase58(), baseMint: built.baseMint.toBase58(), symbol, name: name.trim(), preset: preset.id, network }) }).catch(() => undefined);

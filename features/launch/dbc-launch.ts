@@ -1,4 +1,5 @@
 import { Connection, Keypair, PublicKey, Transaction } from "@solana/web3.js";
+import { getAccount, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import BN from "bn.js";
 import deployment from "@/config/equinox-deployment.json";
 
@@ -14,6 +15,25 @@ export const NETWORKS = {
 } as const;
 export const explorerUrl = (network: LaunchNetwork, address: string, kind: "address" | "tx" = "address") => `https://explorer.solana.com/${kind}/${address}${NETWORKS[network].explorerQuery}`;
 export const QUOTE_DECIMALS = 6;
+
+/** Waits for a signature by polling its status. web3's block-height expiry
+ * check is unusable on mainnet: PublicNode's getBlockHeight returns the slot,
+ * so every transaction reads as expired the moment it is sent. */
+export async function confirmSignature(connection: Pick<Connection, "getSignatureStatuses">, signature: string, timeoutMs = 90_000, pollMs = 1_000) {
+  for (const end = Date.now() + timeoutMs; Date.now() < end; await new Promise((r) => setTimeout(r, pollMs))) {
+    const status = (await connection.getSignatureStatuses([signature])).value[0];
+    if (status?.err) throw new Error(JSON.stringify(status.err));
+    if (status?.confirmationStatus === "confirmed" || status?.confirmationStatus === "finalized") return;
+  }
+  throw new Error(`not confirmed within ${timeoutMs / 1000}s; check ${signature} on the explorer before trying again`);
+}
+
+/** Whole launch tokens in the owner's associated account (0 when it has none).
+ * Reads via getAccountInfo: PublicNode refuses getTokenAccountBalance without a personal token. */
+export async function heldTokens(connection: Pick<Connection, "getAccountInfo">, mint: PublicKey, owner: PublicKey) {
+  const account = await getAccount(connection as Connection, getAssociatedTokenAddressSync(mint, owner)).catch(() => null);
+  return Number(account?.amount ?? 0n) / 10 ** BASE_DECIMALS;
+}
 export const BASE_DECIMALS = 6;
 
 /** Equity-tuned Meteora DBC launch presets. Market caps are in USD (test USDC). */
