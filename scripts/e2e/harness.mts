@@ -10,8 +10,7 @@ export const SITE = process.env.SITE ?? "https://equinox.ansht.workers.dev/trade
 const L1 = new Connection("https://api.devnet.solana.com", "confirmed");
 const MINT = new PublicKey("GLgZYwSXmDTktcX9Hpizak7AjPJjd5QdwrRDkYc5oRtC");
 
-export async function launch() {
-  const wallet = Keypair.generate();
+export async function launch(wallet = Keypair.generate()) {
   const signingKey = await createKeyPairFromPrivateKeyBytes(wallet.secretKey.slice(0, 32));
   const browser = await chromium.launch({ channel: "chrome" });
   const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
