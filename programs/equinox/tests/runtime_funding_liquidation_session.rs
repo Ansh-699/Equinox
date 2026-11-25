@@ -9,14 +9,6 @@
 use std::path::PathBuf;
 use std::ptr;
 
-use litesvm::LiteSVM;
-use solana_account::Account;
-use solana_address::Address;
-use solana_instruction::{account_meta::AccountMeta, Instruction};
-use solana_keypair::Keypair;
-use solana_message::Message;
-use solana_signer::Signer;
-use solana_transaction::Transaction;
 use equinox::{
     session::{TradingSession, TRADING_SESSION_SEED},
     state::{
@@ -25,6 +17,14 @@ use equinox::{
     },
     ID,
 };
+use litesvm::LiteSVM;
+use solana_account::Account;
+use solana_address::Address;
+use solana_instruction::{account_meta::AccountMeta, Instruction};
+use solana_keypair::Keypair;
+use solana_message::Message;
+use solana_signer::Signer;
+use solana_transaction::Transaction;
 
 fn program_path() -> PathBuf {
     std::env::var_os("EQUINOX_TEST_SBF")
@@ -137,11 +137,9 @@ impl Env {
 
         let mut data = self.market_data();
         unsafe {
-            let bid_base =
-                data.as_mut_ptr().add(equinox::state::BID_ARENA_OFFSET) as *mut Arena;
+            let bid_base = data.as_mut_ptr().add(equinox::state::BID_ARENA_OFFSET) as *mut Arena;
             ptr::write_unaligned(bid_base, bids);
-            let ask_base =
-                data.as_mut_ptr().add(equinox::state::ASK_ARENA_OFFSET) as *mut Arena;
+            let ask_base = data.as_mut_ptr().add(equinox::state::ASK_ARENA_OFFSET) as *mut Arena;
             ptr::write_unaligned(ask_base, asks);
         }
         self.write_market_data(data);
@@ -583,9 +581,7 @@ impl Env {
     }
 
     fn book(&mut self, bid: i64, ask: i64) {
-        use equinox::book::{
-            Arena, OrderInput, SelfTradeBehavior, Side, TimeInForce, TreeKind,
-        };
+        use equinox::book::{Arena, OrderInput, SelfTradeBehavior, Side, TimeInForce, TreeKind};
         let mut data = self.market_data();
         for (offset, side, price) in [
             (equinox::state::BID_ARENA_OFFSET, Side::Bid, bid),
@@ -776,15 +772,9 @@ impl Env {
         };
         let mut data = self.market_data();
         let (offset_arena, side) = if side == 0 {
-            (
-                equinox::state::BID_ARENA_OFFSET,
-                equinox::book::Side::Bid,
-            )
+            (equinox::state::BID_ARENA_OFFSET, equinox::book::Side::Bid)
         } else {
-            (
-                equinox::state::ASK_ARENA_OFFSET,
-                equinox::book::Side::Ask,
-            )
+            (equinox::state::ASK_ARENA_OFFSET, equinox::book::Side::Ask)
         };
         let mut arena =
             unsafe { ptr::read_unaligned(data.as_ptr().add(offset_arena) as *const Arena) };

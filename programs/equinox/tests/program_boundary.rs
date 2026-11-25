@@ -1,4 +1,3 @@
-use pinocchio::{error::ProgramError, Address};
 use equinox::instruction::EquinoxInstruction;
 use equinox::{
     error::EquinoxError,
@@ -6,6 +5,7 @@ use equinox::{
     instruction::INITIALIZE_MARKET_DISCRIMINATOR,
     process_instruction, ID,
 };
+use pinocchio::{error::ProgramError, Address};
 
 const OTHER_PROGRAM_ID: Address = Address::new_from_array([1; 32]);
 
@@ -214,7 +214,7 @@ fn production_instruction_decoder_covers_integration_variants() {
 /// distinct `action`.
 #[test]
 fn all_six_market_transition_opcodes_decode_to_distinct_actions_and_correct_modes() {
-    use equinox::instruction::{MarketTransitionAction as Action, EquinoxInstruction as I};
+    use equinox::instruction::{EquinoxInstruction as I, MarketTransitionAction as Action};
     let cases = [
         (equinox::instruction::PAUSE_MARKET, 0u8, Action::Pause),
         (equinox::instruction::RESUME_MARKET, 1, Action::Resume),

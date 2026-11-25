@@ -22,6 +22,12 @@
 use std::path::PathBuf;
 use std::ptr;
 
+use equinox::{
+    magicblock::{DELEGATE_BUFFER_TAG, DELEGATION_METADATA_TAG, DELEGATION_RECORD_TAG},
+    registry::PERP_MARKET_SEED,
+    state::{DelegationStatus, MarketMode, MarketStateHeader, MARKET_ACCOUNT_SIZE},
+    ID,
+};
 use litesvm::LiteSVM;
 use solana_account::Account;
 use solana_address::Address;
@@ -31,12 +37,6 @@ use solana_keypair::Keypair;
 use solana_message::Message;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
-use equinox::{
-    magicblock::{DELEGATE_BUFFER_TAG, DELEGATION_METADATA_TAG, DELEGATION_RECORD_TAG},
-    registry::PERP_MARKET_SEED,
-    state::{DelegationStatus, MarketMode, MarketStateHeader, MARKET_ACCOUNT_SIZE},
-    ID,
-};
 
 const DELEGATION_PROGRAM_ID: Address = Address::new_from_array([
     181, 183, 0, 225, 242, 87, 58, 192, 204, 6, 34, 1, 52, 74, 207, 151, 184, 53, 6, 235, 140, 229,

@@ -11,9 +11,7 @@
 //! liability rises only when the seat is credited: until then the vault simply
 //! holds a surplus, which reconciliation records and never pays out.
 
-use pinocchio::{
-    account::AccountView, address::Address, error::ProgramError, ProgramResult,
-};
+use pinocchio::{account::AccountView, address::Address, error::ProgramError, ProgramResult};
 use pinocchio_token::{instructions::Transfer, state::Account as TokenAccount};
 
 use crate::error::EquinoxError;
@@ -53,7 +51,11 @@ fn check_core(program_id: &Address, core: &AccountView) -> ProgramResult {
 
 /// L1: `[core (ro), receipt (w), trader (signer, w), source (w), vault (w),
 /// mint (ro), token_program, system_program]`, data `[60, amount: u64]`.
-pub fn deposit_to_inbox_v3(program_id: &Address, accounts: &mut [AccountView], amount: u64) -> ProgramResult {
+pub fn deposit_to_inbox_v3(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    amount: u64,
+) -> ProgramResult {
     use pinocchio::sysvars::{rent::Rent, Sysvar};
 
     if accounts.len() != 8 {
@@ -69,7 +71,9 @@ pub fn deposit_to_inbox_v3(program_id: &Address, accounts: &mut [AccountView], a
     let core_key = *accounts[0].address();
     let trader_key = *accounts[2].address();
     let mint = Address::new_from_array(
-        unsafe { accounts[0].borrow_unchecked() }[76..108].try_into().map_err(|_| EquinoxError::InvalidMarketLayout)?,
+        unsafe { accounts[0].borrow_unchecked() }[76..108]
+            .try_into()
+            .map_err(|_| EquinoxError::InvalidMarketLayout)?,
     );
     if *accounts[4].address() != crate::handlers::derive_vault(&core_key, program_id)
         || *accounts[5].address() != mint
@@ -79,8 +83,10 @@ pub fn deposit_to_inbox_v3(program_id: &Address, accounts: &mut [AccountView], a
         return Err(EquinoxError::CustodyViolation.into());
     }
     {
-        let source = TokenAccount::from_account_view(&accounts[3]).map_err(|_| EquinoxError::CustodyViolation)?;
-        let vault = TokenAccount::from_account_view(&accounts[4]).map_err(|_| EquinoxError::CustodyViolation)?;
+        let source = TokenAccount::from_account_view(&accounts[3])
+            .map_err(|_| EquinoxError::CustodyViolation)?;
+        let vault = TokenAccount::from_account_view(&accounts[4])
+            .map_err(|_| EquinoxError::CustodyViolation)?;
         if *source.owner() != trader_key
             || *source.mint() != mint
             || source.amount() < amount
@@ -124,15 +130,23 @@ pub fn deposit_to_inbox_v3(program_id: &Address, accounts: &mut [AccountView], a
     Transfer::<&AccountView>::new(&accounts[3], &accounts[4], &accounts[2], amount)
         .invoke_with_program(accounts[6].address())?;
     let receipt = unsafe { accounts[1].borrow_unchecked_mut() };
-    let total = u64::from_le_bytes(receipt[RECEIPT_TOTAL..RECEIPT_TOTAL + 8].try_into().unwrap())
-        .checked_add(amount)
-        .ok_or(EquinoxError::ArithmeticOverflow)?;
+    let total = u64::from_le_bytes(
+        receipt[RECEIPT_TOTAL..RECEIPT_TOTAL + 8]
+            .try_into()
+            .unwrap(),
+    )
+    .checked_add(amount)
+    .ok_or(EquinoxError::ArithmeticOverflow)?;
     receipt[RECEIPT_TOTAL..RECEIPT_TOTAL + 8].copy_from_slice(&total.to_le_bytes());
     Ok(())
 }
 
 /// A program-owned receipt for `core`, at its canonical PDA. Returns `(trader, total)`.
-fn validate_receipt(program_id: &Address, receipt: &AccountView, core: &Address) -> Result<(Address, u64), ProgramError> {
+fn validate_receipt(
+    program_id: &Address,
+    receipt: &AccountView,
+    core: &Address,
+) -> Result<(Address, u64), ProgramError> {
     if !receipt.owned_by(program_id) {
         return Err(EquinoxError::InvalidInstruction.into());
     }
@@ -144,25 +158,41 @@ fn validate_receipt(program_id: &Address, receipt: &AccountView, core: &Address)
     {
         return Err(EquinoxError::InvalidInstruction.into());
     }
-    let trader = Address::new_from_array(bytes[RECEIPT_TRADER..RECEIPT_TRADER + 32].try_into().unwrap());
+    let trader = Address::new_from_array(
+        bytes[RECEIPT_TRADER..RECEIPT_TRADER + 32]
+            .try_into()
+            .unwrap(),
+    );
     if derive_receipt(program_id, core, &trader).0 != *receipt.address() {
         return Err(EquinoxError::InvalidInstruction.into());
     }
-    Ok((trader, u64::from_le_bytes(bytes[RECEIPT_TOTAL..RECEIPT_TOTAL + 8].try_into().unwrap())))
+    Ok((
+        trader,
+        u64::from_le_bytes(bytes[RECEIPT_TOTAL..RECEIPT_TOTAL + 8].try_into().unwrap()),
+    ))
 }
 
 /// Wherever the bundle lives: `[core (w), seat_shard (w), event_shard × 4 (w),
 /// receipt (ro)]`, data `[61, seat_index: u16]`. Permissionless: the credit
 /// can only ever go to the receipt owner's own seat.
-pub fn claim_inbox_deposit_v3(program_id: &Address, accounts: &mut [AccountView], seat_index: u16) -> ProgramResult {
+pub fn claim_inbox_deposit_v3(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    seat_index: u16,
+) -> ProgramResult {
     if accounts.len() != 7 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
     let core_key = v3::validate_event_core(program_id, &accounts[0])?;
-    if unsafe { accounts[0].borrow_unchecked() }[v3::V3_CORE_DELEGATION_STATUS_OFFSET] == DelegationStatus::Undelegating as u8 {
+    if unsafe { accounts[0].borrow_unchecked() }[v3::V3_CORE_DELEGATION_STATUS_OFFSET]
+        == DelegationStatus::Undelegating as u8
+    {
         return Err(EquinoxError::CustodyViolation.into());
     }
-    let (shard, slot) = ((seat_index as usize) / v3::V3_SEATS_PER_SHARD, (seat_index as usize) % v3::V3_SEATS_PER_SHARD);
+    let (shard, slot) = (
+        (seat_index as usize) / v3::V3_SEATS_PER_SHARD,
+        (seat_index as usize) % v3::V3_SEATS_PER_SHARD,
+    );
     if shard >= v3::V3_SEAT_SHARDS {
         return Err(EquinoxError::InvalidSeat.into());
     }
@@ -177,7 +207,10 @@ pub fn claim_inbox_deposit_v3(program_id: &Address, accounts: &mut [AccountView]
         return Err(EquinoxError::InvalidSeat.into());
     }
     let credited = u64::from_le_bytes(seat.reserved[SEAT_CREDITED].try_into().unwrap());
-    let amount = total.checked_sub(credited).filter(|delta| *delta > 0).ok_or(EquinoxError::InvalidInstruction)?;
+    let amount = total
+        .checked_sub(credited)
+        .filter(|delta| *delta > 0)
+        .ok_or(EquinoxError::InvalidInstruction)?;
     seat.available_collateral = seat
         .available_collateral
         .checked_add(i128::from(amount))
@@ -194,13 +227,25 @@ fn write_credit(
     amount: u64,
     seat: &crate::state::TraderSeat,
 ) -> ProgramResult {
-    let liability = v3::core_i128(unsafe { accounts[0].borrow_unchecked() }, v3::V3_CORE_VAULT_LIABILITY_OFFSET)?
-        .checked_add(i128::from(amount))
-        .ok_or(EquinoxError::ArithmeticOverflow)?;
+    let liability = v3::core_i128(
+        unsafe { accounts[0].borrow_unchecked() },
+        v3::V3_CORE_VAULT_LIABILITY_OFFSET,
+    )?
+    .checked_add(i128::from(amount))
+    .ok_or(EquinoxError::ArithmeticOverflow)?;
     v3::write_shard_seat(unsafe { accounts[1].borrow_unchecked_mut() }, slot, seat)?;
     let mut core_copy = accounts[0].clone();
-    v3::set_core_i128(unsafe { core_copy.borrow_unchecked_mut() }, v3::V3_CORE_VAULT_LIABILITY_OFFSET, liability)?;
-    let mut events = [accounts[2].clone(), accounts[3].clone(), accounts[4].clone(), accounts[5].clone()];
+    v3::set_core_i128(
+        unsafe { core_copy.borrow_unchecked_mut() },
+        v3::V3_CORE_VAULT_LIABILITY_OFFSET,
+        liability,
+    )?;
+    let mut events = [
+        accounts[2].clone(),
+        accounts[3].clone(),
+        accounts[4].clone(),
+        accounts[5].clone(),
+    ];
     let mut payload = [0u8; crate::events::EVENT_PAYLOAD_SIZE];
     payload[0..2].copy_from_slice(&seat_index.to_le_bytes());
     payload[2..10].copy_from_slice(&amount.to_le_bytes());
@@ -220,7 +265,11 @@ pub const PAYOUT_DISCRIMINATOR: [u8; 8] = *b"STKWR003";
 /// `TraderSeat.reserved[8..16]`: total ever requested for withdrawal in the rollup.
 const SEAT_REQUESTED: core::ops::Range<usize> = 8..16;
 
-pub fn derive_payout_receipt(program_id: &Address, core: &Address, trader: &Address) -> (Address, u8) {
+pub fn derive_payout_receipt(
+    program_id: &Address,
+    core: &Address,
+    trader: &Address,
+) -> (Address, u8) {
     Address::find_program_address(&[PAYOUT_SEED, core.as_ref(), trader.as_ref()], program_id)
 }
 
@@ -230,7 +279,11 @@ pub fn derive_payout_receipt(program_id: &Address, core: &Address, trader: &Addr
 /// `[63, seat_index:u16]`. Reads the seat as last committed to L1 (owned by
 /// the delegation program while delegated) and pays `requested - paid`, where
 /// `paid` lives in a per-(market, trader) receipt, so each request pays once.
-pub fn claim_withdrawal_v3(program_id: &Address, accounts: &mut [AccountView], seat_index: u16) -> ProgramResult {
+pub fn claim_withdrawal_v3(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    seat_index: u16,
+) -> ProgramResult {
     use pinocchio::cpi::{Seed, Signer};
     use pinocchio::sysvars::{rent::Rent, Sysvar};
 
@@ -243,19 +296,26 @@ pub fn claim_withdrawal_v3(program_id: &Address, accounts: &mut [AccountView], s
     check_core(program_id, &accounts[0])?;
     let core_key = *accounts[0].address();
     let trader_key = *accounts[2].address();
-    let (shard, slot) = ((seat_index as usize) / v3::V3_SEATS_PER_SHARD, (seat_index as usize) % v3::V3_SEATS_PER_SHARD);
+    let (shard, slot) = (
+        (seat_index as usize) / v3::V3_SEATS_PER_SHARD,
+        (seat_index as usize) % v3::V3_SEATS_PER_SHARD,
+    );
     if shard >= v3::V3_SEAT_SHARDS {
         return Err(EquinoxError::InvalidSeat.into());
     }
     let shard_account = &accounts[1];
-    if !(shard_account.owned_by(program_id) || shard_account.owned_by(&crate::magicblock::DELEGATION_PROGRAM_ID))
+    if !(shard_account.owned_by(program_id)
+        || shard_account.owned_by(&crate::magicblock::DELEGATION_PROGRAM_ID))
         || *shard_account.address() != v3::derive_seat_shard_v3(program_id, &core_key, shard as u8)
     {
         return Err(EquinoxError::InvalidSeat.into());
     }
     let requested = {
         let bytes = unsafe { shard_account.borrow_unchecked() };
-        if bytes.len() < 44 || bytes[0..8] != v3::V3_SEAT_SHARD_DISCRIMINATOR || bytes[12..44] != *core_key.as_ref() {
+        if bytes.len() < 44
+            || bytes[0..8] != v3::V3_SEAT_SHARD_DISCRIMINATOR
+            || bytes[12..44] != *core_key.as_ref()
+        {
             return Err(EquinoxError::InvalidSeat.into());
         }
         let seat = v3::read_shard_seat(bytes, slot)?;
@@ -266,7 +326,9 @@ pub fn claim_withdrawal_v3(program_id: &Address, accounts: &mut [AccountView], s
     };
 
     let mint = Address::new_from_array(
-        unsafe { accounts[0].borrow_unchecked() }[76..108].try_into().map_err(|_| EquinoxError::InvalidMarketLayout)?,
+        unsafe { accounts[0].borrow_unchecked() }[76..108]
+            .try_into()
+            .map_err(|_| EquinoxError::InvalidMarketLayout)?,
     );
     let (vault_authority, authority_bump) =
         Address::find_program_address(&[b"vault-authority", core_key.as_ref()], program_id);
@@ -285,7 +347,12 @@ pub fn claim_withdrawal_v3(program_id: &Address, accounts: &mut [AccountView], s
     }
     if accounts[8].data_len() == 0 {
         let bump_slice = [bump];
-        let seeds = [Seed::from(PAYOUT_SEED), Seed::from(core_key.as_ref()), Seed::from(trader_key.as_ref()), Seed::from(&bump_slice)];
+        let seeds = [
+            Seed::from(PAYOUT_SEED),
+            Seed::from(core_key.as_ref()),
+            Seed::from(trader_key.as_ref()),
+            Seed::from(&bump_slice),
+        ];
         pinocchio_system::instructions::CreateAccount {
             from: &accounts[2],
             to: &accounts[8],
@@ -311,17 +378,34 @@ pub fn claim_withdrawal_v3(program_id: &Address, accounts: &mut [AccountView], s
             return Err(EquinoxError::InvalidInstruction.into());
         }
     }
-    let paid = u64::from_le_bytes(unsafe { accounts[8].borrow_unchecked() }[RECEIPT_TOTAL..RECEIPT_TOTAL + 8].try_into().unwrap());
-    let amount = requested.checked_sub(paid).filter(|delta| *delta > 0).ok_or(EquinoxError::InvalidInstruction)?;
+    let paid = u64::from_le_bytes(
+        unsafe { accounts[8].borrow_unchecked() }[RECEIPT_TOTAL..RECEIPT_TOTAL + 8]
+            .try_into()
+            .unwrap(),
+    );
+    let amount = requested
+        .checked_sub(paid)
+        .filter(|delta| *delta > 0)
+        .ok_or(EquinoxError::InvalidInstruction)?;
     {
-        let destination = TokenAccount::from_account_view(&accounts[3]).map_err(|_| EquinoxError::CustodyViolation)?;
-        let vault = TokenAccount::from_account_view(&accounts[4]).map_err(|_| EquinoxError::CustodyViolation)?;
-        if *destination.owner() != trader_key || *destination.mint() != mint || *vault.mint() != mint || vault.amount() < amount {
+        let destination = TokenAccount::from_account_view(&accounts[3])
+            .map_err(|_| EquinoxError::CustodyViolation)?;
+        let vault = TokenAccount::from_account_view(&accounts[4])
+            .map_err(|_| EquinoxError::CustodyViolation)?;
+        if *destination.owner() != trader_key
+            || *destination.mint() != mint
+            || *vault.mint() != mint
+            || vault.amount() < amount
+        {
             return Err(EquinoxError::CustodyViolation.into());
         }
     }
     let bump_slice = [authority_bump];
-    let seeds = [Seed::from(b"vault-authority"), Seed::from(core_key.as_ref()), Seed::from(&bump_slice)];
+    let seeds = [
+        Seed::from(b"vault-authority"),
+        Seed::from(core_key.as_ref()),
+        Seed::from(&bump_slice),
+    ];
     Transfer::<&AccountView>::new(&accounts[4], &accounts[3], &accounts[5], amount)
         .invoke_signed_with_program(&[Signer::from(&seeds)], accounts[7].address())?;
     let receipt = unsafe { accounts[8].borrow_unchecked_mut() };

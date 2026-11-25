@@ -1782,13 +1782,16 @@ fn is_v3_commit_accounts(accounts: &[AccountView]) -> bool {
 }
 
 fn is_v3_core_commit_accounts(accounts: &[AccountView]) -> bool {
-    (accounts.len() == 5 || (accounts.len() == 6 && accounts[5].data_len() != v3::V3_MARKET_CORE_SIZE))
+    (accounts.len() == 5
+        || (accounts.len() == 6 && accounts[5].data_len() != v3::V3_MARKET_CORE_SIZE))
         && accounts[0].data_len() == v3::V3_MARKET_CORE_SIZE
         && unsafe { accounts[0].borrow_unchecked() }[0..8] == v3::V3_MARKET_CORE_DISCRIMINATOR
 }
 
 fn is_v3_member_commit_accounts(accounts: &[AccountView]) -> bool {
-    if !(accounts.len() == 6 || accounts.len() == 7) || accounts[5].data_len() != v3::V3_MARKET_CORE_SIZE {
+    if !(accounts.len() == 6 || accounts.len() == 7)
+        || accounts[5].data_len() != v3::V3_MARKET_CORE_SIZE
+    {
         return false;
     }
     let bytes = unsafe { accounts[0].borrow_unchecked() };
@@ -2037,7 +2040,13 @@ fn commit_v3_member(
     }
 
     if paid {
-        schedule_core_paid_commit(program_id, &accounts[5], &accounts[3], &accounts[6], Some(&accounts[0]))?;
+        schedule_core_paid_commit(
+            program_id,
+            &accounts[5],
+            &accounts[3],
+            &accounts[6],
+            Some(&accounts[0]),
+        )?;
     } else {
         let mut data_buf = [0u8; SCHEDULE_DATA_MAX_LEN];
         let data_len = encode_schedule_intent_bundle_data(
@@ -2064,7 +2073,8 @@ fn commit_v3_member(
     if core[v3::V3_CORE_COMMIT_PHASE_OFFSET] == v3::V3_COMMIT_PHASE_IDLE {
         // A new snapshot starts from an empty record table.
         core[v3::V3_CORE_CHILD_RECORDS_OFFSET
-            ..v3::V3_CORE_CHILD_RECORDS_OFFSET + v3::V3_CHILD_COUNT * v3::V3_CORE_CHILD_RECORD_SIZE]
+            ..v3::V3_CORE_CHILD_RECORDS_OFFSET
+                + v3::V3_CHILD_COUNT * v3::V3_CORE_CHILD_RECORD_SIZE]
             .fill(0);
         core[v3::V3_CORE_COMMIT_PHASE_OFFSET] = v3::V3_COMMIT_PHASE_SNAPSHOT;
         core[v3::V3_CORE_SNAPSHOT_EPOCH_OFFSET..v3::V3_CORE_SNAPSHOT_EPOCH_OFFSET + 8]
@@ -2098,7 +2108,8 @@ fn commit_v3_member(
 /// under the delegation program (the validator is recorded in the core).
 fn is_core_fee_vault(core: &[u8], vault: &AccountView) -> bool {
     let validator = &core[v3::V3_CORE_VALIDATOR_OFFSET..v3::V3_CORE_VALIDATOR_OFFSET + 32];
-    let (expected, _) = Address::find_program_address(&[b"magic-fee-vault", validator], &DELEGATION_PROGRAM_ID);
+    let (expected, _) =
+        Address::find_program_address(&[b"magic-fee-vault", validator], &DELEGATION_PROGRAM_ID);
     *vault.address() == expected && vault.is_writable()
 }
 
@@ -2112,7 +2123,10 @@ pub(crate) fn schedule_core_paid_commit(
     fee_vault: &AccountView,
     member: Option<&AccountView>,
 ) -> ProgramResult {
-    if *magic_context.address() != MAGIC_CONTEXT_ID || !magic_context.is_writable() || !core.is_writable() {
+    if *magic_context.address() != MAGIC_CONTEXT_ID
+        || !magic_context.is_writable()
+        || !core.is_writable()
+    {
         return Err(custom(EquinoxError::MagicBlockInvalidAccount));
     }
     let instrument = {
@@ -2123,7 +2137,11 @@ pub(crate) fn schedule_core_paid_commit(
         {
             return Err(custom(EquinoxError::MagicBlockInvalidAccount));
         }
-        Address::new_from_array(bytes[12..44].try_into().map_err(|_| ProgramError::InvalidAccountData)?)
+        Address::new_from_array(
+            bytes[12..44]
+                .try_into()
+                .map_err(|_| ProgramError::InvalidAccountData)?,
+        )
     };
     let (derived, bump) =
         Address::find_program_address(&[v3::V3_MARKET_CORE_SEED, instrument.as_ref()], program_id);
@@ -2131,12 +2149,20 @@ pub(crate) fn schedule_core_paid_commit(
         return Err(custom(EquinoxError::MagicBlockInvalidAccount));
     }
     let bump_slice = [bump];
-    let seeds = [Seed::from(v3::V3_MARKET_CORE_SEED), Seed::from(instrument.as_ref()), Seed::from(&bump_slice)];
+    let seeds = [
+        Seed::from(v3::V3_MARKET_CORE_SEED),
+        Seed::from(instrument.as_ref()),
+        Seed::from(&bump_slice),
+    ];
     let mut data_buf = [0u8; SCHEDULE_DATA_MAX_LEN];
     // CPI accounts: [payer = core, magic context, fee vault, member]. The core
     // commits itself as the payer (index 0) or a member at index 3.
-    let data_len = encode_schedule_intent_bundle_data(&[if member.is_some() { 3 } else { 0 }], false, &mut data_buf)
-        .map_err(custom)?;
+    let data_len = encode_schedule_intent_bundle_data(
+        &[if member.is_some() { 3 } else { 0 }],
+        false,
+        &mut data_buf,
+    )
+    .map_err(custom)?;
     let data = &data_buf[..data_len];
     match member {
         Some(member) => {
@@ -2149,8 +2175,16 @@ pub(crate) fn schedule_core_paid_commit(
                 InstructionAccount::writable(fee_vault.address()),
                 InstructionAccount::writable(member.address()),
             ];
-            let ix = InstructionView { program_id: &MAGIC_PROGRAM_ID, accounts: &metas, data };
-            invoke_signed_with_bounds::<4, _>(&ix, &[core, magic_context, fee_vault, member], &[Signer::from(&seeds)])
+            let ix = InstructionView {
+                program_id: &MAGIC_PROGRAM_ID,
+                accounts: &metas,
+                data,
+            };
+            invoke_signed_with_bounds::<4, _>(
+                &ix,
+                &[core, magic_context, fee_vault, member],
+                &[Signer::from(&seeds)],
+            )
         }
         None => {
             let metas = [
@@ -2158,8 +2192,16 @@ pub(crate) fn schedule_core_paid_commit(
                 InstructionAccount::writable(magic_context.address()),
                 InstructionAccount::writable(fee_vault.address()),
             ];
-            let ix = InstructionView { program_id: &MAGIC_PROGRAM_ID, accounts: &metas, data };
-            invoke_signed_with_bounds::<3, _>(&ix, &[core, magic_context, fee_vault], &[Signer::from(&seeds)])
+            let ix = InstructionView {
+                program_id: &MAGIC_PROGRAM_ID,
+                accounts: &metas,
+                data,
+            };
+            invoke_signed_with_bounds::<3, _>(
+                &ix,
+                &[core, magic_context, fee_vault],
+                &[Signer::from(&seeds)],
+            )
         }
     }
 }
@@ -2185,13 +2227,18 @@ pub(crate) fn schedule_member_commit(
         return Err(custom(EquinoxError::MagicBlockInvalidAccount));
     }
     let mut data_buf = [0u8; SCHEDULE_DATA_MAX_LEN];
-    let data_len = encode_schedule_intent_bundle_data(&[2], false, &mut data_buf).map_err(custom)?;
+    let data_len =
+        encode_schedule_intent_bundle_data(&[2], false, &mut data_buf).map_err(custom)?;
     let commit_accounts = [
         InstructionAccount::writable_signer(payer.address()),
         InstructionAccount::writable(magic_context.address()),
         InstructionAccount::writable(member.address()),
     ];
-    let commit_ix = InstructionView { program_id: &MAGIC_PROGRAM_ID, accounts: &commit_accounts, data: &data_buf[..data_len] };
+    let commit_ix = InstructionView {
+        program_id: &MAGIC_PROGRAM_ID,
+        accounts: &commit_accounts,
+        data: &data_buf[..data_len],
+    };
     invoke_signed_with_bounds::<3, _>(&commit_ix, &[payer, magic_context, member], &[])
 }
 
@@ -2581,8 +2628,8 @@ pub fn external_undelegate(
     {
         return Err(custom(EquinoxError::MagicBlockInvalidCallback));
     }
-    let kind = parse_delegated_seeds(&data[8..])
-        .ok_or(custom(EquinoxError::MagicBlockInvalidCallback))?;
+    let kind =
+        parse_delegated_seeds(&data[8..]).ok_or(custom(EquinoxError::MagicBlockInvalidCallback))?;
 
     if !accounts[0].is_writable() {
         return Err(custom(EquinoxError::MagicBlockInvalidCallback));
@@ -3072,15 +3119,39 @@ mod delegation_status_tests {
 
     #[test]
     fn fresh_and_cleanly_restored_cores_can_be_delegated() {
-        assert!(v3_core_delegatable(&core_with(DelegationStatus::NotDelegated as u8, 0, 0)));
-        assert!(v3_core_delegatable(&core_with(DelegationStatus::Restored as u8, v3::V3_COMMIT_PHASE_IDLE, 0)));
+        assert!(v3_core_delegatable(&core_with(
+            DelegationStatus::NotDelegated as u8,
+            0,
+            0
+        )));
+        assert!(v3_core_delegatable(&core_with(
+            DelegationStatus::Restored as u8,
+            v3::V3_COMMIT_PHASE_IDLE,
+            0
+        )));
     }
 
     #[test]
     fn live_unreconciled_or_mid_commit_cores_cannot_be_delegated() {
-        assert!(!v3_core_delegatable(&core_with(DelegationStatus::Delegated as u8, 0, 0)));
-        assert!(!v3_core_delegatable(&core_with(DelegationStatus::Undelegating as u8, 0, 0)));
-        assert!(!v3_core_delegatable(&core_with(DelegationStatus::Restored as u8, 1, 0)));
-        assert!(!v3_core_delegatable(&core_with(DelegationStatus::Restored as u8, 0, 2)));
+        assert!(!v3_core_delegatable(&core_with(
+            DelegationStatus::Delegated as u8,
+            0,
+            0
+        )));
+        assert!(!v3_core_delegatable(&core_with(
+            DelegationStatus::Undelegating as u8,
+            0,
+            0
+        )));
+        assert!(!v3_core_delegatable(&core_with(
+            DelegationStatus::Restored as u8,
+            1,
+            0
+        )));
+        assert!(!v3_core_delegatable(&core_with(
+            DelegationStatus::Restored as u8,
+            0,
+            2
+        )));
     }
 }

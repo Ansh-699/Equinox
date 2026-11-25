@@ -607,15 +607,20 @@ impl EquinoxInstruction {
             }),
             Some(ABORT_V3_SNAPSHOT) if data.len() == 1 => Ok(Self::AbortV3Snapshot),
             Some(SET_V3_PRICE_REPORTER) if data.len() == 33 => Ok(Self::SetV3PriceReporter {
-                reporter: data[1..33].try_into().map_err(|_| ProgramError::InvalidInstructionData)?,
+                reporter: data[1..33]
+                    .try_into()
+                    .map_err(|_| ProgramError::InvalidInstructionData)?,
             }),
             Some(REPORT_PRICE_V3) if data.len() == 25 => Ok(Self::ReportPriceV3 {
                 price: read_u64(data, 1).ok_or(ProgramError::InvalidInstructionData)? as i64,
                 confidence: read_u64(data, 9).ok_or(ProgramError::InvalidInstructionData)?,
-                publish_timestamp: read_u64(data, 17).ok_or(ProgramError::InvalidInstructionData)?,
+                publish_timestamp: read_u64(data, 17)
+                    .ok_or(ProgramError::InvalidInstructionData)?,
             }),
             Some(SET_V3_KEEPER) if data.len() == 33 => Ok(Self::SetV3Keeper {
-                keeper: data[1..33].try_into().map_err(|_| ProgramError::InvalidInstructionData)?,
+                keeper: data[1..33]
+                    .try_into()
+                    .map_err(|_| ProgramError::InvalidInstructionData)?,
             }),
             Some(DEPOSIT_COLLATERAL_V3) if data.len() == 11 => Ok(Self::DepositCollateralV3 {
                 seat_index: read_u16(data, 1).ok_or(ProgramError::InvalidInstructionData)?,

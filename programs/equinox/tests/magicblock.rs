@@ -22,10 +22,6 @@
 
 use core::{mem::size_of, ptr};
 
-use pinocchio::{
-    account::{AccountView, RuntimeAccount, NOT_BORROWED},
-    Address,
-};
 use equinox::{
     error::EquinoxError,
     magicblock::{
@@ -42,6 +38,10 @@ use equinox::{
     },
     state::{DelegationStatus, MarketStateHeader, MARKET_ACCOUNT_SIZE},
     ID,
+};
+use pinocchio::{
+    account::{AccountView, RuntimeAccount, NOT_BORROWED},
+    Address,
 };
 
 // ---------------------------------------------------------------------
@@ -1127,10 +1127,7 @@ fn cluster_member_seed_encodings_match_real_borsh_delegate_args() {
 
     // Scratch: ["settlement", market, seat_le].
     let ours = equinox::magicblock::encode_scratch_delegate_seeds(&market_key, seat);
-    assert_eq!(
-        ours.len(),
-        equinox::magicblock::SCRATCH_SEEDS_PAYLOAD_LEN
-    );
+    assert_eq!(ours.len(), equinox::magicblock::SCRATCH_SEEDS_PAYLOAD_LEN);
     let mut expected = Vec::new();
     dlp_api::args::DelegateArgs {
         commit_frequency_ms: 0,
@@ -1154,10 +1151,7 @@ fn cluster_member_seed_encodings_match_real_borsh_delegate_args() {
         seat,
         &session_signer,
     );
-    assert_eq!(
-        ours.len(),
-        equinox::magicblock::SESSION_SEEDS_PAYLOAD_LEN
-    );
+    assert_eq!(ours.len(), equinox::magicblock::SESSION_SEEDS_PAYLOAD_LEN);
     let mut expected = Vec::new();
     dlp_api::args::DelegateArgs {
         commit_frequency_ms: 0,
@@ -1277,8 +1271,7 @@ fn parse_delegated_seeds_round_trips_every_kind_and_rejects_foreign_shapes() {
             page: 3
         })
     );
-    let seat_shard_seeds =
-        equinox::magicblock::encode_v3_seat_shard_delegate_seeds(&market_key, 2);
+    let seat_shard_seeds = equinox::magicblock::encode_v3_seat_shard_delegate_seeds(&market_key, 2);
     assert_eq!(
         parse_delegated_seeds(&seat_shard_seeds),
         Some(DelegatedAccountKind::V3SeatShard {
@@ -1485,8 +1478,7 @@ fn delegate_cluster_member_rejects_a_validator_different_from_the_markets() {
         &system_program,
         &owner_program,
     );
-    let result =
-        equinox::magicblock::delegate_cluster_member(&ID, &mut accounts, other_validator);
+    let result = equinox::magicblock::delegate_cluster_member(&ID, &mut accounts, other_validator);
     assert_eq!(
         err_code(result),
         EquinoxError::MagicBlockInvalidAccount as u32
@@ -1677,13 +1669,8 @@ fn external_undelegate_rejects_a_scratch_callback_for_a_foreign_account() {
     let owner = Address::new_from_array([6; 32]);
     let session_signer = Address::new_from_array([7; 32]);
     let other = {
-        let address = equinox::session::derive_trading_session(
-            &owner,
-            &market_key,
-            0,
-            &session_signer,
-            &ID,
-        );
+        let address =
+            equinox::session::derive_trading_session(&owner, &market_key, 0, &session_signer, &ID);
         let mut acct = account(address, DELEGATION_PROGRAM_ID, 256, false, true);
         let mut session = equinox::session::TradingSession::empty();
         session.initialized = 1;

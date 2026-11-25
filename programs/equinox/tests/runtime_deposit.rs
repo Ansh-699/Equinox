@@ -23,6 +23,14 @@
 use std::path::PathBuf;
 use std::ptr;
 
+use equinox::{
+    instruction::DEPOSIT_COLLATERAL,
+    state::{
+        MarketMode, MarketStateHeader, TraderSeat, MARKET_ACCOUNT_SIZE, TRADER_SEAT_OFFSET,
+        TRADER_SEAT_SIZE,
+    },
+    ID,
+};
 use litesvm::types::TransactionMetadata;
 use litesvm::LiteSVM;
 use solana_account::Account;
@@ -37,14 +45,6 @@ use spl_token_interface::{
     instruction as token_ix,
     state::{Account as TokenAccount, Mint},
     ID as TOKENKEG,
-};
-use equinox::{
-    instruction::DEPOSIT_COLLATERAL,
-    state::{
-        MarketMode, MarketStateHeader, TraderSeat, MARKET_ACCOUNT_SIZE, TRADER_SEAT_OFFSET,
-        TRADER_SEAT_SIZE,
-    },
-    ID,
 };
 
 const DECIMALS: u8 = 6;

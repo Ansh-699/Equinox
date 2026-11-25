@@ -19,21 +19,6 @@
 
 use std::path::PathBuf;
 
-use litesvm::types::TransactionMetadata;
-use litesvm::LiteSVM;
-use solana_account::Account;
-use solana_address::Address;
-use solana_instruction::{account_meta::AccountMeta, Instruction};
-use solana_keypair::Keypair;
-use solana_message::Message;
-use solana_program_pack::Pack;
-use solana_signer::Signer;
-use solana_transaction::Transaction;
-use spl_token_interface::{
-    instruction as token_ix,
-    state::{Account as TokenAccount, Mint},
-    ID as TOKENKEG,
-};
 use equinox::{
     magicblock::DELEGATION_PROGRAM_ID,
     registry::{
@@ -50,6 +35,21 @@ use equinox::{
         V3_SEAT_AVAILABLE_COLLATERAL_OFFSET, V3_SEAT_SHARD_SIZE,
     },
     ID,
+};
+use litesvm::types::TransactionMetadata;
+use litesvm::LiteSVM;
+use solana_account::Account;
+use solana_address::Address;
+use solana_instruction::{account_meta::AccountMeta, Instruction};
+use solana_keypair::Keypair;
+use solana_message::Message;
+use solana_program_pack::Pack;
+use solana_signer::Signer;
+use solana_transaction::Transaction;
+use spl_token_interface::{
+    instruction as token_ix,
+    state::{Account as TokenAccount, Mint},
+    ID as TOKENKEG,
 };
 
 const CREATE_V3_ACCOUNT: u8 = 46;
@@ -1055,13 +1055,7 @@ fn reconcile_finalizes_a_core_returned_by_undelegation() {
         readonly(env.vault_authority),
         readonly(TOKENKEG),
     ]);
-    send(
-        &mut env.svm,
-        &env.authority,
-        equinox_ix(data, metas),
-        &[],
-    )
-    .expect("withdraw");
+    send(&mut env.svm, &env.authority, equinox_ix(data, metas), &[]).expect("withdraw");
     assert_eq!(token_amount(&env.svm, env.vault), DEPOSIT_AMOUNT - half);
     assert_eq!(
         seat_available_collateral(&env.svm, env.seat_shards[0], 0),
@@ -1076,7 +1070,11 @@ const DEPOSIT_TO_INBOX_V3: u8 = 60;
 const CLAIM_INBOX_DEPOSIT_V3: u8 = 61;
 
 fn derive_receipt(core: &Address, trader: &Address) -> Address {
-    Address::find_program_address(&[b"deposit-receipt-v3", core.as_ref(), trader.as_ref()], &solana_address(ID)).0
+    Address::find_program_address(
+        &[b"deposit-receipt-v3", core.as_ref(), trader.as_ref()],
+        &solana_address(ID),
+    )
+    .0
 }
 
 fn inbox_deposit_ix(env: &Env, amount: u64) -> Instruction {
@@ -1117,39 +1115,106 @@ fn claim_ix(env: &Env, seat_index: u16, receipt: Address) -> Instruction {
 #[test]
 fn inbox_deposit_is_credited_exactly_once_while_the_market_is_delegated() {
     let mut env = setup();
-    send(&mut env.svm, &env.authority, create_vault_ix(env.core, env.vault, env.authority.pubkey(), env.mint), &[]).expect("vault");
+    send(
+        &mut env.svm,
+        &env.authority,
+        create_vault_ix(env.core, env.vault, env.authority.pubkey(), env.mint),
+        &[],
+    )
+    .expect("vault");
     // Delegated: seats cannot take a direct deposit, but the inbox still works.
     set_core_delegation_status(&mut env.svm, env.core, 1);
-    assert!({ let ix = standard_deposit(&env); send(&mut env.svm, &env.authority, ix, &[]) }.is_err(), "direct deposits stay L1-only");
+    assert!(
+        {
+            let ix = standard_deposit(&env);
+            send(&mut env.svm, &env.authority, ix, &[])
+        }
+        .is_err(),
+        "direct deposits stay L1-only"
+    );
 
-    { let ix = inbox_deposit_ix(&env, DEPOSIT_AMOUNT); send(&mut env.svm, &env.authority, ix, &[]) }.expect("DEPOSIT_TO_INBOX_V3");
-    assert_eq!(token_amount(&env.svm, env.vault), DEPOSIT_AMOUNT, "tokens reach the vault immediately");
-    assert_eq!(seat_available_collateral(&env.svm, env.seat_shards[0], 0), 0, "nothing is credited until claimed");
+    {
+        let ix = inbox_deposit_ix(&env, DEPOSIT_AMOUNT);
+        send(&mut env.svm, &env.authority, ix, &[])
+    }
+    .expect("DEPOSIT_TO_INBOX_V3");
+    assert_eq!(
+        token_amount(&env.svm, env.vault),
+        DEPOSIT_AMOUNT,
+        "tokens reach the vault immediately"
+    );
+    assert_eq!(
+        seat_available_collateral(&env.svm, env.seat_shards[0], 0),
+        0,
+        "nothing is credited until claimed"
+    );
 
     let receipt = derive_receipt(&env.core, &env.authority.pubkey());
-    { let ix = claim_ix(&env, 0, receipt); send(&mut env.svm, &env.authority, ix, &[]) }.expect("CLAIM_INBOX_DEPOSIT_V3");
-    assert_eq!(seat_available_collateral(&env.svm, env.seat_shards[0], 0), i128::from(DEPOSIT_AMOUNT));
+    {
+        let ix = claim_ix(&env, 0, receipt);
+        send(&mut env.svm, &env.authority, ix, &[])
+    }
+    .expect("CLAIM_INBOX_DEPOSIT_V3");
+    assert_eq!(
+        seat_available_collateral(&env.svm, env.seat_shards[0], 0),
+        i128::from(DEPOSIT_AMOUNT)
+    );
     env.svm.expire_blockhash();
-    assert!({ let ix = claim_ix(&env, 0, receipt); send(&mut env.svm, &env.authority, ix, &[]) }.is_err(), "a receipt cannot be credited twice");
+    assert!(
+        {
+            let ix = claim_ix(&env, 0, receipt);
+            send(&mut env.svm, &env.authority, ix, &[])
+        }
+        .is_err(),
+        "a receipt cannot be credited twice"
+    );
 
     // A second deposit credits only the new amount.
     env.svm.expire_blockhash();
-    { let ix = inbox_deposit_ix(&env, 7); send(&mut env.svm, &env.authority, ix, &[]) }.expect("second inbox deposit");
+    {
+        let ix = inbox_deposit_ix(&env, 7);
+        send(&mut env.svm, &env.authority, ix, &[])
+    }
+    .expect("second inbox deposit");
     env.svm.expire_blockhash();
-    { let ix = claim_ix(&env, 0, receipt); send(&mut env.svm, &env.authority, ix, &[]) }.expect("second claim");
-    assert_eq!(seat_available_collateral(&env.svm, env.seat_shards[0], 0), i128::from(DEPOSIT_AMOUNT) + 7);
+    {
+        let ix = claim_ix(&env, 0, receipt);
+        send(&mut env.svm, &env.authority, ix, &[])
+    }
+    .expect("second claim");
+    assert_eq!(
+        seat_available_collateral(&env.svm, env.seat_shards[0], 0),
+        i128::from(DEPOSIT_AMOUNT) + 7
+    );
     assert_eq!(token_amount(&env.svm, env.vault), DEPOSIT_AMOUNT + 7);
 }
 
 #[test]
 fn inbox_claim_only_credits_the_receipt_owners_seat() {
     let mut env = setup();
-    send(&mut env.svm, &env.authority, create_vault_ix(env.core, env.vault, env.authority.pubkey(), env.mint), &[]).expect("vault");
-    { let ix = inbox_deposit_ix(&env, DEPOSIT_AMOUNT); send(&mut env.svm, &env.authority, ix, &[]) }.expect("inbox deposit");
+    send(
+        &mut env.svm,
+        &env.authority,
+        create_vault_ix(env.core, env.vault, env.authority.pubkey(), env.mint),
+        &[],
+    )
+    .expect("vault");
+    {
+        let ix = inbox_deposit_ix(&env, DEPOSIT_AMOUNT);
+        send(&mut env.svm, &env.authority, ix, &[])
+    }
+    .expect("inbox deposit");
     let receipt = derive_receipt(&env.core, &env.authority.pubkey());
     // Seat 1 is empty / not the receipt owner's: refused.
-    assert!({ let ix = claim_ix(&env, 1, receipt); send(&mut env.svm, &env.authority, ix, &[]) }.is_err());
-    assert_eq!(seat_available_collateral(&env.svm, env.seat_shards[0], 0), 0);
+    assert!({
+        let ix = claim_ix(&env, 1, receipt);
+        send(&mut env.svm, &env.authority, ix, &[])
+    }
+    .is_err());
+    assert_eq!(
+        seat_available_collateral(&env.svm, env.seat_shards[0], 0),
+        0
+    );
 }
 
 // ── Withdrawal payout (opcode 63): pays committed rollup requests once ──
@@ -1168,7 +1233,15 @@ fn set_seat_requested(svm: &mut LiteSVM, shard: Address, slot: usize, requested:
 fn claim_withdrawal_ix(env: &Env, seat_index: u16) -> Instruction {
     let mut data = vec![CLAIM_WITHDRAWAL_V3];
     data.extend_from_slice(&seat_index.to_le_bytes());
-    let receipt = Address::find_program_address(&[b"withdraw-receipt-v3", env.core.as_ref(), env.authority.pubkey().as_ref()], &solana_address(ID)).0;
+    let receipt = Address::find_program_address(
+        &[
+            b"withdraw-receipt-v3",
+            env.core.as_ref(),
+            env.authority.pubkey().as_ref(),
+        ],
+        &solana_address(ID),
+    )
+    .0;
     equinox_ix(
         data,
         vec![
@@ -1189,22 +1262,51 @@ fn claim_withdrawal_ix(env: &Env, seat_index: u16) -> Instruction {
 #[test]
 fn withdrawal_payout_pays_each_committed_request_exactly_once() {
     let mut env = setup();
-    send(&mut env.svm, &env.authority, create_vault_ix(env.core, env.vault, env.authority.pubkey(), env.mint), &[]).expect("vault");
-    { let ix = standard_deposit(&env); send(&mut env.svm, &env.authority, ix, &[]) }.expect("deposit");
+    send(
+        &mut env.svm,
+        &env.authority,
+        create_vault_ix(env.core, env.vault, env.authority.pubkey(), env.mint),
+        &[],
+    )
+    .expect("vault");
+    {
+        let ix = standard_deposit(&env);
+        send(&mut env.svm, &env.authority, ix, &[])
+    }
+    .expect("deposit");
     let before = token_amount(&env.svm, env.source);
 
     // Nothing requested yet: nothing to pay.
-    assert!({ let ix = claim_withdrawal_ix(&env, 0); send(&mut env.svm, &env.authority, ix, &[]) }.is_err());
+    assert!({
+        let ix = claim_withdrawal_ix(&env, 0);
+        send(&mut env.svm, &env.authority, ix, &[])
+    }
+    .is_err());
 
     // The rollup's request (as committed to L1) is paid once.
     set_seat_requested(&mut env.svm, env.seat_shards[0], 0, 150);
-    { let ix = claim_withdrawal_ix(&env, 0); send(&mut env.svm, &env.authority, ix, &[]) }.expect("CLAIM_WITHDRAWAL_V3");
+    {
+        let ix = claim_withdrawal_ix(&env, 0);
+        send(&mut env.svm, &env.authority, ix, &[])
+    }
+    .expect("CLAIM_WITHDRAWAL_V3");
     assert_eq!(token_amount(&env.svm, env.source), before + 150);
     assert_eq!(token_amount(&env.svm, env.vault), DEPOSIT_AMOUNT - 150);
-    assert!({ let ix = claim_withdrawal_ix(&env, 0); send(&mut env.svm, &env.authority, ix, &[]) }.is_err(), "no double payout");
+    assert!(
+        {
+            let ix = claim_withdrawal_ix(&env, 0);
+            send(&mut env.svm, &env.authority, ix, &[])
+        }
+        .is_err(),
+        "no double payout"
+    );
 
     // A later request pays only the difference.
     set_seat_requested(&mut env.svm, env.seat_shards[0], 0, 200);
-    { let ix = claim_withdrawal_ix(&env, 0); send(&mut env.svm, &env.authority, ix, &[]) }.expect("second payout");
+    {
+        let ix = claim_withdrawal_ix(&env, 0);
+        send(&mut env.svm, &env.authority, ix, &[])
+    }
+    .expect("second payout");
     assert_eq!(token_amount(&env.svm, env.source), before + 200);
 }

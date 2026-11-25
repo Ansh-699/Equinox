@@ -1,9 +1,5 @@
 use core::{mem::size_of, ptr};
 
-use pinocchio::{
-    account::{AccountView, RuntimeAccount, NOT_BORROWED},
-    Address,
-};
 use equinox::{
     book::{
         plan_limit_arenas_into, Arena, MatchLimits, OrderInput, SelfTradeBehavior, Side,
@@ -19,6 +15,10 @@ use equinox::{
         TRADER_SEAT_OFFSET, TRADER_SEAT_SIZE,
     },
     ID,
+};
+use pinocchio::{
+    account::{AccountView, RuntimeAccount, NOT_BORROWED},
+    Address,
 };
 
 struct TestAccount {
@@ -831,8 +831,7 @@ fn serialized_market_can_create_seats_and_settle_crossing_orders() {
     let event_offset = equinox::state::FILL_EVENT_OFFSET
         + (fill_sequence as usize % equinox::state::FILL_EVENT_CAPACITY)
             * equinox::state::FILL_EVENT_SIZE;
-    let event =
-        unsafe { &*(data.as_ptr().add(event_offset) as *const equinox::state::FillEvent) };
+    let event = unsafe { &*(data.as_ptr().add(event_offset) as *const equinox::state::FillEvent) };
     let event_price = event.price;
     let event_quantity = event.quantity;
     assert_eq!(event_price, 100);
@@ -1029,12 +1028,10 @@ fn mvp_partial_fill_preserves_remaining_leaf_and_reserve() {
     assert_eq!((maker_position, taker_position), (-4, 4));
     assert_eq!(
         maker_reserve,
-        equinox::risk::initial_margin(equinox::risk::notional(6, 100).unwrap(), 2_000)
-            .unwrap()
+        equinox::risk::initial_margin(equinox::risk::notional(6, 100).unwrap(), 2_000).unwrap()
     );
     let arena = unsafe {
-        &*(data.as_ptr().add(equinox::state::ASK_ARENA_OFFSET)
-            as *const equinox::book::Arena)
+        &*(data.as_ptr().add(equinox::state::ASK_ARENA_OFFSET) as *const equinox::book::Arena)
     };
     assert_eq!(arena.leaf_counts[0], 1);
     arena.validate().unwrap();
@@ -1054,12 +1051,10 @@ fn mvp_ioc_partial_fill_leaves_no_taker_residual() {
     let orders = taker.open_order_count;
     assert_eq!((position, reserve, orders), (4, 0, 0));
     let ask = unsafe {
-        &*(data.as_ptr().add(equinox::state::ASK_ARENA_OFFSET)
-            as *const equinox::book::Arena)
+        &*(data.as_ptr().add(equinox::state::ASK_ARENA_OFFSET) as *const equinox::book::Arena)
     };
     let bid = unsafe {
-        &*(data.as_ptr().add(equinox::state::BID_ARENA_OFFSET)
-            as *const equinox::book::Arena)
+        &*(data.as_ptr().add(equinox::state::BID_ARENA_OFFSET) as *const equinox::book::Arena)
     };
     assert_eq!(ask.leaf_counts[0], 0);
     assert_eq!(bid.leaf_counts[0], 0);
@@ -1084,8 +1079,7 @@ fn mvp_cancellation_releases_exact_remaining_reserve_once() {
     place(&f, true, &order_data(1, 0, 10, 100, 0, 131)).unwrap();
     let data = unsafe { f.market.view.borrow_unchecked() };
     let ask = unsafe {
-        &*(data.as_ptr().add(equinox::state::ASK_ARENA_OFFSET)
-            as *const equinox::book::Arena)
+        &*(data.as_ptr().add(equinox::state::ASK_ARENA_OFFSET) as *const equinox::book::Arena)
     };
     let handle = ask.roots[0];
     let key = ask.leaf(handle).unwrap().key;
@@ -1103,8 +1097,7 @@ fn mvp_cancellation_releases_exact_remaining_reserve_once() {
     assert!(before > 0);
     assert_eq!((reserve, count), (0, 0));
     let ask = unsafe {
-        &*(data.as_ptr().add(equinox::state::ASK_ARENA_OFFSET)
-            as *const equinox::book::Arena)
+        &*(data.as_ptr().add(equinox::state::ASK_ARENA_OFFSET) as *const equinox::book::Arena)
     };
     ask.validate().unwrap();
     let bytes = data.to_vec();
@@ -1151,8 +1144,7 @@ fn mvp_event_ring_wraps_from_final_slot_to_zero() {
             as *const equinox::state::FillEvent)
     };
     let zero = unsafe {
-        &*(data.as_ptr().add(equinox::state::FILL_EVENT_OFFSET)
-            as *const equinox::state::FillEvent)
+        &*(data.as_ptr().add(equinox::state::FILL_EVENT_OFFSET) as *const equinox::state::FillEvent)
     };
     let last_sequence = last.sequence;
     let zero_sequence = zero.sequence;
@@ -1186,8 +1178,7 @@ fn a_resting_orders_placed_event_never_collides_with_a_later_crossing_fills_sequ
     let event_offset = equinox::state::FILL_EVENT_OFFSET
         + (fill_sequence as usize % equinox::state::FILL_EVENT_CAPACITY)
             * equinox::state::FILL_EVENT_SIZE;
-    let event =
-        unsafe { &*(data.as_ptr().add(event_offset) as *const equinox::state::FillEvent) };
+    let event = unsafe { &*(data.as_ptr().add(event_offset) as *const equinox::state::FillEvent) };
     let event_sequence = event.sequence;
     assert_eq!(event_sequence, fill_sequence);
 }
@@ -1472,13 +1463,11 @@ fn self_trade_cancel_provide_removes_the_own_order_and_fills_the_next_seat() {
     assert_eq!(own_position, 4, "only the fill moves the taker's position");
     assert_eq!(other_position, -4);
     let ask = unsafe {
-        &*(data.as_ptr().add(equinox::state::ASK_ARENA_OFFSET)
-            as *const equinox::book::Arena)
+        &*(data.as_ptr().add(equinox::state::ASK_ARENA_OFFSET) as *const equinox::book::Arena)
     };
     assert_eq!(ask.leaf_counts[0], 0);
     let bid = unsafe {
-        &*(data.as_ptr().add(equinox::state::BID_ARENA_OFFSET)
-            as *const equinox::book::Arena)
+        &*(data.as_ptr().add(equinox::state::BID_ARENA_OFFSET) as *const equinox::book::Arena)
     };
     assert_eq!(bid.leaf_counts[0], 0);
 }
@@ -1507,13 +1496,11 @@ fn self_trade_decrement_take_creates_no_fill_and_leaves_the_own_order_resting() 
         "OrderPlaced plus the SelfTradePrevented record"
     );
     let ask = unsafe {
-        &*(data.as_ptr().add(equinox::state::ASK_ARENA_OFFSET)
-            as *const equinox::book::Arena)
+        &*(data.as_ptr().add(equinox::state::ASK_ARENA_OFFSET) as *const equinox::book::Arena)
     };
     assert_eq!(ask.leaf_counts[0], 1, "the own resting order survives");
     let bid = unsafe {
-        &*(data.as_ptr().add(equinox::state::BID_ARENA_OFFSET)
-            as *const equinox::book::Arena)
+        &*(data.as_ptr().add(equinox::state::BID_ARENA_OFFSET) as *const equinox::book::Arena)
     };
     assert_eq!(bid.leaf_counts[0], 0, "the order was fully decremented");
 }
@@ -1535,13 +1522,11 @@ fn ioc_cancel_provide_removes_the_own_order_and_never_rests_a_residual() {
     assert_eq!(own_position, 4, "filled only against the other seat");
     assert_eq!(other_position, -4);
     let ask = unsafe {
-        &*(data.as_ptr().add(equinox::state::ASK_ARENA_OFFSET)
-            as *const equinox::book::Arena)
+        &*(data.as_ptr().add(equinox::state::ASK_ARENA_OFFSET) as *const equinox::book::Arena)
     };
     assert_eq!(ask.leaf_counts[0], 0);
     let bid = unsafe {
-        &*(data.as_ptr().add(equinox::state::BID_ARENA_OFFSET)
-            as *const equinox::book::Arena)
+        &*(data.as_ptr().add(equinox::state::BID_ARENA_OFFSET) as *const equinox::book::Arena)
     };
     assert_eq!(bid.leaf_counts[0], 0, "the IOC residual must not rest");
 }
@@ -1566,13 +1551,11 @@ fn ioc_decrement_take_creates_no_self_fill_and_never_rests_a_residual() {
     );
     assert_eq!(other_position, -1);
     let ask = unsafe {
-        &*(data.as_ptr().add(equinox::state::ASK_ARENA_OFFSET)
-            as *const equinox::book::Arena)
+        &*(data.as_ptr().add(equinox::state::ASK_ARENA_OFFSET) as *const equinox::book::Arena)
     };
     assert_eq!(ask.leaf_counts[0], 1, "the own maker is left untouched");
     let bid = unsafe {
-        &*(data.as_ptr().add(equinox::state::BID_ARENA_OFFSET)
-            as *const equinox::book::Arena)
+        &*(data.as_ptr().add(equinox::state::BID_ARENA_OFFSET) as *const equinox::book::Arena)
     };
     assert_eq!(bid.leaf_counts[0], 0, "the IOC residual must not rest");
 }

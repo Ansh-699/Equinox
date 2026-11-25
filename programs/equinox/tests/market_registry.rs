@@ -1,8 +1,8 @@
-use pinocchio::Address;
 use equinox::{
     registry::{derive_instrument, derive_perp_market, EXCHANGE_SIZE, INSTRUMENT_SIZE},
     ID,
 };
+use pinocchio::Address;
 
 #[test]
 fn instrument_and_perp_market_addresses_are_market_scoped() {

@@ -19,14 +19,6 @@
 use std::path::PathBuf;
 use std::ptr;
 
-use litesvm::LiteSVM;
-use solana_account::Account;
-use solana_address::Address;
-use solana_instruction::{account_meta::AccountMeta, Instruction};
-use solana_keypair::Keypair;
-use solana_message::Message;
-use solana_signer::Signer;
-use solana_transaction::Transaction;
 use equinox::{
     book::{OrderInput, SelfTradeBehavior, Side, TimeInForce, TreeKind},
     scratch::{derive_settlement_scratch, SETTLEMENT_SCRATCH_LEN},
@@ -36,6 +28,14 @@ use equinox::{
     },
     ID,
 };
+use litesvm::LiteSVM;
+use solana_account::Account;
+use solana_address::Address;
+use solana_instruction::{account_meta::AccountMeta, Instruction};
+use solana_keypair::Keypair;
+use solana_message::Message;
+use solana_signer::Signer;
+use solana_transaction::Transaction;
 
 const SEAT_A: u16 = 0;
 const SEAT_B: u16 = 1;

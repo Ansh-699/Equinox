@@ -1,4 +1,3 @@
-use pinocchio::Address;
 use equinox::{
     scratch::{
         derive_settlement_scratch, ScratchStatus, SettlementScratchHeader, SettlementScratchView,
@@ -8,6 +7,7 @@ use equinox::{
     },
     ID,
 };
+use pinocchio::Address;
 
 fn scratch_bytes() -> Vec<u8> {
     vec![0; SETTLEMENT_SCRATCH_LEN]
@@ -77,10 +77,8 @@ fn rust_client_and_pda_derivation_use_the_canonical_program_id() {
         229, 226, 164, 31, 131, 3, 31, 153, 255, 39, 114, 192,
     ]);
     assert_eq!(ID, EXPECTED);
-    assert!(
-        include_str!("../../../clients/equinox/src/constants.ts")
-            .contains("8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ")
-    );
+    assert!(include_str!("../../../clients/equinox/src/constants.ts")
+        .contains("8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ"));
     let market = Address::new_from_array([9; 32]);
     assert_ne!(
         derive_settlement_scratch(&market, 0, &ID),

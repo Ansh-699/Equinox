@@ -1,6 +1,6 @@
 use core::mem::{offset_of, size_of};
-use std::str::FromStr;
 use equinox::v3::*;
+use std::str::FromStr;
 
 fn validator() -> [u8; 32] {
     pinocchio::Address::from_str("MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57")

@@ -11,6 +11,11 @@
 
 use std::path::PathBuf;
 
+use equinox::{
+    scratch::{derive_settlement_scratch, SETTLEMENT_SCRATCH_LEN},
+    state::MARKET_ACCOUNT_SIZE,
+    ID,
+};
 use litesvm::LiteSVM;
 use solana_account::Account;
 use solana_address::Address;
@@ -19,11 +24,6 @@ use solana_keypair::Keypair;
 use solana_message::Message;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
-use equinox::{
-    scratch::{derive_settlement_scratch, SETTLEMENT_SCRATCH_LEN},
-    state::MARKET_ACCOUNT_SIZE,
-    ID,
-};
 
 const CREATE_SCRATCH_ACCOUNT: u8 = 45;
 const CREATE_TRADER_SEAT: u8 = 1;

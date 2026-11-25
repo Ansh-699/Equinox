@@ -2,15 +2,15 @@
 
 use core::{mem::size_of, ptr};
 
-use pinocchio::{
-    account::{AccountView, RuntimeAccount, NOT_BORROWED},
-    Address,
-};
 use equinox::{
     instruction::exchange_config_field as field,
     process_instruction,
     registry::{EXCHANGE_DISCRIMINATOR, EXCHANGE_SIZE},
     ID,
+};
+use pinocchio::{
+    account::{AccountView, RuntimeAccount, NOT_BORROWED},
+    Address,
 };
 
 struct TestAccount {

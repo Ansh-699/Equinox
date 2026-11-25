@@ -28,7 +28,7 @@ use crate::{
         ANY_NODE_SIZE, NONE, TAG_INNER, TAG_LEAF,
     },
     error::EquinoxError,
-    instruction::{PlaceOrderData, EquinoxInstruction},
+    instruction::{EquinoxInstruction, PlaceOrderData},
     session::{self, TradingSession},
     state::{
         DelegationStatus, LiquidationState, ReconciliationStatus, TraderSeat, TRADER_SEAT_SIZE,
@@ -169,7 +169,8 @@ pub fn abort_v3_snapshot(program_id: &Address, accounts: &mut [AccountView]) -> 
     }
     bytes[V3_CORE_COMMIT_PHASE_OFFSET] = V3_COMMIT_PHASE_IDLE;
     bytes[V3_CORE_SNAPSHOT_CHILD_COUNT_OFFSET..V3_CORE_SNAPSHOT_CHILD_COUNT_OFFSET + 4].fill(0);
-    bytes[V3_CORE_CHILD_RECORDS_OFFSET..V3_CORE_CHILD_RECORDS_OFFSET + V3_CHILD_COUNT * V3_CORE_CHILD_RECORD_SIZE]
+    bytes[V3_CORE_CHILD_RECORDS_OFFSET
+        ..V3_CORE_CHILD_RECORDS_OFFSET + V3_CHILD_COUNT * V3_CORE_CHILD_RECORD_SIZE]
         .fill(0);
     Ok(())
 }
@@ -181,11 +182,21 @@ pub fn set_v3_price_reporter(
     accounts: &mut [AccountView],
     reporter: [u8; 32],
 ) -> ProgramResult {
-    set_core_key(program_id, accounts, V3_CORE_PRICE_REPORTER_OFFSET, reporter)
+    set_core_key(
+        program_id,
+        accounts,
+        V3_CORE_PRICE_REPORTER_OFFSET,
+        reporter,
+    )
 }
 
 /// Writes a 32-byte key into the core, market authority only.
-fn set_core_key(program_id: &Address, accounts: &mut [AccountView], offset: usize, key: [u8; 32]) -> ProgramResult {
+fn set_core_key(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    offset: usize,
+    key: [u8; 32],
+) -> ProgramResult {
     if accounts.len() != 2 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
@@ -1984,7 +1995,9 @@ pub fn validate_v3_withdrawal_readiness(
     // A surplus (the vault holds more than it owes, e.g. inbox deposits not
     // yet credited) is safe to pay out of; only a deficit blocks withdrawals.
     let reconciliation = core[V3_CORE_RECONCILIATION_STATUS_OFFSET];
-    if reconciliation != ReconciliationStatus::Reconciled as u8 && reconciliation != ReconciliationStatus::SurplusDetected as u8 {
+    if reconciliation != ReconciliationStatus::Reconciled as u8
+        && reconciliation != ReconciliationStatus::SurplusDetected as u8
+    {
         return Err(EquinoxError::CustodyViolation.into());
     }
     Ok(())
@@ -2142,7 +2155,10 @@ fn validate_seat_core(program_id: &Address, core: &AccountView) -> Result<Addres
     Ok(*core.address())
 }
 
-pub(crate) fn validate_event_core(program_id: &Address, core: &AccountView) -> Result<Address, ProgramError> {
+pub(crate) fn validate_event_core(
+    program_id: &Address,
+    core: &AccountView,
+) -> Result<Address, ProgramError> {
     if !core.owned_by(program_id) || !core.is_writable() {
         return Err(bundle_error());
     }
@@ -4426,8 +4442,8 @@ pub fn withdraw_collateral_v3(
     {
         let destination = TokenAccount::from_account_view(&accounts[V3_EXECUTION_BUNDLE_LEN + 1])
             .map_err(|_| EquinoxError::CustodyViolation)?;
-        let vault_state = TokenAccount::from_account_view(vault)
-            .map_err(|_| EquinoxError::CustodyViolation)?;
+        let vault_state =
+            TokenAccount::from_account_view(vault).map_err(|_| EquinoxError::CustodyViolation)?;
         if *destination.owner() != *authority.address()
             || *destination.mint() != *mint.address()
             || *vault_state.mint() != *mint.address()
@@ -4505,7 +4521,11 @@ pub const V3_STALE_WITHDRAWAL_STRESS_BPS: i64 = 2_500;
 /// - no position: 1 (a flat seat's equity does not depend on the price);
 /// - position, no live price (weekend, holiday, outage): the market's last
 ///   authenticated price moved `V3_STALE_WITHDRAWAL_STRESS_BPS` against the position.
-pub fn withdrawal_mark_price(program_id: &Address, accounts: &[AccountView], base_position: i128) -> Result<i64, ProgramError> {
+pub fn withdrawal_mark_price(
+    program_id: &Address,
+    accounts: &[AccountView],
+    base_position: i128,
+) -> Result<i64, ProgramError> {
     if fresh_v3_execution_time_with_snapshot(program_id, accounts, Some(9)).is_ok() {
         return oracle_price_after_freshness(accounts, Some(9));
     }
@@ -4520,9 +4540,17 @@ pub fn withdrawal_mark_price(program_id: &Address, accounts: &[AccountView], bas
     let price = crate::oracle_snapshot::last_verified_price(
         unsafe { snapshot.borrow_unchecked() },
         accounts[0].address(),
-        u32::from_le_bytes(core[V3_CORE_ORACLE_FEED_ID_OFFSET..V3_CORE_ORACLE_FEED_ID_OFFSET + 4].try_into().map_err(|_| bundle_error())?),
+        u32::from_le_bytes(
+            core[V3_CORE_ORACLE_FEED_ID_OFFSET..V3_CORE_ORACLE_FEED_ID_OFFSET + 4]
+                .try_into()
+                .map_err(|_| bundle_error())?,
+        ),
         core[V3_CORE_ORACLE_CHANNEL_OFFSET],
-        i32::from_le_bytes(core[V3_CORE_ORACLE_EXPONENT_OFFSET..V3_CORE_ORACLE_EXPONENT_OFFSET + 4].try_into().map_err(|_| bundle_error())?),
+        i32::from_le_bytes(
+            core[V3_CORE_ORACLE_EXPONENT_OFFSET..V3_CORE_ORACLE_EXPONENT_OFFSET + 4]
+                .try_into()
+                .map_err(|_| bundle_error())?,
+        ),
     )
     .map_err(|_| ProgramError::from(EquinoxError::OracleUnavailable))?;
     let stressed = if base_position > 0 {
@@ -4551,7 +4579,10 @@ pub fn request_withdrawal_v3(
     if core_bytes[V3_CORE_DELEGATION_STATUS_OFFSET] != DelegationStatus::Delegated as u8 {
         return Err(EquinoxError::CustodyViolation.into());
     }
-    let (shard, slot) = ((seat_index as usize) / V3_SEATS_PER_SHARD, (seat_index as usize) % V3_SEATS_PER_SHARD);
+    let (shard, slot) = (
+        (seat_index as usize) / V3_SEATS_PER_SHARD,
+        (seat_index as usize) % V3_SEATS_PER_SHARD,
+    );
     if shard >= V3_SEAT_SHARDS {
         return Err(EquinoxError::InvalidSeat.into());
     }
@@ -4564,7 +4595,10 @@ pub fn request_withdrawal_v3(
         return Err(ProgramError::MissingRequiredSignature);
     }
     let seat = read_shard_seat(unsafe { accounts[1].borrow_unchecked() }, slot)?;
-    if seat.occupancy != 1 || seat.trader != trader.address().to_bytes() || seat.open_order_count != 0 {
+    if seat.occupancy != 1
+        || seat.trader != trader.address().to_bytes()
+        || seat.open_order_count != 0
+    {
         return Err(EquinoxError::RiskViolation.into());
     }
     let mark_price = withdrawal_mark_price(program_id, accounts, seat.base_position)?;
@@ -4578,17 +4612,30 @@ pub fn request_withdrawal_v3(
         risk_config.withdrawal_buffer,
     )
     .map_err(v3_risk_error)?;
-    let requested = u64::from_le_bytes(seat.reserved[8..16].try_into().map_err(|_| bundle_error())?)
-        .checked_add(amount)
-        .ok_or(EquinoxError::ArithmeticOverflow)?;
+    let requested = u64::from_le_bytes(
+        seat.reserved[8..16]
+            .try_into()
+            .map_err(|_| bundle_error())?,
+    )
+    .checked_add(amount)
+    .ok_or(EquinoxError::ArithmeticOverflow)?;
     seat.reserved[8..16].copy_from_slice(&requested.to_le_bytes());
     let liability = core_i128(core_bytes, V3_CORE_VAULT_LIABILITY_OFFSET)?
         .checked_sub(i128::from(amount))
         .ok_or(EquinoxError::RiskViolation)?;
     write_shard_seat(unsafe { accounts[1].borrow_unchecked_mut() }, slot, &seat)?;
     let mut core_copy = accounts[0].clone();
-    set_core_i128(unsafe { core_copy.borrow_unchecked_mut() }, V3_CORE_VAULT_LIABILITY_OFFSET, liability)?;
-    let mut events = [accounts[2].clone(), accounts[3].clone(), accounts[4].clone(), accounts[5].clone()];
+    set_core_i128(
+        unsafe { core_copy.borrow_unchecked_mut() },
+        V3_CORE_VAULT_LIABILITY_OFFSET,
+        liability,
+    )?;
+    let mut events = [
+        accounts[2].clone(),
+        accounts[3].clone(),
+        accounts[4].clone(),
+        accounts[5].clone(),
+    ];
     let mut payload = [0u8; crate::events::EVENT_PAYLOAD_SIZE];
     payload[0..2].copy_from_slice(&seat_index.to_le_bytes());
     payload[2..10].copy_from_slice(&amount.to_le_bytes());
@@ -4602,9 +4649,20 @@ pub fn request_withdrawal_v3(
         crate::handlers::event_timestamp(),
     )?;
     if accounts.len() == 11 {
-        return crate::magicblock::schedule_core_paid_commit(program_id, &accounts[0], &accounts[7], &accounts[10], Some(&accounts[1]));
+        return crate::magicblock::schedule_core_paid_commit(
+            program_id,
+            &accounts[0],
+            &accounts[7],
+            &accounts[10],
+            Some(&accounts[1]),
+        );
     }
-    crate::magicblock::schedule_member_commit(&accounts[6], &accounts[7], &accounts[8], &accounts[1])
+    crate::magicblock::schedule_member_commit(
+        &accounts[6],
+        &accounts[7],
+        &accounts[8],
+        &accounts[1],
+    )
 }
 
 /// Cancels one V3 order by searching both canonical roots.  The owner is

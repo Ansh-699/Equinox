@@ -2,14 +2,9 @@
 
 use core::{mem::size_of, ptr};
 
-use pinocchio::{
-    account::{AccountView, RuntimeAccount, NOT_BORROWED},
-    error::ProgramError,
-    Address,
-};
 use equinox::{
     book::{LeafNode, Side, TreeKind},
-    instruction::{PlaceOrderData, EquinoxInstruction},
+    instruction::{EquinoxInstruction, PlaceOrderData},
     session::{
         self, TradingSession, SESSION_ACTION_CANCEL_ALL, SESSION_ACTION_PLACE,
         SESSION_ACTION_REPLACE, TRADING_SESSION_SIZE,
@@ -18,15 +13,21 @@ use equinox::{
         append_event_record, authorize_trading_session_v3, cancel_all_v3, close_trader_seat,
         create_trader_seat, deposit_collateral_v3, derive_book_page_v3, derive_event_shard_v3,
         derive_market_core_v3, derive_seat_shard_v3, initialize_book_page_metadata, liquidate_v3,
-        place_order_v3, read_v3_risk_config, set_v3_keeper, update_funding_v3, update_v3_risk_config,
-        validate_execution_bundle, validate_v3_oracle_snapshot_for_er, validate_v3_session_actor,
-        validate_v3_withdrawal_readiness, withdraw_collateral_v3, PagedBookV3, V3RiskConfig,
-        V3_BOOK_PAGES_PER_SIDE, V3_BOOK_PAGE_SIZE, V3_CORE_DELEGATION_STATUS_OFFSET,
-        V3_CORE_INSURANCE_BALANCE_OFFSET, V3_CORE_PROTOCOL_FEE_BALANCE_OFFSET,
-        V3_CORE_VAULT_SURPLUS_OFFSET, V3_CORE_WITHDRAWAL_BUFFER_OFFSET, V3_EVENT_SHARD_SIZE,
-        V3_EXECUTION_BUNDLE_LEN, V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
+        place_order_v3, read_v3_risk_config, set_v3_keeper, update_funding_v3,
+        update_v3_risk_config, validate_execution_bundle, validate_v3_oracle_snapshot_for_er,
+        validate_v3_session_actor, validate_v3_withdrawal_readiness, withdraw_collateral_v3,
+        PagedBookV3, V3RiskConfig, V3_BOOK_PAGES_PER_SIDE, V3_BOOK_PAGE_SIZE,
+        V3_CORE_DELEGATION_STATUS_OFFSET, V3_CORE_INSURANCE_BALANCE_OFFSET,
+        V3_CORE_PROTOCOL_FEE_BALANCE_OFFSET, V3_CORE_VAULT_SURPLUS_OFFSET,
+        V3_CORE_WITHDRAWAL_BUFFER_OFFSET, V3_EVENT_SHARD_SIZE, V3_EXECUTION_BUNDLE_LEN,
+        V3_MARKET_CORE_SIZE, V3_SEAT_SHARD_SIZE,
     },
     ID,
+};
+use pinocchio::{
+    account::{AccountView, RuntimeAccount, NOT_BORROWED},
+    error::ProgramError,
+    Address,
 };
 
 const V3_BOOK_ACCOUNT_COUNT: usize = 2 * V3_BOOK_PAGES_PER_SIDE;
@@ -84,8 +85,7 @@ fn bundle() -> Vec<TestAccount> {
     let core_key = derive_market_core_v3(&ID, &instrument);
     let mut core = account(core_key, V3_MARKET_CORE_SIZE, false);
     header(&mut core, b"STKMK003", 1, Some(instrument));
-    equinox::v3::initialize_v3_risk_config(unsafe { core.view.borrow_unchecked_mut() })
-        .unwrap();
+    equinox::v3::initialize_v3_risk_config(unsafe { core.view.borrow_unchecked_mut() }).unwrap();
     unsafe {
         core.view.borrow_unchecked_mut()[11] = 1;
         let data = core.view.borrow_unchecked_mut();
@@ -384,18 +384,40 @@ fn v3_keeper_set_by_authority_may_run_funding_but_a_stranger_may_not() {
     let funding = |signer: &TestAccount, accounts: &[TestAccount], accumulator| {
         let mut call = views(accounts);
         call.push(signer.view.clone());
-        update_funding_v3(&ID, &mut call, EquinoxInstruction::UpdateFunding { accumulator, timestamp: 20 })
+        update_funding_v3(
+            &ID,
+            &mut call,
+            EquinoxInstruction::UpdateFunding {
+                accumulator,
+                timestamp: 20,
+            },
+        )
     };
     // No keeper configured yet: only the authority may fund.
     assert!(funding(&keeper, &accounts, 0).is_err());
     // Only the authority may name the keeper.
     let keeper_key = keeper.view.address().to_bytes();
-    assert!(set_v3_keeper(&ID, &mut [accounts[0].view.clone(), keeper.view.clone()], keeper_key).is_err());
-    set_v3_keeper(&ID, &mut [accounts[0].view.clone(), authority.view.clone()], keeper_key).unwrap();
+    assert!(set_v3_keeper(
+        &ID,
+        &mut [accounts[0].view.clone(), keeper.view.clone()],
+        keeper_key
+    )
+    .is_err());
+    set_v3_keeper(
+        &ID,
+        &mut [accounts[0].view.clone(), authority.view.clone()],
+        keeper_key,
+    )
+    .unwrap();
     assert!(funding(&stranger, &accounts, 0).is_err());
     funding(&keeper, &accounts, 0).unwrap();
     // Clearing the keeper revokes it again.
-    set_v3_keeper(&ID, &mut [accounts[0].view.clone(), authority.view.clone()], [0; 32]).unwrap();
+    set_v3_keeper(
+        &ID,
+        &mut [accounts[0].view.clone(), authority.view.clone()],
+        [0; 32],
+    )
+    .unwrap();
     assert!(funding(&keeper, &accounts, 0).is_err());
 }
 
@@ -1981,7 +2003,11 @@ fn v3_seat_creation_accepts_l1_and_rollup_cores_but_not_undelegating() {
 }
 
 /// A 10-account withdrawal-shaped list: core ... snapshot at index 9.
-fn withdrawal_price_accounts(snapshot_core: Address, status: u8, publish: u64) -> (Vec<TestAccount>, TestAccount) {
+fn withdrawal_price_accounts(
+    snapshot_core: Address,
+    status: u8,
+    publish: u64,
+) -> (Vec<TestAccount>, TestAccount) {
     use equinox::oracle_snapshot as snap;
     let mut accounts = bundle();
     unsafe {
@@ -1990,14 +2016,21 @@ fn withdrawal_price_accounts(snapshot_core: Address, status: u8, publish: u64) -
         core[250] = 2;
         core[251..255].copy_from_slice(&(-5i32).to_le_bytes());
     }
-    let mut snapshot = account(Address::new_from_array([91; 32]), snap::ORACLE_SNAPSHOT_SIZE, false);
+    let mut snapshot = account(
+        Address::new_from_array([91; 32]),
+        snap::ORACLE_SNAPSHOT_SIZE,
+        false,
+    );
     snapshot.set_readonly();
     unsafe {
         let bytes = snapshot.view.borrow_unchecked_mut();
         snap::initialize(bytes, &snapshot_core, 1435, 2, -5).unwrap();
-        bytes[snap::OFFSET_PRICE..snap::OFFSET_PRICE + 8].copy_from_slice(&100_000i64.to_le_bytes());
-        bytes[snap::OFFSET_PUBLISH_TIMESTAMP..snap::OFFSET_PUBLISH_TIMESTAMP + 8].copy_from_slice(&publish.to_le_bytes());
-        bytes[snap::OFFSET_SEQUENCE..snap::OFFSET_SEQUENCE + 8].copy_from_slice(&7u64.to_le_bytes());
+        bytes[snap::OFFSET_PRICE..snap::OFFSET_PRICE + 8]
+            .copy_from_slice(&100_000i64.to_le_bytes());
+        bytes[snap::OFFSET_PUBLISH_TIMESTAMP..snap::OFFSET_PUBLISH_TIMESTAMP + 8]
+            .copy_from_slice(&publish.to_le_bytes());
+        bytes[snap::OFFSET_SEQUENCE..snap::OFFSET_SEQUENCE + 8]
+            .copy_from_slice(&7u64.to_le_bytes());
         bytes[snap::OFFSET_TRADING_STATUS] = status;
         bytes[snap::OFFSET_AUTHENTICATED] = 1;
     }
@@ -2028,7 +2061,11 @@ fn withdrawals_never_wait_for_a_live_price() {
     assert_eq!(call(&accounts, &snapshot, -5).unwrap(), 125_000);
 
     // A snapshot of another market is never trusted for a position.
-    let (accounts, forged) = withdrawal_price_accounts(Address::new_from_array([3; 32]), STATUS_CLOSED, now - 86_400);
+    let (accounts, forged) = withdrawal_price_accounts(
+        Address::new_from_array([3; 32]),
+        STATUS_CLOSED,
+        now - 86_400,
+    );
     assert!(call(&accounts, &forged, 5).is_err());
 }
 
@@ -2052,27 +2089,59 @@ fn price_reporter_posts_bounded_prices_only_for_its_own_market() {
     }
     let snapshot_key = equinox::v3::derive_oracle_snapshot_v3(&ID, &core_key);
     let mut snapshot = account(snapshot_key, snap::ORACLE_SNAPSHOT_SIZE, false);
-    unsafe { snap::initialize(snapshot.view.borrow_unchecked_mut(), &core_key, 4_000_000_001, 1, -5).unwrap() };
+    unsafe {
+        snap::initialize(
+            snapshot.view.borrow_unchecked_mut(),
+            &core_key,
+            4_000_000_001,
+            1,
+            -5,
+        )
+        .unwrap()
+    };
     // The core is passed read-only: a copy of its current bytes.
     let report = |accounts: &[TestAccount], signer: &TestAccount, price: i64, at: u64| {
         let mut core = account(core_key, V3_MARKET_CORE_SIZE, false);
-        unsafe { core.view.borrow_unchecked_mut().copy_from_slice(accounts[0].view.borrow_unchecked()) };
+        unsafe {
+            core.view
+                .borrow_unchecked_mut()
+                .copy_from_slice(accounts[0].view.borrow_unchecked())
+        };
         core.set_readonly();
-        let mut list = [snapshot.view.clone(), core.view.clone(), signer.view.clone()];
-        let ix = Ix::ReportPriceV3 { price, confidence: price.unsigned_abs() / 200, publish_timestamp: at };
+        let mut list = [
+            snapshot.view.clone(),
+            core.view.clone(),
+            signer.view.clone(),
+        ];
+        let ix = Ix::ReportPriceV3 {
+            price,
+            confidence: price.unsigned_abs() / 200,
+            publish_timestamp: at,
+        };
         dispatch(&ID, &mut list, ix, &[])
     };
     // No reporter configured (every Pyth market): refused.
     assert!(report(&accounts, &reporter, 100_000_000, now).is_err());
     let set = |accounts: &[TestAccount], signer: &TestAccount, key: [u8; 32]| {
         let mut list = [accounts[0].view.clone(), signer.view.clone()];
-        dispatch(&ID, &mut list, Ix::SetV3PriceReporter { reporter: key }, &[])
+        dispatch(
+            &ID,
+            &mut list,
+            Ix::SetV3PriceReporter { reporter: key },
+            &[],
+        )
     };
     assert!(set(&accounts, &reporter, reporter.view.address().to_bytes()).is_err()); // only the authority names it
     set(&accounts, &authority, reporter.view.address().to_bytes()).unwrap();
     assert!(report(&accounts, &stranger, 100_000_000, now).is_err());
     report(&accounts, &reporter, 100_000_000, now - 5).unwrap(); // first price: any level
-    let price = |s: &TestAccount| unsafe { i64::from_le_bytes(s.view.borrow_unchecked()[snap::OFFSET_PRICE..snap::OFFSET_PRICE + 8].try_into().unwrap()) };
+    let price = |s: &TestAccount| unsafe {
+        i64::from_le_bytes(
+            s.view.borrow_unchecked()[snap::OFFSET_PRICE..snap::OFFSET_PRICE + 8]
+                .try_into()
+                .unwrap(),
+        )
+    };
     assert_eq!(price(&snapshot), 100_000_000);
     // One second later: at most 0.6% (0.5% + 0.1%/s).
     assert!(report(&accounts, &reporter, 101_000_000, now - 4).is_err());

@@ -11,7 +11,12 @@ fn base58_decode(text: &str) -> [u8; 32] {
     const ALPHABET: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
     let mut bytes: Vec<u8> = Vec::new(); // little endian
     for ch in text.bytes() {
-        let mut carry = ALPHABET.iter().position(|&a| a == ch).unwrap_or_else(|| panic!("EQUINOX_PROGRAM_ID: invalid base58 character {:?}", ch as char)) as u32;
+        let mut carry = ALPHABET.iter().position(|&a| a == ch).unwrap_or_else(|| {
+            panic!(
+                "EQUINOX_PROGRAM_ID: invalid base58 character {:?}",
+                ch as char
+            )
+        }) as u32;
         for byte in bytes.iter_mut() {
             carry += u32::from(*byte) * 58;
             *byte = (carry & 0xff) as u8;
@@ -24,13 +29,24 @@ fn base58_decode(text: &str) -> [u8; 32] {
     }
     bytes.extend(std::iter::repeat(0).take(text.bytes().take_while(|&c| c == b'1').count()));
     bytes.reverse();
-    bytes.try_into().unwrap_or_else(|v: Vec<u8>| panic!("EQUINOX_PROGRAM_ID must decode to 32 bytes, got {}", v.len()))
+    bytes.try_into().unwrap_or_else(|v: Vec<u8>| {
+        panic!(
+            "EQUINOX_PROGRAM_ID must decode to 32 bytes, got {}",
+            v.len()
+        )
+    })
 }
 
 fn main() {
     println!("cargo:rerun-if-env-changed=EQUINOX_PROGRAM_ID");
     println!("cargo:rerun-if-changed=build.rs");
-    let id = env::var("EQUINOX_PROGRAM_ID").map(|text| base58_decode(text.trim())).unwrap_or(DEVNET_ID);
+    let id = env::var("EQUINOX_PROGRAM_ID")
+        .map(|text| base58_decode(text.trim()))
+        .unwrap_or(DEVNET_ID);
     let out = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR")).join("program_id.rs");
-    fs::write(out, format!("pub const ID: Address = Address::new_from_array({id:?});\n")).expect("write program_id.rs");
+    fs::write(
+        out,
+        format!("pub const ID: Address = Address::new_from_array({id:?});\n"),
+    )
+    .expect("write program_id.rs");
 }

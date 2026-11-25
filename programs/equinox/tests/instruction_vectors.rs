@@ -125,9 +125,7 @@ fn trailing_unsupported_bytes_are_rejected() {
 #[test]
 fn unknown_opcode_is_rejected() {
     assert!(EquinoxInstruction::decode(&[200]).is_err());
-    assert!(
-        EquinoxInstruction::decode(&[instruction::UNDELEGATION_CALLBACK_RESERVED]).is_err()
-    );
+    assert!(EquinoxInstruction::decode(&[instruction::UNDELEGATION_CALLBACK_RESERVED]).is_err());
 }
 
 #[test]
@@ -242,13 +240,9 @@ fn typescript_golden_instruction_vectors_decode_in_rust() {
     // The parser rejects bad kinds and bounds before a handler can derive a
     // PDA, preventing malformed flattened page indices from aliasing pages.
     assert!(
-        EquinoxInstruction::decode(&[equinox::instruction::CREATE_V3_ACCOUNT, 1, 18,])
-            .is_err()
+        EquinoxInstruction::decode(&[equinox::instruction::CREATE_V3_ACCOUNT, 1, 18,]).is_err()
     );
-    assert!(
-        EquinoxInstruction::decode(&[equinox::instruction::CREATE_V3_ACCOUNT, 4, 0,])
-            .is_err()
-    );
+    assert!(EquinoxInstruction::decode(&[equinox::instruction::CREATE_V3_ACCOUNT, 4, 0,]).is_err());
     let mut delegate_v3 = vec![equinox::instruction::DELEGATE_V3_ACCOUNT, 1, 7];
     delegate_v3.extend_from_slice(&[9; 32]);
     assert!(matches!(

@@ -141,7 +141,8 @@ pub(crate) fn update_oracle_snapshot_v3(
             )
         || verified.price <= 0
         || verified.confidence < 0
-        || verified.confidence as u64 > verified.price.unsigned_abs() / crate::oracle_snapshot::MAX_CONFIDENCE_DIVISOR
+        || verified.confidence as u64
+            > verified.price.unsigned_abs() / crate::oracle_snapshot::MAX_CONFIDENCE_DIVISOR
         || timestamp > now as u64 + 2
         || now as u64 > timestamp.saturating_add(crate::v3::V3_MAX_ORACLE_AGE_SECONDS)
     {
@@ -189,7 +190,10 @@ pub(crate) fn configure_market_oracle(
 /// Largest move a reporter may post, in bps: 0.5% plus 0.1% per second since
 /// the previous price, capped at 10% per update.
 pub fn max_report_move_bps(elapsed_seconds: u64) -> u64 {
-    elapsed_seconds.saturating_mul(10).saturating_add(50).min(1_000)
+    elapsed_seconds
+        .saturating_mul(10)
+        .saturating_add(50)
+        .min(1_000)
 }
 
 /// Price for a market with no Pyth feed (pre-IPO): the core's reporter posts it
@@ -206,7 +210,8 @@ pub(crate) fn report_price_v3(
     if accounts.len() != 3
         || !accounts[0].is_writable()
         || !accounts[0].owned_by(program_id)
-        || *accounts[0].address() != crate::v3::derive_oracle_snapshot_v3(program_id, accounts[1].address())
+        || *accounts[0].address()
+            != crate::v3::derive_oracle_snapshot_v3(program_id, accounts[1].address())
         || accounts[1].is_writable()
         || !accounts[2].is_signer()
     {
@@ -227,9 +232,17 @@ pub(crate) fn report_price_v3(
             return Err(EquinoxError::OracleUnavailable.into());
         }
         (
-            u32::from_le_bytes(core[V3_CORE_ORACLE_FEED_ID_OFFSET..V3_CORE_ORACLE_FEED_ID_OFFSET + 4].try_into().unwrap()),
+            u32::from_le_bytes(
+                core[V3_CORE_ORACLE_FEED_ID_OFFSET..V3_CORE_ORACLE_FEED_ID_OFFSET + 4]
+                    .try_into()
+                    .unwrap(),
+            ),
             core[V3_CORE_ORACLE_CHANNEL_OFFSET],
-            i32::from_le_bytes(core[V3_CORE_ORACLE_EXPONENT_OFFSET..V3_CORE_ORACLE_EXPONENT_OFFSET + 4].try_into().unwrap()),
+            i32::from_le_bytes(
+                core[V3_CORE_ORACLE_EXPONENT_OFFSET..V3_CORE_ORACLE_EXPONENT_OFFSET + 4]
+                    .try_into()
+                    .unwrap(),
+            ),
         )
     };
     let now = u64::try_from(crate::handlers::current_unix_timestamp()?)
@@ -237,15 +250,32 @@ pub(crate) fn report_price_v3(
     let core_address = *accounts[1].address();
     let bytes = &mut *accounts[0].try_borrow_mut()?;
     use crate::oracle_snapshot::*;
-    let previous_price = i64::from_le_bytes(bytes[OFFSET_PRICE..OFFSET_PRICE + 8].try_into().unwrap());
-    let previous_publish = u64::from_le_bytes(bytes[OFFSET_PUBLISH_TIMESTAMP..OFFSET_PUBLISH_TIMESTAMP + 8].try_into().unwrap());
+    let previous_price =
+        i64::from_le_bytes(bytes[OFFSET_PRICE..OFFSET_PRICE + 8].try_into().unwrap());
+    let previous_publish = u64::from_le_bytes(
+        bytes[OFFSET_PUBLISH_TIMESTAMP..OFFSET_PUBLISH_TIMESTAMP + 8]
+            .try_into()
+            .unwrap(),
+    );
     if previous_price > 0 && bytes[OFFSET_AUTHENTICATED] == 1 {
         let limit = max_report_move_bps(publish_timestamp.saturating_sub(previous_publish));
-        let moved = i128::from(price).abs_diff(i128::from(previous_price)).saturating_mul(10_000);
+        let moved = i128::from(price)
+            .abs_diff(i128::from(previous_price))
+            .saturating_mul(10_000);
         if moved > u128::from(limit).saturating_mul(previous_price.unsigned_abs().into()) {
             return Err(EquinoxError::RiskViolation.into());
         }
     }
-    write_verified(bytes, &core_address, feed_id, channel, exponent, price, confidence, publish_timestamp, 0, now)
+    write_verified(
+        bytes,
+        &core_address,
+        feed_id,
+        channel,
+        exponent,
+        price,
+        confidence,
+        publish_timestamp,
+        0,
+        now,
+    )
 }
-

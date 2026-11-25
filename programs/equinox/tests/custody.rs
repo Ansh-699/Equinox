@@ -12,11 +12,6 @@
 
 use core::{mem::size_of, ptr};
 
-use pinocchio::{
-    account::{AccountView, RuntimeAccount, NOT_BORROWED},
-    error::ProgramError,
-    Address,
-};
 use equinox::{
     error::EquinoxError,
     process_instruction,
@@ -25,6 +20,11 @@ use equinox::{
         MARKET_ACCOUNT_SIZE, TRADER_SEAT_OFFSET, TRADER_SEAT_SIZE,
     },
     ID,
+};
+use pinocchio::{
+    account::{AccountView, RuntimeAccount, NOT_BORROWED},
+    error::ProgramError,
+    Address,
 };
 
 struct TestAccount {
@@ -474,10 +474,7 @@ fn withdraw_is_blocked_while_vault_deficit_is_unresolved() {
     let vault_authority_account = account(f.vault_authority, Address::default(), 0, false, false);
     let mut accounts = withdraw_accounts(&f, &destination, &vault_authority_account);
     let error = process_instruction(&ID, &mut accounts, &withdraw_data(0, 1_000)).unwrap_err();
-    assert_eq!(
-        error,
-        ProgramError::from(EquinoxError::CustodyViolation)
-    );
+    assert_eq!(error, ProgramError::from(EquinoxError::CustodyViolation));
 }
 
 #[test]
@@ -566,10 +563,7 @@ fn transfer_to_insurance_fund_moves_the_ledger_and_requires_market_authority() {
     );
     let mut accounts = [f.market.view.clone(), attacker.view.clone()];
     let error = process_instruction(&ID, &mut accounts, &insurance_transfer_data(1)).unwrap_err();
-    assert_eq!(
-        error,
-        ProgramError::from(EquinoxError::CustodyViolation)
-    );
+    assert_eq!(error, ProgramError::from(EquinoxError::CustodyViolation));
 }
 
 #[test]
@@ -625,10 +619,7 @@ fn withdraw_protocol_fees_pays_out_and_withdraw_insurance_requires_emergency_aut
         f.token_program.view.clone(),
     ];
     let error = process_instruction(&ID, &mut accounts, &insurance_data).unwrap_err();
-    assert_eq!(
-        error,
-        ProgramError::from(EquinoxError::CustodyViolation)
-    );
+    assert_eq!(error, ProgramError::from(EquinoxError::CustodyViolation));
 }
 
 #[test]
@@ -726,10 +717,7 @@ fn withdrawal_health_settles_pending_funding_before_evaluating_margin() {
     let last_funding_accumulator = seat.last_funding_accumulator;
     assert_eq!(realized_pnl, -50);
     assert_eq!(available, 1_050);
-    assert_eq!(
-        last_funding_accumulator,
-        equinox::risk::FUNDING_SCALE / 2
-    );
+    assert_eq!(last_funding_accumulator, equinox::risk::FUNDING_SCALE / 2);
 }
 
 /// Companion to the funding test above: a fee already charged by a prior

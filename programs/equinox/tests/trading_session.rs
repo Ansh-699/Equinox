@@ -10,11 +10,6 @@
 
 use core::{mem::size_of, ptr};
 
-use pinocchio::{
-    account::{AccountView, RuntimeAccount, NOT_BORROWED},
-    error::ProgramError,
-    Address,
-};
 use equinox::{
     error::EquinoxError,
     process_instruction,
@@ -25,6 +20,11 @@ use equinox::{
     },
     state::{MarketStateHeader, MARKET_ACCOUNT_SIZE},
     ID,
+};
+use pinocchio::{
+    account::{AccountView, RuntimeAccount, NOT_BORROWED},
+    error::ProgramError,
+    Address,
 };
 
 struct TestAccount {
@@ -350,10 +350,7 @@ fn authorize_rejects_a_pre_funded_system_owned_session_pda() {
         ],
         &authorize_data(SEAT_INDEX, 1_000, SESSION_ACTION_PLACE, 100, 200, 300, 5),
     );
-    assert_eq!(
-        err_code(result),
-        EquinoxError::InvalidTradingSession as u32
-    );
+    assert_eq!(err_code(result), EquinoxError::InvalidTradingSession as u32);
 }
 
 fn err_code(result: Result<(), ProgramError>) -> u32 {
@@ -1536,13 +1533,11 @@ fn replace_that_would_self_cross_preserves_the_old_order_and_the_session() {
     // never charged; the runtime-rollback half stays runtime-unverified.
     let data = unsafe { f.market.view.borrow_unchecked() };
     let ask = unsafe {
-        &*(data.as_ptr().add(equinox::state::ASK_ARENA_OFFSET)
-            as *const equinox::book::Arena)
+        &*(data.as_ptr().add(equinox::state::ASK_ARENA_OFFSET) as *const equinox::book::Arena)
     };
     assert_eq!(ask.leaf_counts[0], 1, "the second own order survives");
     let bid = unsafe {
-        &*(data.as_ptr().add(equinox::state::BID_ARENA_OFFSET)
-            as *const equinox::book::Arena)
+        &*(data.as_ptr().add(equinox::state::BID_ARENA_OFFSET) as *const equinox::book::Arena)
     };
     assert_eq!(bid.leaf_counts[0], 0, "no replacement order may rest");
     assert_eq!(

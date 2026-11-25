@@ -22,9 +22,9 @@
 //! the npm script itself didn't even match (`/tmp/abi-check.json` vs
 //! `/tmp/abi_layout.json`).
 
-use std::mem::offset_of;
 use equinox::book::{InnerNode, LeafNode};
 use equinox::state::MarketStateHeader;
+use std::mem::offset_of;
 
 #[test]
 fn generate_manifest() {

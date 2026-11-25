@@ -116,16 +116,31 @@ pub fn last_verified_price(
 ) -> Result<i64, ProgramError> {
     if bytes.len() != ORACLE_SNAPSHOT_SIZE
         || bytes[0..8] != ORACLE_SNAPSHOT_DISCRIMINATOR
-        || u16::from_le_bytes(bytes[OFFSET_VERSION..OFFSET_VERSION + 2].try_into().unwrap())
-            != ORACLE_SNAPSHOT_VERSION
+        || u16::from_le_bytes(
+            bytes[OFFSET_VERSION..OFFSET_VERSION + 2]
+                .try_into()
+                .unwrap(),
+        ) != ORACLE_SNAPSHOT_VERSION
         || bytes[OFFSET_INITIALIZED] != 1
         || bytes[OFFSET_CORE..OFFSET_CORE + 32] != core.to_bytes()
         || bytes[OFFSET_AUTHENTICATED] != 1
         || bytes[OFFSET_REVISION] != 1
-        || u32::from_le_bytes(bytes[OFFSET_FEED_ID..OFFSET_FEED_ID + 4].try_into().unwrap()) != feed_id
+        || u32::from_le_bytes(
+            bytes[OFFSET_FEED_ID..OFFSET_FEED_ID + 4]
+                .try_into()
+                .unwrap(),
+        ) != feed_id
         || bytes[OFFSET_CHANNEL] != channel
-        || i32::from_le_bytes(bytes[OFFSET_EXPONENT..OFFSET_EXPONENT + 4].try_into().unwrap()) != exponent
-        || u64::from_le_bytes(bytes[OFFSET_SEQUENCE..OFFSET_SEQUENCE + 8].try_into().unwrap()) == 0
+        || i32::from_le_bytes(
+            bytes[OFFSET_EXPONENT..OFFSET_EXPONENT + 4]
+                .try_into()
+                .unwrap(),
+        ) != exponent
+        || u64::from_le_bytes(
+            bytes[OFFSET_SEQUENCE..OFFSET_SEQUENCE + 8]
+                .try_into()
+                .unwrap(),
+        ) == 0
     {
         return Err(ProgramError::InvalidAccountData);
     }
@@ -269,9 +284,20 @@ mod tests {
         let core = Address::new_from_array([7; 32]);
         for (session, open) in [(0u8, true), (1, true), (2, true), (3, true), (4, false)] {
             let mut bytes = [0u8; ORACLE_SNAPSHOT_SIZE];
-            write_verified(&mut bytes, &core, 1435, 2, -5, 36982565, 10, 1_000, session, 1_005).unwrap();
-            assert_eq!(bytes[OFFSET_TRADING_STATUS] == STATUS_OPEN, open, "session {session}");
-            assert_eq!(validate_for_core(&bytes, &core, 1435, 2, -5, 1_005).is_ok(), open, "session {session}");
+            write_verified(
+                &mut bytes, &core, 1435, 2, -5, 36982565, 10, 1_000, session, 1_005,
+            )
+            .unwrap();
+            assert_eq!(
+                bytes[OFFSET_TRADING_STATUS] == STATUS_OPEN,
+                open,
+                "session {session}"
+            );
+            assert_eq!(
+                validate_for_core(&bytes, &core, 1435, 2, -5, 1_005).is_ok(),
+                open,
+                "session {session}"
+            );
         }
     }
 

@@ -2,6 +2,10 @@
 
 use std::path::PathBuf;
 
+use equinox::{
+    state::{MarketStateHeader, MARKET_ACCOUNT_SIZE},
+    ID,
+};
 use litesvm::LiteSVM;
 use solana_account::Account;
 use solana_address::Address;
@@ -10,10 +14,6 @@ use solana_keypair::Keypair;
 use solana_message::Message;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
-use equinox::{
-    state::{MarketStateHeader, MARKET_ACCOUNT_SIZE},
-    ID,
-};
 
 #[test]
 fn serialized_initialize_market_executes_in_litesvm() {

@@ -2,6 +2,8 @@
 //! (`EQUINOX_PROGRAM_ID`, default: the devnet deployment).
 #[test]
 fn id_is_the_configured_program_id() {
-    let expected = option_env!("EQUINOX_PROGRAM_ID").unwrap_or("8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ").trim();
+    let expected = option_env!("EQUINOX_PROGRAM_ID")
+        .unwrap_or("8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ")
+        .trim();
     assert_eq!(equinox::ID.to_string(), expected);
 }

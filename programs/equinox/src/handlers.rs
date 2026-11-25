@@ -17,7 +17,7 @@ use crate::{
         TimeInForce, TreeKind,
     },
     error::EquinoxError,
-    instruction::{PlaceOrderData, EquinoxInstruction},
+    instruction::{EquinoxInstruction, PlaceOrderData},
     risk,
     scratch::{
         derive_settlement_scratch, ScratchStatus, SettlementScratchView, SETTLEMENT_SCRATCH_LEN,
@@ -473,9 +473,11 @@ pub fn dispatch(
         EquinoxInstruction::SetV3PriceReporter { reporter } => {
             crate::v3::set_v3_price_reporter(program_id, accounts, reporter)
         }
-        EquinoxInstruction::ReportPriceV3 { price, confidence, publish_timestamp } => {
-            oracle::report_price_v3(program_id, accounts, price, confidence, publish_timestamp)
-        }
+        EquinoxInstruction::ReportPriceV3 {
+            price,
+            confidence,
+            publish_timestamp,
+        } => oracle::report_price_v3(program_id, accounts, price, confidence, publish_timestamp),
         EquinoxInstruction::DepositCollateralV3 { seat_index, amount } => {
             crate::v3::deposit_collateral_v3(program_id, accounts, seat_index, amount)
         }
@@ -601,9 +603,7 @@ pub fn dispatch(
                 withdrawal_buffer,
             },
         ),
-        EquinoxInstruction::ReconcileVaultV3 => {
-            crate::v3::reconcile_vault_v3(program_id, accounts)
-        }
+        EquinoxInstruction::ReconcileVaultV3 => crate::v3::reconcile_vault_v3(program_id, accounts),
         EquinoxInstruction::CreateV3VaultAccount => {
             crate::v3::create_v3_vault_account(program_id, accounts)
         }
@@ -1801,7 +1801,8 @@ fn consume_oracle_update(
         || i32::from(verified.exponent) != header.price_exponent
         || verified.price <= 0
         || verified.confidence < 0
-        || verified.confidence as u64 > verified.price.unsigned_abs() / crate::oracle_snapshot::MAX_CONFIDENCE_DIVISOR
+        || verified.confidence as u64
+            > verified.price.unsigned_abs() / crate::oracle_snapshot::MAX_CONFIDENCE_DIVISOR
         || now < 0
         || timestamp > now as u64 + 2
         || now as u64 > timestamp.saturating_add(10)
@@ -1959,7 +1960,8 @@ fn consume_oracle_update_v3(
             )
         || verified.price <= 0
         || verified.confidence < 0
-        || verified.confidence as u64 > verified.price.unsigned_abs() / crate::oracle_snapshot::MAX_CONFIDENCE_DIVISOR
+        || verified.confidence as u64
+            > verified.price.unsigned_abs() / crate::oracle_snapshot::MAX_CONFIDENCE_DIVISOR
         || now < 0
         || timestamp > now as u64 + 2
         || now as u64 > timestamp.saturating_add(10)
@@ -1982,8 +1984,8 @@ fn consume_oracle_update_v3(
             ..crate::v3::V3_CORE_ORACLE_TIMESTAMP_OFFSET + 8]
             .copy_from_slice(&timestamp.to_le_bytes());
         core[crate::v3::V3_CORE_ORACLE_VALID_OFFSET] = 1;
-        core[crate::v3::V3_CORE_ORACLE_SESSION_OFFSET] = u8::try_from(verified.session)
-            .map_err(|_| custom(EquinoxError::OracleUnavailable))?;
+        core[crate::v3::V3_CORE_ORACLE_SESSION_OFFSET] =
+            u8::try_from(verified.session).map_err(|_| custom(EquinoxError::OracleUnavailable))?;
         core[crate::v3::V3_CORE_ORACLE_CONFIDENCE_OFFSET
             ..crate::v3::V3_CORE_ORACLE_CONFIDENCE_OFFSET + 8]
             .copy_from_slice(&(verified.confidence as u64).to_le_bytes());
@@ -3763,8 +3765,8 @@ fn liquidate(
     let liquidation_sequence = next_event_sequence(&mut header)?;
     let liquidation_timestamp = event_timestamp();
     if liquidation_fee > 0 {
-        let fee_u64 = u64::try_from(liquidation_fee)
-            .map_err(|_| custom(EquinoxError::ArithmeticOverflow))?;
+        let fee_u64 =
+            u64::try_from(liquidation_fee).map_err(|_| custom(EquinoxError::ArithmeticOverflow))?;
         header.set_protocol_fee_balance(
             header
                 .protocol_fee_balance()

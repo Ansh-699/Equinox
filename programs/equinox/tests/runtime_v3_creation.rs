@@ -8,14 +8,6 @@
 
 use std::path::PathBuf;
 
-use litesvm::LiteSVM;
-use solana_account::Account;
-use solana_address::Address;
-use solana_instruction::{account_meta::AccountMeta, Instruction};
-use solana_keypair::Keypair;
-use solana_message::Message;
-use solana_signer::Signer;
-use solana_transaction::Transaction;
 use equinox::{
     registry::{
         derive_instrument, EXCHANGE_CONFIG_VERSION, EXCHANGE_DISCRIMINATOR, EXCHANGE_SIZE,
@@ -28,6 +20,14 @@ use equinox::{
     },
     ID,
 };
+use litesvm::LiteSVM;
+use solana_account::Account;
+use solana_address::Address;
+use solana_instruction::{account_meta::AccountMeta, Instruction};
+use solana_keypair::Keypair;
+use solana_message::Message;
+use solana_signer::Signer;
+use solana_transaction::Transaction;
 
 const CREATE_V3_ACCOUNT: u8 = 46;
 const INITIALIZE_V3_MARKET: u8 = 47;

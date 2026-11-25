@@ -21,6 +21,14 @@
 use std::path::PathBuf;
 use std::ptr;
 
+use equinox::{
+    scratch::{
+        derive_settlement_scratch, ScratchStatus, SettlementScratchHeader, SETTLEMENT_SCRATCH_LEN,
+    },
+    session::{derive_trading_session, TradingSession, TRADING_SESSION_SEED, TRADING_SESSION_SIZE},
+    state::{DelegationStatus, MarketMode, MarketStateHeader, MARKET_ACCOUNT_SIZE},
+    ID,
+};
 use litesvm::types::FailedTransactionMetadata;
 use litesvm::LiteSVM;
 use solana_account::Account;
@@ -32,14 +40,6 @@ use solana_message::Message;
 use solana_message::Message as _Message;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
-use equinox::{
-    scratch::{
-        derive_settlement_scratch, ScratchStatus, SettlementScratchHeader, SETTLEMENT_SCRATCH_LEN,
-    },
-    session::{derive_trading_session, TradingSession, TRADING_SESSION_SEED, TRADING_SESSION_SIZE},
-    state::{DelegationStatus, MarketMode, MarketStateHeader, MARKET_ACCOUNT_SIZE},
-    ID,
-};
 
 fn program_path() -> PathBuf {
     std::env::var_os("EQUINOX_TEST_SBF")

@@ -22,16 +22,16 @@
 
 use core::{mem::size_of, ptr};
 
-use pinocchio::{
-    account::{AccountView, RuntimeAccount, NOT_BORROWED},
-    error::ProgramError,
-    Address,
-};
 use equinox::{
     handlers::OFF_CHAIN_TEST_NOW,
     process_instruction,
     state::{MarketStateHeader, MARKET_ACCOUNT_SIZE},
     ID,
+};
+use pinocchio::{
+    account::{AccountView, RuntimeAccount, NOT_BORROWED},
+    error::ProgramError,
+    Address,
 };
 
 struct TestAccount {
