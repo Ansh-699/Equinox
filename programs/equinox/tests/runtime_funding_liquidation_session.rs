@@ -108,9 +108,7 @@ impl Env {
     /// index 100). Uses the real arena types so the packed(8) node layout is
     /// exactly the one the program validates.
     fn plant_book(&mut self) {
-        use equinox::book::{
-            Arena, LeafNode, OrderInput, SelfTradeBehavior, Side, TimeInForce, TreeKind,
-        };
+        use equinox::book::{Arena, LeafNode, OrderInput, SelfTradeBehavior, Side, TreeKind};
 
         let mut bids = Arena::new();
         let mut asks = Arena::new();
@@ -767,9 +765,7 @@ fn runtime_mark_funding_positive_basis() {
 // ---------------------------------------------------------------------
 impl Env {
     fn pegged_leaf(&mut self, side: u8, offset: i64, peg_limit: i64) {
-        use equinox::book::{
-            Arena, LeafNode, OrderInput, SelfTradeBehavior, TimeInForce, TreeKind,
-        };
+        use equinox::book::{Arena, OrderInput, SelfTradeBehavior, TimeInForce, TreeKind};
         let mut data = self.market_data();
         let (offset_arena, side) = if side == 0 {
             (equinox::state::BID_ARENA_OFFSET, equinox::book::Side::Bid)
