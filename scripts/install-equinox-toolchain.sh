@@ -26,6 +26,11 @@ fi
 # assertions below are what actually gate the build.
 agave-install init "$AGAVE_VERSION"
 export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+# In GitHub Actions each step is a new shell; publish the bin dir so the
+# workflow's later steps (cargo build-sbf, the runtime harness) can find it.
+if [ -n "${GITHUB_PATH:-}" ]; then
+  echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+fi
 
 SOLANA_VERSION="$(solana --version)"
 BUILD_SBF_VERSION="$(cargo-build-sbf --version)"
