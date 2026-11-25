@@ -1,10 +1,18 @@
-# Equinox status (2026-09-25)
+# Equinox status (2026-11-26)
 
 The live state of the devnet deployment. The design is in
 [`docs/architecture.md`](../architecture.md); earlier status history lives in
 git (`git log -- docs/status`).
 
 ## Live on devnet
+
+- **2026-11-26 recovery.** The market-maker host died, taking the keeper key
+  `7JuUhGG…` with it. The service runs on a new Azure host in
+  `southeastasia` behind `api.ansht.in`. The market authority named a new
+  keeper, `WFgD69Q6KGaDPxJxMHeHazUG5Lp3G4ey9HA4gyVcgdN`, on all three cores
+  (opcode 64) and as reporter on OPENAI- and ANTHROPIC-PERP (opcode 66), and
+  the market API got a new Pyth Pro key. All three markets quote, the reporters
+  post and the keeper commits again.
 
 - **Program** `8Ucdsd3ejSEFFTpUivfK84eZv2q6aAe83A9zwSBcxFZ`, deployed build
   recorded in `config/equinox-deployment.json`
