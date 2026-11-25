@@ -10,6 +10,9 @@ EnvironmentFile=/etc/stockstream/mm.env
 ExecStart=/usr/local/bin/equinox-market-maker
 Restart=always
 RestartSec=2
+# The rollup websocket client once leaked ~1000 sockets and hit the default
+# 1024 nofile limit, wedging the status port while systemd still said active.
+LimitNOFILE=65536
 # Hardening: the process only needs the network and its two key files.
 NoNewPrivileges=true
 ProtectSystem=strict

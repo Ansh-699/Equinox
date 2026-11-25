@@ -151,6 +151,6 @@ funds the bots, delegates, and the reporter prices it from the pool.
 | Service deploy | build `services/market-maker` in its Dockerfile on the VM, install, `systemctl restart stockstream-mm` |
 | Live checks | `npx tsx scripts/e2e/{onboarding,deposit,preipo,basket,speed}.mts`, `SITE=…/launch npx tsx scripts/e2e/launch.mts` |
 
-Balances to watch (devnet SOL): the keeper/reporter key `7JuUhGG…` (L1
-posts, ~0.3 SOL/day for three reporters), the faucet key `AmHAkH…`, each
+Balances to watch (devnet SOL): the keeper/reporter key `WFgD69…` (L1
+posts, ~0.2 SOL/day for two reporters; named on every core 2026-11-26), the faucet key `AmHAkH…`, each
 core's rollup lamports (commit fees), the authority for new markets.

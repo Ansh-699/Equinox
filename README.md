@@ -94,7 +94,7 @@ The [docs site](https://equinox-docs.ansht.workers.dev) walks through every flow
 |---|---|---|
 | **MagicBlock** | Runs each market's delegated order book, seats and events in an Ephemeral Rollup; commits back to Solana. | Millisecond orders and a live book. |
 | **Pyth** | Signed TSLA equity price, verified on L1 before it updates the snapshot. | TSLA perp pricing with session-aware order checks. |
-| **PreStocks** | Token and issuer-mark data; its tokens anchor three reporter-priced perps. | Pre-IPO perps, price comparisons, baskets. |
+| **PreStocks** | Token and issuer-mark data; its tokens anchor the two reporter-priced perps (OpenAI, Anthropic). | Pre-IPO perps, price comparisons, baskets. |
 | **Meteora** | Dynamic Bonding Curves for launches, DAMM v2 pools after graduation. | Launch and trade a token; a graduated pool can price a perp. |
 | **Privy** | Sign-in and wallet path alongside Solana wallet adapters. | Wallet access that authorizes the trading key. |
 

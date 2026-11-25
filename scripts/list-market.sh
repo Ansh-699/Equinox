@@ -12,8 +12,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 symbol="${1:?symbol}"; feed="${2:?feed id}"; kind="${3:?meteora|prestocks}"; source="${4:?pool or token}"; mint="${5:?base mint}"; lot="${6:-1000000}"
 market="$symbol-PERP"; name="$(echo "$symbol" | tr A-Z a-z)"
-KEEPER="${KEEPER:-7JuUhGGGcu2t2De6VQecNCqhWPwu8QzmztWXW9kYNKFz}"
-VM="${VM:-azureuser@4.194.209.138}"; SSH_KEY="${SSH_KEY:-$HOME/.ssh/digitalocean}"
+KEEPER="${KEEPER:-WFgD69Q6KGaDPxJxMHeHazUG5Lp3G4ey9HA4gyVcgdN}"
+VM="${VM:-azureuser@138.91.41.33}"; SSH_KEY="${SSH_KEY:-$HOME/.ssh/digitalocean}"
 prefix=$([ "$kind" = meteora ] && echo LAUNCH || echo PRESTOCKS)
 
 scripts/preipo-market.sh "$symbol" "$feed" "$prefix"
