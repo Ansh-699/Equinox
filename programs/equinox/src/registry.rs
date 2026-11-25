@@ -352,8 +352,8 @@ pub fn create_vault_account(program_id: &Address, accounts: &mut [AccountView]) 
         data: &init_data,
     };
     {
-        let mut vault_view = accounts[1].clone();
-        let mut mint_view = accounts[3].clone();
+        let vault_view = accounts[1].clone();
+        let mint_view = accounts[3].clone();
         pinocchio::cpi::invoke_signed(
             &init_ix,
             &[&vault_view, &mint_view],

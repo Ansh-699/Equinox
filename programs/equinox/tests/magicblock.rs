@@ -1311,29 +1311,6 @@ fn parse_delegated_seeds_round_trips_every_kind_and_rejects_foreign_shapes() {
     assert_eq!(parse_delegated_seeds(&[]), None);
 }
 
-fn session_account(
-    market: Address,
-    seat: u16,
-    owner: Address,
-    session_signer: Address,
-    owner_of_account: Address,
-) -> TestAccount {
-    let address =
-        equinox::session::derive_trading_session(&owner, &market, seat, &session_signer, &ID);
-    let mut acct = account(address, owner_of_account, 256, false, true);
-    let mut session = equinox::session::TradingSession::empty();
-    session.initialized = 1;
-    session.target_program = ID.to_bytes();
-    session.owner = owner.to_bytes();
-    session.market = market.to_bytes();
-    session.session_signer = session_signer.to_bytes();
-    session.trader_seat_index = seat;
-    let bytes = unsafe { acct.view.borrow_unchecked_mut() };
-    bytes.fill(0);
-    equinox::session::write_session(bytes, &session).unwrap();
-    acct
-}
-
 // ---------------------------------------------------------------------
 // DelegateClusterMember: pre-CPI account/lifecycle validation.
 // ---------------------------------------------------------------------
@@ -1560,7 +1537,6 @@ fn delegate_cluster_member_rejects_a_non_empty_scratch() {
 fn delegate_cluster_member_rejects_a_foreign_or_wrongly_derived_member() {
     let instrument_key = Address::new_from_array([1; 32]);
     let authority_key = Address::new_from_array([2; 32]);
-    let market_key = derive_perp_market(&ID, &instrument_key);
     let validator = Address::new_from_array([5; 32]);
     let market = valid_market(instrument_key, authority_key, DelegationStatus::Delegated);
     // A program-owned 256-byte account that is NOT a valid session PDA.
@@ -1663,8 +1639,6 @@ fn external_undelegate_rejects_a_scratch_callback_for_a_foreign_account() {
     let instrument_key = Address::new_from_array([1; 32]);
     let market_key = derive_perp_market(&ID, &instrument_key);
     let seat: u16 = 4;
-    // The scratch the seeds claim.
-    let scratch = empty_scratch(market_key, seat);
     // ...but the account presented is a different one (a session PDA).
     let owner = Address::new_from_array([6; 32]);
     let session_signer = Address::new_from_array([7; 32]);

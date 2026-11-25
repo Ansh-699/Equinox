@@ -902,14 +902,13 @@ fn initialize_vault(program_id: &Address, accounts: &mut [AccountView]) -> Progr
     {
         return Err(custom(EquinoxError::InvalidInstruction));
     }
-    let decimals = {
+    {
         let mint = pinocchio_token::state::Mint::from_account_view(&accounts[2])
             .map_err(|_| custom(EquinoxError::InvalidInstruction))?;
         if !mint.is_initialized() {
             return Err(custom(EquinoxError::InvalidInstruction));
         }
-        mint.decimals()
-    };
+    }
     {
         let (market_split, rest) = accounts.split_at_mut(1);
         configure_vault_header(

@@ -788,7 +788,7 @@ impl<'a> PagedBookV3<'a> {
     }
 
     fn set_meta_u32(&mut self, offset: usize, value: u32) -> ProgramResult {
-        let mut data = unsafe { self.pages[0].borrow_unchecked_mut() };
+        let data = unsafe { self.pages[0].borrow_unchecked_mut() };
         let dst = data.get_mut(offset..offset + 4).ok_or_else(bundle_error)?;
         dst.copy_from_slice(&value.to_le_bytes());
         Ok(())
@@ -818,7 +818,7 @@ impl<'a> PagedBookV3<'a> {
     }
     fn put_node_bytes(&mut self, handle: u32, node: &[u8; ANY_NODE_SIZE]) -> ProgramResult {
         let (page, slot) = Self::page_slot(handle)?;
-        let mut data = unsafe { self.pages[page].borrow_unchecked_mut() };
+        let data = unsafe { self.pages[page].borrow_unchecked_mut() };
         let start = Self::node_offset(slot);
         data.get_mut(start..start + ANY_NODE_SIZE)
             .ok_or_else(bundle_error)?
@@ -1225,31 +1225,6 @@ impl<'a> PagedBookV3<'a> {
         Ok((price > 0).then_some(price))
     }
 
-    fn best_unselected(
-        &mut self,
-        tree: TreeKind,
-        selected: &[u32; crate::book::MAX_FILLS_PER_INSTRUCTION],
-        selected_len: usize,
-    ) -> Result<Option<u32>, ProgramError> {
-        let bump = self.meta_u32(V3_BOOK_BUMP_INDEX_OFFSET)? as usize;
-        let mut best: Option<(u128, u32)> = None;
-        for handle in 0..bump {
-            let handle = handle as u32;
-            if self.tag(handle)? != TAG_LEAF || selected[..selected_len].contains(&handle) {
-                continue;
-            }
-            let leaf = self.leaf(handle)?;
-            let key = unsafe { core::ptr::addr_of!(leaf.key).read_unaligned() };
-            if self.find(tree, key).ok() != Some(handle) {
-                continue;
-            }
-            if best.map(|(current, _)| key < current).unwrap_or(true) {
-                best = Some((key, handle));
-            }
-        }
-        Ok(best.map(|(_, handle)| handle))
-    }
-
     fn best_unselected_across(
         &mut self,
         trees: &[TreeKind],
@@ -1310,25 +1285,6 @@ impl<'a> PagedBookV3<'a> {
             }
         }
         Ok(best.map(|(_, tree, handle, price)| (tree, handle, price)))
-    }
-
-    fn effective_price(
-        leaf: &LeafNode,
-        tree: TreeKind,
-        oracle: Option<i64>,
-    ) -> Result<u64, ProgramError> {
-        let raw = unsafe { core::ptr::addr_of!(leaf.price_or_offset).read_unaligned() };
-        let value = match tree {
-            TreeKind::Fixed => raw,
-            TreeKind::OraclePegged => oracle
-                .ok_or_else(bundle_error)?
-                .checked_add(raw)
-                .ok_or_else(bundle_error)?,
-        };
-        if value <= 0 {
-            return Err(bundle_error());
-        }
-        Ok(value as u64)
     }
 
     /// Plans up to four crossing fills against this page-sharded book without
@@ -1676,7 +1632,7 @@ pub fn append_event_record(
     record[12..44].copy_from_slice(core_key.as_ref());
     record[44..52].copy_from_slice(&timestamp.to_le_bytes());
     record[52..].copy_from_slice(payload);
-    let mut bytes = unsafe { shards[shard_index].borrow_unchecked_mut() };
+    let bytes = unsafe { shards[shard_index].borrow_unchecked_mut() };
     let offset = V3_SHARD_HEADER_SIZE + slot * V3_EVENT_RECORD_SIZE;
     bytes[offset..offset + V3_EVENT_RECORD_SIZE].copy_from_slice(&record);
     Ok(())

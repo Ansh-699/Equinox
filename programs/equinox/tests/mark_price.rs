@@ -4,7 +4,7 @@
 //! (`workers/src/mark-price.ts` + parity vectors).
 
 use equinox::{
-    book::{Arena, OrderInput, PeggedState, Side, TimeInForce, TreeKind},
+    book::{Arena, OrderInput, Side, TimeInForce, TreeKind},
     mark::{executable_mark, MarkSource},
     state::{MarketMode, MarketStateHeader},
 };
