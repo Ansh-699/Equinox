@@ -128,7 +128,7 @@ export function ErTxPanel({ marketApiUrl, market }: { marketApiUrl: string | und
                   <span className="hidden h-[3px] w-10 overflow-hidden rounded bg-[var(--t-surface-3)] sm:block">
                     <span className="block h-full rounded bg-[var(--t-up)]" style={{ width: `${Math.min(100, ((onChain(row) ?? 0) / scale) * 100)}%` }} />
                   </span>
-                  <span className={`tnum w-[60px] text-right ${row.ok ? "text-[var(--t-text)]" : "text-[var(--t-down)]"}`} title="send → finalized in the rollup, as seen by the sender">
+                  <span className={`tnum w-[60px] text-right ${row.ok ? "text-[var(--t-text)]" : "text-[var(--t-down)]"}`} title="send → confirmed in a rollup block, as seen by the sender (not Solana L1 settlement)">
                     {row.ok && onChain(row) !== null ? `${onChain(row)} ms` : "failed"}
                   </span>
                 </span>

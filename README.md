@@ -32,8 +32,9 @@
 
 | | |
 |---|---|
-| **Order executed in the rollup** | 2–15 ms (10 ms blocks) |
-| **Click to order visible in the book** (from India) | ~180 ms |
+| **Order lands in a rollup block** | 10 ms blocks; median 8 ms, 99% under 20 ms (measured at the market maker, beside the rollup) |
+| **Click to order visible in the book** (from India) | ~180 ms; the round trip is ~120 ms, almost all network |
+| **Settled on Solana L1** | at the next commit, every 30 minutes (trading pauses ~1.2 s); a rollup confirmation is not L1 finality |
 | **Wallet prompts** | one, to derive the trading key; everything after signs silently |
 | **Markets** | TSLA-PERP (Pyth) · OPENAI-, ANTHROPIC-PERP (PreStocks) |
 | **Accounts delegated per market** | 27: core, 18 book pages, 4 seat shards, 4 event shards |
@@ -52,7 +53,7 @@
 
 ```mermaid
 flowchart LR
-  APP["Equinox app<br/>trading key signs"] -- "orders<br/>2–15 ms" --> ER["MagicBlock rollup<br/>order books, seats,<br/>matching, risk"]
+  APP["Equinox app<br/>trading key signs"] -- "orders<br/>10 ms blocks" --> ER["MagicBlock rollup<br/>order books, seats,<br/>matching, risk"]
   ER -- "commits" --> L1["Solana<br/>Equinox program,<br/>USDC vault,<br/>oracle snapshots"]
   APP -- "deposits,<br/>withdrawals" --> L1
   MM["Market maker<br/>quotes, keeper,<br/>reporter"] -- "quotes" --> ER
@@ -63,7 +64,7 @@ flowchart LR
   API -- "verified price" --> L1
 ```
 
-- **Fast path in the rollup.** Each market's 27 execution accounts are delegated to MagicBlock, so placing, cancelling and matching orders, margin checks, funding and liquidation run at a few milliseconds per transaction.
+- **Fast path in the rollup.** Each market's 27 execution accounts are delegated to MagicBlock, so placing, cancelling and matching orders, margin checks, funding and liquidation run in 10 ms rollup blocks.
 - **Safe state on Solana.** The USDC vault and the verified price snapshots never leave L1. The keeper commits the rollup's state back to Solana every 30 minutes (trading pauses ~1.2 s).
 - **Custody by receipt.** Money moves in through an inbox (deposit 60 on L1, claim 61 in the rollup) and out through an outbox (risk-checked request 62 in the rollup, claim 63 on L1 that pays only the seat owner).
 - **Two price paths, one snapshot.** TSLA uses Ed25519-verified Pyth Lazer updates. Pre-IPO and launched tokens use a named reporter bounded by the program to 0.5% + 0.1% per second (max 10%) per post.

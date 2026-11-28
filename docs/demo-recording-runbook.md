@@ -19,6 +19,6 @@ Record the live TSLA trade on a weekday while Pyth reports an open session. US h
 | 1:00–1:30 | Pre-IPO | Buy the AI labs basket and show both fills. |
 | 1:30–2:00 | Launch | Pulse board, a small quick-buy on an active curve, then GIGA's graduated DAMM v2 pool and perp listing state. |
 | 2:00–2:20 | Docs | Order lifecycle and price-source diagrams. |
-| 2:20–2:30 | Landing/footer | 2–15 ms order path, 27 delegated accounts per market, custody on Solana, repo and docs links. |
+| 2:20–2:30 | Landing/footer | 10 ms rollup blocks (about 120 ms from India), 27 delegated accounts per market, custody on Solana, repo and docs links. |
 
 Do not call GIGA a live perp until its market is actually listed; the current board says “Perp listing queued.” If TSLA is closed, record the pre-IPO and Launch portions now and capture the TSLA portion on the next open weekday session.

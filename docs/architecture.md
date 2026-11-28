@@ -126,8 +126,10 @@ One process, ~2 ms from the rollup. For every market in the manifest:
 ## Flows
 
 **Order (from India):** click → sign with the trading key (local) → send to
-the rollup → finalized in ~2-15 ms → push or status poll back → ~110-130 ms
-end to end, almost all of it the India↔Singapore round trip.
+the rollup → confirmed in a 10 ms block (median 8 ms, 99% under 20 ms, measured at
+the market maker) → push or status poll back → ~110-130 ms end to end, almost all of
+it the India↔Singapore round trip. Settlement to Solana L1 follows at the next
+commit, every 30 minutes.
 
 **Pre-IPO price:** PreStocks API → reporter (VM) → `ReportPriceV3` on L1 →
 the rollup's copy of the snapshot → orders and risk checks in the rollup.

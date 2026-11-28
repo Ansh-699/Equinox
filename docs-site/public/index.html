@@ -78,7 +78,7 @@
             <span><img src="/meteora.svg" alt="" />Meteora</span>
           </div>
           <div class="facts">
-            <div class="fact"><b class="up">2–15 ms</b><span>order executed in the rollup</span></div>
+            <div class="fact"><b class="up">&lt; 20 ms</b><span>to land in a rollup block (median 8 ms)</span></div>
             <div class="fact"><b>27</b><span>accounts delegated per market</span></div>
             <div class="fact"><b>4</b><span>live markets on devnet</span></div>
             <div class="fact"><b>1</b><span>wallet prompt, then silent signing</span></div>
@@ -93,7 +93,7 @@
             <div class="diagram"></div>
             <script type="text/plain" class="mermaid-src">
 flowchart LR
-  APP["Equinox app<br/>trading key signs"] -- "orders<br/>2–15 ms" --> ER["MagicBlock rollup<br/>order books, seats,<br/>matching, risk"]
+  APP["Equinox app<br/>trading key signs"] -- "orders<br/>10 ms blocks" --> ER["MagicBlock rollup<br/>order books, seats,<br/>matching, risk"]
   ER -- "commits" --> L1["Solana<br/>Equinox program,<br/>USDC vault,<br/>oracle snapshots"]
   APP -- "deposits,<br/>withdrawals" --> L1
   MM["Market maker<br/>quotes, keeper,<br/>reporter"] -- "quotes" --> ER
@@ -235,13 +235,13 @@ sequenceDiagram
   P->>P: initial margin check on the seat
   P->>P: match against the book, price-time priority
   P->>P: write fills to the event shard, update seats
-  R-->>A: executed in a 10 ms block (2-15 ms)
+  R-->>A: confirmed in a 10 ms block
   R-->>A: websocket push: book pages, seat shard
   A-->>T: toast with time and explorer link
   R-->>M: book changed
   M->>R: requote (33) in place
             </script>
-            <figcaption><b>One order.</b> From India the round trip is about 110–130 ms, almost all of it the network hop to Singapore; the rollup itself takes 2–15 ms.</figcaption>
+            <figcaption><b>One order.</b> From India the round trip is about 110–130 ms, almost all of it the network hop to Singapore; inside the rollup a transaction lands in a block in under 20 ms (median 8 ms, measured at the market maker). That is a rollup confirmation; settlement to Solana L1 follows at the next commit, every 30 minutes.</figcaption>
           </figure>
           <p>Order types: limit and market (IOC), post-only, reduce-only, with a self-trade policy. Replace (33) moves a resting order in one instruction, which is how the market maker requotes without leaving gaps.</p>
         </section>
@@ -509,10 +509,11 @@ flowchart LR
             <tbody>
               <tr><td>Sign with the trading key (in the browser)</td><td class="mono">&lt; 1 ms</td></tr>
               <tr><td>Browser to rollup, India to Singapore</td><td class="mono">~50 ms each way</td></tr>
-              <tr><td>Executed in a rollup block</td><td class="mono">2–15 ms</td></tr>
+              <tr><td>Lands in a rollup block (measured beside the rollup)</td><td class="mono">median 8 ms, p99 20 ms</td></tr>
               <tr><td>Order visible in your book after the click</td><td class="mono">~180 ms</td></tr>
               <tr><td>Market maker to rollup</td><td class="mono">~2 ms</td></tr>
               <tr><td>Rollup cost: requote / taker order</td><td class="mono">~90k / ~53k CU</td></tr>
+              <tr><td>Settled on Solana L1</td><td class="mono">next commit, every 30 min</td></tr>
               <tr><td>Commit pause, every 30 min</td><td class="mono">~1.2 s</td></tr>
             </tbody>
           </table></div>

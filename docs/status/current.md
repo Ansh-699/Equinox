@@ -69,6 +69,14 @@ closing ceremony. It does not cover judging that runs into 30 Nov.
 Fund the keeper with devnet SOL before judging runs past 30 Nov. Do not
 change `MM_COMMIT_EVERY_S` to save SOL.
 
+- **Latency, measured (2026-11-28).** 554 market-maker transactions sampled from
+  `/v1/mm/stream` over 100 s, from a bot about 2 ms from the rollup: send to the
+  rollup's "processed" push p50 3 ms, p99 6 ms; send to the rollup block that holds it
+  (10 ms slots) p50 8 ms, p90 17 ms, p99 20 ms, max 21 ms. A browser adds its own
+  round trip: about 77 ms to the rollup RPC from India on a kept-alive connection, so a
+  click to a confirmed order is roughly 110-130 ms. Those are rollup confirmations;
+  settlement to Solana L1 happens at the next commit, every 30 minutes.
+
 ## Checks
 
 | What | Command |

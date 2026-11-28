@@ -374,7 +374,7 @@ export function TradingTerminal() {
         const result = await protocol.service.executeEr(preview, built.instructions, built.writableAccounts);
         const ms = Math.round(performance.now() - clicked);
         setNotice("Order accepted by the MagicBlock rollup.");
-        txToasts.settle(toastId, { ok: true, title: `${what} · done`, detail: `Finalized in the rollup · ${ms} ms from click`, href: result.signature ? rollupExplorer(result.signature) : undefined });
+        txToasts.settle(toastId, { ok: true, title: `${what} · done`, detail: `Confirmed in the rollup · ${ms} ms from click`, href: result.signature ? rollupExplorer(result.signature) : undefined });
       } else {
         setNotice("Placing your order on Solana L1 (the market is not delegated right now)…");
         const result = await protocol.service.executeL1(preview, built.instructions, { freshOracle: true });
