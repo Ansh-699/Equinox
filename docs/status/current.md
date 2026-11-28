@@ -1,4 +1,4 @@
-# Equinox status (2026-11-26)
+# Equinox status (2026-11-28)
 
 The live state of the devnet deployment. The design is in
 [`docs/architecture.md`](../architecture.md); earlier status history lives in
@@ -36,6 +36,38 @@ git (`git log -- docs/status`).
   the rollup (~100 KB/s per terminal) and renders at most every 50 ms;
   execution status comes from the market API (placed in
   `azure:southeastasia`).
+
+## Operating note (2026-11-28)
+
+The devnet keeper `WFgD69Q6KGaDPxJxMHeHazUG5Lp3G4ey9HA4gyVcgdN` pays Solana
+fees and tops up each market core. MagicBlock then charges commit fees from
+that core. A stale price and an empty book mean this key is empty, not that
+the program is broken. The same outage happened on 27 Nov and cleared as soon
+as the key was funded again.
+
+Two different clocks:
+
+- The program refuses a price older than 10 seconds (`V3_MAX_ORACLE_AGE_SECONDS`).
+  OPENAI and ANTHROPIC are posted by the reporter and stay inside that window.
+  TSLA uses Pyth. On a weekend Pyth's last print is the Friday close, the
+  program rejects it, and the book stays empty until the US session reopens.
+  That is the market calendar, not a failed keeper.
+- MagicBlock auto-commits every delegated market every 30 seconds. That
+  interval is `commit_frequency_ms` on the delegation and is not
+  `MM_COMMIT_EVERY_S`. The keeper's own snapshot commit is separate and is
+  set to 1800 seconds in `/etc/stockstream/mm.env`. Slowing that variable does
+  not cut the burn, and it must not be pushed out toward the 10 second price
+  rule, because it does not refresh the price.
+
+Measured on 28 Nov at 14:16 UTC: the keeper held 5.80 SOL. Each core
+received 0.3 SOL roughly every 5.5 hours (about 3.9 SOL/day for three
+markets) plus about 0.28 SOL/day in transaction fees. At that rate the
+balance lasts about 33 hours, until about 23:30 UTC on 29 Nov (early
+morning 30 Nov IST). It covers the 29 Nov submission session and the
+closing ceremony. It does not cover judging that runs into 30 Nov.
+
+Fund the keeper with devnet SOL before judging runs past 30 Nov. Do not
+change `MM_COMMIT_EVERY_S` to save SOL.
 
 ## Checks
 
