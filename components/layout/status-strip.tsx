@@ -66,12 +66,13 @@ export function ExecutionStatusBanner({
 }
 
 /** Slim footer strip: connection truth on the left, reference links on the right. */
-export function ProtocolStatusStrip({ authenticated, v3, delegated = null, oracleOnline, priceSource = "pyth" }: { authenticated: boolean; v3: V3MarketReadiness; delegated?: boolean | null; oracleOnline: boolean; priceSource?: "pyth" | "reporter" }) {
+export function ProtocolStatusStrip({ authenticated, v3, delegated = null, oracleOnline, sessionClosed = false, priceSource = "pyth" }: { authenticated: boolean; v3: V3MarketReadiness; delegated?: boolean | null; oracleOnline: boolean; sessionClosed?: boolean; priceSource?: "pyth" | "reporter" }) {
+  const priceLabel = sessionClosed ? "US session closed" : oracleOnline ? (priceSource === "pyth" ? "Pyth price verified" : "Reporter price on-chain") : "Waiting for a verified price";
   return (
     <section aria-label="Equinox status" className="flex h-[32px] shrink-0 items-center gap-4 border-t border-[var(--t-border)] px-4 text-[12px] text-[var(--t-text-3)]">
       <span className="flex items-center gap-1.5">
-        <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${oracleOnline ? "bg-[var(--t-up)]" : "bg-[var(--t-text-2)]"}`} />
-        <span className={oracleOnline ? "text-[var(--t-up)]" : "text-[var(--t-text-2)]"}>{oracleOnline ? (priceSource === "pyth" ? "Pyth price verified" : "Reporter price on-chain") : "Waiting for a verified price"}</span>
+        <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${oracleOnline && !sessionClosed ? "bg-[var(--t-up)]" : "bg-[var(--t-text-2)]"}`} />
+        <span className={oracleOnline && !sessionClosed ? "text-[var(--t-up)]" : "text-[var(--t-text-2)]"}>{priceLabel}</span>
       </span>
       <span className="hidden sm:inline">Solana devnet</span>
       <span className="hidden md:inline">Wallet: <span className="text-[var(--t-text-2)]">{authenticated ? "signed in" : "signed out"}</span></span>

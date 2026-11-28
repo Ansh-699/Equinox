@@ -529,7 +529,7 @@ export function TradingTerminal() {
     ?? (withdraw.pending || walletWithdraw.pending ? "Withdrawing…" : null)
     ?? (orderPending || sessionOrder.pending ? "Placing your order in the rollup…" : null)
     ?? (cancelPending ? "Cancelling in the rollup…" : null);
-  const blocker = busy && !orderPending ? busy : needsFunding ? null : auth.authenticated && (!marketClock?.oracle || snapshotStale) ? "Waiting for a verified price" : marketClosed && auth.authenticated ? "Market closed — US session only" : !auth.authenticated
+  const blocker = busy && !orderPending ? busy : needsFunding ? null : marketClosed && auth.authenticated ? "Market closed — US session only" : auth.authenticated && (!marketClock?.oracle || snapshotStale) ? "Waiting for a verified price" : !auth.authenticated
     ? null
     : !sized
       ? ticket.kind === "limit" && !(Number(ticket.price) > 0) ? "Enter a limit price" : markPrice === null ? "Waiting for the verified price" : "Enter an amount"
@@ -687,12 +687,12 @@ export function TradingTerminal() {
             />
           </div>}
           <div className="border-t border-[var(--t-border)]">
-            <ExecutionStatusBanner display={executionStatus} canTrade={canTrade} walletTrading={walletTrading} oracleSafety={oracleSafety} v3={v3MarketState} privy={tradingKey.signer ? "in-app trading key · silent signing" : auth.walletAddress ? `${auth.userLabel ?? "wallet login"} · ${auth.walletClientType === "privy" ? "embedded wallet" : auth.walletClientType ?? "wallet"}` : auth.wallets.length ? "sign-in incomplete" : "not signed in"} />
+            <ExecutionStatusBanner display={executionStatus} canTrade={canTrade} walletTrading={walletTrading} oracleSafety={marketClosed ? "closed" : oracleSafety} v3={v3MarketState} privy={tradingKey.signer ? "in-app trading key · silent signing" : auth.walletAddress ? `${auth.userLabel ?? "wallet login"} · ${auth.walletClientType === "privy" ? "embedded wallet" : auth.walletClientType ?? "wallet"}` : auth.wallets.length ? "sign-in incomplete" : "not signed in"} />
           </div>
         </div>
       </main>
 
-      <ProtocolStatusStrip authenticated={auth.authenticated} v3={v3MarketState} delegated={executionStatus ? executionStatus.marketDelegated : null} oracleOnline={oracleSafety === "fresh"} priceSource={isReporterPriced(v3) ? "reporter" : "pyth"} />
+      <ProtocolStatusStrip authenticated={auth.authenticated} v3={v3MarketState} delegated={executionStatus ? executionStatus.marketDelegated : null} oracleOnline={oracleSafety === "fresh"} sessionClosed={marketClosed} priceSource={isReporterPriced(v3) ? "reporter" : "pyth"} />
       <TxToasts toasts={txToasts.toasts} />
     </div>
   );

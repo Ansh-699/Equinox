@@ -112,8 +112,11 @@ export function MarketBar({
     const last = window[window.length - 1].c;
     return { high: Math.max(...window.map((c) => c.h)), low: Math.min(...window.map((c) => c.l)), change: last - open, changePct: open > 0 ? ((last - open) / open) * 100 : 0 };
   }, [candles]);
-  // The cron refreshes every minute; only a missed refresh is worth a warning.
-  const stale = oracleAgeSeconds !== null && oracleAgeSeconds > 90;
+  // A closed US session keeps the last verified close, which is older than
+  // 90s until the next open. Warn only when the session is open and a refresh
+  // has actually been missed.
+  const sessionClosed = oracle !== null && !oracle.tradingOpen;
+  const stale = !sessionClosed && oracleAgeSeconds !== null && oracleAgeSeconds > 90;
   const up = day ? day.change >= 0 : null;
 
   return (
