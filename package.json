@@ -38,17 +38,14 @@
     "@solana/kit": "5.5.1",
     "@solana/spl-token": "0.4.14",
     "@solana/web3.js": "^1.98.4",
-    "@stripe/stripe-js": "^8.4.0",
     "@wallet-standard/app": "^1.1.1",
     "bn.js": "5.2.2",
     "buffer": "6.0.3",
-    "ed25519-hd-key": "^2.0.0",
     "fzstd": "0.1.1",
     "lucide-react": "1.46.0",
     "next": "16.3.5",
     "react": "19.3.0",
-    "react-dom": "19.3.0",
-    "zod": "4.6.5"
+    "react-dom": "19.3.0"
   },
   "overrides": {
     "@magicblock-labs/ephemeral-rollups-kit": {
